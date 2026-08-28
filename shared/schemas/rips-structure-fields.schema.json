@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doctorseolabs.local/schemas/rips-structure-fields.json",
+  "title": "RIPS JSON — Reglas de estructura y sintaxis (Res. 2275)",
+  "description": "Subconjunto de reglas MUV para campos críticos de identificación, prestador, facturación y fechas.",
+  "definitions": {
+    "tipoDocumentoIdentificacion": {
+      "type": "string",
+      "enum": ["CC", "CE", "PA", "RC", "TI", "NV", "CD", "SC", "PE", "PT"],
+      "description": "Tabla maestra de tipos de documento de identificación"
+    },
+    "numDocumentoIdentificacion": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]+$",
+      "description": "Sin espacios, guiones ni caracteres especiales. Longitud según tipoDocumentoIdentificacion."
+    },
+    "codPrestador": {
+      "type": "string",
+      "pattern": "^\\d{12}$",
+      "description": "Código REPS de la sede — exactamente 12 dígitos"
+    },
+    "numFactura": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9]{0,3}\\d{1,20}$",
+      "description": "Prefijo alfanumérico (1–4) + número consecutivo. Debe coincidir 1:1 con la FEV DIAN."
+    },
+    "numNota": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9]{0,3}\\d{1,20}$",
+      "description": "Mismo formato que numFactura cuando aplica nota crédito/débito"
+    },
+    "fechaInicioAtencion": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$",
+      "description": "ISO 8601 YYYY-MM-DD HH:mm. No posterior a generación ni anterior a vigencia del convenio."
+    },
+    "fecConsumo": {
+      "$ref": "#/definitions/fechaInicioAtencion"
+    }
+  },
+  "type": "object",
+  "required": ["numDocumentoIdObligado", "numFactura", "usuarios"],
+  "properties": {
+    "numFactura": { "$ref": "#/definitions/numFactura" },
+    "numNota": { "$ref": "#/definitions/numNota" },
+    "usuarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tipoDocumentoIdentificacion", "numDocumentoIdentificacion", "servicios"],
+        "properties": {
+          "tipoDocumentoIdentificacion": { "$ref": "#/definitions/tipoDocumentoIdentificacion" },
+          "numDocumentoIdentificacion": { "$ref": "#/definitions/numDocumentoIdentificacion" },
+          "servicios": {
+            "type": "object",
+            "properties": {
+              "consultas": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["codPrestador", "fechaInicioAtencion"],
+                  "properties": {
+                    "codPrestador": { "$ref": "#/definitions/codPrestador" },
+                    "fechaInicioAtencion": { "$ref": "#/definitions/fechaInicioAtencion" },
+                    "tipoDocumentoIdentificacion": { "$ref": "#/definitions/tipoDocumentoIdentificacion" },
+                    "numDocumentoIdentificacion": { "$ref": "#/definitions/numDocumentoIdentificacion" }
+                  }
+                }
+              },
+              "procedimientos": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["codPrestador", "fechaInicioAtencion"],
+                  "properties": {
+                    "codPrestador": { "$ref": "#/definitions/codPrestador" },
+                    "fechaInicioAtencion": { "$ref": "#/definitions/fechaInicioAtencion" },
+                    "tipoDocumentoIdentificacion": { "$ref": "#/definitions/tipoDocumentoIdentificacion" },
+                    "numDocumentoIdentificacion": { "$ref": "#/definitions/numDocumentoIdentificacion" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

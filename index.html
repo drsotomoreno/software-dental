@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/dental-icon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="doctorSEOlabs Historia Dental Dictada por Voz — RIPS, Ley 527, FHIR" />
+    <!-- Normativa DIAN/MinSalud: facturas electrónicas inmutables; anulación solo vía Nota Crédito. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <title>doctorSEOlabs Historia Dental Dictada por Voz</title>
+    <style>
+      #modal-auth-container {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(15, 23, 42, 0.72);
+        padding: 1rem;
+      }
+
+      #modal-auth-container.hidden {
+        display: none !important;
+      }
+
+      body.auth-locked #root {
+        pointer-events: none;
+        user-select: none;
+        filter: blur(2px);
+      }
+
+      body:not(.auth-locked) #root {
+        display: block;
+      }
+
+      .auth-card {
+        width: 100%;
+        max-width: 420px;
+        border-radius: 1rem;
+        background: #fff;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+        padding: 1.5rem;
+      }
+
+      .auth-card h2 {
+        margin: 0 0 0.25rem;
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: #0369a1;
+      }
+
+      .auth-card p {
+        margin: 0 0 1rem;
+        color: #475569;
+        font-size: 0.9rem;
+      }
+
+      .auth-field {
+        display: block;
+        margin-bottom: 0.75rem;
+      }
+
+      .auth-field label {
+        display: block;
+        margin-bottom: 0.25rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #334155;
+      }
+
+      .auth-field input {
+        width: 100%;
+        border: 1px solid #cbd5e1;
+        border-radius: 0.5rem;
+        padding: 0.55rem 0.75rem;
+        font-size: 0.95rem;
+        box-sizing: border-box;
+      }
+
+      .auth-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-top: 1rem;
+      }
+
+      .auth-btn {
+        border: none;
+        border-radius: 0.5rem;
+        padding: 0.65rem 1rem;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .auth-btn-primary {
+        background: #0284c7;
+        color: #fff;
+      }
+
+      .auth-btn-pay {
+        background: #7c3aed;
+        color: #fff;
+        font-size: 1rem;
+      }
+
+      .auth-error {
+        margin-top: 0.75rem;
+        padding: 0.6rem 0.75rem;
+        border-radius: 0.5rem;
+        background: #fef2f2;
+        color: #b91c1c;
+        font-size: 0.85rem;
+      }
+
+      .auth-success {
+        margin-top: 0.75rem;
+        padding: 0.6rem 0.75rem;
+        border-radius: 0.5rem;
+        background: #ecfdf5;
+        color: #047857;
+        font-size: 0.85rem;
+      }
+
+      .auth-view.hidden {
+        display: none !important;
+      }
+
+      .auth-switch {
+        margin-top: 0.75rem;
+        text-align: center;
+        font-size: 0.85rem;
+        color: #64748b;
+      }
+
+      .auth-switch button {
+        border: none;
+        background: none;
+        color: #0284c7;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .auth-payment-box {
+        margin-top: 1rem;
+        padding: 1rem;
+        border-radius: 0.75rem;
+        border: 1px solid #ddd6fe;
+        background: #f5f3ff;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body class="auth-locked">
+    <div id="modal-auth-container" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+      <div class="auth-card">
+        <h2 id="auth-modal-title">doctorSEOlabs</h2>
+        <p>Acceso seguro — Historia dental dictada por voz</p>
+
+        <div id="auth-view-login" class="auth-view">
+          <form id="loginForm" novalidate>
+            <div class="auth-field">
+              <label for="loginEmail">Correo electrónico</label>
+              <input id="loginEmail" name="email" type="email" required autocomplete="username" />
+            </div>
+            <div class="auth-field">
+              <label for="loginPassword">Contraseña</label>
+              <input
+                id="loginPassword"
+                name="password"
+                type="password"
+                required
+                minlength="6"
+                autocomplete="current-password"
+              />
+            </div>
+            <div class="auth-actions">
+              <button type="submit" id="loginSubmitBtn" class="auth-btn auth-btn-primary">Ingresar</button>
+            </div>
+          </form>
+          <p class="auth-switch">
+            ¿No tiene cuenta?
+            <button type="button" id="auth-show-register">Registrarse</button>
+          </p>
+        </div>
+
+        <div id="auth-view-register" class="auth-view hidden">
+          <form id="registerForm" novalidate>
+            <div class="auth-field">
+              <label for="registerNombre">Nombre completo</label>
+              <input id="registerNombre" name="nombre" type="text" autocomplete="name" />
+            </div>
+            <div class="auth-field">
+              <label for="registerEmail">Correo electrónico</label>
+              <input id="registerEmail" name="email" type="email" required autocomplete="email" />
+            </div>
+            <div class="auth-field">
+              <label for="registerPassword">Contraseña</label>
+              <input
+                id="registerPassword"
+                name="password"
+                type="password"
+                required
+                minlength="6"
+                autocomplete="new-password"
+              />
+            </div>
+            <div class="auth-actions">
+              <button type="submit" id="registerSubmitBtn" class="auth-btn auth-btn-primary">
+                Crear cuenta
+              </button>
+            </div>
+          </form>
+          <p class="auth-switch">
+            ¿Ya tiene cuenta?
+            <button type="button" id="auth-show-login">Iniciar sesión</button>
+          </p>
+        </div>
+
+        <div id="auth-view-payment" class="auth-view hidden">
+          <div class="auth-payment-box">
+            <p style="margin: 0 0 0.75rem; color: #5b21b6; font-weight: 600">
+              Su suscripción está pendiente o vencida.
+            </p>
+            <button type="button" id="auth-pay-button" class="auth-btn auth-btn-pay" style="width: 100%">
+              PAGAR SUSCRIPCIÓN ($50.000 COP)
+            </button>
+          </div>
+          <p class="auth-switch">
+            <button type="button" id="auth-back-login">Volver al inicio de sesión</button>
+          </p>
+        </div>
+
+        <div id="auth-message" class="hidden"></div>
+      </div>
+    </div>
+
+    <div id="root"></div>
+    <script src="/app.js"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,6 @@
+export { SmileAnalysisSection } from './SmileAnalysisSection'
+export { RehabilitationAestheticsAnnexPanel } from './RehabilitationAestheticsAnnexPanel'
+export { InitialFindingsSection } from './InitialFindingsSection'
+export { DarkenedTeethPicker } from './DarkenedTeethPicker'
+export { VitaClassicShadePicker } from './VitaClassicShadePicker'
+export { RehabOdontogram } from './rehab-odontogram'

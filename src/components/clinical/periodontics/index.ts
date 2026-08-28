@@ -1,0 +1,6 @@
+export { PeriodonticsAnnexPanel } from './PeriodonticsAnnexPanel'
+export { PeriodontogramChart } from './PeriodontogramChart'
+export { PeriodontogramSiteGrid } from './PeriodontogramSiteGrid'
+export { PeriodontalIndicesSummaryPanel } from './PeriodontalIndicesSummaryPanel'
+export { PeriodontalDiagnosisSection } from './PeriodontalDiagnosisSection'
+export { PeriodontalTreatmentPlanSection } from './PeriodontalTreatmentPlanSection'

@@ -1,0 +1,1 @@
+export { DiagnosticOdontogramSection } from './DiagnosticOdontogramSection'

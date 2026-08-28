@@ -1,0 +1,1347 @@
+[
+  {
+    "codigo": "230101",
+    "descripcion": "Exodoncia de diente permanente unirradicular",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "230102",
+    "descripcion": "Exodoncia de diente permanente multirradicular",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "230103",
+    "descripcion": "Exodoncia de dientes permanentes (código genérico)",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "230201",
+    "descripcion": "Exodoncia de diente temporal unirradicular",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "230202",
+    "descripcion": "Exodoncia de diente temporal multirradicular",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "230203",
+    "descripcion": "Exodoncia de dientes temporales (código genérico)",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "231101",
+    "descripcion": "Exodoncia quirúrgica unirradicular",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "231102",
+    "descripcion": "Exodoncia quirúrgica de diente retenido o impactado",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "231201",
+    "descripcion": "Exodoncia quirúrgica multirradicular",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "231301",
+    "descripcion": "Exodoncia de diente incluido ectópico (abordaje intraoral)",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "231302",
+    "descripcion": "Exodoncia de incluido ectópico (abordaje extraoral)",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "231303",
+    "descripcion": "Exodoncia de diente incluido",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "231401",
+    "descripcion": "Exodoncias múltiples con alveoloplastia, por cuadrante",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "231501",
+    "descripcion": "Colgajo desplazado para abordaje quirúrgico",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "232101",
+    "descripcion": "Obturación dental con amalgama",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "232102",
+    "descripcion": "Obturación dental con resina de fotocurado",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "232103",
+    "descripcion": "Obturación dental con ionómero de vidrio",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "232104",
+    "descripcion": "Obturación dental (código genérico)",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "232201",
+    "descripcion": "Obturación temporal por diente",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "232300",
+    "descripcion": "Colocación de pin milimétrico SOD",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "232301",
+    "descripcion": "Colocación de pin intradentinario",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "232401",
+    "descripcion": "Reconstrucción de ángulo incisal",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "232402",
+    "descripcion": "Reconstrucción de tercio incisal",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "232403",
+    "descripcion": "Reconstrucción dental (código genérico)",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "233100",
+    "descripcion": "Restauración mediante incrustación metálica SOD",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "233101",
+    "descripcion": "Incrustación metálica",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "233200",
+    "descripcion": "Restauración mediante incrustación no metálica SOD",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "233201",
+    "descripcion": "Incrustación no metálica (cerámica, resina indirecta)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234000",
+    "descripcion": "Colocación de corona individual / provisional SOD",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234001",
+    "descripcion": "Colocación de corona acrílica o provisional",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234101",
+    "descripcion": "Corona en acero inoxidable (dentición temporal)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234102",
+    "descripcion": "Corona en policarboxilato (dentición temporal)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234103",
+    "descripcion": "Corona en forma plástica",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234105",
+    "descripcion": "Inserción de corona (código genérico)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234106",
+    "descripcion": "Corona provisional",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234201",
+    "descripcion": "Prótesis fija — cada unidad (pilar y pónticos)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234202",
+    "descripcion": "Reconstrucción de muñones",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234203",
+    "descripcion": "Perno o patrón de núcleo",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234204",
+    "descripcion": "Reparación de prótesis fija",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234205",
+    "descripcion": "Inserción de retenedor intrarradicular",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234301",
+    "descripcion": "Prótesis removible parcial mucosoportada",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234302",
+    "descripcion": "Prótesis removible parcial dentomucosoportada",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234303",
+    "descripcion": "Reparación de prótesis removible parcial",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234401",
+    "descripcion": "Prótesis total mucosoportada (medio caso)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234402",
+    "descripcion": "Prótesis total mucosoportada (caso completo)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234403",
+    "descripcion": "Prótesis total implantoasistida (medio caso)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "234404",
+    "descripcion": "Prótesis total implantoasistida (caso completo)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "235101",
+    "descripcion": "Reimplante de diente",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "235201",
+    "descripcion": "Autotrasplante dental intencional",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "236101",
+    "descripcion": "Implante cerámico",
+    "categoria": "Implantología"
+  },
+  {
+    "codigo": "236201",
+    "descripcion": "Implante metálico (código genérico)",
+    "categoria": "Implantología"
+  },
+  {
+    "codigo": "236301",
+    "descripcion": "Implante dental oseointegrado",
+    "categoria": "Implantología"
+  },
+  {
+    "codigo": "237102",
+    "descripcion": "Pulpotomía",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237103",
+    "descripcion": "Pulpectomía",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237201",
+    "descripcion": "Apexificación (cierre apical)",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237202",
+    "descripcion": "Revascularización pulpar",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237203",
+    "descripcion": "Recubrimiento pulpar directo",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237204",
+    "descripcion": "Recubrimiento pulpar indirecto",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237301",
+    "descripcion": "Terapia de conducto en diente unirradicular",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237302",
+    "descripcion": "Terapia de conducto en diente birradicular",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237303",
+    "descripcion": "Terapia de conducto en diente multirradicular",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237304",
+    "descripcion": "Terapia de conducto en diente temporal unirradicular",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237305",
+    "descripcion": "Terapia de conducto en diente temporal multirradicular",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237307",
+    "descripcion": "Desobturación de conducto radicular",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237401",
+    "descripcion": "Apicectomía",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237501",
+    "descripcion": "Tratamiento correctivo de reabsorción radicular",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237502",
+    "descripcion": "Tratamiento correctivo de fracturas radiculares",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237503",
+    "descripcion": "Sellado quirúrgico de perforación endodóntica",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237504",
+    "descripcion": "Sellado no quirúrgico de perforación endodóntica",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237505",
+    "descripcion": "Remoción de retenedor intrarradicular",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237601",
+    "descripcion": "Fistulización endodóntica por trepanación",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237602",
+    "descripcion": "Fistulización endodóntica por incisión",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237603",
+    "descripcion": "Fistulización endodóntica (código genérico)",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237604",
+    "descripcion": "Fistulización endodóntica por descompresión",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237701",
+    "descripcion": "Radectomía — una raíz",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237702",
+    "descripcion": "Radectomía — múltiples raíces",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237703",
+    "descripcion": "Radectomía (código genérico)",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237801",
+    "descripcion": "Hemisección del diente",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237901",
+    "descripcion": "Blanqueamiento dental intrínseco",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237902",
+    "descripcion": "Exploración del nervio dentario inferior",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "237903",
+    "descripcion": "Blanqueamiento dental extrínseco",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "238101",
+    "descripcion": "Frenilectomía labial",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "238102",
+    "descripcion": "Frenilectomía lingual",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "238103",
+    "descripcion": "Exéresis de mucocele o quiste de retención",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "238201",
+    "descripcion": "Reducción cerrada de fractura mandibular",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "238202",
+    "descripcion": "Reducción abierta de fractura mandibular",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "238301",
+    "descripcion": "Injerto óseo en maxilar o mandíbula",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "238401",
+    "descripcion": "Elevación de seno maxilar",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "238501",
+    "descripcion": "Colocación de implante en cirugía maxilofacial",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "238601",
+    "descripcion": "Osteotomía segmentaria",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "238701",
+    "descripcion": "Artrocentesis de ATM",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "238702",
+    "descripcion": "Artroscopía de ATM",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "240200",
+    "descripcion": "Detartraje subgingival",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "240201",
+    "descripcion": "Detartraje subgingival",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "240300",
+    "descripcion": "Alisado radicular, campo cerrado",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "240301",
+    "descripcion": "Alisado radicular, campo cerrado",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "240401",
+    "descripcion": "Drenaje de colección periodontal",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "241101",
+    "descripcion": "Biopsia incisional de encía (periodoncia)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "241102",
+    "descripcion": "Biopsia escisional de encía con cierre primario",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "241103",
+    "descripcion": "Biopsia escisional con colgajo o injerto",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "241104",
+    "descripcion": "Biopsia de encía (código genérico)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "241201",
+    "descripcion": "Biopsia de pared alveolar",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "242101",
+    "descripcion": "Plastia mucogingival con injerto pediculado",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "242102",
+    "descripcion": "Plastia mucogingival con injerto libre",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "242103",
+    "descripcion": "Plastia mucogingival (código genérico)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "242201",
+    "descripcion": "Curetaje a campo abierto",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "242202",
+    "descripcion": "Cirugía a colgajo con resección radicular",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "242204",
+    "descripcion": "Aumento de reborde edéntulo sin injerto",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "242205",
+    "descripcion": "Aumento de reborde edéntulo con injerto",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "242301",
+    "descripcion": "Plastias preprotésicas (aumento de corona clínica)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "242401",
+    "descripcion": "Reparación periodontal regenerativa (RTG / RTR)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243101",
+    "descripcion": "Escisión de lesión benigna encapsulada ≤3 cm",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243102",
+    "descripcion": "Escisión de lesión benigna encapsulada >3 cm",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243103",
+    "descripcion": "Escisión de lesión benigna no encapsulada ≤3 cm",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243104",
+    "descripcion": "Escisión de lesión benigna no encapsulada >3 cm",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243105",
+    "descripcion": "Escisión de lesión maligna de encía sin vaciamiento",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243106",
+    "descripcion": "Escisión de lesión maligna con vaciamiento ganglionar",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243107",
+    "descripcion": "Vaciamiento ganglionar de piso de boca",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243108",
+    "descripcion": "Escisión de lesión maligna con resección ósea",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243109",
+    "descripcion": "Escisión de lesión maligna con reconstrucción",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243110",
+    "descripcion": "Resección de lesión de encía (código genérico)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243201",
+    "descripcion": "Sutura de laceración de encía <3 cm",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243202",
+    "descripcion": "Sutura de laceración de encía >3 cm",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243203",
+    "descripcion": "Sutura de laceración de encía (código genérico)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243301",
+    "descripcion": "Enucleación de quiste epidermoide (abordaje intraoral)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243302",
+    "descripcion": "Enucleación de quiste epidermoide (abordaje extraoral)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243303",
+    "descripcion": "Enucleación de quiste epidermoide (código genérico)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243401",
+    "descripcion": "Gingivectomía",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243501",
+    "descripcion": "Cuña distal",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "243502",
+    "descripcion": "Operculectomía",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "244101",
+    "descripcion": "Enucleación de quiste odontogénico hasta 3 cm",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "244102",
+    "descripcion": "Enucleación de quiste odontogénico >3 cm",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "244103",
+    "descripcion": "Resección de tumor odontogénico",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "244104",
+    "descripcion": "Resección de tumor con injerto óseo libre",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "244105",
+    "descripcion": "Resección de tumor con colgajo óseo pediculado",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "244106",
+    "descripcion": "Resección tumoral con colgajo óseo libre microvascular",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "244107",
+    "descripcion": "Resección de tumor con reconstrucción con placa",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "244108",
+    "descripcion": "Marsupialización de quiste",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "244109",
+    "descripcion": "Resección lesión odontogénica (código genérico)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "245101",
+    "descripcion": "Regularización de rebordes",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "245201",
+    "descripcion": "Alveolectomía",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "247001",
+    "descripcion": "Anclaje temporal esquelético (TADs / mini-implantes)",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "247101",
+    "descripcion": "Aparatología fija de ortodoncia por arcada",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "247201",
+    "descripcion": "Aparatología removible intraoral",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "247202",
+    "descripcion": "Aparatología removible extraoral",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "247301",
+    "descripcion": "Aparatos de retención post-ortodoncia",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "247401",
+    "descripcion": "Ferulización rígida",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "247402",
+    "descripcion": "Ferulización semirrígida",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "247403",
+    "descripcion": "Ferulización (código genérico)",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "248101",
+    "descripcion": "Cierre de diastema",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "248201",
+    "descripcion": "Tallado selectivo o ajuste oclusal",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "248401",
+    "descripcion": "Reparación de aparatología fija o removible",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "248801",
+    "descripcion": "Máscara facial terapéutica",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "249101",
+    "descripcion": "Control de hemorragia dental posquirúrgica",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "391401",
+    "descripcion": "Ortodoncia interceptiva (legacy cap. 39)",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "391402",
+    "descripcion": "Ortodoncia correctiva con aparatos fijos (legacy cap. 39)",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "391404",
+    "descripcion": "Retenedor ortodóntico (legacy cap. 39)",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "391405",
+    "descripcion": "Aparatología ortopédica funcional removible (legacy cap. 39)",
+    "categoria": "Ortodoncia"
+  },
+  {
+    "codigo": "761101",
+    "descripcion": "Biopsia de huesos maxilares",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "870440",
+    "descripcion": "Radiografía oclusal intraoral",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "870450",
+    "descripcion": "Radiografía periapical milimetrada",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "870451",
+    "descripcion": "Radiografía periapical de dientes anteriores superiores",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "870452",
+    "descripcion": "Radiografía periapical de dientes anteriores inferiores",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "870453",
+    "descripcion": "Radiografía periapical de zona de caninos",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "870454",
+    "descripcion": "Radiografía periapical de premolares",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "870455",
+    "descripcion": "Radiografía periapical de molares",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "870456",
+    "descripcion": "Juego completo de radiografías periapicales",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "870460",
+    "descripcion": "Radiografía coronal (aleta de mordida)",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "870470",
+    "descripcion": "Radiografía panorámica",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "870480",
+    "descripcion": "Tomografía dental (CBCT)",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "870490",
+    "descripcion": "Cefalometría lateral",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "871010",
+    "descripcion": "Radiografía periapical (legacy)",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "871011",
+    "descripcion": "Serie radiográfica periapical completa (legacy)",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "871020",
+    "descripcion": "Radiografía panorámica (legacy)",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "871021",
+    "descripcion": "Cefalometría lateral (legacy)",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "871030",
+    "descripcion": "Radiografía oclusal (legacy)",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "871040",
+    "descripcion": "Tomografía dental CBCT (legacy)",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "871050",
+    "descripcion": "Radiografía de articulación temporomandibular",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "890103",
+    "descripcion": "Atención domiciliaria por odontología general",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890203",
+    "descripcion": "Consulta de primera vez por odontología general",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890204",
+    "descripcion": "Consulta de primera vez por odontología especializada",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890217",
+    "descripcion": "Consulta de primera vez por especialista en Cirugía Oral",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890218",
+    "descripcion": "Consulta de primera vez por especialista en Endodoncia",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890219",
+    "descripcion": "Consulta de primera vez por especialista en Estomatología y Cirugía Oral",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890220",
+    "descripcion": "Consulta de primera vez por especialista en Odontopediatría",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890221",
+    "descripcion": "Consulta de primera vez por especialista en Periodoncia",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890222",
+    "descripcion": "Consulta de primera vez por especialista en Ortodoncia",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890223",
+    "descripcion": "Consulta de primera vez por especialista en Radiología Oral y Maxilofacial",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890224",
+    "descripcion": "Consulta de primera vez por especialista en Rehabilitación Oral",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890303",
+    "descripcion": "Consulta de control o de seguimiento por odontología general",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890304",
+    "descripcion": "Consulta de control o de seguimiento por odontología especializada",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890317",
+    "descripcion": "Consulta de control por especialista en cirugía oral y maxilofacial",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890318",
+    "descripcion": "Consulta de control por especialista en endodoncia",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890319",
+    "descripcion": "Consulta de control por especialista en odontología del bebé",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890320",
+    "descripcion": "Consulta de control por especialista en odontopediatría",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890321",
+    "descripcion": "Consulta de control por especialista en periodoncia",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890322",
+    "descripcion": "Consulta de control por ortodoncia",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890323",
+    "descripcion": "Consulta de control por especialista en radiología oral y maxilofacial",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890324",
+    "descripcion": "Consulta de control por especialista en rehabilitación oral",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890336",
+    "descripcion": "Consulta de control por especialista en patología oral y maxilofacial",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890403",
+    "descripcion": "Interconsulta por odontología general",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890404",
+    "descripcion": "Interconsulta por odontología especializada",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890503",
+    "descripcion": "Participación en junta médica u odontológica",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890603",
+    "descripcion": "Evaluación odontológica en donante potencial de órganos",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890604",
+    "descripcion": "Atención intrahospitalaria por odontología especializada",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890703",
+    "descripcion": "Consulta de urgencias por odontología general",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "890704",
+    "descripcion": "Consulta de urgencias por odontología especializada",
+    "categoria": "Consulta"
+  },
+  {
+    "codigo": "893101",
+    "descripcion": "Impresión de arco dentario con modelo de estudio",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "893102",
+    "descripcion": "Fotografía clínica diagnóstica",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "893103",
+    "descripcion": "Evaluación y medición ortodóntica",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "893104",
+    "descripcion": "Estudio de oclusión y ATM",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "893105",
+    "descripcion": "Máscara facial diagnóstica ortodóncica",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "893106",
+    "descripcion": "Control de ortodoncia",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "893107",
+    "descripcion": "Elaboración y adaptación de aparato ortopédico",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "893108",
+    "descripcion": "Control de crecimiento y desarrollo dentomaxilofacial",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "893109",
+    "descripcion": "Examen de mucosa oral y periodontal",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "893110",
+    "descripcion": "Elaboración de aparato ortésico intraoral",
+    "categoria": "Diagnóstico"
+  },
+  {
+    "codigo": "990103",
+    "descripcion": "Educación grupal en salud, por odontología",
+    "categoria": "Educación en salud"
+  },
+  {
+    "codigo": "990112",
+    "descripcion": "Educación grupal en salud, por higiene oral",
+    "categoria": "Educación en salud"
+  },
+  {
+    "codigo": "990203",
+    "descripcion": "Educación individual en salud, por odontología",
+    "categoria": "Educación en salud"
+  },
+  {
+    "codigo": "990212",
+    "descripcion": "Educación individual en salud, por higiene oral",
+    "categoria": "Educación en salud"
+  },
+  {
+    "codigo": "997001",
+    "descripcion": "Profilaxis dental o pulido coronal",
+    "categoria": "Preventiva"
+  },
+  {
+    "codigo": "997002",
+    "descripcion": "Control de placa dental",
+    "categoria": "Preventiva"
+  },
+  {
+    "codigo": "997101",
+    "descripcion": "Aplicación de sellantes de autocurado",
+    "categoria": "Preventiva"
+  },
+  {
+    "codigo": "997102",
+    "descripcion": "Aplicación de sellantes de fotocurado",
+    "categoria": "Preventiva"
+  },
+  {
+    "codigo": "997103",
+    "descripcion": "Topicación de flúor en gel",
+    "categoria": "Preventiva"
+  },
+  {
+    "codigo": "997104",
+    "descripcion": "Topicación de flúor en solución",
+    "categoria": "Preventiva"
+  },
+  {
+    "codigo": "997105",
+    "descripcion": "Aplicación de resina preventiva",
+    "categoria": "Preventiva"
+  },
+  {
+    "codigo": "997106",
+    "descripcion": "Topicación de flúor en barniz",
+    "categoria": "Preventiva"
+  },
+  {
+    "codigo": "997107",
+    "descripcion": "Aplicación de sellantes",
+    "categoria": "Preventiva"
+  },
+  {
+    "codigo": "997201",
+    "descripcion": "Obturación dental con amalgama (legacy 99.72)",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "997202",
+    "descripcion": "Obturación dental con resina (legacy 99.72)",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "997203",
+    "descripcion": "Obturación dental con ionómero (legacy 99.72)",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "997204",
+    "descripcion": "Obturación dental genérica (legacy 99.72)",
+    "categoria": "Operatoria dental"
+  },
+  {
+    "codigo": "997205",
+    "descripcion": "Blanqueamiento dental ambulatorio",
+    "categoria": "Estética dental"
+  },
+  {
+    "codigo": "997206",
+    "descripcion": "Carilla estética directa en resina",
+    "categoria": "Estética dental"
+  },
+  {
+    "codigo": "997207",
+    "descripcion": "Carilla estética indirecta",
+    "categoria": "Estética dental"
+  },
+  {
+    "codigo": "997301",
+    "descripcion": "Detartraje supragingival",
+    "categoria": "Preventiva"
+  },
+  {
+    "codigo": "997302",
+    "descripcion": "Mantenimiento periodontal (legacy 99.73)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "997303",
+    "descripcion": "Gingivectomía (legacy 99.73)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "997304",
+    "descripcion": "Alisado radicular a campo abierto (legacy 99.73)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "997305",
+    "descripcion": "Cirugía periodontal a colgajo (legacy 99.73)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "997306",
+    "descripcion": "Injerto gingival libre (legacy 99.73)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "997307",
+    "descripcion": "Injerto óseo periodontal (legacy 99.73)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "997308",
+    "descripcion": "Ferulización periodontal (legacy 99.73)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "997310",
+    "descripcion": "Control de placa dental (legacy 99.73)",
+    "categoria": "Periodoncia"
+  },
+  {
+    "codigo": "997401",
+    "descripcion": "Endodoncia unirradicular (legacy 99.74)",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "997402",
+    "descripcion": "Endodoncia birradicular (legacy 99.74)",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "997403",
+    "descripcion": "Endodoncia multirradicular (legacy 99.74)",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "997404",
+    "descripcion": "Retratamiento endodóntico (legacy 99.74)",
+    "categoria": "Endodoncia"
+  },
+  {
+    "codigo": "997501",
+    "descripcion": "Exodoncia multirradicular (legacy 99.75)",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "997502",
+    "descripcion": "Exodoncia de dientes permanentes (legacy 99.75)",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "997503",
+    "descripcion": "Exodoncia unirradicular (legacy 99.75)",
+    "categoria": "Cirugía oral"
+  },
+  {
+    "codigo": "997601",
+    "descripcion": "Corona metal-porcelana (legacy 99.74)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "997602",
+    "descripcion": "Prótesis parcial removible (legacy 99.74)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "997603",
+    "descripcion": "Prótesis total (legacy 99.74)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "997604",
+    "descripcion": "Prótesis fija por unidad (legacy 99.74)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "997605",
+    "descripcion": "Corona provisional acrílica (legacy 99.74)",
+    "categoria": "Rehabilitación oral"
+  },
+  {
+    "codigo": "997701",
+    "descripcion": "Implante dental osteointegrado (legacy 99.77)",
+    "categoria": "Implantología"
+  },
+  {
+    "codigo": "997702",
+    "descripcion": "Colocación de pilar sobre implante (legacy 99.77)",
+    "categoria": "Implantología"
+  },
+  {
+    "codigo": "997703",
+    "descripcion": "Corona sobre implante (legacy 99.77)",
+    "categoria": "Implantología"
+  },
+  {
+    "codigo": "997704",
+    "descripcion": "Prótesis híbrida sobre implantes (legacy 99.77)",
+    "categoria": "Implantología"
+  },
+  {
+    "codigo": "997705",
+    "descripcion": "Mantenimiento de implantes (legacy 99.77)",
+    "categoria": "Implantología"
+  },
+  {
+    "codigo": "997801",
+    "descripcion": "Apicectomía (legacy 99.78)",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "997802",
+    "descripcion": "Frenilectomía (legacy 99.78)",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "997803",
+    "descripcion": "Exéresis de quiste odontogénico (legacy 99.78)",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "997804",
+    "descripcion": "Alveoloplastía (legacy 99.78)",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "997805",
+    "descripcion": "Injerto óseo (legacy 99.78)",
+    "categoria": "Cirugía maxilofacial"
+  },
+  {
+    "codigo": "997806",
+    "descripcion": "Elevación de seno maxilar (legacy 99.78)",
+    "categoria": "Cirugía maxilofacial"
+  }
+]

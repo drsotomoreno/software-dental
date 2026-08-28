@@ -1,0 +1,201 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-lg bg-dental-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-dental-700 focus:outline-none focus:ring-2 focus:ring-dental-500 focus:ring-offset-2 disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-dental-500 focus:ring-offset-2;
+  }
+
+  .input-field {
+    @apply block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-dental-500 focus:outline-none focus:ring-1 focus:ring-dental-500;
+  }
+
+  .label-field {
+    @apply mb-1 block text-sm font-medium text-slate-700;
+  }
+
+  .clinical-history .label-field,
+  .clinical-history h4.text-sm,
+  .clinical-history h5.text-sm,
+  .clinical-history p.text-xs.font-medium.text-slate-600,
+  .clinical-history p.mb-2.text-sm.font-medium {
+    text-transform: capitalize;
+  }
+
+  .clinical-label-raw {
+    text-transform: none !important;
+  }
+
+  .clinical-todo-normal {
+    @apply inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-800 transition hover:bg-green-100;
+  }
+
+  .clinical-todo-normal:disabled {
+    @apply cursor-not-allowed opacity-45;
+  }
+
+  .clinical-todo-normal-label {
+    @apply inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-800 transition hover:bg-green-100;
+  }
+
+  .clinical-todo-normal-label:has(:disabled) {
+    @apply cursor-not-allowed opacity-45;
+  }
+
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white p-6 shadow-sm;
+  }
+
+  .clinical-history-shell {
+    @apply rounded-2xl border border-dental-100 bg-gradient-to-b from-dental-50/90 via-sky-50/40 to-white/70 p-4 shadow-sm sm:p-6;
+  }
+
+  .dark .clinical-history-shell {
+    @apply border-dental-800/30 bg-gradient-to-b from-slate-900/80 via-dental-900/20 to-slate-900/60;
+  }
+
+  .clinical-history-shell .card {
+    @apply border-dental-100/80 bg-white/95 shadow-sm backdrop-blur-sm;
+  }
+
+  .dark .clinical-history-shell .card {
+    @apply border-slate-700 bg-slate-900/90;
+  }
+
+  .nav-pill {
+    @apply rounded-full border px-3 py-1.5 text-sm font-medium transition;
+  }
+
+  .nav-pill-top {
+    @apply rounded-full border px-3 py-1.5 text-sm font-medium transition sm:px-3.5 sm:py-2;
+  }
+
+  .top-nav-menu .nav-pill-top {
+    @apply inline-flex h-10 w-[11.5rem] shrink-0 items-center justify-center px-2 text-center text-sm leading-tight sm:h-11 sm:w-[11.75rem] sm:px-3 sm:text-[0.9375rem];
+  }
+
+  .top-nav-brand {
+    @apply min-h-[2.5rem];
+  }
+
+  .nav-pill-top.nav-pill-inactive {
+    @apply border-orange-200 bg-orange-50 text-orange-900 hover:bg-orange-100;
+  }
+
+  .nav-pill-top.nav-pill-active {
+    @apply border-dental-600 bg-dental-600 text-white;
+  }
+
+  .nav-pill-sm {
+    @apply rounded-full border px-3 py-1 text-xs font-medium transition;
+  }
+
+  .nav-pill-inactive {
+    @apply border-orange-200 bg-orange-50 text-orange-900 hover:bg-orange-100;
+  }
+
+  .nav-pill-active {
+    @apply border-dental-600 bg-dental-600 text-white;
+  }
+
+  .clinical-section-nav .nav-pill-inactive {
+    @apply border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100;
+  }
+
+  .clinical-section-nav .nav-pill-active {
+    @apply border-dental-600 bg-dental-600 text-white hover:bg-dental-700;
+  }
+
+  .btn-voice-mic {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 bg-slate-50 text-base shadow-sm transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-dental-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-voice-mic.voice-mic--listening {
+    @apply border-red-500 bg-red-600 text-white ring-2 ring-red-300;
+  }
+
+  .agenda-view-tabs {
+    @apply flex flex-wrap;
+  }
+
+  .agenda-week-grid {
+    display: grid;
+  }
+
+  .agenda-month-grid {
+    display: grid;
+  }
+
+  .agenda-month-cell {
+    @apply flex flex-col;
+  }
+
+  .agenda-blocked-slot {
+    @apply bg-black text-white;
+  }
+
+  .agenda-whatsapp-btn {
+    @apply inline-flex items-center gap-1 rounded-md bg-[#25D366] font-medium text-white shadow-sm transition hover:bg-[#1ebe57];
+  }
+
+  .agenda-btn-eliminar {
+    @apply border border-red-200 bg-red-50 text-red-700 hover:bg-red-100;
+  }
+
+  .agenda-btn-reasignar {
+    @apply border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100;
+  }
+
+  .agenda-context-menu {
+    @apply fixed z-[9999] min-w-[200px] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl;
+  }
+
+  .agenda-context-menu__item {
+    @apply flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .agenda-context-menu__item--danger {
+    @apply text-red-700 hover:bg-red-50;
+  }
+
+  .agenda-context-menu__icon {
+    @apply w-5 shrink-0 text-center text-base;
+  }
+
+  .agenda-clipboard-banner {
+    @apply border;
+  }
+
+  @media (max-width: 640px) {
+    .agenda-month-cell {
+      min-height: 88px;
+    }
+  }
+}
+
+/* Odontograma — grid fijo inamovible */
+.odontogram-grid {
+  display: grid;
+  grid-template-rows: auto auto auto auto;
+  gap: 8px;
+  min-width: max-content;
+  user-select: none;
+}
+
+.odontogram-scroll-container {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 8px;
+}

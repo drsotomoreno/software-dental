@@ -1,0 +1,159 @@
+import {
+  hasPermission,
+  mapApiRoleToUserRole,
+  resolveEffectiveRole,
+  type Permission,
+} from '@/utils/permissions'
+import type { UserRole } from '@/types/user'
+
+export const API_AUTH_TOKEN_KEY = 'doctorSEO_token'
+export const API_AUTH_USER_KEY = 'doctorSEO_user'
+export const API_ROLE_KEY = 'doctorSEO_rol'
+
+const LEGACY_TOKEN_KEY = 'doctorseolabs_api_token'
+const LEGACY_USER_KEY = 'doctorseolabs_api_user'
+
+export interface ApiSubscriptionUser {
+  id: string
+  nombre: string
+  email: string
+  rol: 'superadmin' | 'admin' | 'odontologo' | 'recepcion'
+  estado_pago: 'pendiente' | 'activo' | 'vencido' | 'exento'
+  fecha_vencimiento: string | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export const SUPERADMIN_EMAIL = 'doctormauriciosoto@gmail.com'
+
+export function isApiSuperAdmin(user: ApiSubscriptionUser | null | undefined): boolean {
+  if (localStorage.getItem(API_ROLE_KEY) === 'superadmin') return true
+  if (!user) return false
+  const email = String(user.email ?? '').trim().toLowerCase()
+  const rol = String(user.rol ?? '').trim().toLowerCase()
+  return email === SUPERADMIN_EMAIL || rol === 'superadmin' || user.estado_pago === 'exento'
+}
+
+export function getStoredApiAuth():
+  | { token: string; user: ApiSubscriptionUser }
+  | null {
+  const token =
+    localStorage.getItem(API_AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_TOKEN_KEY)
+  const rawUser =
+    localStorage.getItem(API_AUTH_USER_KEY) || localStorage.getItem(LEGACY_USER_KEY)
+  if (!token || !rawUser) return null
+
+  try {
+    const user = JSON.parse(rawUser) as ApiSubscriptionUser
+    return { token, user }
+  } catch {
+    return null
+  }
+}
+
+export function setStoredApiAuth(token: string, user: ApiSubscriptionUser): void {
+  localStorage.setItem(API_AUTH_TOKEN_KEY, token)
+  localStorage.setItem(API_AUTH_USER_KEY, JSON.stringify(user))
+  localStorage.setItem(LEGACY_TOKEN_KEY, token)
+  localStorage.setItem(LEGACY_USER_KEY, JSON.stringify(user))
+  if (isApiSuperAdmin(user)) {
+    localStorage.setItem(API_ROLE_KEY, 'superadmin')
+  } else {
+    localStorage.setItem(API_ROLE_KEY, user.rol)
+  }
+}
+
+export function clearStoredApiAuth(): void {
+  localStorage.removeItem(API_AUTH_TOKEN_KEY)
+  localStorage.removeItem(API_AUTH_USER_KEY)
+  localStorage.removeItem(API_ROLE_KEY)
+  localStorage.removeItem(LEGACY_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_USER_KEY)
+}
+
+export async function validateApiSession(token: string) {
+  const response = await fetch('/api/sesion', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (response.status === 402) {
+    const payload = await response.json().catch(() => ({}))
+    const user = payload.user as ApiSubscriptionUser | undefined
+    if (isApiSuperAdmin(user)) {
+      return {
+        ok: true as const,
+        user: user!,
+        expiresAt: null as unknown as string,
+        rol: 'superadmin' as const,
+      }
+    }
+    return {
+      ok: false as const,
+      requiresPayment: true,
+      user,
+      error: payload.error as string | undefined,
+    }
+  }
+
+  if (!response.ok) {
+    const stored = getStoredApiAuth()
+    if (stored && isApiSuperAdmin(stored.user)) {
+      return {
+        ok: true as const,
+        user: stored.user,
+        expiresAt: null as unknown as string,
+        rol: 'superadmin' as const,
+      }
+    }
+    return { ok: false as const, requiresPayment: false }
+  }
+
+  const payload = await response.json()
+  return {
+    ok: true as const,
+    user: payload.user as ApiSubscriptionUser,
+    expiresAt: payload.expiresAt as string,
+    rol: payload.rol as ApiSubscriptionUser['rol'] | undefined,
+  }
+}
+
+export function getEffectiveRole(userRole?: UserRole | string | null): UserRole | null {
+  const apiAuth = getStoredApiAuth()
+  const resolved = resolveEffectiveRole(
+    userRole,
+    apiAuth?.user?.rol,
+    localStorage.getItem(API_ROLE_KEY),
+  )
+  return resolved
+}
+
+export function canWithEffectiveRole(
+  permission: Permission,
+  userRole?: UserRole | string | null,
+): boolean {
+  const role = getEffectiveRole(userRole)
+  return role ? hasPermission(role, permission) : false
+}
+
+export function mapApiUserToAuthUser(
+  user: ApiSubscriptionUser,
+  token: string,
+): import('@/types/auth').AuthUser {
+  const nameParts = (user.nombre || user.email).trim().split(/\s+/)
+  const firstName = nameParts[0] ?? user.email
+  const lastName = nameParts.slice(1).join(' ') || 'Usuario'
+
+  return {
+    id: user.id,
+    email: user.email,
+    firstName,
+    lastName,
+    documentType: 'CC',
+    documentNumber: '0000000000',
+    role: mapApiRoleToUserRole(user.rol),
+    clinicName: 'doctorSEOlabs',
+    sessionId: token,
+  }
+}
