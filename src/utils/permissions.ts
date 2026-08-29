@@ -145,10 +145,12 @@ export function resolveEffectiveRole(
 }
 
 export function hasPermission(role: UserRole, permission: Permission): boolean {
+  const canonical = normalizeRole(role)
+  if (canonical === 'superadmin') return true
   if (permission === 'users.manage') {
     return canManageUsers(role)
   }
-  return ROLE_PERMISSIONS[normalizeRole(role)]?.includes(permission) ?? false
+  return ROLE_PERMISSIONS[canonical]?.includes(permission) ?? false
 }
 
 export function getPermissions(role: UserRole): Permission[] {
@@ -160,6 +162,7 @@ export function roleHasModule(
   module: 'agenda' | 'clinical' | 'odontogram' | 'budgets' | 'rips' | 'config',
 ): boolean {
   const canonical = normalizeRole(role)
+  if (canonical === 'superadmin') return true
   switch (module) {
     case 'agenda':
       return hasPermission(canonical, 'agenda.read')

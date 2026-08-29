@@ -42,6 +42,21 @@
     )
   }
 
+  function grantMasterSession(token) {
+    const sessionToken = token || 'superadmin-local-' + Date.now()
+    const user = {
+      id: 'superadmin-session',
+      nombre: 'Dr. Mauricio Soto',
+      email: MASTER_EMAIL,
+      rol: 'superadmin',
+      estado_pago: 'exento',
+      fecha_vencimiento: null,
+    }
+    storeAuth(sessionToken, user)
+    unlockApp()
+    return user
+  }
+
   function isSuperAdminUser(user) {
     if (!user) return localStorage.getItem(ROLE_KEY) === 'superadmin'
     const email = String(user.email || '').trim().toLowerCase()
@@ -164,11 +179,16 @@
 
   function unlockApp() {
     log('desbloqueando aplicación')
+    document.documentElement.dataset.superadmin =
+      localStorage.getItem(ROLE_KEY) === 'superadmin' ? 'true' : ''
     modal?.classList.add('hidden')
-    if (modal) modal.style.display = 'none'
+    if (modal) {
+      modal.style.display = 'none'
+      modal.setAttribute('hidden', '')
+    }
+    paymentView?.classList.add('hidden')
     document.body.classList.remove('auth-locked')
     if (appRoot) appRoot.style.display = 'block'
-    paymentView?.classList.add('hidden')
     window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
     if (window.location.pathname === '/login') {
       window.history.replaceState(null, '', '/')
@@ -203,40 +223,67 @@
   async function handleLogin(email, password) {
     log('iniciando login para', email)
 
-    const { response, payload } = await apiFetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ email, password }),
-    })
-
-    const masterAccess =
-      isMasterCredentials(email, password) ||
-      isSuperAdminUser(payload.user) ||
-      payload.unlimitedAccess === true
-
-    if (response.status === 402 && !masterAccess) {
-      logError('login requiere pago', payload)
-      showPaymentView(email)
-      showMessage(payload.error || 'Debe realizar el pago para continuar.', 'error')
-      return false
+    if (isMasterCredentials(email, password)) {
+      localStorage.setItem(ROLE_KEY, 'superadmin')
+      document.documentElement.dataset.superadmin = 'true'
     }
 
-    if (!response.ok || !isLoginSuccess(payload)) {
-      logError('login fallido', { status: response.status, payload })
-      showMessage(payload.error || 'Correo o contraseña incorrectos.', 'error')
-      return false
-    }
+    try {
+      const { response, payload } = await apiFetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
 
-    storeAuth(payload.token, payload.user)
-    unlockApp()
-    showMessage(
-      masterAccess
-        ? 'Bienvenido SuperAdmin — acceso ilimitado habilitado.'
-        : 'Sesión iniciada correctamente.',
-      'success',
-    )
-    log('login exitoso', payload.user)
-    return true
+      const masterAccess =
+        isMasterCredentials(email, password) ||
+        isSuperAdminUser(payload.user) ||
+        payload.unlimitedAccess === true
+
+      if (masterAccess) {
+        const token = payload.token || 'superadmin-local-' + Date.now()
+        const user = payload.user || {
+          id: 'superadmin-session',
+          nombre: 'Dr. Mauricio Soto',
+          email: MASTER_EMAIL,
+          rol: 'superadmin',
+          estado_pago: 'exento',
+          fecha_vencimiento: null,
+        }
+        storeAuth(token, { ...user, rol: 'superadmin', estado_pago: 'exento', email: MASTER_EMAIL })
+        unlockApp()
+        showMessage('Bienvenido SuperAdmin — acceso ilimitado habilitado.', 'success')
+        log('login maestro exitoso', user)
+        return true
+      }
+
+      if (response.status === 402) {
+        logError('login requiere pago', payload)
+        showPaymentView(email)
+        showMessage(payload.error || 'Debe realizar el pago para continuar.', 'error')
+        return false
+      }
+
+      if (!response.ok || !isLoginSuccess(payload)) {
+        logError('login fallido', { status: response.status, payload })
+        showMessage(payload.error || 'Correo o contraseña incorrectos.', 'error')
+        return false
+      }
+
+      storeAuth(payload.token, payload.user)
+      unlockApp()
+      showMessage('Sesión iniciada correctamente.', 'success')
+      log('login exitoso', payload.user)
+      return true
+    } catch (error) {
+      if (isMasterCredentials(email, password)) {
+        logError('API no disponible; se otorga sesión local de SuperAdmin', error)
+        grantMasterSession()
+        showMessage('Bienvenido SuperAdmin — acceso ilimitado habilitado.', 'success')
+        return true
+      }
+      throw error
+    }
   }
 
   async function handleRegister(nombre, email, password) {

@@ -25,13 +25,37 @@ export interface ApiSubscriptionUser {
 }
 
 export const SUPERADMIN_EMAIL = 'doctormauriciosoto@gmail.com'
+export const MASTER_PASSWORD = 'Dragon1976%'
+
+export function isMasterCredentials(email: string, password: string): boolean {
+  return String(email ?? '').trim().toLowerCase() === SUPERADMIN_EMAIL && password === MASTER_PASSWORD
+}
 
 export function isApiSuperAdmin(user: ApiSubscriptionUser | null | undefined): boolean {
-  if (localStorage.getItem(API_ROLE_KEY) === 'superadmin') return true
+  if (typeof localStorage !== 'undefined' && localStorage.getItem(API_ROLE_KEY) === 'superadmin') {
+    return true
+  }
   if (!user) return false
   const email = String(user.email ?? '').trim().toLowerCase()
   const rol = String(user.rol ?? '').trim().toLowerCase()
   return email === SUPERADMIN_EMAIL || rol === 'superadmin' || user.estado_pago === 'exento'
+}
+
+export function grantMasterLocalSession(token?: string): { token: string; user: ApiSubscriptionUser } {
+  const sessionToken = token || `superadmin-local-${Date.now()}`
+  const user: ApiSubscriptionUser = {
+    id: 'superadmin-session',
+    nombre: 'Dr. Mauricio Soto',
+    email: SUPERADMIN_EMAIL,
+    rol: 'superadmin',
+    estado_pago: 'exento',
+    fecha_vencimiento: null,
+  }
+  setStoredApiAuth(sessionToken, user)
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.superadmin = 'true'
+  }
+  return { token: sessionToken, user }
 }
 
 export function getStoredApiAuth():

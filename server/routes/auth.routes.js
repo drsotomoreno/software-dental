@@ -1,4 +1,6 @@
+import { randomBytes } from 'node:crypto'
 import { Router } from 'express'
+import { config } from '../config.js'
 import {
   confirmSubscriptionPayment,
   ensureSuperAdmin,
@@ -8,6 +10,17 @@ import {
   registerSubscriptionUser,
   resolveSubscriptionSession,
 } from '../services/subscriptionAuthStore.js'
+
+function masterUserPayload(user) {
+  return {
+    id: user?.id ?? 'superadmin-master',
+    nombre: user?.nombre ?? config.superAdmin.nombre,
+    email: MASTER_EMAIL,
+    rol: 'superadmin',
+    estado_pago: 'exento',
+    fecha_vencimiento: null,
+  }
+}
 
 const router = Router()
 
@@ -78,7 +91,30 @@ router.post('/login', async (req, res) => {
       })
     }
 
-    const isMaster = isMasterCredentials(email, password)
+    if (isMasterCredentials(email, password)) {
+      let result
+      try {
+        result = await loginSubscriptionUser({ email, password })
+      } catch (masterError) {
+        console.error('[Auth] Login maestro: store falló, se otorga sesión de respaldo', masterError)
+        result = { ok: false }
+      }
+
+      const user = masterUserPayload(result.user)
+      const token = result.token || randomBytes(32).toString('hex')
+
+      return res.json({
+        success: true,
+        ok: true,
+        token,
+        user,
+        rol: 'superadmin',
+        expiresAt: result.expiresAt ?? null,
+        unlimitedAccess: true,
+        requiresPayment: false,
+      })
+    }
+
     const result = await loginSubscriptionUser({ email, password })
 
     if (!result.ok) {
@@ -87,13 +123,13 @@ router.post('/login', async (req, res) => {
         ok: false,
         error: result.error,
         estado_pago: result.estado_pago,
-        requiresPayment: isMaster ? false : result.requiresPayment ?? false,
+        requiresPayment: result.requiresPayment ?? false,
         user: result.user,
       })
     }
 
     const user = result.user
-    const isSuperAdmin = isMaster || email === MASTER_EMAIL || user?.rol === 'superadmin'
+    const isSuperAdmin = email === MASTER_EMAIL || user?.rol === 'superadmin'
 
     return res.json({
       success: true,

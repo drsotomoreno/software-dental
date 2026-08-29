@@ -10,7 +10,27 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <title>doctorSEOlabs Historia Dental Dictada por Voz</title>
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem('doctorSEO_rol') === 'superadmin') {
+            document.documentElement.dataset.superadmin = 'true'
+          }
+        } catch (e) {}
+      })()
+    </script>
     <style>
+      html[data-superadmin='true'] #modal-auth-container,
+      html[data-superadmin='true'] #auth-view-payment {
+        display: none !important;
+      }
+
+      html[data-superadmin='true'] body.auth-locked #root {
+        pointer-events: auto !important;
+        user-select: auto !important;
+        filter: none !important;
+      }
+
       #modal-auth-container {
         position: fixed;
         inset: 0;

@@ -11,13 +11,14 @@ export function LoginPage() {
   const location = useLocation()
   const from = (location.state as { from?: string } | null)?.from ?? '/'
   const apiAuth = getStoredApiAuth()
+  const isSuperAdmin = localStorage.getItem('doctorSEO_rol') === 'superadmin'
 
   const [email, setEmail] = useState('odontologo@clinica.co')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  if (!isLoading && (user || apiAuth?.token)) {
+  if (!isLoading && (user || apiAuth?.token || isSuperAdmin)) {
     return <Navigate to={from} replace />
   }
 

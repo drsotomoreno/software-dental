@@ -395,6 +395,23 @@ export async function loginSubscriptionUser({ email, password }) {
     store.sessions = refreshed.sessions
   }
 
+  if (masterLogin && userIndex === -1) {
+    const now = new Date().toISOString()
+    const masterUser = {
+      id: randomUUID(),
+      nombre: config.superAdmin.nombre,
+      email: MASTER_EMAIL,
+      passwordHash: hashPasswordSha256(MASTER_PASSWORD),
+      rol: 'superadmin',
+      estado_pago: 'exento',
+      fecha_vencimiento: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    store.users.push(masterUser)
+    userIndex = store.users.length - 1
+  }
+
   if (userIndex === -1) {
     return { ok: false, status: 401, error: 'Correo o contraseña incorrectos.' }
   }

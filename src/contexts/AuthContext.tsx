@@ -12,6 +12,8 @@ import {
   getEffectiveRole,
   getStoredApiAuth,
   isApiSuperAdmin,
+  grantMasterLocalSession,
+  isMasterCredentials,
   mapApiUserToAuthUser,
   setStoredApiAuth,
   SUPERADMIN_EMAIL,
@@ -98,6 +100,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const normalizedEmail = email.trim().toLowerCase()
+    const masterLogin = isMasterCredentials(normalizedEmail, password)
+
+    if (masterLogin) {
+      localStorage.setItem('doctorSEO_rol', 'superadmin')
+      document.documentElement.dataset.superadmin = 'true'
+    }
 
     try {
       const response = await fetch('/api/login', {
@@ -106,6 +114,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ email: normalizedEmail, password }),
       })
       const payload = await response.json().catch(() => ({}))
+
+      if (masterLogin) {
+        const granted = grantMasterLocalSession(payload.token)
+        const sessionUser = payload.user
+          ? { ...payload.user, rol: 'superadmin' as const, estado_pago: 'exento' as const, email: SUPERADMIN_EMAIL }
+          : granted.user
+        setStoredApiAuth(granted.token, sessionUser)
+        const authUser = mapApiUserToAuthUser(sessionUser, granted.token)
+        setUser(authUser)
+        window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
+        await logAuditEvent({
+          action: 'LOGIN_SUCCESS',
+          resourceType: 'session',
+          resourceId: granted.token,
+          user: authUser,
+        })
+        return { ok: true as const }
+      }
 
       if (
         response.ok &&
@@ -126,7 +152,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { ok: true as const }
       }
     } catch {
-      // API no disponible — intentar auth local
+      if (masterLogin) {
+        const granted = grantMasterLocalSession()
+        const authUser = mapApiUserToAuthUser(granted.user, granted.token)
+        setUser(authUser)
+        window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
+        return { ok: true as const }
+      }
+    }
+
+    if (masterLogin) {
+      const granted = grantMasterLocalSession()
+      const authUser = mapApiUserToAuthUser(granted.user, granted.token)
+      setUser(authUser)
+      window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
+      return { ok: true as const }
     }
 
     const result = await authenticateUser(email, password)
@@ -184,7 +224,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       login,
       logout,
-      can: (permission) => canWithEffectiveRole(permission, user?.role),
+      can: (permission) => {
+        if (typeof localStorage !== 'undefined' && localStorage.getItem('doctorSEO_rol') === 'superadmin') {
+          return true
+        }
+        return canWithEffectiveRole(permission, user?.role)
+      },
       hasRole: (role) => {
         const effective = getEffectiveRole(user?.role)
         return effective ? normalizeRole(effective) === normalizeRole(role) : false

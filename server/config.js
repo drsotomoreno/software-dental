@@ -1,13 +1,18 @@
 import 'dotenv/config'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const port = Number(process.env.PORT ?? 3000)
 
+/** URL de PostgreSQL requerida por la aplicación (local o producción). */
+export const DATABASE_URL =
+  process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/software_dental'
+
 export const config = {
   port,
   nodeEnv: process.env.NODE_ENV ?? 'development',
+  databaseUrl: DATABASE_URL,
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   minsalud: {
     sandbox: process.env.MINSALUD_SANDBOX !== 'false',
@@ -39,4 +44,15 @@ export function hasMinsaludCredentials() {
     apiBaseUrl &&
       ((clientId && clientSecret) || (username && password)),
   )
+}
+
+export default config
+
+const invokedDirectly =
+  Boolean(process.argv[1]) && pathToFileURL(process.argv[1]).href === import.meta.url
+
+if (invokedDirectly) {
+  console.log('[config] Módulo válido')
+  console.log(`[config] DATABASE_URL=${config.databaseUrl}`)
+  console.log(`[config] SuperAdmin=${config.superAdmin.email} rol=superadmin estado_pago=exento`)
 }

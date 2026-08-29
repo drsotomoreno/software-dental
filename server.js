@@ -4,7 +4,7 @@
  */
 import express from 'express'
 import cors from 'cors'
-import { config } from './server/config.js'
+import { config, DATABASE_URL } from './server/config.js'
 import { errorHandler } from './server/middleware/errorHandler.js'
 import healthRoutes from './server/routes/health.routes.js'
 import ripsRoutes from './server/routes/rips.routes.js'
@@ -38,8 +38,11 @@ app.use(errorHandler)
 
 await ensureSuperAdmin()
 
+export { config, DATABASE_URL }
+
 app.listen(config.port, () => {
   console.log(`[RIPS API] Escuchando en http://localhost:${config.port}`)
+  console.log(`[config] DATABASE_URL=${DATABASE_URL}`)
   console.log(`[Auth] SuperAdmin exento: ${config.superAdmin.email}`)
   console.log(
     `[RIPS API] Modo MinSalud: ${config.minsalud.sandbox ? 'SANDBOX (local)' : 'PRODUCCIÓN'}`,
