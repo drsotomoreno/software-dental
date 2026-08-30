@@ -24,7 +24,8 @@ app.use(
       if (!origin) return callback(null, true)
       const allowed =
         /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
-        origin === config.corsOrigin
+        origin === config.corsOrigin ||
+        /^https:\/\/([a-z0-9-]+\.)?mihistoriadental\.com$/.test(origin)
       callback(null, allowed)
     },
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
@@ -38,15 +39,17 @@ app.use('/api/rips', ripsRoutes)
 app.use('/api/invoices', invoicesRoutes)
 app.use('/api', authRoutes)
 
-const distIndex = path.join(__dirname, 'dist', 'index.html')
+const distDir = path.join(__dirname, 'dist')
+const distIndex = path.join(distDir, 'index.html')
 const hasFrontendBuild = existsSync(distIndex)
+const isProduction = process.env.NODE_ENV === 'production'
 
-if (!hasFrontendBuild) {
+if (!isProduction && !hasFrontendBuild) {
   try {
     const { readFileSync } = await import('node:fs')
     const { createServer: createViteServer } = await import('vite')
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, allowedHosts: true },
       appType: 'spa',
     })
     app.use(vite.middlewares)
@@ -67,22 +70,26 @@ if (!hasFrontendBuild) {
       error?.message ?? error,
     )
   }
+} else if (isProduction && !hasFrontendBuild) {
+  console.error(
+    '[RIPS API] Falta dist/index.html. En Render el Build Command debe ser: npm run build',
+  )
 }
 
 await ensureSuperAdmin()
 
 export { config, DATABASE_URL }
 
-app.use(express.static(path.join(__dirname, 'dist')))
+app.use(express.static(distDir))
 app.get('/{*splat}', (req, res, next) => {
   if (req.path.startsWith('/api')) return next()
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'))
+  res.sendFile(distIndex)
 })
 
 app.use(errorHandler)
 
-app.listen(config.port, () => {
-  console.log(`[RIPS API] App y API en http://localhost:${config.port}`)
+app.listen(config.port, '0.0.0.0', () => {
+  console.log(`[RIPS API] App y API en http://0.0.0.0:${config.port}`)
   console.log(`[config] DATABASE_URL=${DATABASE_URL}`)
   console.log(`[Auth] SuperAdmin exento: ${config.superAdmin.email}`)
   console.log(

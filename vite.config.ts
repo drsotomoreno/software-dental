@@ -2,9 +2,18 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
 
+const allowedHosts = [
+  'www.mihistoriadental.com',
+  'mihistoriadental.com',
+  '.mihistoriadental.com',
+  '.onrender.com',
+]
+
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: true,
+    allowedHosts,
     watch: {
       ignored: ['**/src/data/dane-*.json'],
     },
@@ -14,6 +23,10 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  preview: {
+    host: true,
+    allowedHosts,
   },
   resolve: {
     alias: {
