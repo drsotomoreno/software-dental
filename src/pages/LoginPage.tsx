@@ -3,7 +3,6 @@ import { APP_INITIALS, APP_NAME } from '@/constants/branding'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { getStoredApiAuth } from '@/services/apiAuthService'
-import { DEMO_DEFAULT_PASSWORD } from '@/types/auth'
 
 export function LoginPage() {
   const { user, login, isLoading } = useAuth()
@@ -13,7 +12,7 @@ export function LoginPage() {
   const apiAuth = getStoredApiAuth()
   const isSuperAdmin = localStorage.getItem('doctorSEO_rol') === 'superadmin'
 
-  const [email, setEmail] = useState('odontologo@clinica.co')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -82,24 +81,6 @@ export function LoginPage() {
             {submitting ? 'Ingresando...' : 'Iniciar sesión'}
           </button>
         </form>
-
-        <div className="mt-6 rounded-lg border border-slate-200 bg-white/80 p-4 text-xs text-slate-600">
-          <p className="font-medium text-slate-800">Usuarios demo</p>
-          <ul className="mt-2 space-y-1">
-            <li>
-              <strong>Odontólogo:</strong> odontologo@clinica.co
-            </li>
-            <li>
-              <strong>Administrador:</strong> admin@clinica.co
-            </li>
-            <li>
-              <strong>Contraseña:</strong> {DEMO_DEFAULT_PASSWORD}
-            </li>
-          </ul>
-          <p className="mt-2 text-slate-500">
-            Los accesos quedan registrados en la bitácora de auditoría (Ley 1581 / custodia HC).
-          </p>
-        </div>
       </div>
     </div>
   )
