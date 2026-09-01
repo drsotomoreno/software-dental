@@ -1,4 +1,5 @@
 import { config } from '../config.js'
+import { loadMailSettings } from './mailSettingsStore.js'
 
 const RESET_SUBJECT = 'Recuperación de contraseña — doctorSEOlabs'
 
@@ -24,28 +25,46 @@ function mailBody(resetUrl) {
   }
 }
 
-export function isMailConfigured() {
+export async function getMailRuntime() {
+  const stored = await loadMailSettings()
+  return {
+    resendApiKey: (process.env.RESEND_API_KEY || stored.resendApiKey || '').trim(),
+    sendgridApiKey: (process.env.SENDGRID_API_KEY || stored.sendgridApiKey || '').trim(),
+    brevoApiKey: (process.env.BREVO_API_KEY || stored.brevoApiKey || '').trim(),
+    smtp: {
+      host: config.smtp.host,
+      port: config.smtp.port,
+      user: config.smtp.user,
+      pass: config.smtp.pass,
+      from: (process.env.MAIL_FROM || stored.from || config.smtp.from).trim(),
+    },
+  }
+}
+
+export async function isMailConfigured() {
+  const runtime = await getMailRuntime()
   return Boolean(
-    config.mail.resendApiKey ||
-      config.mail.sendgridApiKey ||
-      config.mail.brevoApiKey ||
-      (config.smtp.host && config.smtp.user && config.smtp.pass),
+    runtime.resendApiKey ||
+      runtime.sendgridApiKey ||
+      runtime.brevoApiKey ||
+      (runtime.smtp.host && runtime.smtp.user && runtime.smtp.pass),
   )
 }
 
-export function mailTransportLabel() {
-  if (config.mail.resendApiKey) return 'resend'
-  if (config.mail.sendgridApiKey) return 'sendgrid'
-  if (config.mail.brevoApiKey) return 'brevo'
-  if (config.smtp.host && config.smtp.user && config.smtp.pass) return 'smtp'
+export async function mailTransportLabel() {
+  const runtime = await getMailRuntime()
+  if (runtime.brevoApiKey) return 'brevo'
+  if (runtime.resendApiKey) return 'resend'
+  if (runtime.sendgridApiKey) return 'sendgrid'
+  if (runtime.smtp.host && runtime.smtp.user && runtime.smtp.pass) return 'smtp'
   return 'none'
 }
 
-async function sendWithResend({ to, from, subject, html, text }) {
+async function sendWithResend(runtime, { to, from, subject, html, text }) {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${config.mail.resendApiKey}`,
+      Authorization: `Bearer ${runtime.resendApiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ from, to: [to], subject, html, text }),
@@ -55,11 +74,11 @@ async function sendWithResend({ to, from, subject, html, text }) {
   }
 }
 
-async function sendWithSendgrid({ to, from, subject, html, text }) {
+async function sendWithSendgrid(runtime, { to, from, subject, html, text }) {
   const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${config.mail.sendgridApiKey}`,
+      Authorization: `Bearer ${runtime.sendgridApiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -77,11 +96,11 @@ async function sendWithSendgrid({ to, from, subject, html, text }) {
   }
 }
 
-async function sendWithBrevo({ to, from, subject, html, text }) {
+async function sendWithBrevo(runtime, { to, from, subject, html, text }) {
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
-      'api-key': config.mail.brevoApiKey,
+      'api-key': runtime.brevoApiKey,
       accept: 'application/json',
       'Content-Type': 'application/json',
     },
@@ -98,8 +117,8 @@ async function sendWithBrevo({ to, from, subject, html, text }) {
   }
 }
 
-async function sendWithSmtp({ to, from, subject, html, text }) {
-  const { host, port, user, pass } = config.smtp
+async function sendWithSmtp(runtime, { to, from, subject, html, text }) {
+  const { host, port, user, pass } = runtime.smtp
   const mod = await import('nodemailer')
   const nodemailer = mod.default ?? mod
   const isGmail = /gmail/i.test(host) || /gmail\.com$/i.test(user)
@@ -121,41 +140,27 @@ async function sendWithSmtp({ to, from, subject, html, text }) {
 }
 
 async function sendTransactionalEmail({ to, subject, html, text }) {
-  const from = config.smtp.from
+  const runtime = await getMailRuntime()
+  const from = runtime.smtp.from
   const payload = { to, from, subject, html, text }
 
-  if (!isMailConfigured()) {
-    console.error(
-      `[Auth] Correo no configurado. Defina RESEND_API_KEY o SMTP_HOST/SMTP_USER/SMTP_PASS. Destino: ${to}`,
-    )
+  const configured = Boolean(
+    runtime.resendApiKey ||
+      runtime.sendgridApiKey ||
+      runtime.brevoApiKey ||
+      (runtime.smtp.host && runtime.smtp.user && runtime.smtp.pass),
+  )
+
+  if (!configured) {
+    console.error(`[Auth] Correo no configurado. Destino: ${to}`)
     throw new Error('MAIL_NOT_CONFIGURED')
   }
 
   const errors = []
 
-  if (config.mail.resendApiKey) {
+  if (runtime.brevoApiKey) {
     try {
-      await sendWithResend(payload)
-      return { sent: true, via: 'resend' }
-    } catch (error) {
-      errors.push(error)
-      console.error('[Auth] Falló envío con Resend', error)
-    }
-  }
-
-  if (config.mail.sendgridApiKey) {
-    try {
-      await sendWithSendgrid(payload)
-      return { sent: true, via: 'sendgrid' }
-    } catch (error) {
-      errors.push(error)
-      console.error('[Auth] Falló envío con SendGrid', error)
-    }
-  }
-
-  if (config.mail.brevoApiKey) {
-    try {
-      await sendWithBrevo(payload)
+      await sendWithBrevo(runtime, payload)
       return { sent: true, via: 'brevo' }
     } catch (error) {
       errors.push(error)
@@ -163,9 +168,29 @@ async function sendTransactionalEmail({ to, subject, html, text }) {
     }
   }
 
-  if (config.smtp.host && config.smtp.user && config.smtp.pass) {
+  if (runtime.resendApiKey) {
     try {
-      await sendWithSmtp(payload)
+      await sendWithResend(runtime, payload)
+      return { sent: true, via: 'resend' }
+    } catch (error) {
+      errors.push(error)
+      console.error('[Auth] Falló envío con Resend', error)
+    }
+  }
+
+  if (runtime.sendgridApiKey) {
+    try {
+      await sendWithSendgrid(runtime, payload)
+      return { sent: true, via: 'sendgrid' }
+    } catch (error) {
+      errors.push(error)
+      console.error('[Auth] Falló envío con SendGrid', error)
+    }
+  }
+
+  if (runtime.smtp.host && runtime.smtp.user && runtime.smtp.pass) {
+    try {
+      await sendWithSmtp(runtime, payload)
       return { sent: true, via: 'smtp' }
     } catch (error) {
       errors.push(error)

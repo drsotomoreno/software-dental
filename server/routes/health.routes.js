@@ -4,7 +4,7 @@ import { isMailConfigured, mailTransportLabel } from '../services/mailer.js'
 
 const router = Router()
 
-router.get('/', (_req, res) => {
+router.get('/', async (_req, res) => {
   res.json({
     service: 'doctorSEOlabs Historia Dental Dictada por Voz — API RIPS / CUV / DIAN',
     version: '1.0.0',
@@ -13,8 +13,8 @@ router.get('/', (_req, res) => {
       credentialsConfigured: hasMinsaludCredentials(),
     },
     mail: {
-      configured: isMailConfigured(),
-      transport: mailTransportLabel(),
+      configured: await isMailConfigured(),
+      transport: await mailTransportLabel(),
     },
   })
 })

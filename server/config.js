@@ -49,7 +49,7 @@ export const config = {
     from:
       process.env.MAIL_FROM ??
       process.env.SMTP_USER ??
-      'doctorSEOlabs <noreply@mihistoriadental.com>',
+      `doctorSEOlabs <${process.env.SUPERADMIN_EMAIL ?? 'doctormauriciosoto@gmail.com'}>`,
   },
   superAdmin: {
     email: (process.env.SUPERADMIN_EMAIL ?? 'doctormauriciosoto@gmail.com').toLowerCase(),

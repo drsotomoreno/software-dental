@@ -3,6 +3,7 @@ import { Router } from 'express'
 import { config } from '../config.js'
 import { forgotPassword, resetPassword } from '../controllers/authPassword.controller.js'
 import { requestRegisterCode, verifyRegisterCode } from '../controllers/authRegister.controller.js'
+import { getMailSettings, updateMailSettings } from '../controllers/authMailSettings.controller.js'
 import {
   confirmSubscriptionPayment,
   ensureSuperAdmin,
@@ -201,6 +202,8 @@ router.post('/auth/forgot-password', forgotPassword)
 router.post('/auth/reset-password', resetPassword)
 router.post('/auth/register/request-code', requestRegisterCode)
 router.post('/auth/register/verify', verifyRegisterCode)
+router.get('/auth/mail-settings', getMailSettings)
+router.put('/auth/mail-settings', updateMailSettings)
 
 router.get('/sesion', async (req, res) => {
   try {

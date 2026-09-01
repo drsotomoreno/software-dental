@@ -6,6 +6,8 @@ import { changeUserPassword } from '@/services/authService'
 import { ROLE_LABELS } from '@/utils/permissions'
 import { LocalBackupPanel } from '@/components/backup/LocalBackupPanel'
 import { ClearTestDatabasePanel } from '@/components/settings/ClearTestDatabasePanel'
+import { MailSettingsPanel } from '@/components/settings/MailSettingsPanel'
+import { getStoredApiAuth } from '@/services/apiAuthService'
 import {
   ODONTOLOGY_THS_SPECIALTIES,
   type OdontologyThsSpecialtyId,
@@ -261,6 +263,10 @@ export function ProfilePage() {
           <p className="text-sm text-green-600">Contraseña actualizada correctamente.</p>
         )}
       </form>
+
+      {(getStoredApiAuth()?.user?.rol === 'superadmin' || user.role === 'superadmin') && (
+        <MailSettingsPanel />
+      )}
 
       {can('backups.manage') && (
         <div className="card space-y-3">
