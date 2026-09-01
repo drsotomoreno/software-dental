@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { config, hasMinsaludCredentials } from '../config.js'
+import { isMailConfigured, mailTransportLabel } from '../services/mailer.js'
 
 const router = Router()
 
@@ -10,6 +11,10 @@ router.get('/', (_req, res) => {
     minsalud: {
       sandbox: config.minsalud.sandbox,
       credentialsConfigured: hasMinsaludCredentials(),
+    },
+    mail: {
+      configured: isMailConfigured(),
+      transport: mailTransportLabel(),
     },
   })
 })

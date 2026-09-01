@@ -30,10 +30,17 @@ export const config = {
     technicalKey: process.env.DIAN_TECHNICAL_KEY ?? '',
   },
   dataDir: join(__dirname, 'data'),
-  appPublicUrl: (process.env.APP_PUBLIC_URL ?? process.env.CORS_ORIGIN ?? 'http://localhost:5173').replace(
-    /\/$/,
-    '',
-  ),
+  appPublicUrl: (
+    process.env.APP_PUBLIC_URL ||
+    (process.env.NODE_ENV === 'production'
+      ? 'https://www.mihistoriadental.com'
+      : process.env.CORS_ORIGIN || 'http://localhost:5173')
+  ).replace(/\/$/, ''),
+  mail: {
+    resendApiKey: process.env.RESEND_API_KEY ?? '',
+    sendgridApiKey: process.env.SENDGRID_API_KEY ?? '',
+    brevoApiKey: process.env.BREVO_API_KEY ?? '',
+  },
   smtp: {
     host: process.env.SMTP_HOST ?? '',
     port: Number(process.env.SMTP_PORT ?? 587),

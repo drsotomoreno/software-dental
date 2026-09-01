@@ -13,6 +13,7 @@ import healthRoutes from './server/routes/health.routes.js'
 import ripsRoutes from './server/routes/rips.routes.js'
 import invoicesRoutes from './server/routes/invoices.routes.js'
 import authRoutes from './server/routes/auth.routes.js'
+import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -92,6 +93,7 @@ app.listen(config.port, '0.0.0.0', () => {
   console.log(`[RIPS API] App y API en http://0.0.0.0:${config.port}`)
   console.log(`[config] DATABASE_URL=${DATABASE_URL}`)
   console.log(`[Auth] SuperAdmin exento: ${config.superAdmin.email}`)
+  console.log(`[Auth] Correo de recuperación: ${mailTransportLabel()} (${config.appPublicUrl})`)
   console.log(
     `[RIPS API] Modo MinSalud: ${config.minsalud.sandbox ? 'SANDBOX (local)' : 'PRODUCCIÓN'}`,
   )

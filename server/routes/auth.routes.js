@@ -1,18 +1,16 @@
 import { randomBytes } from 'node:crypto'
 import { Router } from 'express'
 import { config } from '../config.js'
+import { forgotPassword, resetPassword } from '../controllers/authPassword.controller.js'
 import {
   confirmSubscriptionPayment,
-  createPasswordResetToken,
   ensureSuperAdmin,
   isMasterCredentials,
   loginSubscriptionUser,
   MASTER_EMAIL,
   registerSubscriptionUser,
-  resetPasswordWithToken,
   resolveSubscriptionSession,
 } from '../services/subscriptionAuthStore.js'
-import { sendPasswordResetEmail } from '../services/mailer.js'
 
 function masterUserPayload(user) {
   return {
@@ -198,79 +196,8 @@ router.post('/confirmar-pago', async (req, res) => {
   }
 })
 
-router.post('/auth/forgot-password', async (req, res) => {
-  const genericMessage =
-    'Si el correo está registrado, enviaremos un enlace para restablecer la contraseña. Revise su bandeja de entrada.'
-
-  try {
-    const body = req.body && typeof req.body === 'object' ? req.body : {}
-    const email = String(body.email ?? '').trim().toLowerCase()
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        ok: false,
-        error: 'El correo electrónico es obligatorio.',
-      })
-    }
-
-    const result = await createPasswordResetToken(email)
-
-    if (result.created && result.token) {
-      const resetUrl = `${config.appPublicUrl}/reset-password?token=${encodeURIComponent(result.token)}`
-      try {
-        await sendPasswordResetEmail({ to: result.email, resetUrl })
-      } catch (mailError) {
-        console.error('[Auth] No se pudo enviar el correo de recuperación', mailError)
-        return res.status(500).json({
-          success: false,
-          ok: false,
-          error: 'No se pudo enviar el correo. Intente de nuevo más tarde.',
-        })
-      }
-    }
-
-    return res.json({ success: true, ok: true, message: genericMessage })
-  } catch (error) {
-    console.error('[Auth] Error en /auth/forgot-password:', error)
-    return res.status(500).json({
-      success: false,
-      ok: false,
-      error: 'No se pudo procesar la solicitud.',
-    })
-  }
-})
-
-router.post('/auth/reset-password', async (req, res) => {
-  try {
-    const body = req.body && typeof req.body === 'object' ? req.body : {}
-    const token = String(body.token ?? '').trim()
-    const newPassword = String(body.newPassword ?? body.password ?? '')
-
-    const result = await resetPasswordWithToken({ token, newPassword })
-
-    if (!result.ok) {
-      return res.status(result.status).json({
-        success: false,
-        ok: false,
-        error: result.error,
-      })
-    }
-
-    return res.json({
-      success: true,
-      ok: true,
-      message: 'Contraseña actualizada. Ya puede iniciar sesión.',
-    })
-  } catch (error) {
-    console.error('[Auth] Error en /auth/reset-password:', error)
-    return res.status(500).json({
-      success: false,
-      ok: false,
-      error: 'No se pudo actualizar la contraseña.',
-    })
-  }
-})
+router.post('/auth/forgot-password', forgotPassword)
+router.post('/auth/reset-password', resetPassword)
 
 router.get('/sesion', async (req, res) => {
   try {
