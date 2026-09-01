@@ -165,12 +165,31 @@
         color: #64748b;
       }
 
-      .auth-switch button {
+      .auth-switch button,
+      .auth-switch a {
         border: none;
         background: none;
         color: #0284c7;
         font-weight: 600;
         cursor: pointer;
+        text-decoration: none;
+      }
+
+      .auth-forgot {
+        display: block;
+        margin: 0.35rem 0 0.75rem;
+        text-align: right;
+        font-size: 0.85rem;
+      }
+
+      .auth-forgot a {
+        color: #0284c7;
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .auth-forgot a:hover {
+        text-decoration: underline;
       }
 
       .auth-payment-box {
@@ -215,6 +234,9 @@
                 autocomplete="current-password"
               />
             </div>
+            <p class="auth-forgot">
+              <a href="/forgot-password" id="auth-forgot-password">¿Olvidaste tu contraseña?</a>
+            </p>
             <div class="auth-actions">
               <button type="submit" id="loginSubmitBtn" class="auth-btn auth-btn-primary">Ingresar</button>
             </div>

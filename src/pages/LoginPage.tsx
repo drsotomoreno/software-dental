@@ -76,12 +76,6 @@ export function LoginPage() {
             />
           </div>
 
-          <p className="text-right text-sm">
-            <Link to="/forgot-password" className="font-medium text-dental-700 hover:underline">
-              ¿Olvidaste tu contraseña?
-            </Link>
-          </p>
-
           {Boolean((location.state as { passwordReset?: boolean } | null)?.passwordReset) && (
             <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
               Contraseña actualizada. Inicie sesión con su nueva clave.
@@ -95,6 +89,15 @@ export function LoginPage() {
           <button type="submit" disabled={submitting} className="btn-primary w-full">
             {submitting ? 'Ingresando...' : 'Iniciar sesión'}
           </button>
+
+          <p className="text-center text-sm">
+            <Link
+              to="/forgot-password"
+              className="inline-block font-semibold text-dental-700 underline underline-offset-2 hover:text-dental-800"
+            >
+              ¿Olvidaste tu contraseña?
+            </Link>
+          </p>
         </form>
       </div>
     </div>

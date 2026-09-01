@@ -476,6 +476,12 @@
     }
   })
 
+  document.getElementById('auth-forgot-password')?.addEventListener('click', function (event) {
+    event.preventDefault()
+    unlockApp()
+    window.location.assign('/forgot-password')
+  })
+
   document.getElementById('auth-show-register')?.addEventListener('click', function () {
     clearMessage()
     showView(registerView)
