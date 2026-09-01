@@ -229,8 +229,8 @@ function describeMailError(error) {
   if (/invalid.*api key|unauthorized|401/i.test(raw)) {
     return 'La clave de Resend no es válida. Revise RESEND_API_KEY en Render.'
   }
-  if (/verify a domain|own email|testing emails|not verified|restricted to/i.test(raw)) {
-    return 'Resend no puede enviar a ese correo hasta verificar el dominio mihistoriadental.com en resend.com/domains.'
+  if (/verify a domain|own email|testing emails|not verified|restricted to|add and verify your domain/i.test(raw)) {
+    return 'Resend no puede enviar el código hasta verificar mihistoriadental.com. Agregue en Namecheap (Advanced DNS) los registros DKIM y SPF que muestra resend.com/domains.'
   }
   return 'No se pudo enviar el código al correo. Intente de nuevo más tarde.'
 }

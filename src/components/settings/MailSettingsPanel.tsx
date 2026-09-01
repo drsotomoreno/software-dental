@@ -84,8 +84,28 @@ export function MailSettingsPanel() {
       <div>
         <h2 className="text-base font-semibold text-slate-800">Correo de verificación</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Render bloquea SMTP. Use una API HTTPS (Brevo recomendado: verifique su Gmail como
-          remitente y pegue la API key). Sin esto, el registro no puede enviar el código.
+          Render bloquea SMTP. El envío usa Resend por HTTPS. Para que el código llegue a
+          cualquier correo (Gmail, Yahoo, Outlook), el dominio mihistoriadental.com debe
+          estar verificado en Resend. En Namecheap → Domain List → Advanced DNS agregue:
+        </p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-600">
+          <li>
+            TXT <code className="font-mono">resend._domainkey</code> — valor DKIM que muestra
+            Resend en resend.com/domains
+          </li>
+          <li>
+            MX <code className="font-mono">send</code> —{' '}
+            <code className="font-mono">feedback-smtp.us-east-1.amazonses.com</code> (prioridad
+            10)
+          </li>
+          <li>
+            TXT <code className="font-mono">send</code> —{' '}
+            <code className="font-mono">v=spf1 include:amazonses.com ~all</code>
+          </li>
+        </ul>
+        <p className="mt-2 text-sm text-slate-600">
+          También agregue <code className="font-mono">RESEND_API_KEY</code> en Render →
+          Environment para que no se pierda al redesplegar.
         </p>
         <p className="mt-2 text-sm font-medium text-slate-700">{status}</p>
       </div>
