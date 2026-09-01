@@ -346,6 +346,10 @@
       }
     }
 
+    if (isPublicPath()) {
+      unlockApp()
+      return false
+    }
     clearAuth()
     lockApp()
     showView(loginView)
@@ -354,6 +358,11 @@
 
   async function initAuthGate() {
     log('inicializando puerta de autenticación')
+
+    if (isPublicPath()) {
+      unlockApp()
+      return
+    }
 
     const stored = getStoredAuth()
     if (stored?.token && (isSuperAdminUser(stored.user) || localStorage.getItem(ROLE_KEY) === 'superadmin')) {
