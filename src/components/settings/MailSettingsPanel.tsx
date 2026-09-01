@@ -116,7 +116,7 @@ export function MailSettingsPanel() {
           value={from}
           onChange={(e) => setFrom(e.target.value)}
           className="input-field"
-          placeholder="doctorSEOlabs <doctormauriciosoto@gmail.com>"
+          placeholder="Doctor SEO Labs <notificaciones@mihistoriadental.com>"
         />
       </div>
       <div>

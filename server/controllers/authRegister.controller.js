@@ -24,7 +24,20 @@ export async function requestRegisterCode(req, res) {
     try {
       await sendVerificationCodeEmail({ to: result.email, code: result.code })
     } catch (mailError) {
-      console.error('[Auth] No se pudo enviar el código de verificación', mailError)
+      console.error(
+        '[Auth] No se pudo enviar el código de verificación',
+        JSON.stringify(
+          {
+            email: result.email,
+            message: mailError?.message,
+            causeMessage: mailError?.cause?.message,
+            cause: mailError?.cause,
+            stack: mailError?.stack,
+          },
+          null,
+          2,
+        ),
+      )
       return res.status(503).json({
         success: false,
         ok: false,

@@ -42,8 +42,7 @@ export const config = {
     brevoApiKey: process.env.BREVO_API_KEY ?? '',
     resendFrom:
       process.env.MAIL_FROM ??
-      'Mi Historia Dental <noreply@mihistoriadental.com>',
-    resendTestFrom: 'Mi Historia Dental <beth.t@example.com>',
+      'Doctor SEO Labs <notificaciones@mihistoriadental.com>',
   },
   smtp: {
     host: process.env.SMTP_HOST ?? '',
@@ -52,8 +51,7 @@ export const config = {
     pass: process.env.SMTP_PASS ?? '',
     from:
       process.env.MAIL_FROM ??
-      process.env.SMTP_USER ??
-      `doctorSEOlabs <${process.env.SUPERADMIN_EMAIL ?? 'doctormauriciosoto@gmail.com'}>`,
+      'Doctor SEO Labs <notificaciones@mihistoriadental.com>',
   },
   superAdmin: {
     email: (process.env.SUPERADMIN_EMAIL ?? 'doctormauriciosoto@gmail.com').toLowerCase(),

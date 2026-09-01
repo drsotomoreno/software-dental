@@ -25,10 +25,30 @@ function mailBody(resetUrl) {
   }
 }
 
+const RESEND_FROM = 'Doctor SEO Labs <notificaciones@mihistoriadental.com>'
+
+function logResendError(context, details) {
+  const payload = {
+    context,
+    to: details?.to || null,
+    from: details?.from || null,
+    statusCode: details?.error?.statusCode || details?.error?.status || null,
+    name: details?.error?.name || details?.error?.constructor?.name || null,
+    message: details?.error?.message || String(details?.error || ''),
+    raw: details?.error,
+  }
+  console.error('[Auth] Resend error detallado', JSON.stringify(payload, null, 2))
+}
+
 export async function getMailRuntime() {
   const stored = await loadMailSettings()
   return {
-    resendApiKey: (process.env.RESEND_API_KEY || stored.resendApiKey || config.mail.resendApiKey || '').trim(),
+    resendApiKey: (
+      process.env.RESEND_API_KEY ||
+      stored.resendApiKey ||
+      config.mail.resendApiKey ||
+      ''
+    ).trim(),
     sendgridApiKey: (process.env.SENDGRID_API_KEY || stored.sendgridApiKey || '').trim(),
     brevoApiKey: (process.env.BREVO_API_KEY || stored.brevoApiKey || '').trim(),
     smtp: {
@@ -36,7 +56,7 @@ export async function getMailRuntime() {
       port: config.smtp.port,
       user: config.smtp.user,
       pass: config.smtp.pass,
-      from: (process.env.MAIL_FROM || stored.from || config.mail.resendFrom || config.smtp.from).trim(),
+      from: RESEND_FROM,
     },
   }
 }
@@ -60,13 +80,12 @@ export async function mailTransportLabel() {
   return 'none'
 }
 
-async function sendWithResend(runtime, { to, from, subject, html, text }) {
+async function sendWithResend(runtime, { to, subject, html, text }) {
   const { Resend } = await import('resend')
   const resend = new Resend(runtime.resendApiKey)
-  const fromCandidates = [...new Set([from, config.mail.resendFrom, config.mail.resendTestFrom].filter(Boolean))]
+  const fromAddress = RESEND_FROM
 
-  let lastError
-  for (const fromAddress of fromCandidates) {
+  try {
     const { data, error } = await resend.emails.send({
       from: fromAddress,
       to: [to],
@@ -75,17 +94,18 @@ async function sendWithResend(runtime, { to, from, subject, html, text }) {
       text,
     })
     if (!error) {
+      console.log('[Auth] Resend envió el correo', JSON.stringify({ to, from: fromAddress, id: data?.id || null }))
       return data
     }
-    lastError = error
-    console.error(`[Auth] Resend no aceptó el remitente ${fromAddress}:`, error)
+    logResendError('emails.send', { to, from: fromAddress, error })
+    const err = new Error(error?.message || JSON.stringify(error) || 'Resend no pudo enviar el correo')
+    err.cause = error
+    throw err
+  } catch (error) {
+    if (error?.cause) throw error
+    logResendError('emails.send exception', { to, from: fromAddress, error })
+    throw error
   }
-
-  const detail =
-    lastError?.message ||
-    (typeof lastError === 'object' ? JSON.stringify(lastError) : '') ||
-    'Resend no pudo enviar el correo'
-  throw new Error(detail)
 }
 
 async function sendWithSendgrid(runtime, { to, from, subject, html, text }) {
@@ -174,7 +194,7 @@ async function sendTransactionalEmail({ to, subject, html, text }) {
       return { sent: true, via: 'resend' }
     } catch (error) {
       errors.push(error)
-      console.error('[Auth] Falló envío con Resend', error)
+      logResendError('sendTransactionalEmail catch', { to, from, error })
     }
   }
 
@@ -209,8 +229,9 @@ async function sendTransactionalEmail({ to, subject, html, text }) {
   }
 
   console.error(`[Auth] No se pudo entregar el correo a ${to}.`)
-  const err = new Error('MAIL_SEND_FAILED')
-  err.cause = errors[0]
+  const first = errors[0]
+  const err = new Error(first?.message || 'MAIL_SEND_FAILED')
+  err.cause = first?.cause || first
   throw err
 }
 
@@ -229,7 +250,10 @@ function describeMailError(error) {
   if (/invalid.*api key|unauthorized|401/i.test(raw)) {
     return 'La clave de Resend no es válida. Revise RESEND_API_KEY en Render.'
   }
-  if (/verify a domain|own email|testing emails|not verified|restricted to|add and verify your domain/i.test(raw)) {
+  if (/own email|testing emails/i.test(raw)) {
+    return 'Resend en modo prueba solo envía a doctormauriciosoto@gmail.com. Para Yahoo u otros correos hay que verificar mihistoriadental.com en resend.com/domains.'
+  }
+  if (/verify a domain|not verified|restricted to|add and verify your domain/i.test(raw)) {
     return 'Resend no puede enviar el código hasta verificar mihistoriadental.com. Agregue en Namecheap (Advanced DNS) los registros DKIM y SPF que muestra resend.com/domains.'
   }
   return 'No se pudo enviar el código al correo. Intente de nuevo más tarde.'
