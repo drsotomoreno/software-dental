@@ -186,7 +186,7 @@ export function TopNavbar() {
         <div className="flex items-start justify-between gap-2 sm:gap-3">
           <div className="flex min-w-0 flex-1 items-start gap-2 sm:gap-3">
             <NavLink
-              to="/"
+              to="/app"
               end
               className={({ isActive }) =>
                 `top-nav-brand flex shrink-0 items-center gap-2 rounded-full border px-2 py-1.5 pr-3 transition sm:pr-3.5 ${

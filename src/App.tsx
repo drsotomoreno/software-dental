@@ -5,6 +5,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { PermissionRoute } from '@/components/auth/PermissionRoute'
 import {
   HomePage,
+  LandingPage,
   LoginPage,
   NewPatientPage,
   PatientListPage,
@@ -30,10 +31,11 @@ export function AppRouter() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
+          <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout />}>
-              <Route index element={<HomePage />} />
+              <Route path="app" element={<HomePage />} />
               <Route element={<PermissionRoute permission="patients.write" />}>
                 <Route path="pacientes/nuevo" element={<NewPatientPage />} />
               </Route>

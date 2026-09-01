@@ -80,6 +80,11 @@
     return port === '5173' || port === '5174' || port === '4173'
   }
 
+  function isPublicPath() {
+    const path = window.location.pathname.replace(/\/+$/, '') || '/'
+    return path === '/' || path === '/login'
+  }
+
   async function apiFetch(path, options) {
     const method = String(options?.method || 'GET').toUpperCase()
     if (method === 'DELETE' && /\/api\/invoices(\/|$)/.test(path)) {
@@ -191,12 +196,16 @@
     if (appRoot) appRoot.style.display = 'block'
     window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
     if (window.location.pathname === '/login') {
-      window.history.replaceState(null, '', '/')
+      window.history.replaceState(null, '', '/app')
     }
   }
 
   function lockApp() {
     if (localStorage.getItem(ROLE_KEY) === 'superadmin') {
+      unlockApp()
+      return
+    }
+    if (isPublicPath()) {
       unlockApp()
       return
     }
@@ -358,8 +367,8 @@
       if (ok) return
     }
 
-    // En Vite dev: React maneja login offline (/login) sin bloquear la UI
-    if (isViteDev()) {
+    // Landing pública (/) y Vite dev: React muestra inicio o /login sin overlay
+    if (isViteDev() || isPublicPath()) {
       unlockApp()
       return
     }

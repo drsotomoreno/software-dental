@@ -8,7 +8,7 @@ export function LoginPage() {
   const { user, login, isLoading } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const from = (location.state as { from?: string } | null)?.from ?? '/'
+  const from = (location.state as { from?: string } | null)?.from ?? '/app'
   const apiAuth = getStoredApiAuth()
   const isSuperAdmin = localStorage.getItem('doctorSEO_rol') === 'superadmin'
 
@@ -17,8 +17,11 @@ export function LoginPage() {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  const afterLogin =
+    !from || from === '/' || from === '/login' ? '/app' : from
+
   if (!isLoading && (user || apiAuth?.token || isSuperAdmin)) {
-    return <Navigate to={from} replace />
+    return <Navigate to={afterLogin} replace />
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -31,7 +34,7 @@ export function LoginPage() {
       setError(result.error)
       return
     }
-    navigate(from, { replace: true })
+    navigate(afterLogin, { replace: true })
   }
 
   return (

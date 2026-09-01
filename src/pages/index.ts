@@ -1,4 +1,5 @@
 export { HomePage } from './HomePage'
+export { LandingPage } from './LandingPage'
 export { NewPatientPage } from './NewPatientPage'
 export { PatientListPage } from './PatientListPage'
 export { ValuatedPatientsPage } from './ValuatedPatientsPage'

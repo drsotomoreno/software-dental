@@ -17,5 +17,5 @@ export function PermissionRoute({ permission }: PermissionRouteProps) {
     return <Outlet />
   }
 
-  return <Navigate to="/" replace />
+  return <Navigate to="/app" replace />
 }
