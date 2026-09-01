@@ -13,7 +13,7 @@
     "dev:full": "node server.js",
     "electron": "electron .",
     "electron:dev": "electron .",
-    "build": "vite build",
+    "build": "npm install nodemailer@9.1.0 --no-save && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },

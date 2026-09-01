@@ -1,11 +1,26 @@
-import nodemailer from 'nodemailer'
 import { config } from '../config.js'
+
+async function loadNodemailer() {
+  try {
+    const mod = await import('nodemailer')
+    return mod.default ?? mod
+  } catch (error) {
+    console.error('[Auth] No se pudo cargar nodemailer:', error?.message ?? error)
+    return null
+  }
+}
 
 export async function sendPasswordResetEmail({ to, resetUrl }) {
   const { host, port, user, pass, from } = config.smtp
 
   if (!host) {
     console.log(`[Auth] SMTP no configurado. Enlace de recuperación para ${to}: ${resetUrl}`)
+    return { sent: false, logged: true }
+  }
+
+  const nodemailer = await loadNodemailer()
+  if (!nodemailer) {
+    console.log(`[Auth] Enlace de recuperación para ${to}: ${resetUrl}`)
     return { sent: false, logged: true }
   }
 
