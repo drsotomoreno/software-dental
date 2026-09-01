@@ -81,7 +81,11 @@ async function sendWithResend(runtime, { to, from, subject, html, text }) {
     console.error(`[Auth] Resend no aceptó el remitente ${fromAddress}:`, error)
   }
 
-  throw new Error(lastError?.message || 'Resend no pudo enviar el correo')
+  const detail =
+    lastError?.message ||
+    (typeof lastError === 'object' ? JSON.stringify(lastError) : '') ||
+    'Resend no pudo enviar el correo'
+  throw new Error(detail)
 }
 
 async function sendWithSendgrid(runtime, { to, from, subject, html, text }) {
@@ -151,6 +155,15 @@ async function sendWithSmtp(runtime, { to, from, subject, html, text }) {
 
 async function sendTransactionalEmail({ to, subject, html, text }) {
   const runtime = await getMailRuntime()
+  if (
+    !runtime.resendApiKey &&
+    !runtime.brevoApiKey &&
+    !runtime.sendgridApiKey &&
+    !(runtime.smtp.host && runtime.smtp.user && runtime.smtp.pass)
+  ) {
+    const err = new Error('MAIL_NOT_CONFIGURED')
+    throw err
+  }
   const from = runtime.smtp.from || config.mail.resendFrom
   const payload = { to, from, subject, html, text }
   const errors = []
@@ -200,6 +213,29 @@ async function sendTransactionalEmail({ to, subject, html, text }) {
   err.cause = errors[0]
   throw err
 }
+
+function describeMailError(error) {
+  const raw = [
+    error?.message,
+    error?.cause?.message,
+    typeof error?.cause === 'object' ? JSON.stringify(error.cause) : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  if (/MAIL_NOT_CONFIGURED/i.test(raw)) {
+    return 'El servidor no tiene correo configurado. Agregue RESEND_API_KEY en Render o guarde la clave en Perfil → Correo de verificación.'
+  }
+  if (/invalid.*api key|unauthorized|401/i.test(raw)) {
+    return 'La clave de Resend no es válida. Revise RESEND_API_KEY en Render.'
+  }
+  if (/verify a domain|own email|testing emails|not verified|restricted to/i.test(raw)) {
+    return 'Resend no puede enviar a ese correo hasta verificar el dominio mihistoriadental.com en resend.com/domains.'
+  }
+  return 'No se pudo enviar el código al correo. Intente de nuevo más tarde.'
+}
+
+export { describeMailError }
 
 export async function sendPasswordResetEmail({ to, resetUrl }) {
   const { html, text } = mailBody(resetUrl)

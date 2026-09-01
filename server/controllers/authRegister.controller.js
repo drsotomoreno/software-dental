@@ -1,4 +1,4 @@
-import { sendVerificationCodeEmail } from '../services/mailer.js'
+import { describeMailError, sendVerificationCodeEmail } from '../services/mailer.js'
 import {
   createEmailVerification,
   verifyEmailAndRegister,
@@ -28,7 +28,7 @@ export async function requestRegisterCode(req, res) {
       return res.status(503).json({
         success: false,
         ok: false,
-        error: 'No se pudo enviar el código al correo. Intente de nuevo más tarde.',
+        error: describeMailError(mailError),
       })
     }
 
