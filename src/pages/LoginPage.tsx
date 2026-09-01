@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { APP_INITIALS, APP_NAME } from '@/constants/branding'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 
@@ -75,6 +75,18 @@ export function LoginPage() {
               placeholder="••••••••"
             />
           </div>
+
+          <p className="text-right text-sm">
+            <Link to="/forgot-password" className="font-medium text-dental-700 hover:underline">
+              ¿Olvidaste tu contraseña?
+            </Link>
+          </p>
+
+          {Boolean((location.state as { passwordReset?: boolean } | null)?.passwordReset) && (
+            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              Contraseña actualizada. Inicie sesión con su nueva clave.
+            </p>
+          )}
 
           {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>

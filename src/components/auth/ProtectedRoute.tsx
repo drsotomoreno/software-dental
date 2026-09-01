@@ -1,8 +1,10 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 
 import { useAuth } from '@/contexts/AuthContext'
+import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { LandingPage } from '@/pages/LandingPage'
 import { LoginPage } from '@/pages/LoginPage'
+import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 import { clearStoredApiAuth, getStoredApiAuth, isApiSuperAdmin } from '@/services/apiAuthService'
 
 function normalizePath(pathname: string) {
@@ -25,6 +27,14 @@ export function ProtectedRoute() {
 
   if (path === '/login') {
     return <LoginPage />
+  }
+
+  if (path === '/forgot-password') {
+    return <ForgotPasswordPage />
+  }
+
+  if (path === '/reset-password') {
+    return <ResetPasswordPage />
   }
 
   if (isLoading) {

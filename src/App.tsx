@@ -7,6 +7,8 @@ import {
   HomePage,
   LandingPage,
   LoginPage,
+  ForgotPasswordPage,
+  ResetPasswordPage,
   NewPatientPage,
   PatientListPage,
   ValuatedPatientsPage,
@@ -33,6 +35,8 @@ export function AppRouter() {
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout />}>
               <Route path="app" element={<HomePage />} />

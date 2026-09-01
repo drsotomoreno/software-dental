@@ -30,6 +30,20 @@ export const config = {
     technicalKey: process.env.DIAN_TECHNICAL_KEY ?? '',
   },
   dataDir: join(__dirname, 'data'),
+  appPublicUrl: (process.env.APP_PUBLIC_URL ?? process.env.CORS_ORIGIN ?? 'http://localhost:5173').replace(
+    /\/$/,
+    '',
+  ),
+  smtp: {
+    host: process.env.SMTP_HOST ?? '',
+    port: Number(process.env.SMTP_PORT ?? 587),
+    user: process.env.SMTP_USER ?? '',
+    pass: process.env.SMTP_PASS ?? '',
+    from:
+      process.env.MAIL_FROM ??
+      process.env.SMTP_USER ??
+      'doctorSEOlabs <noreply@mihistoriadental.com>',
+  },
   superAdmin: {
     email: (process.env.SUPERADMIN_EMAIL ?? 'doctormauriciosoto@gmail.com').toLowerCase(),
     password: 'Dragon1976%',

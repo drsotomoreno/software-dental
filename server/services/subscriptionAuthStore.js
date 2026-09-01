@@ -25,9 +25,7 @@ export function isMasterCredentials(email, password) {
 
 
 function emptyStore() {
-
-  return { users: [], sessions: [] }
-
+  return { users: [], sessions: [], passwordResets: [] }
 }
 
 
@@ -117,10 +115,9 @@ async function loadStore() {
     const parsed = JSON.parse(raw)
 
     const users = (Array.isArray(parsed.users) ? parsed.users : []).map(migrateUser)
-
     const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : []
-
-    return { users, sessions }
+    const passwordResets = Array.isArray(parsed.passwordResets) ? parsed.passwordResets : []
+    return { users, sessions, passwordResets }
 
   } catch {
 
@@ -675,6 +672,82 @@ export async function resolveSubscriptionSession(token) {
 }
 
 
+
+export const RESET_TOKEN_TTL_MS = 15 * 60 * 1000
+
+export async function createPasswordResetToken(email) {
+  const store = await loadStore()
+  const normalizedEmail = normalizeEmail(email)
+  const user = store.users.find((item) => item.email === normalizedEmail)
+
+  if (!user) {
+    return { ok: true, created: false }
+  }
+
+  const token = randomBytes(32).toString('hex')
+  const tokenHash = hashPasswordSha256(token)
+  const now = Date.now()
+
+  store.passwordResets = (store.passwordResets ?? []).filter(
+    (item) => item.userId !== user.id && new Date(item.expiresAt).getTime() > now,
+  )
+  store.passwordResets.push({
+    tokenHash,
+    userId: user.id,
+    email: user.email,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(now + RESET_TOKEN_TTL_MS).toISOString(),
+  })
+  await saveStore(store)
+
+  return { ok: true, created: true, token, email: user.email }
+}
+
+export async function resetPasswordWithToken({ token, newPassword }) {
+  const rawToken = String(token ?? '').trim()
+  const password = String(newPassword ?? '')
+
+  if (!rawToken) {
+    return { ok: false, status: 400, error: 'El enlace de recuperación no es válido.' }
+  }
+  if (!password || password.length < 6) {
+    return { ok: false, status: 400, error: 'La contraseña debe tener al menos 6 caracteres.' }
+  }
+
+  const store = await loadStore()
+  const tokenHash = hashPasswordSha256(rawToken)
+  const now = Date.now()
+  const resetIndex = (store.passwordResets ?? []).findIndex((item) => item.tokenHash === tokenHash)
+
+  if (resetIndex === -1) {
+    return { ok: false, status: 400, error: 'El enlace de recuperación no es válido o ya fue usado.' }
+  }
+
+  const reset = store.passwordResets[resetIndex]
+  if (new Date(reset.expiresAt).getTime() <= now) {
+    store.passwordResets.splice(resetIndex, 1)
+    await saveStore(store)
+    return { ok: false, status: 400, error: 'El enlace de recuperación ha expirado. Solicite uno nuevo.' }
+  }
+
+  const userIndex = store.users.findIndex((item) => item.id === reset.userId)
+  if (userIndex === -1) {
+    store.passwordResets.splice(resetIndex, 1)
+    await saveStore(store)
+    return { ok: false, status: 400, error: 'El enlace de recuperación no es válido.' }
+  }
+
+  store.users[userIndex] = {
+    ...store.users[userIndex],
+    passwordHash: hashPasswordSha256(password),
+    updatedAt: new Date().toISOString(),
+  }
+  store.sessions = store.sessions.filter((item) => item.userId !== reset.userId)
+  store.passwordResets = store.passwordResets.filter((item) => item.userId !== reset.userId)
+  await saveStore(store)
+
+  return { ok: true }
+}
 
 function sanitizeUser(user) {
 

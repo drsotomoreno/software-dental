@@ -82,7 +82,7 @@
 
   function isPublicPath() {
     const path = window.location.pathname.replace(/\/+$/, '') || '/'
-    return path === '/' || path === '/login'
+    return path === '/' || path === '/login' || path === '/forgot-password' || path === '/reset-password'
   }
 
   async function apiFetch(path, options) {

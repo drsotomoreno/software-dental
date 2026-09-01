@@ -17,7 +17,7 @@
             document.documentElement.dataset.superadmin = 'true'
           }
           var path = (location.pathname || '/').replace(/\/+$/, '') || '/'
-          if (path === '/' || path === '/login') {
+          if (path === '/' || path === '/login' || path === '/forgot-password' || path === '/reset-password') {
             document.documentElement.dataset.publicLanding = 'true'
           }
         } catch (e) {}
@@ -190,7 +190,7 @@
     <script>
       (function () {
         var path = (location.pathname || '/').replace(/\/+$/, '') || '/'
-        if (path !== '/' && path !== '/login') document.body.classList.add('auth-locked')
+        if (path !== '/' && path !== '/login' && path !== '/forgot-password' && path !== '/reset-password') document.body.classList.add('auth-locked')
       })()
     </script>
     <div id="modal-auth-container" class="hidden" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
