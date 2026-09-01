@@ -40,6 +40,10 @@ export const config = {
     resendApiKey: process.env.RESEND_API_KEY ?? '',
     sendgridApiKey: process.env.SENDGRID_API_KEY ?? '',
     brevoApiKey: process.env.BREVO_API_KEY ?? '',
+    resendFrom:
+      process.env.MAIL_FROM ??
+      'Mi Historia Dental <noreply@mihistoriadental.com>',
+    resendTestFrom: 'Mi Historia Dental <beth.t@example.com>',
   },
   smtp: {
     host: process.env.SMTP_HOST ?? '',

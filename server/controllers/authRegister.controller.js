@@ -25,13 +25,10 @@ export async function requestRegisterCode(req, res) {
       await sendVerificationCodeEmail({ to: result.email, code: result.code })
     } catch (mailError) {
       console.error('[Auth] No se pudo enviar el código de verificación', mailError)
-      const notConfigured = mailError?.message === 'MAIL_NOT_CONFIGURED'
       return res.status(503).json({
         success: false,
         ok: false,
-        error: notConfigured
-          ? 'El servidor no tiene correo configurado. El administrador debe guardar una API de envío (Brevo o Resend) en Perfil.'
-          : 'No se pudo enviar el código al correo. Intente de nuevo más tarde.',
+        error: 'No se pudo enviar el código al correo. Intente de nuevo más tarde.',
       })
     }
 

@@ -28,7 +28,7 @@ function mailBody(resetUrl) {
 export async function getMailRuntime() {
   const stored = await loadMailSettings()
   return {
-    resendApiKey: (process.env.RESEND_API_KEY || stored.resendApiKey || '').trim(),
+    resendApiKey: (process.env.RESEND_API_KEY || stored.resendApiKey || config.mail.resendApiKey || '').trim(),
     sendgridApiKey: (process.env.SENDGRID_API_KEY || stored.sendgridApiKey || '').trim(),
     brevoApiKey: (process.env.BREVO_API_KEY || stored.brevoApiKey || '').trim(),
     smtp: {
@@ -36,7 +36,7 @@ export async function getMailRuntime() {
       port: config.smtp.port,
       user: config.smtp.user,
       pass: config.smtp.pass,
-      from: (process.env.MAIL_FROM || stored.from || config.smtp.from).trim(),
+      from: (process.env.MAIL_FROM || stored.from || config.mail.resendFrom || config.smtp.from).trim(),
     },
   }
 }
@@ -53,25 +53,35 @@ export async function isMailConfigured() {
 
 export async function mailTransportLabel() {
   const runtime = await getMailRuntime()
-  if (runtime.brevoApiKey) return 'brevo'
   if (runtime.resendApiKey) return 'resend'
+  if (runtime.brevoApiKey) return 'brevo'
   if (runtime.sendgridApiKey) return 'sendgrid'
   if (runtime.smtp.host && runtime.smtp.user && runtime.smtp.pass) return 'smtp'
   return 'none'
 }
 
 async function sendWithResend(runtime, { to, from, subject, html, text }) {
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${runtime.resendApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ from, to: [to], subject, html, text }),
-  })
-  if (!response.ok) {
-    throw new Error(`Resend ${response.status}: ${await response.text()}`)
+  const { Resend } = await import('resend')
+  const resend = new Resend(runtime.resendApiKey)
+  const fromCandidates = [...new Set([from, config.mail.resendFrom, config.mail.resendTestFrom].filter(Boolean))]
+
+  let lastError
+  for (const fromAddress of fromCandidates) {
+    const { data, error } = await resend.emails.send({
+      from: fromAddress,
+      to: [to],
+      subject,
+      html,
+      text,
+    })
+    if (!error) {
+      return data
+    }
+    lastError = error
+    console.error(`[Auth] Resend no aceptó el remitente ${fromAddress}:`, error)
   }
+
+  throw new Error(lastError?.message || 'Resend no pudo enviar el correo')
 }
 
 async function sendWithSendgrid(runtime, { to, from, subject, html, text }) {
@@ -141,32 +151,9 @@ async function sendWithSmtp(runtime, { to, from, subject, html, text }) {
 
 async function sendTransactionalEmail({ to, subject, html, text }) {
   const runtime = await getMailRuntime()
-  const from = runtime.smtp.from
+  const from = runtime.smtp.from || config.mail.resendFrom
   const payload = { to, from, subject, html, text }
-
-  const configured = Boolean(
-    runtime.resendApiKey ||
-      runtime.sendgridApiKey ||
-      runtime.brevoApiKey ||
-      (runtime.smtp.host && runtime.smtp.user && runtime.smtp.pass),
-  )
-
-  if (!configured) {
-    console.error(`[Auth] Correo no configurado. Destino: ${to}`)
-    throw new Error('MAIL_NOT_CONFIGURED')
-  }
-
   const errors = []
-
-  if (runtime.brevoApiKey) {
-    try {
-      await sendWithBrevo(runtime, payload)
-      return { sent: true, via: 'brevo' }
-    } catch (error) {
-      errors.push(error)
-      console.error('[Auth] Falló envío con Brevo', error)
-    }
-  }
 
   if (runtime.resendApiKey) {
     try {
@@ -175,6 +162,16 @@ async function sendTransactionalEmail({ to, subject, html, text }) {
     } catch (error) {
       errors.push(error)
       console.error('[Auth] Falló envío con Resend', error)
+    }
+  }
+
+  if (runtime.brevoApiKey) {
+    try {
+      await sendWithBrevo(runtime, payload)
+      return { sent: true, via: 'brevo' }
+    } catch (error) {
+      errors.push(error)
+      console.error('[Auth] Falló envío con Brevo', error)
     }
   }
 
