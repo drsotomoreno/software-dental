@@ -81,31 +81,36 @@ export async function mailTransportLabel() {
 }
 
 async function sendWithResend(runtime, { to, subject, html, text }) {
-  const { Resend } = await import('resend')
-  const resend = new Resend(runtime.resendApiKey)
   const fromAddress = RESEND_FROM
-
-  try {
-    const { data, error } = await resend.emails.send({
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${runtime.resendApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
       from: fromAddress,
       to: [to],
       subject,
       html,
       text,
-    })
-    if (!error) {
-      console.log('[Auth] Resend envió el correo', JSON.stringify({ to, from: fromAddress, id: data?.id || null }))
-      return data
-    }
-    logResendError('emails.send', { to, from: fromAddress, error })
-    const err = new Error(error?.message || JSON.stringify(error) || 'Resend no pudo enviar el correo')
-    err.cause = error
-    throw err
-  } catch (error) {
-    if (error?.cause) throw error
-    logResendError('emails.send exception', { to, from: fromAddress, error })
+    }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.error?.message ||
+      (typeof payload?.error === 'string' ? payload.error : '') ||
+      `Resend ${response.status}`
+    const error = new Error(message)
+    error.statusCode = response.status
+    error.cause = payload
+    logResendError('emails.send', { to, from: fromAddress, error: { statusCode: response.status, message, raw: payload } })
     throw error
   }
+  console.log('[Auth] Resend envió el correo', JSON.stringify({ to, from: fromAddress, id: payload?.id || null }))
+  return payload
 }
 
 async function sendWithSendgrid(runtime, { to, from, subject, html, text }) {
@@ -244,6 +249,10 @@ function describeMailError(error) {
     .filter(Boolean)
     .join(' ')
 
+  const hint = [error?.message, error?.cause?.message, error?.cause?.name]
+    .filter(Boolean)
+    .join(' ')
+
   if (/MAIL_NOT_CONFIGURED/i.test(raw)) {
     return 'El servidor no tiene correo configurado. Agregue RESEND_API_KEY en Render o guarde la clave en Perfil → Correo de verificación.'
   }
@@ -255,6 +264,9 @@ function describeMailError(error) {
   }
   if (/verify a domain|not verified|restricted to|add and verify your domain/i.test(raw)) {
     return 'Resend no puede enviar el código hasta verificar mihistoriadental.com. Agregue en Namecheap (Advanced DNS) los registros DKIM y SPF que muestra resend.com/domains.'
+  }
+  if (hint && !/MAIL_SEND_FAILED/i.test(hint)) {
+    return `No se pudo enviar el código al correo: ${error?.message || hint}`
   }
   return 'No se pudo enviar el código al correo. Intente de nuevo más tarde.'
 }
