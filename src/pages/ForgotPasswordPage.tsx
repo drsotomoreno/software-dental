@@ -46,7 +46,7 @@ export function ForgotPasswordPage() {
           <div className="card space-y-4">
             <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
               Si el correo está registrado, enviaremos un enlace para restablecer la contraseña.
-              Revise su bandeja de entrada (y la carpeta de spam). El enlace caduca en 15 minutos.
+              Revise su bandeja de entrada y la carpeta de spam.
             </p>
             <Link to="/login" className="btn-primary inline-flex w-full">
               Volver al inicio de sesión
@@ -54,10 +54,6 @@ export function ForgotPasswordPage() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="card space-y-4">
-            <p className="text-sm text-slate-600">
-              Ingrese el correo de su cuenta. Le enviaremos un enlace para crear una nueva
-              contraseña.
-            </p>
             <div>
               <label className="label-field">Correo electrónico</label>
               <input
@@ -74,7 +70,7 @@ export function ForgotPasswordPage() {
               <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
             )}
             <button type="submit" disabled={submitting} className="btn-primary w-full">
-              {submitting ? 'Enviando...' : 'Enviar enlace'}
+              {submitting ? 'Enviando...' : 'Enviar instrucciones'}
             </button>
             <p className="text-center text-sm text-slate-500">
               <Link to="/login" className="font-medium text-dental-700 hover:underline">

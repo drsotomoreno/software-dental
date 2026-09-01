@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { APP_INITIALS, APP_NAME } from '@/constants/branding'
 
 export function ResetPasswordPage() {
   const [params] = useSearchParams()
-  const token = params.get('token')?.trim() ?? ''
+  const { token: tokenParam } = useParams()
+  const token = (params.get('token') ?? tokenParam ?? '').trim()
   const navigate = useNavigate()
 
   const [password, setPassword] = useState('')

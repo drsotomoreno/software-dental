@@ -33,7 +33,7 @@ export function ProtectedRoute() {
     return <ForgotPasswordPage />
   }
 
-  if (path === '/reset-password') {
+  if (path === '/reset-password' || path.startsWith('/reset-password/')) {
     return <ResetPasswordPage />
   }
 

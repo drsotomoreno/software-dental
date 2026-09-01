@@ -44,7 +44,7 @@ const FEATURES: Array<{ title: string; text: string; icon: LucideIcon }> = [
     icon: CalendarDays,
   },
   {
-    title: 'Datos Seguros',
+    title: 'Historia Clínica en la Nube',
     text: 'Información encriptada. Cumple regulaciones de privacidad y Res. 948 actualizada.',
     icon: Lock,
   },
@@ -146,16 +146,22 @@ export function LandingPage() {
                 {APP_SHORT_NAME}
               </p>
               <h1 className="text-3xl font-bold leading-tight text-dental-800 sm:text-4xl lg:text-5xl">
-                Evoluciona tu consulta odontológica con dictado por voz
+                El Software de Historia Clínica Odontológica con Dictado por Voz
               </h1>
               <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600 sm:text-lg">
-                Recupera tiempo clínico: dicta la atención, genera la historia y exporta RIPS sin
-                reescribir datos. Menos papel, menos códigos errados y más foco en el paciente.
+                Recupera tu tiempo clínico. Dicta la atención, gestiona todo 100% en la nube y
+                exporta los RIPS sin reescribir datos.
               </p>
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <Link to="/login" className="btn-primary px-6 py-3 text-center text-base">
-                  Comenzar Prueba Gratis
-                </Link>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-start">
+                <div>
+                  <Link to="/login" className="btn-primary px-6 py-3 text-center text-base">
+                    Iniciar Prueba de 7 Días
+                  </Link>
+                  <p className="mt-2 max-w-sm text-xs leading-relaxed text-gray-500">
+                    Requiere validación con número ReTHUS real. Incluye habilitación de dictado por
+                    voz por paciente.
+                  </p>
+                </div>
                 <a href="#planes" className="btn-secondary px-6 py-3 text-center text-base">
                   Ver Planes
                 </a>
