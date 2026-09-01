@@ -120,14 +120,13 @@ async function sendWithSmtp({ to, from, subject, html, text }) {
   await transporter.sendMail({ from, to, subject, text, html })
 }
 
-export async function sendPasswordResetEmail({ to, resetUrl }) {
+async function sendTransactionalEmail({ to, subject, html, text }) {
   const from = config.smtp.from
-  const { html, text } = mailBody(resetUrl)
-  const payload = { to, from, subject: RESET_SUBJECT, html, text }
+  const payload = { to, from, subject, html, text }
 
   if (!isMailConfigured()) {
     console.error(
-      `[Auth] Correo no configurado. Defina RESEND_API_KEY (recomendado en Render) o SMTP_HOST/SMTP_USER/SMTP_PASS. Enlace para ${to}: ${resetUrl}`,
+      `[Auth] Correo no configurado. Defina RESEND_API_KEY o SMTP_HOST/SMTP_USER/SMTP_PASS. Destino: ${to}`,
     )
     throw new Error('MAIL_NOT_CONFIGURED')
   }
@@ -174,8 +173,32 @@ export async function sendPasswordResetEmail({ to, resetUrl }) {
     }
   }
 
-  console.error(`[Auth] No se pudo entregar el correo a ${to}. Enlace: ${resetUrl}`)
+  console.error(`[Auth] No se pudo entregar el correo a ${to}.`)
   const err = new Error('MAIL_SEND_FAILED')
   err.cause = errors[0]
   throw err
+}
+
+export async function sendPasswordResetEmail({ to, resetUrl }) {
+  const { html, text } = mailBody(resetUrl)
+  return sendTransactionalEmail({ to, subject: RESET_SUBJECT, html, text })
+}
+
+export async function sendVerificationCodeEmail({ to, code }) {
+  return sendTransactionalEmail({
+    to,
+    subject: 'Código de verificación — doctorSEOlabs',
+    text: [
+      'Use este código para verificar su correo y crear su cuenta:',
+      '',
+      code,
+      '',
+      'El código caduca en 15 minutos. Si usted no solicitó el registro, ignore este mensaje.',
+    ].join('\n'),
+    html: `
+      <p>Use este código para verificar su correo y crear su cuenta en <strong>doctorSEOlabs</strong>:</p>
+      <p style="font-size:28px;font-weight:700;letter-spacing:0.24em">${code}</p>
+      <p>Caduca en 15 minutos. Si usted no solicitó el registro, ignore este mensaje.</p>
+    `,
+  })
 }

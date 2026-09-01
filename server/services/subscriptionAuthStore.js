@@ -25,7 +25,7 @@ export function isMasterCredentials(email, password) {
 
 
 function emptyStore() {
-  return { users: [], sessions: [], passwordResets: [] }
+  return { users: [], sessions: [], passwordResets: [], emailVerifications: [] }
 }
 
 
@@ -117,7 +117,8 @@ async function loadStore() {
     const users = (Array.isArray(parsed.users) ? parsed.users : []).map(migrateUser)
     const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : []
     const passwordResets = Array.isArray(parsed.passwordResets) ? parsed.passwordResets : []
-    return { users, sessions, passwordResets }
+    const emailVerifications = Array.isArray(parsed.emailVerifications) ? parsed.emailVerifications : []
+    return { users, sessions, passwordResets, emailVerifications }
 
   } catch {
 
@@ -747,6 +748,110 @@ export async function resetPasswordWithToken({ token, newPassword }) {
   await saveStore(store)
 
   return { ok: true }
+}
+
+export const EMAIL_CODE_TTL_MS = 15 * 60 * 1000
+
+function generateNumericCode() {
+  const num = randomBytes(3).readUIntBE(0, 3) % 1_000_000
+  return String(num).padStart(6, '0')
+}
+
+export async function createEmailVerification({ nombre, email, password }) {
+  const store = await loadStore()
+  const normalizedEmail = normalizeEmail(email)
+  const name = String(nombre ?? '').trim()
+
+  if (normalizedEmail === SUPERADMIN_EMAIL) {
+    return { ok: false, status: 403, error: 'Este correo está reservado para el administrador del sistema.' }
+  }
+  if (!name) {
+    return { ok: false, status: 400, error: 'El nombre es obligatorio.' }
+  }
+  if (!normalizedEmail) {
+    return { ok: false, status: 400, error: 'El correo es obligatorio.' }
+  }
+  if (!password || String(password).length < 6) {
+    return { ok: false, status: 400, error: 'La contraseña debe tener al menos 6 caracteres.' }
+  }
+  if (store.users.some((user) => user.email === normalizedEmail)) {
+    return { ok: false, status: 409, error: 'Ya existe una cuenta con este correo.' }
+  }
+
+  const code = generateNumericCode()
+  const now = Date.now()
+  store.emailVerifications = (store.emailVerifications ?? []).filter(
+    (item) => item.email !== normalizedEmail && new Date(item.expiresAt).getTime() > now,
+  )
+  store.emailVerifications.push({
+    email: normalizedEmail,
+    nombre: name,
+    passwordHash: hashPasswordSha256(password),
+    codeHash: hashPasswordSha256(code),
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(now + EMAIL_CODE_TTL_MS).toISOString(),
+    attempts: 0,
+  })
+  await saveStore(store)
+
+  return { ok: true, email: normalizedEmail, code }
+}
+
+export async function verifyEmailAndRegister({ email, code }) {
+  const store = await loadStore()
+  const normalizedEmail = normalizeEmail(email)
+  const rawCode = String(code ?? '').replace(/\s+/g, '')
+  const now = Date.now()
+  const index = (store.emailVerifications ?? []).findIndex((item) => item.email === normalizedEmail)
+
+  if (index === -1) {
+    return { ok: false, status: 400, error: 'Solicite un código de verificación primero.' }
+  }
+
+  const pending = store.emailVerifications[index]
+  if (new Date(pending.expiresAt).getTime() <= now) {
+    store.emailVerifications.splice(index, 1)
+    await saveStore(store)
+    return { ok: false, status: 400, error: 'El código expiró. Solicite uno nuevo.' }
+  }
+
+  if ((pending.attempts ?? 0) >= 5) {
+    store.emailVerifications.splice(index, 1)
+    await saveStore(store)
+    return { ok: false, status: 400, error: 'Demasiados intentos. Solicite un código nuevo.' }
+  }
+
+  if (pending.codeHash !== hashPasswordSha256(rawCode)) {
+    pending.attempts = (pending.attempts ?? 0) + 1
+    store.emailVerifications[index] = pending
+    await saveStore(store)
+    return { ok: false, status: 400, error: 'El código no es válido.' }
+  }
+
+  if (store.users.some((user) => user.email === normalizedEmail)) {
+    store.emailVerifications.splice(index, 1)
+    await saveStore(store)
+    return { ok: false, status: 409, error: 'Ya existe una cuenta con este correo.' }
+  }
+
+  const createdAt = new Date().toISOString()
+  const user = {
+    id: randomUUID(),
+    nombre: pending.nombre,
+    email: normalizedEmail,
+    passwordHash: pending.passwordHash,
+    rol: 'odontologo',
+    estado_pago: 'pendiente',
+    fecha_vencimiento: null,
+    emailVerifiedAt: createdAt,
+    createdAt,
+    updatedAt: createdAt,
+  }
+  store.users.push(user)
+  store.emailVerifications.splice(index, 1)
+  await saveStore(store)
+
+  return { ok: true, user: sanitizeUser(user) }
 }
 
 function sanitizeUser(user) {

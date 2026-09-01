@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { Router } from 'express'
 import { config } from '../config.js'
 import { forgotPassword, resetPassword } from '../controllers/authPassword.controller.js'
+import { requestRegisterCode, verifyRegisterCode } from '../controllers/authRegister.controller.js'
 import {
   confirmSubscriptionPayment,
   ensureSuperAdmin,
@@ -198,6 +199,8 @@ router.post('/confirmar-pago', async (req, res) => {
 
 router.post('/auth/forgot-password', forgotPassword)
 router.post('/auth/reset-password', resetPassword)
+router.post('/auth/register/request-code', requestRegisterCode)
+router.post('/auth/register/verify', verifyRegisterCode)
 
 router.get('/sesion', async (req, res) => {
   try {
