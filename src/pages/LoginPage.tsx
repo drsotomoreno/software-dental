@@ -103,7 +103,7 @@ export function LoginPage() {
     try {
       const { response, payload } = await postJson('/api/auth/register/verify', {
         email: email.trim().toLowerCase(),
-        code: code.trim(),
+        code: code.replace(/\D/g, ''),
       })
       if (!response.ok) {
         setError(payload.error || 'No se pudo verificar el código.')
@@ -287,7 +287,7 @@ export function LoginPage() {
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 required
-                maxLength={6}
+                pattern="[0-9]{6}"
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 className="input-field tracking-[0.35em]"

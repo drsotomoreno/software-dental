@@ -279,19 +279,22 @@ export async function sendPasswordResetEmail({ to, resetUrl }) {
 }
 
 export async function sendVerificationCodeEmail({ to, code }) {
+  const digits = String(code ?? '').replace(/\D/g, '')
   return sendTransactionalEmail({
     to,
     subject: 'Código de verificación — doctorSEOlabs',
     text: [
-      'Use este código para verificar su correo y crear su cuenta:',
+      'Use este código de 6 dígitos para verificar su correo y crear su cuenta:',
       '',
-      code,
+      digits,
       '',
+      'Escríbalo seguido, sin espacios. Si recibió varios correos, use solo el más reciente.',
       'El código caduca en 15 minutos. Si usted no solicitó el registro, ignore este mensaje.',
     ].join('\n'),
     html: `
-      <p>Use este código para verificar su correo y crear su cuenta en <strong>doctorSEOlabs</strong>:</p>
-      <p style="font-size:28px;font-weight:700;letter-spacing:0.24em">${code}</p>
+      <p>Use este código de 6 dígitos para verificar su correo y crear su cuenta en <strong>doctorSEOlabs</strong>:</p>
+      <p style="font-size:28px;font-weight:700;font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:0">${digits}</p>
+      <p>Escríbalo seguido, sin espacios. Si recibió varios correos, use solo el más reciente.</p>
       <p>Caduca en 15 minutos. Si usted no solicitó el registro, ignore este mensaje.</p>
     `,
   })

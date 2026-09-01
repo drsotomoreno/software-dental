@@ -48,7 +48,7 @@ export async function requestRegisterCode(req, res) {
     return res.json({
       success: true,
       ok: true,
-      message: 'Enviamos un código de 6 dígitos a su correo. Revise la bandeja de entrada y el spam.',
+      message: 'Enviamos un código de 6 dígitos a su correo. Escríbalo seguido, sin espacios. Si llega más de un correo, use el más reciente.',
     })
   } catch (error) {
     console.error('[Auth] Error en /auth/register/request-code:', error)

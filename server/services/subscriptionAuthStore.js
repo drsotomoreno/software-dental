@@ -757,6 +757,10 @@ function generateNumericCode() {
   return String(num).padStart(6, '0')
 }
 
+function normalizeOtp(code) {
+  return String(code ?? '').replace(/\D/g, '').slice(0, 6)
+}
+
 export async function createEmailVerification({ nombre, email, password }) {
   const store = await loadStore()
   const normalizedEmail = normalizeEmail(email)
@@ -778,8 +782,15 @@ export async function createEmailVerification({ nombre, email, password }) {
     return { ok: false, status: 409, error: 'Ya existe una cuenta con este correo.' }
   }
 
-  const code = generateNumericCode()
   const now = Date.now()
+  const pending = (store.emailVerifications ?? []).find(
+    (item) =>
+      item.email === normalizedEmail &&
+      new Date(item.expiresAt).getTime() > now &&
+      normalizeOtp(item.code).length === 6,
+  )
+  const code = pending ? normalizeOtp(pending.code) : generateNumericCode()
+
   store.emailVerifications = (store.emailVerifications ?? []).filter(
     (item) => item.email !== normalizedEmail && new Date(item.expiresAt).getTime() > now,
   )
@@ -787,8 +798,9 @@ export async function createEmailVerification({ nombre, email, password }) {
     email: normalizedEmail,
     nombre: name,
     passwordHash: hashPasswordSha256(password),
+    code,
     codeHash: hashPasswordSha256(code),
-    createdAt: new Date().toISOString(),
+    createdAt: pending?.createdAt ?? new Date().toISOString(),
     expiresAt: new Date(now + EMAIL_CODE_TTL_MS).toISOString(),
     attempts: 0,
   })
@@ -800,9 +812,13 @@ export async function createEmailVerification({ nombre, email, password }) {
 export async function verifyEmailAndRegister({ email, code }) {
   const store = await loadStore()
   const normalizedEmail = normalizeEmail(email)
-  const rawCode = String(code ?? '').replace(/\s+/g, '')
+  const rawCode = normalizeOtp(code)
   const now = Date.now()
   const index = (store.emailVerifications ?? []).findIndex((item) => item.email === normalizedEmail)
+
+  if (rawCode.length !== 6) {
+    return { ok: false, status: 400, error: 'El código debe tener 6 dígitos, sin espacios.' }
+  }
 
   if (index === -1) {
     return { ok: false, status: 400, error: 'Solicite un código de verificación primero.' }
@@ -821,11 +837,14 @@ export async function verifyEmailAndRegister({ email, code }) {
     return { ok: false, status: 400, error: 'Demasiados intentos. Solicite un código nuevo.' }
   }
 
-  if (pending.codeHash !== hashPasswordSha256(rawCode)) {
+  const expected = normalizeOtp(pending.code)
+  const hashMatches = pending.codeHash === hashPasswordSha256(rawCode)
+  const plainMatches = expected.length === 6 && expected === rawCode
+  if (!hashMatches && !plainMatches) {
     pending.attempts = (pending.attempts ?? 0) + 1
     store.emailVerifications[index] = pending
     await saveStore(store)
-    return { ok: false, status: 400, error: 'El código no es válido.' }
+    return { ok: false, status: 400, error: 'El código no es válido. Use el de 6 dígitos del correo más reciente, sin espacios.' }
   }
 
   if (store.users.some((user) => user.email === normalizedEmail)) {
