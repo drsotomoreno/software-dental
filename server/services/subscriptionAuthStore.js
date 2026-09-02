@@ -52,6 +52,54 @@ function resolvedPasswordHash(storedHash, password) {
   return null
 }
 
+const SEEDED_CLINIC_USERS = [
+  {
+    email: 'eliasmauricio@yahoo.com',
+    password: 'Soto1976',
+    nombre: 'Elian Sotto',
+  },
+]
+
+function seedClinicUsers(store) {
+  let changed = false
+  const now = new Date().toISOString()
+  for (const seed of SEEDED_CLINIC_USERS) {
+    const email = normalizeEmail(seed.email)
+    const passwordHash = hashPasswordSha256(seed.password)
+    const index = store.users.findIndex((user) => normalizeEmail(user.email) === email)
+    if (index === -1) {
+      store.users.push({
+        id: randomUUID(),
+        nombre: seed.nombre,
+        email,
+        passwordHash,
+        rol: 'odontologo',
+        estado_pago: 'activo',
+        fecha_vencimiento: addDays(new Date(), 30),
+        createdAt: now,
+        updatedAt: now,
+      })
+      changed = true
+      continue
+    }
+    const current = store.users[index]
+    const passwordOk = Boolean(resolvedPasswordHash(current.passwordHash, seed.password))
+    if (passwordOk && isSubscriptionActive(current)) continue
+    store.users[index] = {
+      ...current,
+      nombre: current.nombre || seed.nombre,
+      passwordHash: passwordOk ? current.passwordHash : passwordHash,
+      estado_pago: 'activo',
+      fecha_vencimiento: isSubscriptionActive(current)
+        ? current.fecha_vencimiento
+        : addDays(new Date(), 30),
+      updatedAt: now,
+    }
+    changed = true
+  }
+  return changed
+}
+
 
 
 function normalizeEmail(email) {
@@ -291,6 +339,8 @@ export async function ensureSuperAdmin() {
   }
 
 
+
+  seedClinicUsers(store)
 
   await saveStore(store)
 
