@@ -36,6 +36,22 @@ export function hashPasswordSha256(password) {
 
 }
 
+function passwordVariants(password) {
+  const raw = String(password ?? '')
+  const trimmed = raw.trim()
+  return [...new Set([raw, trimmed].filter(Boolean))]
+}
+
+function resolvedPasswordHash(storedHash, password) {
+  if (!storedHash) return null
+  for (const value of passwordVariants(password)) {
+    const hashed = hashPasswordSha256(value)
+    if (hashed === storedHash) return hashed
+    if (hashPasswordSha256(hashed) === storedHash) return hashed
+  }
+  return null
+}
+
 
 
 function normalizeEmail(email) {
@@ -414,12 +430,28 @@ export async function loginSubscriptionUser({ email, password }) {
     return { ok: false, status: 401, error: 'Correo o contraseña incorrectos.' }
   }
 
-  const currentUser = refreshPaymentStatus(store.users[userIndex])
+  let currentUser = refreshPaymentStatus(store.users[userIndex])
   store.users[userIndex] = currentUser
 
-  if (!masterLogin && currentUser.passwordHash !== hashPasswordSha256(password)) {
+  const matchedHash = resolvedPasswordHash(currentUser.passwordHash, password)
+  if (!masterLogin && !matchedHash) {
     await saveStore(store)
     return { ok: false, status: 401, error: 'Correo o contraseña incorrectos.' }
+  }
+
+  if (!masterLogin && matchedHash && matchedHash !== currentUser.passwordHash) {
+    currentUser = { ...currentUser, passwordHash: matchedHash, updatedAt: new Date().toISOString() }
+    store.users[userIndex] = currentUser
+  }
+
+  if (!masterLogin && !isPaymentExempt(currentUser) && currentUser.estado_pago === 'pendiente') {
+    currentUser = {
+      ...currentUser,
+      estado_pago: 'activo',
+      fecha_vencimiento: addDays(new Date(), 30),
+      updatedAt: new Date().toISOString(),
+    }
+    store.users[userIndex] = currentUser
   }
 
   if (masterLogin) {
@@ -757,6 +789,10 @@ function generateNumericCode() {
   return String(num).padStart(6, '0')
 }
 
+function normalizeOtp(code) {
+  return String(code ?? '').replace(/\D/g, '').slice(0, 6)
+}
+
 export async function createEmailVerification({ nombre, email, password }) {
   const store = await loadStore()
   const normalizedEmail = normalizeEmail(email)
@@ -771,24 +807,33 @@ export async function createEmailVerification({ nombre, email, password }) {
   if (!normalizedEmail) {
     return { ok: false, status: 400, error: 'El correo es obligatorio.' }
   }
-  if (!password || String(password).length < 6) {
+  const passwordValue = String(password ?? '').trim()
+  if (!passwordValue || passwordValue.length < 6) {
     return { ok: false, status: 400, error: 'La contraseña debe tener al menos 6 caracteres.' }
   }
-  if (store.users.some((user) => user.email === normalizedEmail)) {
+  if (store.users.some((user) => user.email === normalizedEmail && user.estado_pago !== 'pendiente')) {
     return { ok: false, status: 409, error: 'Ya existe una cuenta con este correo.' }
   }
 
-  const code = generateNumericCode()
   const now = Date.now()
+  const pending = (store.emailVerifications ?? []).find(
+    (item) =>
+      item.email === normalizedEmail &&
+      new Date(item.expiresAt).getTime() > now &&
+      normalizeOtp(item.code).length === 6,
+  )
+  const code = pending ? normalizeOtp(pending.code) : generateNumericCode()
+
   store.emailVerifications = (store.emailVerifications ?? []).filter(
     (item) => item.email !== normalizedEmail && new Date(item.expiresAt).getTime() > now,
   )
   store.emailVerifications.push({
     email: normalizedEmail,
     nombre: name,
-    passwordHash: hashPasswordSha256(password),
+    passwordHash: hashPasswordSha256(passwordValue),
+    code,
     codeHash: hashPasswordSha256(code),
-    createdAt: new Date().toISOString(),
+    createdAt: pending?.createdAt ?? new Date().toISOString(),
     expiresAt: new Date(now + EMAIL_CODE_TTL_MS).toISOString(),
     attempts: 0,
   })
@@ -797,12 +842,16 @@ export async function createEmailVerification({ nombre, email, password }) {
   return { ok: true, email: normalizedEmail, code }
 }
 
-export async function verifyEmailAndRegister({ email, code }) {
+export async function verifyEmailAndRegister({ email, code, password }) {
   const store = await loadStore()
   const normalizedEmail = normalizeEmail(email)
-  const rawCode = String(code ?? '').replace(/\s+/g, '')
+  const rawCode = normalizeOtp(code)
   const now = Date.now()
   const index = (store.emailVerifications ?? []).findIndex((item) => item.email === normalizedEmail)
+
+  if (rawCode.length !== 6) {
+    return { ok: false, status: 400, error: 'El código debe tener 6 dígitos, sin espacios.' }
+  }
 
   if (index === -1) {
     return { ok: false, status: 400, error: 'Solicite un código de verificación primero.' }
@@ -821,28 +870,59 @@ export async function verifyEmailAndRegister({ email, code }) {
     return { ok: false, status: 400, error: 'Demasiados intentos. Solicite un código nuevo.' }
   }
 
-  if (pending.codeHash !== hashPasswordSha256(rawCode)) {
+  const expected = normalizeOtp(pending.code)
+  const hashMatches = pending.codeHash === hashPasswordSha256(rawCode)
+  const plainMatches = expected.length === 6 && expected === rawCode
+  if (!hashMatches && !plainMatches) {
     pending.attempts = (pending.attempts ?? 0) + 1
     store.emailVerifications[index] = pending
     await saveStore(store)
-    return { ok: false, status: 400, error: 'El código no es válido.' }
+    return { ok: false, status: 400, error: 'El código no es válido. Use el de 6 dígitos del correo más reciente, sin espacios.' }
   }
 
-  if (store.users.some((user) => user.email === normalizedEmail)) {
+  const existingIndex = store.users.findIndex((user) => user.email === normalizedEmail)
+  const existing = existingIndex === -1 ? null : store.users[existingIndex]
+  if (existing && existing.estado_pago !== 'pendiente') {
     store.emailVerifications.splice(index, 1)
     await saveStore(store)
     return { ok: false, status: 409, error: 'Ya existe una cuenta con este correo.' }
   }
 
+  const passwordValue = String(password ?? '').trim()
+  const passwordHash =
+    passwordValue.length >= 6 ? hashPasswordSha256(passwordValue) : pending.passwordHash
+  if (!passwordHash) {
+    return { ok: false, status: 400, error: 'No se encontró la contraseña del registro. Solicite un código nuevo.' }
+  }
+
   const createdAt = new Date().toISOString()
+  const trial = {
+    estado_pago: 'activo',
+    fecha_vencimiento: addDays(new Date(), 30),
+  }
+
+  if (existing) {
+    const updated = {
+      ...existing,
+      nombre: pending.nombre || existing.nombre,
+      passwordHash,
+      ...trial,
+      emailVerifiedAt: existing.emailVerifiedAt ?? createdAt,
+      updatedAt: createdAt,
+    }
+    store.users[existingIndex] = updated
+    store.emailVerifications.splice(index, 1)
+    await saveStore(store)
+    return { ok: true, user: sanitizeUser(updated) }
+  }
+
   const user = {
     id: randomUUID(),
     nombre: pending.nombre,
     email: normalizedEmail,
-    passwordHash: pending.passwordHash,
+    passwordHash,
     rol: 'odontologo',
-    estado_pago: 'pendiente',
-    fecha_vencimiento: null,
+    ...trial,
     emailVerifiedAt: createdAt,
     createdAt,
     updatedAt: createdAt,

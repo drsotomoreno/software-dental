@@ -52,7 +52,7 @@ export function LoginPage() {
     e.preventDefault()
     setError('')
     setSubmitting(true)
-    const result = await login(email, password)
+    const result = await login(email, password.trim())
     setSubmitting(false)
     if (!result.ok) {
       setError(result.error)
@@ -79,7 +79,10 @@ export function LoginPage() {
         setError(payload.error || 'No se pudo enviar el código.')
         return false
       }
-      setInfo(payload.message || 'Enviamos un código de 6 dígitos a su correo.')
+      setInfo(
+        payload.message ||
+          `Enviamos un código de 6 dígitos a ${email.trim().toLowerCase()}.`,
+      )
       setMode('verify')
       return true
     } catch {
@@ -103,7 +106,8 @@ export function LoginPage() {
     try {
       const { response, payload } = await postJson('/api/auth/register/verify', {
         email: email.trim().toLowerCase(),
-        code: code.trim(),
+        code: code.replace(/\D/g, ''),
+        password,
       })
       if (!response.ok) {
         setError(payload.error || 'No se pudo verificar el código.')
@@ -126,7 +130,7 @@ export function LoginPage() {
     mode === 'register'
       ? 'Cree su cuenta — verificaremos su correo'
       : mode === 'verify'
-        ? 'Ingrese el código enviado a su correo'
+        ? `Ingrese el código enviado a ${email.trim().toLowerCase() || 'su correo'}`
         : 'Acceso seguro — Historia clínica odontológica'
 
   return (
@@ -287,7 +291,7 @@ export function LoginPage() {
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 required
-                maxLength={6}
+                pattern="[0-9]{6}"
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 className="input-field tracking-[0.35em]"
