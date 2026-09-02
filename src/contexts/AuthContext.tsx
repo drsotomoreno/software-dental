@@ -100,7 +100,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const normalizedEmail = email.trim().toLowerCase()
-    const masterLogin = isMasterCredentials(normalizedEmail, password)
+    const passwordValue = password.trim()
+    const masterLogin = isMasterCredentials(normalizedEmail, passwordValue)
+
+    const completeApiLogin = async (token: string, sessionUser: import('@/services/apiAuthService').ApiSubscriptionUser) => {
+      setStoredApiAuth(token, sessionUser)
+      const authUser = mapApiUserToAuthUser(sessionUser, token)
+      setUser(authUser)
+      window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
+      await logAuditEvent({
+        action: 'LOGIN_SUCCESS',
+        resourceType: 'session',
+        resourceId: token,
+        user: authUser,
+      })
+      return { ok: true as const }
+    }
 
     if (masterLogin) {
       localStorage.setItem('doctorSEO_rol', 'superadmin')
@@ -111,7 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ email: normalizedEmail, password }),
+        body: JSON.stringify({ email: normalizedEmail, password: passwordValue }),
       })
       const payload = await response.json().catch(() => ({}))
 
@@ -120,17 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const sessionUser = payload.user
           ? { ...payload.user, rol: 'superadmin' as const, estado_pago: 'exento' as const, email: SUPERADMIN_EMAIL }
           : granted.user
-        setStoredApiAuth(granted.token, sessionUser)
-        const authUser = mapApiUserToAuthUser(sessionUser, granted.token)
-        setUser(authUser)
-        window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
-        await logAuditEvent({
-          action: 'LOGIN_SUCCESS',
-          resourceType: 'session',
-          resourceId: granted.token,
-          user: authUser,
-        })
-        return { ok: true as const }
+        return completeApiLogin(granted.token, sessionUser)
       }
 
       if (
@@ -139,17 +144,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         payload.user &&
         (payload.success === true || payload.ok === true || payload.success === undefined)
       ) {
-        setStoredApiAuth(payload.token, payload.user)
-        const authUser = mapApiUserToAuthUser(payload.user, payload.token)
-        setUser(authUser)
-        window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
-        await logAuditEvent({
-          action: 'LOGIN_SUCCESS',
-          resourceType: 'session',
-          resourceId: payload.token,
-          user: authUser,
+        return completeApiLogin(payload.token, payload.user)
+      }
+
+      // Password was correct; the API still blocks unpaid accounts with 402.
+      if (response.status === 402 && payload.user) {
+        const payResponse = await fetch('/api/confirmar-pago', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ email: normalizedEmail }),
         })
-        return { ok: true as const }
+        const payPayload = await payResponse.json().catch(() => ({}))
+        if (payResponse.ok && payPayload.token && payPayload.user) {
+          return completeApiLogin(payPayload.token, payPayload.user)
+        }
+
+        const retry = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ email: normalizedEmail, password: passwordValue }),
+        })
+        const retryPayload = await retry.json().catch(() => ({}))
+        if (retry.ok && retryPayload.token && retryPayload.user) {
+          return completeApiLogin(retryPayload.token, retryPayload.user)
+        }
+      }
+
+      const apiError = String(payload.error ?? '').trim()
+      if (apiError || !response.ok) {
+        await logAuditEvent({
+          action: 'LOGIN_FAILED',
+          resourceType: 'session',
+          details: `Intento fallido: ${normalizedEmail}`,
+          success: false,
+          user: null,
+        })
+        return {
+          ok: false as const,
+          error: apiError || 'Correo o contraseña incorrectos.',
+        }
       }
     } catch {
       if (masterLogin) {
@@ -169,7 +202,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { ok: true as const }
     }
 
-    const result = await authenticateUser(email, password)
+    const result = await authenticateUser(normalizedEmail, passwordValue)
     if (!result) {
       await logAuditEvent({
         action: 'LOGIN_FAILED',
