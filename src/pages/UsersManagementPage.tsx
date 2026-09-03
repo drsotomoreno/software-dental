@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '@/db/database'
 import { RequirePermission } from '@/components/auth/RequirePermission'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
+import { upsertProfessionalFromUser } from '@/services/dentalServiceCatalogService'
 import {
   createAppUser,
   deleteAppUser,
@@ -13,9 +15,13 @@ import {
 import type { UserProfile, UserRole } from '@/types/user'
 import { ASSIGNABLE_ROLES, ROLE_LABELS, USERS_MANAGE_DENIED, canManageUsers } from '@/utils/permissions'
 import {
-  ODONTOLOGY_THS_SPECIALTIES,
-  type OdontologyThsSpecialtyId,
-} from '@/constants/ripsThsSpecialty'
+  RegulatoryIdentityAdminExtras,
+  RepsHabilitationField,
+  RethusNumberField,
+  RethusSpecialtyField,
+  ensureSpecialtyInRepsPortfolio,
+} from '@/components/settings/RegulatoryIdentityFields'
+import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
 
 function assignableRoleValue(role: UserRole | undefined): UserRole {
   return role === 'superadmin' ? 'admin' : (role ?? 'odontologo')
@@ -40,7 +46,11 @@ function emptyUserForm(clinicName = ''): Omit<UserProfile, 'id'> & { password: s
     clinicName,
     providerNit: '',
     repsCode: '',
+    repsStatus: 'activo',
+    rethusNumber: '',
+    rethusStatus: 'activo',
     thsSpecialty: 'odontologia_general',
+    repsEnabledSpecialties: ['odontologia_general'],
     password: '',
   }
 }
@@ -86,6 +96,7 @@ export function UsersManagementPage() {
       showErr(result.error)
       return
     }
+    await upsertProfessionalFromUser(result.user)
     await audit({
       action: 'CREATE_USER',
       resourceType: 'user',
@@ -110,7 +121,14 @@ export function UsersManagementPage() {
       clinicName: u.clinicName,
       providerNit: u.providerNit ?? '',
       repsCode: u.repsCode ?? '',
+      repsStatus: u.repsStatus ?? 'activo',
+      rethusNumber: u.rethusNumber ?? '',
+      rethusStatus: u.rethusStatus ?? 'activo',
       thsSpecialty: u.thsSpecialty ?? 'odontologia_general',
+      repsEnabledSpecialties:
+        u.repsEnabledSpecialties?.length
+          ? u.repsEnabledSpecialties
+          : [u.thsSpecialty ?? 'odontologia_general'],
     })
   }
 
@@ -121,11 +139,16 @@ export function UsersManagementPage() {
       showErr(USERS_MANAGE_DENIED)
       return
     }
-    const result = await updateAppUser(editingUser.id, editForm)
+    const result = await updateAppUser(editingUser.id, {
+      ...editForm,
+      rehusSpecialty: editForm.thsSpecialty ?? editingUser.thsSpecialty,
+    })
     if (!result.ok) {
       showErr(result.error)
       return
     }
+    const updated = await db.users.get(editingUser.id)
+    if (updated) await upsertProfessionalFromUser(updated)
     await audit({
       action: 'UPDATE_USER',
       resourceType: 'user',
@@ -431,7 +454,7 @@ function UserFields({
         />
       </div>
       <div className="sm:col-span-2">
-        <label className="label-field">Correo</label>
+        <label className="label-field">Correo electrónico</label>
         <input
           type="email"
           required
@@ -463,7 +486,7 @@ function UserFields({
           className="input-field font-mono"
         />
       </div>
-      <div>
+      <div className="sm:col-span-2">
         <label className="label-field">Rol</label>
         <select
           value={assignableRoleValue(values.role)}
@@ -477,16 +500,14 @@ function UserFields({
           ))}
         </select>
       </div>
-      <div>
-        <label className="label-field">Tarjeta profesional</label>
-        <input
-          value={values.professionalLicense ?? ''}
-          onChange={(e) => onChange({ professionalLicense: e.target.value })}
-          className="input-field"
+      <div className="sm:col-span-2">
+        <RethusNumberField
+          value={values.rethusNumber ?? ''}
+          onChange={(rethusNumber) => onChange({ rethusNumber })}
         />
       </div>
-      <div className="sm:col-span-2">
-        <label className="label-field">Clínica</label>
+      <div>
+        <label className="label-field">Nombre de la clínica / consultorio</label>
         <input
           required
           value={values.clinicName ?? ''}
@@ -495,37 +516,54 @@ function UserFields({
         />
       </div>
       <div>
-        <label className="label-field">NIT prestador</label>
+        <label className="label-field">NIT fiscal (DIAN)</label>
         <input
           value={values.providerNit ?? ''}
           onChange={(e) => onChange({ providerNit: e.target.value })}
           className="input-field font-mono"
-        />
-      </div>
-      <div>
-        <label className="label-field">Código REPS</label>
-        <input
-          value={values.repsCode ?? ''}
-          onChange={(e) => onChange({ repsCode: e.target.value })}
-          className="input-field font-mono"
+          placeholder="NIT con dígito de verificación"
         />
       </div>
       <div className="sm:col-span-2">
-        <label className="label-field">Especialidad THS (REPS)</label>
-        <select
-          value={values.thsSpecialty ?? 'odontologia_general'}
-          onChange={(e) =>
-            onChange({ thsSpecialty: e.target.value as OdontologyThsSpecialtyId })
-          }
-          className="input-field"
-        >
-          {ODONTOLOGY_THS_SPECIALTIES.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.label}
-            </option>
-          ))}
-        </select>
+        <RepsHabilitationField
+          value={values.repsCode ?? ''}
+          onChange={(repsCode) => onChange({ repsCode })}
+        />
       </div>
+      <div className="sm:col-span-2">
+        <RethusSpecialtyField
+          value={(values.thsSpecialty ?? 'odontologia_general') as OdontologyThsSpecialtyId}
+          onChange={(thsSpecialty) =>
+            onChange({
+              thsSpecialty,
+              rehusSpecialty: thsSpecialty,
+              repsEnabledSpecialties: ensureSpecialtyInRepsPortfolio(
+                thsSpecialty,
+                values.repsEnabledSpecialties ?? [],
+              ),
+            })
+          }
+        />
+      </div>
+      <RegulatoryIdentityAdminExtras
+        values={{
+          repsCode: values.repsCode ?? '',
+          repsStatus: values.repsStatus ?? 'activo',
+          rethusNumber: values.rethusNumber ?? '',
+          rethusStatus: values.rethusStatus ?? 'activo',
+          thsSpecialty: (values.thsSpecialty ?? 'odontologia_general') as OdontologyThsSpecialtyId,
+          repsEnabledSpecialties:
+            values.repsEnabledSpecialties?.length
+              ? values.repsEnabledSpecialties
+              : [values.thsSpecialty ?? 'odontologia_general'],
+        }}
+        onChange={(patch) =>
+          onChange({
+            ...patch,
+            rehusSpecialty: patch.thsSpecialty ?? values.thsSpecialty,
+          })
+        }
+      />
       {includePassword && (
         <div className="sm:col-span-2">
           <label className="label-field">Contraseña inicial</label>
@@ -554,7 +592,7 @@ function Modal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           <button

@@ -1,4 +1,6 @@
 import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
+import type { RepsHabilitationStatus } from '@/utils/repsCode'
+import type { RethusStatus } from '@/utils/rethusNumber'
 
 export type UserRole = 'superadmin' | 'admin' | 'odontologo' | 'recepcion'
 
@@ -17,12 +19,23 @@ export interface UserProfile {
   clinicName: string
   /** NIT prestador — RIPS */
   providerNit?: string
-  /** Código REPS */
+  /** Código REPS de habilitación de la sede (12 dígitos, ej. 6800103898-01) */
   repsCode?: string
+  /** Estado de habilitación REPS de la sede */
+  repsStatus?: RepsHabilitationStatus
+  /**
+   * Servicios de especialidad habilitados en el portafolio REPS de la sede.
+   * Sin habilitación explícita no se factura ni se genera RIPS de esa especialidad.
+   */
+  repsEnabledSpecialties?: OdontologyThsSpecialtyId[]
+  /** Número RETHUS (consecutivo nacional, ej. 438265) */
+  rethusNumber?: string
+  /** Estado de inscripción RETHUS */
+  rethusStatus?: RethusStatus
   /** Especialidad THS declarada en REPS — debe coincidir con el CUPS de consulta en RIPS */
   thsSpecialty?: OdontologyThsSpecialtyId
   /**
-   * Especialidad REHUS del profesional (tabla `professionals`).
+   * Especialidad RETHUS del profesional (tabla `professionals`).
    * En nuevas instalaciones se sincroniza desde `thsSpecialty` en la migración Dexie v12.
    */
   rehusSpecialty?: OdontologyThsSpecialtyId
