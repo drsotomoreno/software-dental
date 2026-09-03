@@ -12,6 +12,7 @@ import {
 import { generateId } from '@/utils/crypto'
 import { getSessionExpiryDate, hashPassword, isSessionExpired, verifyPassword } from '@/utils/authCrypto'
 import { getEffectiveRole, getStoredApiAuth } from '@/services/apiAuthService'
+import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
 
 export async function getStoredSessionToken(): Promise<string | null> {
   return localStorage.getItem(SESSION_STORAGE_KEY)
@@ -226,7 +227,6 @@ export async function createAppUser(
     lastName: data.lastName.trim(),
     documentType: data.documentType,
     documentNumber: data.documentNumber.trim(),
-    professionalLicense: data.rethusNumber?.trim() || data.professionalLicense?.trim() || undefined,
     role: roleResult.role,
     clinicName: data.clinicName.trim(),
     providerNit: data.providerNit?.trim() || undefined,
@@ -246,6 +246,11 @@ export async function createAppUser(
   if (!user.documentNumber) {
     return { ok: false, error: 'El documento es obligatorio.' }
   }
+  const documentCheck = validateProfessionalDocumentNumber(user.documentNumber)
+  if (!documentCheck.valid) {
+    return { ok: false, error: documentCheck.message ?? 'El documento no es válido.' }
+  }
+  user.documentNumber = documentCheck.normalized ?? user.documentNumber
   if (!user.clinicName) {
     return { ok: false, error: 'El nombre de la clínica es obligatorio.' }
   }
@@ -285,6 +290,14 @@ export async function updateAppUser(
       return { ok: false, error: 'Ya existe otro usuario con este correo.' }
     }
     nextPatch.email = email
+  }
+
+  if (nextPatch.documentNumber !== undefined) {
+    const documentCheck = validateProfessionalDocumentNumber(nextPatch.documentNumber)
+    if (!documentCheck.valid) {
+      return { ok: false, error: documentCheck.message ?? 'El documento no es válido.' }
+    }
+    nextPatch.documentNumber = documentCheck.normalized ?? nextPatch.documentNumber.trim()
   }
 
   await db.users.update(userId, nextPatch)

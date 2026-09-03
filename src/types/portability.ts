@@ -41,7 +41,7 @@ export interface PortabilityManifest {
     name: string
     email: string
     role: string
-    professionalLicense?: string
+    documentNumber?: string
     clinicName?: string
     providerNit?: string
   } | null

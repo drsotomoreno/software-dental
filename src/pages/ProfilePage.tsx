@@ -9,8 +9,8 @@ import { LocalBackupPanel } from '@/components/backup/LocalBackupPanel'
 import { ClearTestDatabasePanel } from '@/components/settings/ClearTestDatabasePanel'
 import { MailSettingsPanel } from '@/components/settings/MailSettingsPanel'
 import {
+  DocumentIdentityField,
   RepsHabilitationField,
-  RethusNumberField,
   RethusSpecialtyField,
   ensureSpecialtyInRepsPortfolio,
 } from '@/components/settings/RegulatoryIdentityFields'
@@ -18,8 +18,7 @@ import { getStoredApiAuth, setStoredApiAuth } from '@/services/apiAuthService'
 import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
 import type { RepsHabilitationStatus } from '@/utils/repsCode'
 import { validateActiveRepsSede } from '@/utils/repsCode'
-import type { RethusStatus } from '@/utils/rethusNumber'
-import { validateActiveRethus } from '@/utils/rethusNumber'
+import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
 
 export function ProfilePage() {
   const { user, can, refreshSessionUser } = useAuth()
@@ -33,13 +32,12 @@ export function ProfilePage() {
     firstName: '',
     lastName: '',
     email: '',
-    professionalLicense: '',
+    documentType: 'CC',
+    documentNumber: '',
     clinicName: '',
     providerNit: '',
     repsCode: '',
     repsStatus: 'activo' as RepsHabilitationStatus,
-    rethusNumber: '',
-    rethusStatus: 'activo' as RethusStatus,
     thsSpecialty: 'odontologia_general' as OdontologyThsSpecialtyId,
     repsEnabledSpecialties: ['odontologia_general'] as OdontologyThsSpecialtyId[],
   })
@@ -56,13 +54,12 @@ export function ProfilePage() {
         firstName: user.firstName,
         lastName: user.lastName,
         email: user.email,
-        professionalLicense: user.professionalLicense ?? '',
+        documentType: user.documentType || 'CC',
+        documentNumber: user.documentNumber ?? '',
         clinicName: user.clinicName,
         providerNit: user.providerNit ?? '',
         repsCode: user.repsCode ?? '',
         repsStatus: user.repsStatus ?? 'activo',
-        rethusNumber: user.rethusNumber?.trim() || user.professionalLicense?.trim() || '',
-        rethusStatus: user.rethusStatus ?? 'activo',
         thsSpecialty: user.thsSpecialty ?? 'odontologia_general',
         repsEnabledSpecialties:
           user.repsEnabledSpecialties?.length
@@ -77,12 +74,10 @@ export function ProfilePage() {
     if (!user?.id) return
     setSaveError('')
 
-    if (form.rethusNumber.trim()) {
-      const rethus = validateActiveRethus(form.rethusNumber, form.rethusStatus)
-      if (!rethus.valid) {
-        setSaveError(rethus.message ?? 'El número RETHUS no es válido.')
-        return
-      }
+    const documentCheck = validateProfessionalDocumentNumber(form.documentNumber)
+    if (!documentCheck.valid) {
+      setSaveError(documentCheck.message ?? 'El número de documento es obligatorio.')
+      return
     }
 
     if (form.repsCode.trim()) {
@@ -97,18 +92,16 @@ export function ProfilePage() {
       form.thsSpecialty,
       form.repsEnabledSpecialties,
     )
-    const rethusNumber = form.rethusNumber.trim()
     const patch = {
       firstName: form.firstName,
       lastName: form.lastName,
       email: form.email,
-      professionalLicense: rethusNumber || form.professionalLicense,
+      documentType: form.documentType,
+      documentNumber: documentCheck.normalized ?? form.documentNumber.trim(),
       clinicName: form.clinicName,
       providerNit: form.providerNit,
       repsCode: form.repsCode,
       repsStatus: form.repsStatus,
-      rethusNumber,
-      rethusStatus: form.rethusStatus,
       thsSpecialty: form.thsSpecialty,
       rehusSpecialty: form.thsSpecialty,
       repsEnabledSpecialties,
@@ -119,8 +112,7 @@ export function ProfilePage() {
     if (apiAuth) {
       setStoredApiAuth(apiAuth.token, {
         ...apiAuth.user,
-        rethusNumber: form.rethusNumber,
-        documentNumber: user.documentNumber,
+        documentNumber: documentCheck.normalized ?? form.documentNumber.trim(),
         repsCode: form.repsCode,
         repsStatus: form.repsStatus,
         thsSpecialty: form.thsSpecialty,
@@ -218,21 +210,22 @@ export function ProfilePage() {
           />
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <RethusNumberField
+          <DocumentIdentityField
             compact
-            value={form.rethusNumber}
-            onChange={(rethusNumber) => setForm({ ...form, rethusNumber })}
+            documentType={form.documentType}
+            documentNumber={form.documentNumber}
+            onChange={(patch) => setForm({ ...form, ...patch })}
           />
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
-              Nombre de la clínica / consultorio
-            </label>
-            <input
-              value={form.clinicName || user.clinicName}
-              onChange={(e) => setForm({ ...form, clinicName: e.target.value })}
-              className="input-field"
-            />
-          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
+            Nombre de la clínica / consultorio
+          </label>
+          <input
+            value={form.clinicName || user.clinicName}
+            onChange={(e) => setForm({ ...form, clinicName: e.target.value })}
+            className="input-field"
+          />
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>

@@ -102,6 +102,7 @@ import { useClinicalAutoSave } from '@/hooks/useClinicalAutoSave'
 import { VoiceClinicalAssistant, type ClinicalVoiceContext } from '@/components/voice'
 import { confirmUserPassword } from '@/services/authService'
 import { createDigitalSignature, validateSignatureCapture } from '@/services/signatureService'
+import { getProfessionalSignBlocker } from '@/utils/professionalSignGate'
 import type { ClinicalHistoryExportFormat } from '@/types/portability'
 import { EXPORT_FORMAT_LABELS } from '@/types/portability'
 
@@ -252,7 +253,7 @@ export function PatientDetailPage() {
 
   const professionalName = user ? `${user.firstName} ${user.lastName}` : ''
 
-  const professionalLicense = user?.professionalLicense ?? ''
+  const professionalLicense = user?.documentNumber ?? ''
 
   const patientForeignKey = id ? toPatientForeignKey(id) : ''
 
@@ -1043,6 +1044,12 @@ export function PatientDetailPage() {
       return
     }
 
+    const rethusBlocker = getProfessionalSignBlocker(user)
+    if (rethusBlocker) {
+      setMessage(rethusBlocker)
+      return
+    }
+
     if (!validateClinical()) return
 
     setShowSignConfirm(true)
@@ -1052,6 +1059,11 @@ export function PatientDetailPage() {
   const executeSignAndLock = async (password: string) => {
     if (!id || !clinicalData || !odontogram || !user || !patient) {
       return { ok: false as const, error: 'Datos incompletos para firmar.' }
+    }
+
+    const rethusBlocker = getProfessionalSignBlocker(user)
+    if (rethusBlocker) {
+      return { ok: false as const, error: rethusBlocker }
     }
 
     const valid = await confirmUserPassword(user.id, password)

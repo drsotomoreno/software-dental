@@ -600,7 +600,7 @@ export function AgendaScheduler() {
 
             const result = await markAppointmentNoShow(selectedAppointment, {
               professionalName: `${user.firstName} ${user.lastName}`,
-              professionalLicense: user.professionalLicense ?? '',
+              professionalLicense: user.documentNumber ?? '',
               authorUserId: user.id,
               authorEmail: user.email,
               additionalNote,

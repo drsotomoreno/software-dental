@@ -304,7 +304,6 @@ export class DentalDatabase extends Dexie {
             documentNumber: user.documentNumber ?? '',
             firstName: user.firstName ?? '',
             lastName: user.lastName ?? '',
-            professionalLicense: user.professionalLicense,
             rehusSpecialty,
             repsCode: user.repsCode,
             isActive: true,
@@ -552,6 +551,46 @@ export class DentalDatabase extends Dexie {
     this.version(18).stores({
       clinicBillingSettings: 'id',
     })
+
+    this.version(19).stores({
+      patients: '++id, documentNumber, lastName, createdAt, phase, ownerUserId',
+    })
+
+    this.version(20).upgrade(async (tx) => {
+      const users = await tx.table('users').toArray()
+      for (const user of users) {
+        if (!user?.id) continue
+        const digits = String(user.repsCode ?? '').replace(/\D/g, '')
+        const patch: Record<string, unknown> = {}
+        if (digits === '500000000001') {
+          patch.repsCode = '6800103898-01'
+        }
+        if (!user.repsStatus && (patch.repsCode || user.repsCode)) {
+          patch.repsStatus = 'activo'
+        }
+        if (user.id === 'user-demo-001' && !user.rethusNumber) {
+          patch.rethusNumber = '438265'
+          patch.rethusStatus = 'activo'
+          patch.repsEnabledSpecialties = user.repsEnabledSpecialties ?? ['odontologia_general']
+        }
+        if (Object.keys(patch).length > 0) {
+          await tx.table('users').update(user.id, patch)
+        }
+      }
+    })
+
+    this.version(21).upgrade(async (tx) => {
+      const stripLicense = async (tableName: 'users' | 'professionals') => {
+        const rows = await tx.table(tableName).toArray()
+        for (const row of rows) {
+          if (!row?.id || !('professionalLicense' in row)) continue
+          delete row.professionalLicense
+          await tx.table(tableName).put(row)
+        }
+      }
+      await stripLicense('users')
+      await stripLicense('professionals')
+    })
   }
 }
 
@@ -657,12 +696,16 @@ export async function seedDemoData(): Promise<void> {
         lastName: 'González',
         documentType: 'CC',
         documentNumber: '1234567890',
-        professionalLicense: 'OD-12345',
         role: 'odontologo',
         clinicName: 'Clínica Dental Sonrisa',
         providerNit: '900123456-1',
-        repsCode: '500000000001',
+        repsCode: '6800103898-01',
+        repsStatus: 'activo',
+        rethusNumber: '438265',
+        rethusStatus: 'activo',
         thsSpecialty: 'odontologia_general',
+        rehusSpecialty: 'odontologia_general',
+        repsEnabledSpecialties: ['odontologia_general'],
       },
       {
         id: 'user-demo-admin',
@@ -674,7 +717,8 @@ export async function seedDemoData(): Promise<void> {
         role: 'admin',
         clinicName: 'Clínica Dental Sonrisa',
         providerNit: '900123456-1',
-        repsCode: '500000000001',
+        repsCode: '6800103898-01',
+        repsStatus: 'activo',
         thsSpecialty: 'odontologia_general',
       },
     ])
@@ -692,7 +736,8 @@ export async function seedDemoData(): Promise<void> {
       role: 'admin',
       clinicName: 'Clínica Dental Sonrisa',
       providerNit: '900123456-1',
-      repsCode: '500000000001',
+      repsCode: '6800103898-01',
+      repsStatus: 'activo',
     })
   }
 

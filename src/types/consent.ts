@@ -11,6 +11,7 @@ export interface InformedConsent {
   professionalSignatureDataUrl?: string
   professionalSignatureMeta?: SignatureCaptureMetadata
   professionalLicense: string
+  /** Conservado por compatibilidad de historias firmadas; se iguala a la cédula. */
   professionalRegistry: string
   signedAt?: string
 }

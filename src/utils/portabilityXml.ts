@@ -72,7 +72,7 @@ ${manifest.legalBasis.map((law) => `    ${el('Norma', law)}`).join('\n')}
     ${el('Nombre', manifest.exportedBy?.name)}
     ${el('Email', manifest.exportedBy?.email)}
     ${el('Rol', manifest.exportedBy?.role)}
-    ${el('RegistroProfesional', manifest.exportedBy?.professionalLicense)}
+    ${el('NumeroDocumento', manifest.exportedBy?.documentNumber)}
     ${el('Clinica', manifest.exportedBy?.clinicName)}
     ${el('NIT', manifest.exportedBy?.providerNit)}
   </Prestador>

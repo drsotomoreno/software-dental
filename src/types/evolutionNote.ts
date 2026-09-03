@@ -40,6 +40,7 @@ export interface EvolutionNote {
   anesthesia: AnesthesiaRecord
   prescriptions: string
   professionalName: string
+  /** Snapshot del documento de identidad (cédula / ReTHUS) al firmar la nota. */
   professionalLicense: string
   /** Usuario autenticado que creó la anotación */
   authorUserId?: string

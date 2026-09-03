@@ -2,7 +2,11 @@ import type { ReactNode } from 'react'
 import { ODONTOLOGY_THS_SPECIALTIES, type OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
 import { GENERAL_DENTISTRY_REHUS_SPECIALTY } from '@/constants/rehusSpecialties'
 import { parseRepsCodeWithDane, VERIFIED_REPS_EXAMPLE_DISPLAY } from '@/utils/repsCode'
-import { validateRethusNumberFormat, VERIFIED_RETHUS_EXAMPLE } from '@/utils/rethusNumber'
+import {
+  PROFESSIONAL_DOCUMENT_LABEL,
+  PROFESSIONAL_DOCUMENT_TYPES,
+  validateProfessionalDocumentNumber,
+} from '@/utils/professionalDocument'
 import type { RepsHabilitationStatus } from '@/utils/repsCode'
 import type { RethusStatus } from '@/utils/rethusNumber'
 
@@ -43,46 +47,71 @@ export function ensureSpecialtyInRepsPortfolio(
   return [...next]
 }
 
-export function RethusNumberField({
-  value,
+export function DocumentIdentityField({
+  documentType,
+  documentNumber,
   onChange,
   compact = false,
+  required = true,
 }: {
-  value: string
-  onChange: (value: string) => void
+  documentType: string
+  documentNumber: string
+  onChange: (patch: { documentType?: string; documentNumber?: string }) => void
   compact?: boolean
+  required?: boolean
 }) {
-  const format = value.trim() ? validateRethusNumberFormat(value) : null
+  const format = documentNumber.trim() ? validateProfessionalDocumentNumber(documentNumber) : null
 
   return (
-    <div>
-      <div className={`mb-1 ${compact ? '' : 'flex items-center justify-between gap-3'}`}>
-        <label className="block text-xs font-semibold uppercase text-slate-700">
-          Código RETHUS
+    <>
+      <div>
+        <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
+          Tipo de documento
         </label>
-        {compact ? null : (
-          <CatalogLookupHelp summary="¿Qué es y dónde consultarlo?">
-            Es el Registro Único Nacional del Talento Humano en Salud que reemplaza la tarjeta
-            profesional. Consúltelo en el directorio RETHUS del Ministerio de Salud.
-          </CatalogLookupHelp>
+        <select
+          required={required}
+          value={documentType || 'CC'}
+          onChange={(e) => onChange({ documentType: e.target.value })}
+          className="input-field bg-white"
+        >
+          {PROFESSIONAL_DOCUMENT_TYPES.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <div className={`mb-1 ${compact ? '' : 'flex items-center justify-between gap-3'}`}>
+          <label className="block text-xs font-semibold uppercase text-slate-700">
+            {PROFESSIONAL_DOCUMENT_LABEL}
+          </label>
+          {compact ? null : (
+            <CatalogLookupHelp summary="¿Por qué la cédula?">
+              El directorio ReTHUS del Ministerio de Salud se consulta con el número de cédula. Es
+              la llave del talento humano en el sistema nacional de salud.
+            </CatalogLookupHelp>
+          )}
+        </div>
+        <input
+          required={required}
+          value={documentNumber}
+          onChange={(e) => onChange({ documentNumber: e.target.value })}
+          className="input-field font-mono"
+          placeholder="Ej: 1234567890"
+          inputMode="numeric"
+          autoComplete="off"
+        />
+        {format && !format.valid ? (
+          <p className="mt-1 text-xs text-red-600">{format.message}</p>
+        ) : compact ? null : (
+          <p className="mt-1 text-xs text-slate-500">
+            Obligatorio. La cédula es la llave de consulta en ReTHUS para firmar historias clínicas y
+            RIPS.
+          </p>
         )}
       </div>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="input-field font-mono"
-        placeholder={`Ej: ${VERIFIED_RETHUS_EXAMPLE}`}
-        inputMode="numeric"
-        autoComplete="off"
-      />
-      {format && !format.valid ? (
-        <p className="mt-1 text-xs text-red-600">{format.message}</p>
-      ) : compact ? null : (
-        <p className="mt-1 text-xs text-slate-500">
-          Obligatorio para firmar historias clínicas, fórmulas y soportes de RIPS.
-        </p>
-      )}
-    </div>
+    </>
   )
 }
 
@@ -249,12 +278,6 @@ export function RegulatoryIdentityFields({
 
   return (
     <>
-      <div className="sm:col-span-2">
-        <RethusNumberField
-          value={values.rethusNumber}
-          onChange={(rethusNumber) => onChange({ rethusNumber })}
-        />
-      </div>
       <div className="sm:col-span-2">
         <RepsHabilitationField
           value={values.repsCode}

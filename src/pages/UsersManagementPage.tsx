@@ -15,9 +15,9 @@ import {
 import type { UserProfile, UserRole } from '@/types/user'
 import { ASSIGNABLE_ROLES, ROLE_LABELS, USERS_MANAGE_DENIED, canManageUsers } from '@/utils/permissions'
 import {
+  DocumentIdentityField,
   RegulatoryIdentityAdminExtras,
   RepsHabilitationField,
-  RethusNumberField,
   RethusSpecialtyField,
   ensureSpecialtyInRepsPortfolio,
 } from '@/components/settings/RegulatoryIdentityFields'
@@ -27,13 +27,6 @@ function assignableRoleValue(role: UserRole | undefined): UserRole {
   return role === 'superadmin' ? 'admin' : (role ?? 'odontologo')
 }
 
-const DOCUMENT_TYPES = [
-  { value: 'CC', label: 'Cédula de Ciudadanía' },
-  { value: 'TI', label: 'Tarjeta de Identidad' },
-  { value: 'CE', label: 'Cédula de Extranjería' },
-  { value: 'PA', label: 'Pasaporte' },
-]
-
 function emptyUserForm(clinicName = ''): Omit<UserProfile, 'id'> & { password: string } {
   return {
     email: '',
@@ -41,7 +34,6 @@ function emptyUserForm(clinicName = ''): Omit<UserProfile, 'id'> & { password: s
     lastName: '',
     documentType: 'CC',
     documentNumber: '',
-    professionalLicense: '',
     role: 'odontologo',
     clinicName,
     providerNit: '',
@@ -116,13 +108,12 @@ export function UsersManagementPage() {
       email: u.email,
       documentType: u.documentType,
       documentNumber: u.documentNumber,
-      professionalLicense: u.professionalLicense ?? '',
       role: u.role,
       clinicName: u.clinicName,
       providerNit: u.providerNit ?? '',
       repsCode: u.repsCode ?? '',
       repsStatus: u.repsStatus ?? 'activo',
-      rethusNumber: u.rethusNumber?.trim() || u.professionalLicense?.trim() || '',
+      rethusNumber: u.rethusNumber?.trim() || '',
       rethusStatus: u.rethusStatus ?? 'activo',
       thsSpecialty: u.thsSpecialty ?? 'odontologia_general',
       repsEnabledSpecialties:
@@ -139,11 +130,9 @@ export function UsersManagementPage() {
       showErr(USERS_MANAGE_DENIED)
       return
     }
-    const rethusNumber = (editForm.rethusNumber ?? '').trim()
     const result = await updateAppUser(editingUser.id, {
       ...editForm,
-      rethusNumber,
-      professionalLicense: rethusNumber || undefined,
+      documentNumber: (editForm.documentNumber ?? '').trim(),
       rehusSpecialty: editForm.thsSpecialty ?? editingUser.thsSpecialty,
     })
     if (!result.ok) {
@@ -466,29 +455,12 @@ function UserFields({
           className="input-field"
         />
       </div>
-      <div>
-        <label className="label-field">Tipo documento</label>
-        <select
-          value={values.documentType ?? 'CC'}
-          onChange={(e) => onChange({ documentType: e.target.value })}
-          className="input-field"
-        >
-          {DOCUMENT_TYPES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className="label-field">Nº documento</label>
-        <input
-          required
-          value={values.documentNumber ?? ''}
-          onChange={(e) => onChange({ documentNumber: e.target.value })}
-          className="input-field font-mono"
-        />
-      </div>
+      <DocumentIdentityField
+        compact
+        documentType={values.documentType ?? 'CC'}
+        documentNumber={values.documentNumber ?? ''}
+        onChange={onChange}
+      />
       <div>
         <label className="label-field">Rol</label>
         <select
@@ -502,13 +474,6 @@ function UserFields({
             </option>
           ))}
         </select>
-      </div>
-      <div>
-        <RethusNumberField
-          compact
-          value={values.rethusNumber ?? ''}
-          onChange={(rethusNumber) => onChange({ rethusNumber, professionalLicense: rethusNumber })}
-        />
       </div>
       <div>
         <label className="label-field">Nombre de la clínica / consultorio</label>

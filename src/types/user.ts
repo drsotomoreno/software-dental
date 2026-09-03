@@ -13,8 +13,8 @@ export interface UserProfile {
   firstName: string
   lastName: string
   documentType: string
+  /** Cédula / documento de identidad — llave de consulta en ReTHUS. */
   documentNumber: string
-  professionalLicense?: string
   role: UserRole
   clinicName: string
   /** NIT prestador — RIPS */

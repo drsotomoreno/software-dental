@@ -170,32 +170,20 @@ export function InformedConsentForm({
 
         <div>
           <h4 className="mb-2 text-sm font-semibold text-slate-700">Firma del profesional</h4>
-          <div className="mb-3 grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="label-field">No. RETHUS</label>
-              <input
-                disabled={disabled}
-                value={data.professionalLicense}
-                onChange={(e) =>
-                  update({
-                    professionalLicense: e.target.value,
-                    professionalRegistry: e.target.value,
-                  })
-                }
-                placeholder="Ej: 438265"
-                className="input-field font-mono"
-              />
-            </div>
-            <div>
-              <label className="label-field">Registro médico</label>
-              <input
-                disabled={disabled}
-                value={data.professionalRegistry}
-                onChange={(e) => update({ professionalRegistry: e.target.value })}
-                placeholder="Número de registro"
-                className="input-field"
-              />
-            </div>
+          <div className="mb-3">
+            <label className="label-field">Número de Documento (Cédula / ReTHUS)</label>
+            <input
+              disabled={disabled}
+              value={data.professionalLicense}
+              onChange={(e) =>
+                update({
+                  professionalLicense: e.target.value,
+                  professionalRegistry: e.target.value,
+                })
+              }
+              placeholder="Cédula del profesional"
+              className="input-field font-mono"
+            />
           </div>
           <DigitalSignatureCanvas
             onSignatureChange={(result) =>

@@ -9,7 +9,7 @@ export const FHIR_SYSTEMS = {
   snomed: 'http://snomed.info/sct',
   organizationNit: 'https://www.minsalud.gov.co/fhir/NamingSystem/NIT',
   reps: 'https://www.minsalud.gov.co/fhir/NamingSystem/REPS',
-  professionalLicense: 'https://www.minsalud.gov.co/fhir/NamingSystem/professional-license',
+  rethus: 'https://www.minsalud.gov.co/fhir/NamingSystem/RETHUS',
   clinicalRecord: 'https://dental-emr.local/fhir/NamingSystem/clinical-record',
 } as const
 

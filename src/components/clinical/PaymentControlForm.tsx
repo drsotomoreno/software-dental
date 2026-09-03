@@ -80,9 +80,9 @@ function formatTreatingDentistName(user: UserProfile): string {
 
 function formatTreatingDentistOption(user: UserProfile): string {
   const name = formatTreatingDentistName(user)
-  const license = user.professionalLicense?.trim()
+  const document = user.documentNumber?.trim()
   const role = ROLE_LABELS[user.role as keyof typeof ROLE_LABELS] ?? user.role
-  const details = [license, role].filter(Boolean).join(' · ')
+  const details = [document, role].filter(Boolean).join(' · ')
   return details ? `${name} — ${details}` : name
 }
 
