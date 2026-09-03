@@ -226,12 +226,17 @@ export async function createAppUser(
     lastName: data.lastName.trim(),
     documentType: data.documentType,
     documentNumber: data.documentNumber.trim(),
-    professionalLicense: data.professionalLicense?.trim() || undefined,
+    professionalLicense: data.rethusNumber?.trim() || data.professionalLicense?.trim() || undefined,
     role: roleResult.role,
     clinicName: data.clinicName.trim(),
     providerNit: data.providerNit?.trim() || undefined,
     repsCode: data.repsCode?.trim() || undefined,
+    repsStatus: data.repsStatus ?? 'activo',
+    rethusNumber: data.rethusNumber?.trim() || undefined,
+    rethusStatus: data.rethusStatus ?? 'activo',
     thsSpecialty: data.thsSpecialty,
+    rehusSpecialty: data.rehusSpecialty ?? data.thsSpecialty,
+    repsEnabledSpecialties: data.repsEnabledSpecialties,
     avatarUrl: data.avatarUrl,
   }
 

@@ -58,7 +58,7 @@ export function RethusNumberField({
     <div>
       <div className={`mb-1 ${compact ? '' : 'flex items-center justify-between gap-3'}`}>
         <label className="block text-xs font-semibold uppercase text-slate-700">
-          No. RETHUS (inscripción profesional)
+          Código RETHUS
         </label>
         {compact ? null : (
           <CatalogLookupHelp summary="¿Qué es y dónde consultarlo?">

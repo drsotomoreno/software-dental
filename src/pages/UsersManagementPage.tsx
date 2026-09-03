@@ -122,7 +122,7 @@ export function UsersManagementPage() {
       providerNit: u.providerNit ?? '',
       repsCode: u.repsCode ?? '',
       repsStatus: u.repsStatus ?? 'activo',
-      rethusNumber: u.rethusNumber ?? '',
+      rethusNumber: u.rethusNumber?.trim() || u.professionalLicense?.trim() || '',
       rethusStatus: u.rethusStatus ?? 'activo',
       thsSpecialty: u.thsSpecialty ?? 'odontologia_general',
       repsEnabledSpecialties:
@@ -139,8 +139,11 @@ export function UsersManagementPage() {
       showErr(USERS_MANAGE_DENIED)
       return
     }
+    const rethusNumber = (editForm.rethusNumber ?? '').trim()
     const result = await updateAppUser(editingUser.id, {
       ...editForm,
+      rethusNumber,
+      professionalLicense: rethusNumber || undefined,
       rehusSpecialty: editForm.thsSpecialty ?? editingUser.thsSpecialty,
     })
     if (!result.ok) {
@@ -486,7 +489,7 @@ function UserFields({
           className="input-field font-mono"
         />
       </div>
-      <div className="sm:col-span-2">
+      <div>
         <label className="label-field">Rol</label>
         <select
           value={assignableRoleValue(values.role)}
@@ -500,10 +503,11 @@ function UserFields({
           ))}
         </select>
       </div>
-      <div className="sm:col-span-2">
+      <div>
         <RethusNumberField
+          compact
           value={values.rethusNumber ?? ''}
-          onChange={(rethusNumber) => onChange({ rethusNumber })}
+          onChange={(rethusNumber) => onChange({ rethusNumber, professionalLicense: rethusNumber })}
         />
       </div>
       <div>
