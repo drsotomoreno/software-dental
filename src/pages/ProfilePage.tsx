@@ -61,7 +61,7 @@ export function ProfilePage() {
         providerNit: user.providerNit ?? '',
         repsCode: user.repsCode ?? '',
         repsStatus: user.repsStatus ?? 'activo',
-        rethusNumber: user.rethusNumber ?? '',
+        rethusNumber: user.rethusNumber?.trim() || user.professionalLicense?.trim() || '',
         rethusStatus: user.rethusStatus ?? 'activo',
         thsSpecialty: user.thsSpecialty ?? 'odontologia_general',
         repsEnabledSpecialties:
@@ -97,16 +97,17 @@ export function ProfilePage() {
       form.thsSpecialty,
       form.repsEnabledSpecialties,
     )
+    const rethusNumber = form.rethusNumber.trim()
     const patch = {
       firstName: form.firstName,
       lastName: form.lastName,
       email: form.email,
-      professionalLicense: form.professionalLicense,
+      professionalLicense: rethusNumber || form.professionalLicense,
       clinicName: form.clinicName,
       providerNit: form.providerNit,
       repsCode: form.repsCode,
       repsStatus: form.repsStatus,
-      rethusNumber: form.rethusNumber,
+      rethusNumber,
       rethusStatus: form.rethusStatus,
       thsSpecialty: form.thsSpecialty,
       rehusSpecialty: form.thsSpecialty,
@@ -175,18 +176,17 @@ export function ProfilePage() {
   if (!user) return <p className="text-slate-500">Cargando perfil...</p>
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Mi perfil</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          {ROLE_LABELS[user.role]} · {user.email}
-        </p>
-      </div>
-
+    <div className="mx-auto max-w-xl space-y-6">
       <form onSubmit={handleSave} className="card space-y-4">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">Mi perfil</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {ROLE_LABELS[user.role]} · {user.email}
+          </p>
+        </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-700">
+            <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
               Nombres
             </label>
             <input
@@ -196,7 +196,7 @@ export function ProfilePage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-700">
+            <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
               Apellidos
             </label>
             <input
@@ -207,7 +207,7 @@ export function ProfilePage() {
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-700">
+          <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
             Correo electrónico
           </label>
           <input
@@ -217,13 +217,14 @@ export function ProfilePage() {
             className="input-field bg-slate-50"
           />
         </div>
-        <RethusNumberField
-          value={form.rethusNumber}
-          onChange={(rethusNumber) => setForm({ ...form, rethusNumber })}
-        />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <RethusNumberField
+            compact
+            value={form.rethusNumber}
+            onChange={(rethusNumber) => setForm({ ...form, rethusNumber })}
+          />
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-700">
+            <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
               Nombre de la clínica / consultorio
             </label>
             <input
@@ -232,8 +233,10 @@ export function ProfilePage() {
               className="input-field"
             />
           </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-700">
+            <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
               NIT fiscal (DIAN)
             </label>
             <input
@@ -243,11 +246,12 @@ export function ProfilePage() {
               placeholder="NIT con dígito de verificación"
             />
           </div>
+          <RepsHabilitationField
+            compact
+            value={form.repsCode}
+            onChange={(repsCode) => setForm({ ...form, repsCode })}
+          />
         </div>
-        <RepsHabilitationField
-          value={form.repsCode}
-          onChange={(repsCode) => setForm({ ...form, repsCode })}
-        />
         <RethusSpecialtyField
           value={form.thsSpecialty}
           onChange={(thsSpecialty) =>

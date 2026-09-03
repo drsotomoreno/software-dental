@@ -46,22 +46,26 @@ export function ensureSpecialtyInRepsPortfolio(
 export function RethusNumberField({
   value,
   onChange,
+  compact = false,
 }: {
   value: string
   onChange: (value: string) => void
+  compact?: boolean
 }) {
   const format = value.trim() ? validateRethusNumberFormat(value) : null
 
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between gap-3">
-        <label className="text-xs font-semibold uppercase tracking-wide text-slate-700">
+      <div className={`mb-1 ${compact ? '' : 'flex items-center justify-between gap-3'}`}>
+        <label className="block text-xs font-semibold uppercase text-slate-700">
           No. RETHUS (inscripción profesional)
         </label>
-        <CatalogLookupHelp summary="¿Qué es y dónde consultarlo?">
-          Es el Registro Único Nacional del Talento Humano en Salud que reemplaza la tarjeta
-          profesional. Consúltelo en el directorio RETHUS del Ministerio de Salud.
-        </CatalogLookupHelp>
+        {compact ? null : (
+          <CatalogLookupHelp summary="¿Qué es y dónde consultarlo?">
+            Es el Registro Único Nacional del Talento Humano en Salud que reemplaza la tarjeta
+            profesional. Consúltelo en el directorio RETHUS del Ministerio de Salud.
+          </CatalogLookupHelp>
+        )}
       </div>
       <input
         value={value}
@@ -73,7 +77,7 @@ export function RethusNumberField({
       />
       {format && !format.valid ? (
         <p className="mt-1 text-xs text-red-600">{format.message}</p>
-      ) : (
+      ) : compact ? null : (
         <p className="mt-1 text-xs text-slate-500">
           Obligatorio para firmar historias clínicas, fórmulas y soportes de RIPS.
         </p>
@@ -85,23 +89,27 @@ export function RethusNumberField({
 export function RepsHabilitationField({
   value,
   onChange,
+  compact = false,
 }: {
   value: string
   onChange: (value: string) => void
+  compact?: boolean
 }) {
   const parsed = parseRepsCodeWithDane(value)
 
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between gap-3">
-        <label className="text-xs font-semibold uppercase tracking-wide text-slate-700">
+      <div className={`mb-1 ${compact ? '' : 'flex items-center justify-between gap-3'}`}>
+        <label className="block text-xs font-semibold uppercase text-slate-700">
           Código REPS (habilitación sede)
         </label>
-        <CatalogLookupHelp summary="¿Qué es y dónde consultarlo?">
-          Es el código de 12 dígitos de la sede habilitada ante la seccional de salud. Se consulta
-          en el portal de Prestadores de Servicios de Salud (REPS) del MinSalud. Ejemplo:{' '}
-          {VERIFIED_REPS_EXAMPLE_DISPLAY}.
-        </CatalogLookupHelp>
+        {compact ? null : (
+          <CatalogLookupHelp summary="¿Qué es y dónde consultarlo?">
+            Es el código de 12 dígitos de la sede habilitada ante la seccional de salud. Se consulta
+            en el portal de Prestadores de Servicios de Salud (REPS) del MinSalud. Ejemplo:{' '}
+            {VERIFIED_REPS_EXAMPLE_DISPLAY}.
+          </CatalogLookupHelp>
+        )}
       </div>
       <input
         value={value}
@@ -113,10 +121,12 @@ export function RepsHabilitationField({
       {value.trim() ? (
         <p className={`mt-1 text-xs ${parsed.valid ? 'text-emerald-700' : 'text-red-600'}`}>
           {parsed.valid
-            ? `${parsed.display} · ${parsed.departmentName} / ${parsed.municipalityName} · sede ${parsed.sedeCode}${parsed.isMainSede ? ' (principal)' : ''}`
+            ? compact
+              ? `${parsed.display} · ${parsed.departmentName}`
+              : `${parsed.display} · ${parsed.departmentName} / ${parsed.municipalityName} · sede ${parsed.sedeCode}${parsed.isMainSede ? ' (principal)' : ''}`
             : parsed.message}
         </p>
-      ) : (
+      ) : compact ? null : (
         <p className="mt-1 text-xs text-slate-500">
           Formato: departamento (2) + municipio DANE (3) + consecutivo (5) + sede (2).
         </p>
@@ -134,7 +144,7 @@ export function RethusSpecialtyField({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-700">
+      <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
         Especialidad (RETHUS)
       </label>
       <select

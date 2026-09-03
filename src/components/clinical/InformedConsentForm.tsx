@@ -172,13 +172,18 @@ export function InformedConsentForm({
           <h4 className="mb-2 text-sm font-semibold text-slate-700">Firma del profesional</h4>
           <div className="mb-3 grid gap-3 sm:grid-cols-2">
             <div>
-              <label className="label-field">Tarjeta profesional</label>
+              <label className="label-field">No. RETHUS</label>
               <input
                 disabled={disabled}
                 value={data.professionalLicense}
-                onChange={(e) => update({ professionalLicense: e.target.value })}
-                placeholder="Ej: OD-12345"
-                className="input-field"
+                onChange={(e) =>
+                  update({
+                    professionalLicense: e.target.value,
+                    professionalRegistry: e.target.value,
+                  })
+                }
+                placeholder="Ej: 438265"
+                className="input-field font-mono"
               />
             </div>
             <div>

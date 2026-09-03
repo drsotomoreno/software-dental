@@ -410,7 +410,7 @@ export function EvolutionNoteCard({
                     />
                   </div>
                   <div>
-                    <label className="label-field">Registro profesional</label>
+                    <label className="label-field">No. RETHUS</label>
                     <input
                       disabled={readOnly}
                       value={note.professionalLicense}

@@ -15,6 +15,7 @@ export default defineConfig({
     host: true,
     allowedHosts,
     watch: {
+      usePolling: true,
       ignored: ['**/src/data/dane-*.json'],
     },
     proxy: {
