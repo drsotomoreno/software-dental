@@ -26,6 +26,8 @@ import {
   ClinicalHistoryExportPage,
   CatalogManagementPage,
   InvoicesAccountsPage,
+  WelcomeTrialPage,
+  AdminSubscriptionUsersPage,
 } from '@/pages'
 
 export function AppRouter() {
@@ -39,6 +41,8 @@ export function AppRouter() {
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
           <Route element={<ProtectedRoute />}>
+            <Route path="welcome-trial" element={<WelcomeTrialPage />} />
+            <Route path="subscription-plans" element={<WelcomeTrialPage />} />
             <Route element={<MainLayout />}>
               <Route path="app" element={<HomePage />} />
               <Route element={<PermissionRoute permission="patients.write" />}>
@@ -82,6 +86,7 @@ export function AppRouter() {
               <Route element={<PermissionRoute permission="catalogs.manage" />}>
                 <Route path="catalogos" element={<CatalogManagementPage />} />
               </Route>
+              <Route path="admin/usuarios" element={<AdminSubscriptionUsersPage />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -3,6 +3,7 @@ import { APP_INITIALS, APP_NAME } from '@/constants/branding'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { getStoredApiAuth } from '@/services/apiAuthService'
+import { userNeedsWelcome } from '@/utils/subscriptionAccess'
 
 type AuthMode = 'login' | 'register' | 'verify'
 
@@ -35,10 +36,12 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false)
 
   const afterLogin =
-    !from || from === '/' || from === '/login' ? '/app' : from
+    !from || from === '/' || from === '/login' || from === '/welcome-trial' ? '/app' : from
+  const storedUser = apiAuth?.user
+  const sendToWelcome = Boolean(storedUser && userNeedsWelcome(storedUser) && !isSuperAdmin)
 
   if (!isLoading && (user || apiAuth?.token || isSuperAdmin)) {
-    return <Navigate to={afterLogin} replace />
+    return <Navigate to={sendToWelcome ? '/welcome-trial' : afterLogin} replace />
   }
 
   const switchMode = (next: AuthMode) => {
@@ -58,7 +61,7 @@ export function LoginPage() {
       setError(result.error)
       return
     }
-    navigate(afterLogin, { replace: true })
+    navigate(result.requiresSubscription ? '/welcome-trial' : afterLogin, { replace: true })
   }
 
   const requestCode = async () => {
@@ -118,7 +121,7 @@ export function LoginPage() {
       setCode('')
       setNombre('')
       setMode('login')
-      setInfo('Cuenta creada. Inicie sesión con su correo y contraseña.')
+      setInfo('Cuenta creada. Inicie sesión para elegir un plan o la prueba gratuita de 7 días.')
     } catch {
       setError('No se pudo conectar con el servidor. Intente de nuevo.')
     } finally {

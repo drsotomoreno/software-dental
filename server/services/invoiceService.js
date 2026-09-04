@@ -61,6 +61,7 @@ export async function processElectronicInvoiceSubmission({ rips, invoice, metada
       issueDate: invoice.issueDate,
       payableAmount: invoice.payableAmount,
       lines: invoice.lines ?? [],
+      codPrestadorReps: invoice.codPrestadorReps,
     })
   }
 

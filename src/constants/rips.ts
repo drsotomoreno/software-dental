@@ -132,7 +132,10 @@ export const LEGACY_ENDODONTIC_CUPS = {
  */
 export const DEMO_PRESTADOR_NIT = '900123456'
 export const DEMO_PRESTADOR_NIT_WITH_DV = '900123456-1'
-export const DEMO_PRESTADOR_REPS = '500000000001'
+/** REPS de demostración — 6800103898-01 (Santander / Bucaramanga / sede 01). */
+export const DEMO_PRESTADOR_REPS = '680010389801'
+export const DEMO_PRESTADOR_REPS_DISPLAY = '6800103898-01'
+export const DEMO_PROFESSIONAL_RETHUS = '438265'
 
 export const RIPS_DEFAULTS = {
   codPaisResidencia: '170',

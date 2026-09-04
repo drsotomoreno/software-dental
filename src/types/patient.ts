@@ -66,6 +66,8 @@ export interface Patient {
   treatmentCompleted?: boolean
   createdAt: string
   updatedAt: string
+  /** Cuenta de suscripción que creó el paciente (límites de prueba). */
+  ownerUserId?: string
 }
 
 export interface PatientFormData extends Omit<Patient, 'id' | 'createdAt' | 'updatedAt'> {}

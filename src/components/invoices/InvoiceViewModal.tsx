@@ -31,6 +31,8 @@ import {
 import { ThermalInvoiceReceipt } from '@/components/invoices/ThermalInvoiceReceipt'
 
 import { formatCurrency } from '@/utils'
+import { formatRepsCodeDisplay } from '@/utils/repsCode'
+import { isInvoiceDeliverableToClient } from '@/utils/fevRipsEmissionPipeline'
 
 
 
@@ -238,7 +240,12 @@ export function InvoiceViewModal({ view, onClose }: InvoiceViewModalProps) {
 
         </div>
 
-
+        {view.kind === 'electronic' && !isInvoiceDeliverableToClient(view.invoice, true) && (
+          <div className="mx-5 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            Esta FEV-Salud aún no tiene CUV del Ministerio de Salud. No la entregue al paciente
+            hasta radicar RIPS y enlazar el CUV en la factura.
+          </div>
+        )}
 
         <div className="border-b border-slate-200 px-5 pt-3">
 
@@ -490,7 +497,7 @@ function ElectronicInvoicePreview({
 
           <Field label="NIT" value={`${document.dian.issuer.nit}${document.dian.issuer.nitVerificationDigit ? `-${document.dian.issuer.nitVerificationDigit}` : ''}`} />
 
-          <Field label="Código REPS" value={document.salud.codPrestadorReps} />
+          <Field label="Código REPS" value={formatRepsCodeDisplay(document.salud.codPrestadorReps)} />
 
           <Field label="Resolución DIAN" value={document.dian.issuer.billingResolution?.resolutionNumber || '—'} />
 

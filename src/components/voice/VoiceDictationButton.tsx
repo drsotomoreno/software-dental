@@ -5,6 +5,8 @@ import {
 } from '@/bootstrap/voiceDictationBridge'
 import { isVoiceDictationSupported } from '@/utils/voiceDictation'
 import type { VoiceDictationOptions } from '@/utils/voiceDictation'
+import { assertTrialVoiceAllowed, isTrialVoiceFieldUsed } from '@/utils/trialLimits'
+import { getStoredApiAuth } from '@/services/apiAuthService'
 
 interface VoiceDictationButtonProps extends VoiceDictationOptions {
   /** ID del campo destino — se refleja en data-target */
@@ -35,6 +37,10 @@ export function VoiceDictationButton({
     return () => unregisterVoiceTarget(targetInputId)
   }, [targetInputId])
 
+  const trialUserId = getStoredApiAuth()?.user?.id
+  const trialUsed = Boolean(trialUserId && isTrialVoiceFieldUsed(trialUserId, targetInputId))
+  const trialBlocked = trialUsed || assertTrialVoiceAllowed(targetInputId).ok === false
+
   if (!isVoiceDictationSupported()) return null
 
   return (
@@ -42,8 +48,8 @@ export function VoiceDictationButton({
       <button
         type="button"
         data-target={targetInputId}
-        disabled={disabled}
-        title="Dictar por voz"
+        disabled={disabled || trialBlocked}
+        title={trialBlocked ? 'Prueba: una sola nota de voz por casilla' : 'Dictar por voz'}
         aria-label="Dictar por voz"
         aria-pressed={false}
         className="btn-voice-mic"
@@ -53,7 +59,7 @@ export function VoiceDictationButton({
         </span>
       </button>
       <span data-voice-status className="max-w-[10rem] text-right text-[10px] text-red-600">
-        {errorMessage}
+        {trialBlocked ? 'Casilla ya dictada en prueba' : errorMessage}
       </span>
     </div>
   )

@@ -19,6 +19,7 @@ import {
   REGIME_TO_TIPO_USUARIO,
   RIPS_DEFAULTS,
 } from '@/constants/rips'
+import { extractRepsDigits, parseRepsCode } from '@/utils/repsCode'
 import { RIPS_FEV_NUMERO_PATTERN } from './ripsStructureValidation'
 import {
   resolveConsultationCupsForThs,
@@ -56,8 +57,9 @@ export function normalizeNit(nit: string): string {
 }
 
 export function normalizeCodPrestador(code: string): string {
-  const digits = code.replace(/\D/g, '')
-  return digits.padStart(12, '0').slice(-12)
+  const parsed = parseRepsCode(code)
+  if (parsed.valid) return parsed.digits
+  return extractRepsDigits(code)
 }
 
 export function resolveRipsNit(

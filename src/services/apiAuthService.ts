@@ -18,8 +18,19 @@ export interface ApiSubscriptionUser {
   nombre: string
   email: string
   rol: 'superadmin' | 'admin' | 'odontologo' | 'recepcion'
-  estado_pago: 'pendiente' | 'activo' | 'vencido' | 'exento'
+  estado_pago: 'pendiente' | 'activo' | 'vencido' | 'exento' | 'prueba'
   fecha_vencimiento: string | null
+  plan?: string | null
+  documentNumber?: string
+  rethusNumber?: string
+  repsCode?: string
+  repsStatus?: 'activo' | 'inactivo'
+  thsSpecialty?: string
+  repsEnabledSpecialties?: string[]
+  providerNit?: string
+  clinicName?: string
+  trialLimited?: boolean
+  trialLimits?: { maxPatients: number; maxVoiceNotesPerField: number } | null
   createdAt?: string
   updatedAt?: string
 }
@@ -175,9 +186,19 @@ export function mapApiUserToAuthUser(
     firstName,
     lastName,
     documentType: 'CC',
-    documentNumber: '0000000000',
+    documentNumber: user.documentNumber || '0000000000',
     role: mapApiRoleToUserRole(user.rol),
-    clinicName: 'doctorSEOlabs',
+    clinicName: user.clinicName || 'doctorSEOlabs',
     sessionId: token,
+    providerNit: user.providerNit,
+    repsCode: user.repsCode,
+    repsStatus: user.repsStatus,
+    rethusNumber: user.rethusNumber,
+    rethusStatus: user.rethusNumber ? 'activo' : undefined,
+    thsSpecialty: user.thsSpecialty as import('@/constants/ripsThsSpecialty').OdontologyThsSpecialtyId | undefined,
+    rehusSpecialty: user.thsSpecialty as import('@/constants/ripsThsSpecialty').OdontologyThsSpecialtyId | undefined,
+    repsEnabledSpecialties: user.repsEnabledSpecialties as
+      | import('@/constants/ripsThsSpecialty').OdontologyThsSpecialtyId[]
+      | undefined,
   }
 }

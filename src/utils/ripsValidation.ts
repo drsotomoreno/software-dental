@@ -8,6 +8,7 @@ import { isOdontologyConsultationCups } from '@/constants/rips'
 import { validateProcedureBillingQuantities } from './cupsBillingRules'
 import { validateProcedureLocations } from './cupsLocationRules'
 import { validateThsConsultationCupsMatch } from './ripsThsValidation'
+import { validateRepsSedeStep, validateRethusProfessionalStep } from './fevRipsEmissionPipeline'
 import {
   buildStructureValidationContext,
   validateRipsJsonStructure,
@@ -82,10 +83,10 @@ export function validateRipsExport(
     })
   } else if (!professional.providerNit?.replace(/\D/g, '') || !professional.repsCode?.replace(/\D/g, '')) {
     issues.push({
-      level: 'warning',
+      level: 'error',
       field: 'numDocumentoIdObligado',
       message:
-        'El perfil no tiene NIT o código REPS. Se usaron datos de demostración para validar; configúrelos en Perfil antes de radicar ante DIAN/MUV.',
+        'Configure NIT y código REPS de habilitación de la sede en el perfil antes de radicar RIPS o emitir FEV-Salud.',
     })
   }
 
@@ -98,6 +99,21 @@ export function validateRipsExport(
       level: 'warning',
       field: 'professional',
       message: 'El profesional no tiene documento de identificación registrado.',
+    })
+  }
+
+  const cupsFromRips = rips.usuarios.flatMap((usuario) => [
+    ...(usuario.servicios?.consultas ?? []).map((consulta) => consulta.codConsulta),
+    ...(usuario.servicios?.procedimientos ?? []).map((proc) => proc.codProcedimiento),
+  ])
+  for (const issue of [
+    ...validateRepsSedeStep(professional),
+    ...validateRethusProfessionalStep(professional, cupsFromRips),
+  ]) {
+    issues.push({
+      level: issue.level,
+      field: issue.field,
+      message: issue.message,
     })
   }
 

@@ -125,6 +125,12 @@ const TOP_NAV_ITEMS: TopNavItem[] = [
     permission: 'audit.read',
     row: 2,
   },
+  {
+    label: 'Suscripciones',
+    to: '/admin/usuarios',
+    permission: 'audit.read',
+    row: 2,
+  },
 ]
 
 function TopNavPill({

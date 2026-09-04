@@ -26,6 +26,7 @@ export interface DianInvoicePayload {
   razonSocialAdquiriente: string
   issueDate: string
   payableAmount: number
+  codPrestadorReps?: string
   lines?: Array<{
     description: string
     quantity: number

@@ -5,9 +5,15 @@ import { forgotPassword, resetPassword } from '../controllers/authPassword.contr
 import { requestRegisterCode, verifyRegisterCode } from '../controllers/authRegister.controller.js'
 import { getMailSettings, updateMailSettings } from '../controllers/authMailSettings.controller.js'
 import {
+  choosePaidPlan,
+  getSubscriptionStatus,
+  requestRethusTrial,
+} from '../controllers/subscription.controller.js'
+import {
   confirmSubscriptionPayment,
   ensureSuperAdmin,
   isMasterCredentials,
+  listAllSubscriptionUsers,
   loginSubscriptionUser,
   MASTER_EMAIL,
   registerSubscriptionUser,
@@ -145,10 +151,16 @@ router.post('/login', async (req, res) => {
         rol: isSuperAdmin ? 'superadmin' : user.rol,
         estado_pago: isSuperAdmin ? 'exento' : user.estado_pago,
         fecha_vencimiento: user.fecha_vencimiento,
+        plan: user.plan ?? null,
+        trialLimited: user.trialLimited === true,
+        trialLimits: user.trialLimits ?? null,
+        documentNumber: user.documentNumber ?? '',
+        rethusNumber: user.rethusNumber ?? '',
       },
       rol: isSuperAdmin ? 'superadmin' : user.rol,
       expiresAt: result.expiresAt,
       unlimitedAccess: isSuperAdmin || result.unlimitedAccess === true,
+      requiresSubscription: isSuperAdmin ? false : result.requiresSubscription === true,
     })
   } catch (error) {
     console.error('[Auth] Error en /login:', error)
@@ -204,6 +216,30 @@ router.post('/auth/register/request-code', requestRegisterCode)
 router.post('/auth/register/verify', verifyRegisterCode)
 router.get('/auth/mail-settings', getMailSettings)
 router.put('/auth/mail-settings', updateMailSettings)
+router.get('/subscription', getSubscriptionStatus)
+router.post('/subscription/trial', requestRethusTrial)
+router.post('/subscription/plan', choosePaidPlan)
+
+router.get('/admin/users', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const session = await resolveSubscriptionSession(token)
+    if (!session?.user) {
+      return res.status(401).json({ success: false, ok: false, error: 'Sesión inválida.' })
+    }
+    const email = String(session.user.email ?? '').toLowerCase()
+    const rol = String(session.user.rol ?? '').toLowerCase()
+    if (email !== MASTER_EMAIL && rol !== 'superadmin' && rol !== 'admin') {
+      return res.status(403).json({ success: false, ok: false, error: 'Solo el administrador puede ver los usuarios.' })
+    }
+    const users = await listAllSubscriptionUsers()
+    return res.json({ success: true, ok: true, users })
+  } catch (error) {
+    console.error('[Auth] Error en GET /admin/users:', error)
+    return res.status(500).json({ success: false, ok: false, error: 'No se pudo listar los usuarios.' })
+  }
+})
 
 router.get('/sesion', async (req, res) => {
   try {
@@ -215,24 +251,15 @@ router.get('/sesion', async (req, res) => {
       return res.status(401).json({ success: false, ok: false, error: 'Sesión inválida o expirada.' })
     }
 
-    if (!session.active) {
-      return res.status(402).json({
-        success: false,
-        ok: false,
-        error: 'La suscripción no está activa o el pago ha vencido.',
-        estado_pago: session.estado_pago,
-        requiresPayment: true,
-        user: session.user,
-      })
-    }
-
     return res.json({
       success: true,
       ok: true,
       user: session.user,
       rol: session.user.rol,
-      expiresAt: session.expiresAt,
+      expiresAt: session.expiresAt ?? null,
       unlimitedAccess: session.unlimitedAccess === true,
+      requiresSubscription: session.requiresSubscription === true || session.active === false,
+      active: session.active !== false,
     })
   } catch (error) {
     console.error('[Auth] Error en /sesion:', error)

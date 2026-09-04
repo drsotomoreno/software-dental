@@ -2,9 +2,10 @@ import type { ElectronicInvoice, InvoiceItem, InvoiceValidationIssue } from '@/t
 import type { UserProfile } from '@/types/user'
 import { RIPS_FEV_NUMERO_PATTERN } from '@/utils/ripsStructureValidation'
 import { isInvoiceItemRipsEligible } from '@/utils/buildRipsJson'
+import { validateFevRipsEmissionPipeline } from '@/utils/fevRipsEmissionPipeline'
+import { parseRepsCodeWithDane } from '@/utils/repsCode'
 
 const CUPS_PATTERN = /^\d{6}$/
-const REPS_PATTERN = /^\d{12}$/
 
 export function validateInvoiceItem(item: InvoiceItem): InvoiceValidationIssue[] {
   const issues: InvoiceValidationIssue[] = []
@@ -94,18 +95,12 @@ export function validateInvoiceForSubmission(
     issues.push({ level: 'error', field: 'issuerBusinessName', message: 'La razón social del emisor es obligatoria.' })
   }
 
-  const reps = invoice.healthSector.codPrestadorReps?.replace(/\D/g, '') ?? ''
-  if (!reps) {
+  const repsParsed = parseRepsCodeWithDane(invoice.healthSector.codPrestadorReps)
+  if (!repsParsed.valid) {
     issues.push({
       level: 'error',
       field: 'healthSector.codPrestadorReps',
-      message: 'El código REPS del prestador es obligatorio para FEV-Salud.',
-    })
-  } else if (!REPS_PATTERN.test(reps.padStart(12, '0').slice(-12))) {
-    issues.push({
-      level: 'error',
-      field: 'healthSector.codPrestadorReps',
-      message: 'El código REPS debe tener 12 dígitos.',
+      message: repsParsed.message ?? 'El código REPS del prestador es obligatorio para FEV-Salud.',
     })
   }
 
@@ -151,11 +146,14 @@ export function validateInvoiceForSubmission(
     })
   }
 
-  if (professional && !professional.repsCode?.trim() && !professional.providerNit?.trim()) {
+  if (professional) {
+    const pipelineIssues = validateFevRipsEmissionPipeline(professional, invoice, { requireCuv: false })
+    issues.push(...pipelineIssues)
+  } else {
     issues.push({
-      level: 'warning',
+      level: 'error',
       field: 'professional',
-      message: 'Complete REPS y NIT del prestador en el perfil profesional.',
+      message: 'No hay profesional tratante para validar REPS, RETHUS y especialidad.',
     })
   }
 

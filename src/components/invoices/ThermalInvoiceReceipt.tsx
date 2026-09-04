@@ -5,6 +5,7 @@ import {
   generateDianQrDataUrl,
 } from '@/utils/thermalInvoicePrint'
 import { formatCurrency, formatDate } from '@/utils/crypto'
+import { formatRepsCodeDisplay } from '@/utils/repsCode'
 import '@/styles/thermal-80mm.css'
 
 interface ThermalInvoiceReceiptProps {
@@ -45,7 +46,7 @@ export function ThermalInvoiceReceipt({ data, className = '' }: ThermalInvoiceRe
         <header className="thermal-header">
           <h1 className="thermal-header__name">{data.provider.businessName}</h1>
           <p className="thermal-header__meta">
-            NIT {data.provider.nitWithDv} · REPS {data.provider.repsCode}
+            NIT {data.provider.nitWithDv} · REPS {formatRepsCodeDisplay(data.provider.repsCode)}
           </p>
           {providerContact ? <p className="thermal-header__meta">{providerContact}</p> : null}
         </header>

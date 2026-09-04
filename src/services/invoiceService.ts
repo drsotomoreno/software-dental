@@ -368,6 +368,7 @@ export function buildDianProviderPayload(invoice: ElectronicInvoice): DianInvoic
     razonSocialAdquiriente: invoice.buyerName,
     issueDate: invoice.issueDate,
     payableAmount: invoice.netPayable,
+    codPrestadorReps: invoice.healthSector.codPrestadorReps,
     lines: invoice.items.map((item) => ({
       description: item.description,
       quantity: item.quantity,
@@ -454,8 +455,47 @@ export async function submitInvoiceToMinistry(
     invoice: dianPayload,
   })
 
+  const cuv = ministryResponse.success ? ministryResponse.cuv ?? null : null
+  if (!cuv) {
+    const rejected: ElectronicInvoice = {
+      ...invoice,
+      ripsJson: ripsPackage.rips,
+      ripsReportableTotal: ripsPackage.ripsReportableTotal,
+      ripsExcludedLineCount: ripsPackage.excludedLineCount,
+      updatedAt: now,
+      submittedAt: now,
+      status: 'rejected',
+      cuv: null,
+      cufe: null,
+      rejectionReason:
+        ministryResponse.error ??
+        'MUV no devolvió CUV. No se emite FEV ni se entrega factura al paciente sin CUV.',
+    }
+    await saveElectronicInvoice(rejected)
+    return {
+      validationIssues: [
+        ...allIssues,
+        {
+          level: 'error',
+          field: 'cuv',
+          message:
+            'El CUV del Ministerio de Salud es obligatorio antes de generar la FEV y entregarla al paciente.',
+        },
+      ],
+      ministryResponse: {
+        success: false,
+        approved: false,
+        error: rejected.rejectionReason ?? undefined,
+        ministryErrors: ministryResponse.success ? undefined : ministryResponse.ministryErrors,
+        localIssues: ministryResponse.success ? ministryResponse.localWarnings : ministryResponse.localIssues,
+      },
+      invoice: rejected,
+      folioConsumed: false,
+      depleted: !usesProviderEmission(),
+    }
+  }
+
   let cufe = invoice.cufe ?? null
-  let providerCuv: string | undefined
   let folioConsumed = false
   const providerResult = await emitInvoiceWithDianProvider({
     invoiceNumber: invoice.invoiceNumber,
@@ -463,17 +503,16 @@ export async function submitInvoiceToMinistry(
     amount: invoice.netPayable,
     buyerName: invoice.buyerName,
     buyerDocument: invoice.buyerDocumentNumber,
+    cuv,
   })
   if (providerResult.ok && providerResult.cufe) {
     cufe = providerResult.cufe
-    providerCuv = providerResult.cuv
     folioConsumed = consumeElectronicFolio()
   }
 
-  const cuv = ministryResponse.success ? ministryResponse.cuv : providerCuv ?? null
   const ripsJson = {
     ...ripsPackage.rips,
-    ...(cuv ? { cuv } : {}),
+    cuv,
     ...(cufe ? { cufe } : {}),
   }
 
@@ -484,12 +523,11 @@ export async function submitInvoiceToMinistry(
     ripsExcludedLineCount: ripsPackage.excludedLineCount,
     updatedAt: now,
     submittedAt: now,
-    status: ministryResponse.success && ministryResponse.approved ? 'cuv_approved' : 'rejected',
+    status: 'cuv_approved',
     cuv,
     cuvRecordId: ministryResponse.success ? ministryResponse.cuvRecordId : null,
     cufe,
-    rejectionReason:
-      ministryResponse.success ? null : ministryResponse.error ?? 'Rechazado por MUV',
+    rejectionReason: null,
   }
 
   await saveElectronicInvoice(updatedInvoice)
