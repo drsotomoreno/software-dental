@@ -14,6 +14,7 @@ import type { SignatureCaptureResult } from '@/types/signature'
 import { computeContentHash, formatDate, serializeForHash } from '@/utils'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 import { collectSignatureContext } from '@/utils/clientContext'
+import { getProfessionalSignBlocker } from '@/utils/professionalSignGate'
 
 interface ClinicalRecordAddendumPanelProps {
   record: ClinicalRecord
@@ -65,6 +66,11 @@ export function ClinicalRecordAddendumPanel({
       setError('El registro original no tiene hash de integridad.')
       return
     }
+    const rethusBlocker = getProfessionalSignBlocker(user)
+    if (rethusBlocker) {
+      setError(rethusBlocker)
+      return
+    }
     setShowConfirm(true)
   }
 
@@ -92,7 +98,6 @@ export function ClinicalRecordAddendumPanel({
         authorEmail: user.email,
         authorName: `${user.firstName} ${user.lastName}`,
         authorDocument: user.documentNumber,
-        authorLicense: user.professionalLicense,
         sessionId: user.sessionId,
         parentRecordHash: record.contentHash,
         signedAt: now,

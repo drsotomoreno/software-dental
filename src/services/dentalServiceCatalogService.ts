@@ -148,3 +148,50 @@ export async function filterCupsProcedureOptionsForUser<
 
   return results
 }
+
+export async function upsertProfessionalFromUser(user: UserProfile): Promise<void> {
+  const now = new Date().toISOString()
+  const existing = await getProfessionalByUserId(user.id)
+  const organizationId = userProfileToOrganizationId(user)
+  const rehusSpecialty =
+    user.rehusSpecialty ?? user.thsSpecialty ?? GENERAL_DENTISTRY_REHUS_SPECIALTY
+
+  if (existing) {
+    await db.professionals.update(existing.id, {
+      organizationId,
+      documentType: user.documentType,
+      documentNumber: user.documentNumber,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      rehusSpecialty,
+      repsCode: user.repsCode,
+      rethusNumber: user.rethusNumber,
+      rethusStatus: user.rethusStatus ?? 'activo',
+      isActive: true,
+      updatedAt: now,
+    })
+    return
+  }
+
+  if (user.role !== 'odontologo' && user.role !== 'admin' && user.role !== 'superadmin') {
+    return
+  }
+
+  const { generateId } = await import('@/utils/crypto')
+  await db.professionals.add({
+    id: generateId(),
+    userId: user.id,
+    organizationId,
+    documentType: user.documentType,
+    documentNumber: user.documentNumber,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    rehusSpecialty,
+    repsCode: user.repsCode,
+    rethusNumber: user.rethusNumber,
+    rethusStatus: user.rethusStatus ?? 'activo',
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  })
+}

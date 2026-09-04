@@ -66,8 +66,10 @@ export interface Professional {
   documentNumber: string
   firstName: string
   lastName: string
-  professionalLicense?: string
-  /** Especialidad REHUS/REPS habilitada del profesional */
+  /** Número RETHUS del profesional tratante (legado; la cédula es la llave de consulta). */
+  rethusNumber?: string
+  rethusStatus?: 'activo' | 'inactivo' | 'pendiente'
+  /** Especialidad RETHUS/REPS habilitada del profesional */
   rehusSpecialty: RehusSpecialtyId
   repsCode?: string
   isActive: boolean

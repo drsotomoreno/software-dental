@@ -66,7 +66,7 @@ export function NewPatientPage() {
   const [error, setError] = useState('')
   const { toastMessage, showToast, clearToast } = useToast()
 
-  const professionalLicense = user?.professionalLicense ?? ''
+  const professionalLicense = user?.documentNumber ?? ''
   const patientFormError = validatePatientForm(form)
 
   useEffect(() => {

@@ -734,8 +734,7 @@ function buildConsentSection(data: ClinicalRecordFormData): string {
       <table>
         ${fieldRow('Consentimientos seleccionados', selectedConsents || '—')}
         ${fieldRow('Texto aceptado', consent.textAccepted ? 'Sí' : 'No')}
-        ${fieldRow('Registro profesional', consent.professionalLicense)}
-        ${fieldRow('Tarjeta profesional', consent.professionalRegistry)}
+        ${fieldRow('Número de documento (Cédula / ReTHUS)', consent.professionalLicense || consent.professionalRegistry)}
         ${fieldRow('Fecha de firma', consent.signedAt ? formatDate(consent.signedAt) : '—')}
       </table>
       <div class="signatures">
@@ -831,7 +830,7 @@ export function buildClinicalHistoryPrintHtml(input: ClinicalHistoryPrintInput):
   <h1>Historia Clínica Odontológica</h1>
   <p class="meta">
     Paciente: <strong>${escapeHtml(fullName)}</strong> — ${escapeHtml(patient.documentType)} ${escapeHtml(patient.documentNumber)}<br />
-    Impreso: ${formatDate(new Date().toISOString())} · Profesional: ${escapeHtml(`${professional.firstName} ${professional.lastName}`)}${professional.professionalLicense ? ` · R.P. ${escapeHtml(professional.professionalLicense)}` : ''}
+    Impreso: ${formatDate(new Date().toISOString())} · Profesional: ${escapeHtml(`${professional.firstName} ${professional.lastName}`)}${professional.documentNumber ? ` · Doc. ${escapeHtml(professional.documentNumber)}` : ''}
   </p>
   ${bodySections}
   <footer>

@@ -140,7 +140,7 @@ export async function buildClinicalHistoryExportPackage(
           name: `${exportedBy.firstName} ${exportedBy.lastName}`,
           email: exportedBy.email,
           role: ROLE_LABELS[exportedBy.role],
-          professionalLicense: exportedBy.professionalLicense,
+          documentNumber: exportedBy.documentNumber,
           clinicName: exportedBy.clinicName,
           providerNit: exportedBy.providerNit,
         }

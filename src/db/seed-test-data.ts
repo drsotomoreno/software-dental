@@ -170,9 +170,8 @@ function withSeedBillingDefaults(user: UserProfile): UserProfile {
   return {
     ...user,
     clinicName: user.clinicName?.trim() || 'Clínica Dental Sonrisa',
-    professionalLicense: user.professionalLicense?.trim() || 'OD-12345',
     providerNit: user.providerNit?.trim() || '900123456-1',
-    repsCode: user.repsCode?.trim() || '500000000001',
+    repsCode: user.repsCode?.trim() || '6800103898-01',
     documentType: user.documentType || 'CC',
     documentNumber:
       user.documentNumber && user.documentNumber !== '0000000000'
@@ -318,7 +317,7 @@ function buildUnsignedEvolution(params: {
     anesthesia: { type: 'Lidocaína 2% con epinefrina', carpules: 1, vasoconstrictor: 'Epinefrina 1:80.000' },
     prescriptions: 'Ibuprofeno 400 mg cada 8 h por 3 días si hay dolor.',
     professionalName: `${professional.firstName} ${professional.lastName}`,
-    professionalLicense: professional.professionalLicense ?? 'OD-12345',
+    professionalLicense: professional.documentNumber ?? '1234567890',
     authorUserId: professional.id,
     authorEmail: professional.email,
     createdAt,
@@ -623,7 +622,7 @@ async function persistSignedRecord(params: {
   odontogram: OdontogramData
 }): Promise<ClinicalRecord> {
   const signedNotes = await finalizeEvolutionNotes([params.evolutionDraft], params.now)
-  const professionalLicense = params.professional.professionalLicense ?? 'OD-12345'
+  const professionalLicense = params.professional.documentNumber ?? '1234567890'
 
   const record: ClinicalRecord = {
     patientId: params.patientId,

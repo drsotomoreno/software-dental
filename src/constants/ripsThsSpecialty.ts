@@ -18,6 +18,8 @@ export type OdontologyThsSpecialtyId =
   | 'odontologia_del_bebe'
   | 'periodoncia'
   | 'ortodoncia'
+  | 'implantologia'
+  | 'odontologia_estetica'
   | 'radiologia_oral_maxilofacial'
   | 'rehabilitacion_oral'
   | 'patologia_oral_maxilofacial'
@@ -84,6 +86,18 @@ export const ODONTOLOGY_THS_SPECIALTIES: OdontologyThsSpecialtyDefinition[] = [
     label: 'Ortodoncia',
     primeraVezCups: ODONTOLOGY_SPECIALIST_FIRST_VISIT_CUPS.ortodoncia,
     controlCups: ODONTOLOGY_SPECIALIST_FOLLOWUP_CUPS.ortodoncia,
+  },
+  {
+    id: 'implantologia',
+    label: 'Implantología oral',
+    primeraVezCups: ODONTOLOGY_SPECIALTY_FIRST_VISIT_CUPS,
+    controlCups: ODONTOLOGY_SPECIALTY_FOLLOWUP_CUPS,
+  },
+  {
+    id: 'odontologia_estetica',
+    label: 'Odontología estética',
+    primeraVezCups: ODONTOLOGY_SPECIALTY_FIRST_VISIT_CUPS,
+    controlCups: ODONTOLOGY_SPECIALTY_FOLLOWUP_CUPS,
   },
   {
     id: 'radiologia_oral_maxilofacial',

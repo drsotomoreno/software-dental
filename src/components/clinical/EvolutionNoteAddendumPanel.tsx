@@ -98,7 +98,7 @@ export function EvolutionNoteAddendumPanel({
         authorEmail: user.email,
         authorName: `${user.firstName} ${user.lastName}`,
         authorDocument: user.documentNumber,
-        professionalLicense: user.professionalLicense,
+        professionalLicense: user.documentNumber,
         professionalSignatureDataUrl: signature!.dataUrl,
         professionalSignatureMeta: signature!.metadata,
         signedAt: now,

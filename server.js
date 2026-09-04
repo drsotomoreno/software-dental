@@ -45,7 +45,22 @@ const distIndex = path.join(distDir, 'index.html')
 const hasFrontendBuild = existsSync(distIndex)
 const isProduction = process.env.NODE_ENV === 'production'
 
-if (!isProduction && !hasFrontendBuild) {
+await ensureSuperAdmin()
+
+export { config, DATABASE_URL }
+
+if (isProduction) {
+  if (!hasFrontendBuild) {
+    console.error(
+      '[RIPS API] Falta dist/index.html. En Render el Build Command debe ser: npm run build',
+    )
+  }
+  app.use(express.static(distDir))
+  app.get('/{*splat}', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next()
+    res.sendFile(distIndex)
+  })
+} else {
   try {
     const { readFileSync } = await import('node:fs')
     const { createServer: createViteServer } = await import('vite')
@@ -65,27 +80,26 @@ if (!isProduction && !hasFrontendBuild) {
         next(error)
       }
     })
+    console.log('[RIPS API] Frontend de desarrollo: Vite (no se usa dist/ hasta NODE_ENV=production).')
   } catch (error) {
-    console.error(
-      '[RIPS API] No se encontró dist/index.html ni Vite. Ejecuta "npm run build" antes de desplegar.',
-      error?.message ?? error,
-    )
+    if (hasFrontendBuild) {
+      console.warn(
+        '[RIPS API] Vite no arrancó; se sirve dist/ (puede estar desactualizado).',
+        error?.message ?? error,
+      )
+      app.use(express.static(distDir))
+      app.get('/{*splat}', (req, res, next) => {
+        if (req.path.startsWith('/api')) return next()
+        res.sendFile(distIndex)
+      })
+    } else {
+      console.error(
+        '[RIPS API] No se encontró dist/index.html ni Vite. Ejecuta "npm run build" o "npm run dev".',
+        error?.message ?? error,
+      )
+    }
   }
-} else if (isProduction && !hasFrontendBuild) {
-  console.error(
-    '[RIPS API] Falta dist/index.html. En Render el Build Command debe ser: npm run build',
-  )
 }
-
-await ensureSuperAdmin()
-
-export { config, DATABASE_URL }
-
-app.use(express.static(distDir))
-app.get('/{*splat}', (req, res, next) => {
-  if (req.path.startsWith('/api')) return next()
-  res.sendFile(distIndex)
-})
 
 app.use(errorHandler)
 

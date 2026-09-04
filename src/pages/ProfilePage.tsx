@@ -3,20 +3,28 @@ import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import { changeUserPassword } from '@/services/authService'
+import { upsertProfessionalFromUser } from '@/services/dentalServiceCatalogService'
 import { ROLE_LABELS } from '@/utils/permissions'
 import { LocalBackupPanel } from '@/components/backup/LocalBackupPanel'
 import { ClearTestDatabasePanel } from '@/components/settings/ClearTestDatabasePanel'
 import { MailSettingsPanel } from '@/components/settings/MailSettingsPanel'
-import { getStoredApiAuth } from '@/services/apiAuthService'
 import {
-  ODONTOLOGY_THS_SPECIALTIES,
-  type OdontologyThsSpecialtyId,
-} from '@/constants/ripsThsSpecialty'
+  DocumentIdentityField,
+  RepsHabilitationField,
+  RethusSpecialtyField,
+  ensureSpecialtyInRepsPortfolio,
+} from '@/components/settings/RegulatoryIdentityFields'
+import { getStoredApiAuth, setStoredApiAuth } from '@/services/apiAuthService'
+import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
+import type { RepsHabilitationStatus } from '@/utils/repsCode'
+import { validateActiveRepsSede } from '@/utils/repsCode'
+import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
 
 export function ProfilePage() {
-  const { user, can } = useAuth()
+  const { user, can, refreshSessionUser } = useAuth()
   const { audit } = useAudit()
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [passwordSaved, setPasswordSaved] = useState(false)
   const [passwordError, setPasswordError] = useState('')
 
@@ -24,11 +32,14 @@ export function ProfilePage() {
     firstName: '',
     lastName: '',
     email: '',
-    professionalLicense: '',
+    documentType: 'CC',
+    documentNumber: '',
     clinicName: '',
     providerNit: '',
     repsCode: '',
+    repsStatus: 'activo' as RepsHabilitationStatus,
     thsSpecialty: 'odontologia_general' as OdontologyThsSpecialtyId,
+    repsEnabledSpecialties: ['odontologia_general'] as OdontologyThsSpecialtyId[],
   })
 
   const [passwordForm, setPasswordForm] = useState({
@@ -43,11 +54,17 @@ export function ProfilePage() {
         firstName: user.firstName,
         lastName: user.lastName,
         email: user.email,
-        professionalLicense: user.professionalLicense ?? '',
+        documentType: user.documentType || 'CC',
+        documentNumber: user.documentNumber ?? '',
         clinicName: user.clinicName,
         providerNit: user.providerNit ?? '',
         repsCode: user.repsCode ?? '',
+        repsStatus: user.repsStatus ?? 'activo',
         thsSpecialty: user.thsSpecialty ?? 'odontologia_general',
+        repsEnabledSpecialties:
+          user.repsEnabledSpecialties?.length
+            ? user.repsEnabledSpecialties
+            : [user.thsSpecialty ?? 'odontologia_general'],
       })
     }
   }, [user])
@@ -55,16 +72,56 @@ export function ProfilePage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user?.id) return
-    await db.users.update(user.id, {
+    setSaveError('')
+
+    const documentCheck = validateProfessionalDocumentNumber(form.documentNumber)
+    if (!documentCheck.valid) {
+      setSaveError(documentCheck.message ?? 'El número de documento es obligatorio.')
+      return
+    }
+
+    if (form.repsCode.trim()) {
+      const reps = validateActiveRepsSede(form.repsCode, form.repsStatus)
+      if (!reps.valid) {
+        setSaveError(reps.message ?? 'El código REPS no es válido.')
+        return
+      }
+    }
+
+    const repsEnabledSpecialties = ensureSpecialtyInRepsPortfolio(
+      form.thsSpecialty,
+      form.repsEnabledSpecialties,
+    )
+    const patch = {
       firstName: form.firstName,
       lastName: form.lastName,
       email: form.email,
-      professionalLicense: form.professionalLicense,
+      documentType: form.documentType,
+      documentNumber: documentCheck.normalized ?? form.documentNumber.trim(),
       clinicName: form.clinicName,
       providerNit: form.providerNit,
       repsCode: form.repsCode,
+      repsStatus: form.repsStatus,
       thsSpecialty: form.thsSpecialty,
-    })
+      rehusSpecialty: form.thsSpecialty,
+      repsEnabledSpecialties,
+    }
+    await db.users.update(user.id, patch)
+    await upsertProfessionalFromUser({ ...user, ...patch })
+    const apiAuth = getStoredApiAuth()
+    if (apiAuth) {
+      setStoredApiAuth(apiAuth.token, {
+        ...apiAuth.user,
+        documentNumber: documentCheck.normalized ?? form.documentNumber.trim(),
+        repsCode: form.repsCode,
+        repsStatus: form.repsStatus,
+        thsSpecialty: form.thsSpecialty,
+        repsEnabledSpecialties,
+        providerNit: form.providerNit,
+        clinicName: form.clinicName,
+      })
+    }
+    await refreshSessionUser()
     await audit({
       action: 'UPDATE_PROFILE',
       resourceType: 'profile',
@@ -112,18 +169,18 @@ export function ProfilePage() {
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Mi perfil</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          {ROLE_LABELS[user.role]} · {user.email}
-        </p>
-      </div>
-
       <form onSubmit={handleSave} className="card space-y-4">
-        <h2 className="text-base font-semibold text-slate-800">Datos profesionales</h2>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">Mi perfil</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {ROLE_LABELS[user.role]} · {user.email}
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="label-field">Nombres</label>
+            <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
+              Nombres
+            </label>
             <input
               value={form.firstName || user.firstName}
               onChange={(e) => setForm({ ...form, firstName: e.target.value })}
@@ -131,79 +188,80 @@ export function ProfilePage() {
             />
           </div>
           <div>
-            <label className="label-field">Apellidos</label>
+            <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
+              Apellidos
+            </label>
             <input
               value={form.lastName || user.lastName}
               onChange={(e) => setForm({ ...form, lastName: e.target.value })}
               className="input-field"
             />
           </div>
-          <div className="sm:col-span-2">
-            <label className="label-field">Correo</label>
-            <input
-              type="email"
-              value={form.email || user.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="input-field"
-            />
-          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
+            Correo electrónico
+          </label>
+          <input
+            type="email"
+            value={form.email || user.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            className="input-field bg-slate-50"
+          />
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <DocumentIdentityField
+            compact
+            documentType={form.documentType}
+            documentNumber={form.documentNumber}
+            onChange={(patch) => setForm({ ...form, ...patch })}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
+            Nombre de la clínica / consultorio
+          </label>
+          <input
+            value={form.clinicName || user.clinicName}
+            onChange={(e) => setForm({ ...form, clinicName: e.target.value })}
+            className="input-field"
+          />
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="label-field">Tarjeta profesional</label>
-            <input
-              value={form.professionalLicense || user.professionalLicense || ''}
-              onChange={(e) => setForm({ ...form, professionalLicense: e.target.value })}
-              className="input-field"
-            />
-          </div>
-          <div>
-            <label className="label-field">Clínica</label>
-            <input
-              value={form.clinicName || user.clinicName}
-              onChange={(e) => setForm({ ...form, clinicName: e.target.value })}
-              className="input-field"
-            />
-          </div>
-          <div>
-            <label className="label-field">NIT prestador (RIPS)</label>
+            <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
+              NIT fiscal (DIAN)
+            </label>
             <input
               value={form.providerNit || user.providerNit || ''}
               onChange={(e) => setForm({ ...form, providerNit: e.target.value })}
               className="input-field font-mono"
+              placeholder="NIT con dígito de verificación"
             />
           </div>
-          <div>
-            <label className="label-field">Código REPS</label>
-            <input
-              value={form.repsCode || user.repsCode || ''}
-              onChange={(e) => setForm({ ...form, repsCode: e.target.value })}
-              className="input-field font-mono"
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="label-field">Especialidad THS (REPS)</label>
-            <select
-              value={form.thsSpecialty || user.thsSpecialty || 'odontologia_general'}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  thsSpecialty: e.target.value as OdontologyThsSpecialtyId,
-                })
-              }
-              className="input-field"
-            >
-              {ODONTOLOGY_THS_SPECIALTIES.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-slate-500">
-              Debe coincidir con la especialidad habilitada en REPS y con el CUPS de consulta en
-              RIPS (validación MUV).
-            </p>
-          </div>
+          <RepsHabilitationField
+            compact
+            value={form.repsCode}
+            onChange={(repsCode) => setForm({ ...form, repsCode })}
+          />
         </div>
-        <button type="submit" className="btn-primary">
+        <RethusSpecialtyField
+          value={form.thsSpecialty}
+          onChange={(thsSpecialty) =>
+            setForm({
+              ...form,
+              thsSpecialty,
+              repsEnabledSpecialties: ensureSpecialtyInRepsPortfolio(
+                thsSpecialty,
+                form.repsEnabledSpecialties,
+              ),
+            })
+          }
+        />
+        {saveError ? (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{saveError}</p>
+        ) : null}
+        <button type="submit" className="btn-primary w-full py-2.5">
           Guardar cambios
         </button>
         {saved && <p className="text-sm text-green-600">Perfil actualizado.</p>}

@@ -31,6 +31,7 @@ import {
   VERIFICATION_STATUS_MAP,
 } from '@/constants/fhir'
 import { validateFhirExport } from './fhirValidation'
+import { formatRepsCodeDisplay, normalizeRepsCode } from './repsCode'
 import type { RipsSourceRecord } from './rips'
 
 export type FhirSourceRecord = RipsSourceRecord
@@ -147,7 +148,7 @@ function buildOrganizationResource(user: UserProfile, metadata: FhirExportMetada
         ? [{ system: FHIR_SYSTEMS.organizationNit, value: user.providerNit.replace(/\D/g, '') }]
         : []),
       ...(user.repsCode
-        ? [{ system: FHIR_SYSTEMS.reps, value: user.repsCode }]
+        ? [{ system: FHIR_SYSTEMS.reps, value: normalizeRepsCode(user.repsCode) || formatRepsCodeDisplay(user.repsCode) }]
         : []),
     ],
     name: metadata.organizationName?.trim() || user.clinicName || 'Prestador odontológico',
@@ -172,8 +173,8 @@ function buildPractitionerResource(user: UserProfile): FhirPractitioner {
           ],
         },
       },
-      ...(user.professionalLicense
-        ? [{ system: FHIR_SYSTEMS.professionalLicense, value: user.professionalLicense }]
+      ...(user.rethusNumber
+        ? [{ system: FHIR_SYSTEMS.rethus, value: user.rethusNumber }]
         : []),
     ],
     name: [

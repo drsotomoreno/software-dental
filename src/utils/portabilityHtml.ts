@@ -97,7 +97,7 @@ export function buildPortabilityHtml(pkg: ClinicalHistoryExportPackage): string 
 
   <h2>Prestador / custodio</h2>
   <p>${manifest.exportedBy?.name ?? '—'}<br />
-  ${manifest.exportedBy?.clinicName ?? ''}${manifest.exportedBy?.professionalLicense ? ` · R.P. ${manifest.exportedBy.professionalLicense}` : ''}</p>
+  ${manifest.exportedBy?.clinicName ?? ''}${manifest.exportedBy?.documentNumber ? ` · Doc. ${manifest.exportedBy.documentNumber}` : ''}</p>
 
   <h2>Marco legal</h2>
   <ul class="legal">
