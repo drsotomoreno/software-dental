@@ -1,11 +1,11 @@
-import { MASTER_EMAIL, resolveSubscriptionSession } from '../services/subscriptionAuthStore.js'
+import { MASTER_EMAIL, resolveSubscriptionSession, sessionHintFromRequest } from '../services/subscriptionAuthStore.js'
 import { isMailConfigured, mailTransportLabel } from '../services/mailer.js'
 import { loadMailSettings, publicMailStatus, saveMailSettings } from '../services/mailSettingsStore.js'
 
 async function requireSuperAdmin(req) {
   const authHeader = req.headers.authorization ?? ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
-  const session = await resolveSubscriptionSession(token)
+  const session = await resolveSubscriptionSession(token, sessionHintFromRequest(req))
   if (!session?.user) return null
   const email = String(session.user.email ?? '').toLowerCase()
   const rol = String(session.user.rol ?? '').toLowerCase()

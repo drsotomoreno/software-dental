@@ -26,7 +26,7 @@ import { validatePrestadorIdentityFields } from '@/utils/prestadorIdentity'
 import { PROVIDER_TYPES, isInstitutionProvider, normalizeProviderType } from '@/utils/providerType'
 
 export function ProfilePage() {
-  const { user, can, refreshSessionUser } = useAuth()
+  const { user, can, applySessionUser } = useAuth()
   const { audit } = useAudit()
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -175,7 +175,9 @@ export function ProfilePage() {
           }
           return
         }
-        setStoredApiAuth(apiAuth.token, remote.user)
+        const latestAuth = getStoredApiAuth()
+        setStoredApiAuth(latestAuth?.token ?? apiAuth.token, remote.user)
+        applySessionUser(remote.user)
         const remoteType = normalizeProviderType(remote.user.providerType)
         setForm((current) => ({
           ...current,
@@ -188,25 +190,30 @@ export function ProfilePage() {
           repsCode: remote.user.repsCode ?? current.repsCode,
           documentNumber: remote.user.documentNumber ?? current.documentNumber,
           rethusNumber: remote.user.rethusNumber ?? current.rethusNumber,
+          thsSpecialty:
+            (remote.user.thsSpecialty as OdontologyThsSpecialtyId | undefined) ?? current.thsSpecialty,
         }))
       }
 
-      const localUser = await db.users.get(user.id)
-      if (localUser) {
-        await db.users.update(user.id, patch)
-        await upsertProfessionalFromUser({ ...localUser, ...patch })
-      } else {
-        await upsertProfessionalFromUser({ ...user, ...patch })
+      try {
+        const localUser = await db.users.get(user.id)
+        if (localUser) {
+          await db.users.update(user.id, patch)
+          await upsertProfessionalFromUser({ ...localUser, ...patch })
+        } else {
+          await upsertProfessionalFromUser({ ...user, ...patch })
+        }
+        await audit({
+          action: 'UPDATE_PROFILE',
+          resourceType: 'profile',
+          resourceId: user.id,
+          details: 'Actualización de identidad del prestador',
+        })
+      } catch (localError) {
+        console.error('[perfil] La API guardó el perfil; IndexedDB local falló:', localError)
       }
-      await audit({
-        action: 'UPDATE_PROFILE',
-        resourceType: 'profile',
-        resourceId: user.id,
-        details: 'Actualización de identidad del prestador',
-      })
       setSaved(true)
       window.setTimeout(() => setSaved(false), 5000)
-      await refreshSessionUser()
     } catch (error) {
       setSaveError(
         error instanceof Error ? error.message : 'No se pudo guardar el perfil. Intente de nuevo.',

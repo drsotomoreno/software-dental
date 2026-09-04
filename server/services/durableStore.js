@@ -50,35 +50,105 @@ async function ensureTable(client) {
   `)
 }
 
-export async function readDurableJson(filePath, fallback, storeKey = STORE_KEY) {
+async function readJsonFile(filePath) {
+  try {
+    const parsed = JSON.parse(await readFile(filePath, 'utf8'))
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+async function readPostgresJson(storeKey) {
   const db = getPool()
-  if (db) {
+  if (!db) return null
+  try {
+    const client = await db.connect()
     try {
-      const client = await db.connect()
-      try {
-        await ensureTable(client)
-        const { rows } = await client.query('SELECT value FROM app_json_store WHERE key = $1', [
-          storeKey,
-        ])
-        if (rows[0]?.value && typeof rows[0].value === 'object') {
-          return rows[0].value
-        }
-      } finally {
-        client.release()
-      }
-    } catch (error) {
-      console.error(
-        '[store] PostgreSQL no disponible, se usa archivo local:',
-        error instanceof Error ? error.message : error,
-      )
+      await ensureTable(client)
+      const { rows } = await client.query('SELECT value FROM app_json_store WHERE key = $1', [
+        storeKey,
+      ])
+      const value = rows[0]?.value
+      return value && typeof value === 'object' ? value : null
+    } finally {
+      client.release()
+    }
+  } catch (error) {
+    console.error(
+      '[store] PostgreSQL no disponible, se usa archivo local:',
+      error instanceof Error ? error.message : error,
+    )
+    return null
+  }
+}
+
+function stamp(item) {
+  return Date.parse(item?.updatedAt || item?.createdAt || 0) || 0
+}
+
+function mergeByKey(secondary = [], primary = [], key, primaryWins) {
+  const map = new Map()
+  for (const item of secondary) {
+    if (!item || item[key] == null) continue
+    map.set(String(item[key]), item)
+  }
+  for (const item of primary) {
+    if (!item || item[key] == null) continue
+    const id = String(item[key])
+    const prev = map.get(id)
+    if (!prev || primaryWins || stamp(item) >= stamp(prev)) {
+      map.set(id, item)
     }
   }
+  return [...map.values()]
+}
 
-  try {
-    return JSON.parse(await readFile(filePath, 'utf8'))
-  } catch {
-    return fallback
+const MAX_SESSIONS = 400
+
+function mergeSessions(secondary = [], primary = []) {
+  const map = new Map()
+  for (const session of [...secondary, ...primary]) {
+    if (session?.token) map.set(String(session.token), session)
   }
+  return [...map.values()]
+    .sort((a, b) => stamp(b) - stamp(a))
+    .slice(0, MAX_SESSIONS)
+}
+
+export function mergeDurableStores(primary, secondary, { primaryUserWins = false } = {}) {
+  if (!primary || typeof primary !== 'object') return secondary && typeof secondary === 'object' ? secondary : primary
+  if (!secondary || typeof secondary !== 'object') return primary
+
+  const merged = { ...secondary, ...primary }
+  if (Array.isArray(primary.users) || Array.isArray(secondary.users)) {
+    merged.users = mergeByKey(secondary.users, primary.users, 'id', primaryUserWins)
+  }
+  if (Array.isArray(primary.sessions) || Array.isArray(secondary.sessions)) {
+    merged.sessions = mergeSessions(secondary.sessions, primary.sessions)
+  }
+  if (Array.isArray(primary.passwordResets) || Array.isArray(secondary.passwordResets)) {
+    merged.passwordResets = mergeByKey(secondary.passwordResets, primary.passwordResets, 'tokenHash', primaryUserWins)
+  }
+  if (Array.isArray(primary.emailVerifications) || Array.isArray(secondary.emailVerifications)) {
+    merged.emailVerifications = mergeByKey(
+      secondary.emailVerifications,
+      primary.emailVerifications,
+      'tokenHash',
+      primaryUserWins,
+    )
+  }
+  return merged
+}
+
+export async function readDurableJson(filePath, fallback, storeKey = STORE_KEY) {
+  const fileValue = await readJsonFile(filePath)
+  const pgValue = await readPostgresJson(storeKey)
+
+  if (pgValue && fileValue) return mergeDurableStores(fileValue, pgValue)
+  if (pgValue) return pgValue
+  if (fileValue) return fileValue
+  return fallback
 }
 
 export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
@@ -91,18 +161,23 @@ export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
     const client = await db.connect()
     try {
       await ensureTable(client)
+      const { rows } = await client.query('SELECT value FROM app_json_store WHERE key = $1', [
+        storeKey,
+      ])
+      const current = rows[0]?.value && typeof rows[0].value === 'object' ? rows[0].value : null
+      const toWrite = current ? mergeDurableStores(value, current, { primaryUserWins: true }) : value
       await client.query(
         `INSERT INTO app_json_store (key, value, updated_at)
          VALUES ($1, $2::jsonb, now())
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-        [storeKey, JSON.stringify(value)],
+        [storeKey, JSON.stringify(toWrite)],
       )
     } finally {
       client.release()
     }
   } catch (error) {
     console.error(
-      '[store] No se pudo persistir el perfil en PostgreSQL:',
+      '[store] No se pudo persistir el perfil en PostgreSQL; se conserva el archivo local:',
       error instanceof Error ? error.message : error,
     )
   }

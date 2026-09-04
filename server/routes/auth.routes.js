@@ -16,9 +16,11 @@ import {
   isMasterCredentials,
   listAllSubscriptionUsers,
   loginSubscriptionUser,
+  issueMasterSessionToken,
   MASTER_EMAIL,
   registerSubscriptionUser,
   resolveSubscriptionSession,
+  sessionHintFromRequest,
   updateSubscriptionProfile,
 } from '../services/subscriptionAuthStore.js'
 
@@ -118,12 +120,16 @@ router.post('/login', async (req, res) => {
       try {
         result = await loginSubscriptionUser({ email, password })
       } catch (masterError) {
-        console.error('[Auth] Login maestro: store falló, se otorga sesión de respaldo', masterError)
+        console.error('[Auth] Login maestro: store falló, se otorga sesión persistida de respaldo', masterError)
         result = { ok: false }
       }
 
+      if (!result?.ok || !result.token) {
+        result = await issueMasterSessionToken(result?.token)
+      }
+
       const user = masterUserPayload(result.user)
-      const token = result.token || randomBytes(32).toString('hex')
+      const token = result.token
 
       return res.json({
         success: true,
@@ -160,7 +166,6 @@ router.post('/login', async (req, res) => {
       user: isSuperAdmin
         ? { ...user, rol: 'superadmin', estado_pago: 'exento', email: user.email }
         : user,
-      rol: isSuperAdmin ? 'superadmin' : user.rol,
       rol: isSuperAdmin ? 'superadmin' : user.rol,
       expiresAt: result.expiresAt,
       unlimitedAccess: isSuperAdmin || result.unlimitedAccess === true,
@@ -228,7 +233,7 @@ router.get('/admin/users', async (req, res) => {
   try {
     const authHeader = req.headers.authorization ?? ''
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
-    const session = await resolveSubscriptionSession(token)
+    const session = await resolveSubscriptionSession(token, sessionHintFromRequest(req))
     if (!session?.user) {
       return res.status(401).json({ success: false, ok: false, error: 'Sesión inválida.' })
     }
@@ -254,6 +259,7 @@ router.put('/profile/password', async (req, res) => {
       token,
       currentPassword: body.currentPassword,
       newPassword: body.newPassword,
+      hint: sessionHintFromRequest(req),
     })
     if (!result.ok) {
       return res.status(result.status).json({ success: false, ok: false, error: result.error })
@@ -274,7 +280,14 @@ router.put('/profile', async (req, res) => {
     const authHeader = req.headers.authorization ?? ''
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
     const body = req.body && typeof req.body === 'object' ? req.body : {}
-    const result = await updateSubscriptionProfile({ token, patch: body })
+    const result = await updateSubscriptionProfile({
+      token,
+      patch: body,
+      hint: sessionHintFromRequest(req, {
+        userId: body.clientUserId,
+        email: body.clientEmail,
+      }),
+    })
     if (!result.ok) {
       return res.status(result.status).json({ success: false, ok: false, error: result.error })
     }
@@ -298,6 +311,7 @@ router.put('/users/:id', async (req, res) => {
       token,
       userId: req.params.id,
       patch: body,
+      hint: sessionHintFromRequest(req),
     })
     if (!result.ok) {
       return res.status(result.status).json({ success: false, ok: false, error: result.error })
@@ -317,7 +331,7 @@ router.get('/sesion', async (req, res) => {
   try {
     const authHeader = req.headers.authorization ?? ''
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
-    const session = await resolveSubscriptionSession(token)
+    const session = await resolveSubscriptionSession(token, sessionHintFromRequest(req))
 
     if (!session) {
       return res.status(401).json({ success: false, ok: false, error: 'Sesión inválida o expirada.' })

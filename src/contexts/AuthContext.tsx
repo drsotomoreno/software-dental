@@ -15,6 +15,7 @@ import {
   grantMasterLocalSession,
   isMasterCredentials,
   mapApiUserToAuthUser,
+  restoreMasterApiSession,
   setStoredApiAuth,
   SUPERADMIN_EMAIL,
   validateApiSession,
@@ -38,6 +39,7 @@ interface AuthContextValue {
   ) => Promise<{ ok: true; requiresSubscription?: boolean } | { ok: false; error: string }>
   logout: () => Promise<void>
   refreshSessionUser: () => Promise<void>
+  applySessionUser: (apiUser: ApiSubscriptionUser) => void
   can: (permission: Permission) => boolean
   hasRole: (role: UserRole) => boolean
 }
@@ -51,7 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loadSession = useCallback(async () => {
     const storedRole = localStorage.getItem('doctorSEO_rol')
     const storedToken = localStorage.getItem('doctorSEO_token')
-    const apiAuth = getStoredApiAuth()
+    let apiAuth = getStoredApiAuth()
 
     if (!apiAuth && storedToken && storedRole === 'superadmin') {
       const fallbackUser = {
@@ -65,19 +67,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         fecha_vencimiento: null,
       }
       setStoredApiAuth(storedToken, fallbackUser)
-      setUser(mapApiUserToAuthUser(fallbackUser, storedToken))
-      setIsLoading(false)
-      return
+      apiAuth = { token: storedToken, user: fallbackUser }
     }
 
     if (apiAuth) {
-      if (isApiSuperAdmin(apiAuth.user) || localStorage.getItem('doctorSEO_rol') === 'superadmin') {
-        setUser(mapApiUserToAuthUser(apiAuth.user, apiAuth.token))
-        setIsLoading(false)
-        return
+      let validation = await validateApiSession(apiAuth.token)
+      if (!validation.ok && isApiSuperAdmin(apiAuth.user)) {
+        const restored = await restoreMasterApiSession()
+        if (restored) {
+          validation = {
+            ok: true as const,
+            user: restored.user,
+            expiresAt: null as unknown as string,
+            rol: 'superadmin' as const,
+          }
+          apiAuth = restored
+        }
       }
-
-      const validation = await validateApiSession(apiAuth.token)
       if (validation.ok) {
         setStoredApiAuth(apiAuth.token, validation.user)
         setUser(mapApiUserToAuthUser(validation.user, apiAuth.token))
@@ -87,6 +93,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (validation.requiresPayment && validation.user) {
         setStoredApiAuth(apiAuth.token, validation.user)
         setUser(mapApiUserToAuthUser(validation.user, apiAuth.token))
+        setIsLoading(false)
+        return
+      }
+      if (isApiSuperAdmin(apiAuth.user)) {
+        setUser(mapApiUserToAuthUser(apiAuth.user, apiAuth.token))
         setIsLoading(false)
         return
       }
@@ -231,6 +242,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await loadSession()
   }, [loadSession])
 
+  const applySessionUser = useCallback((apiUser: ApiSubscriptionUser) => {
+    const stored = getStoredApiAuth()
+    const token = stored?.token || `session-${apiUser.id}`
+    setStoredApiAuth(token, apiUser)
+    setUser(mapApiUserToAuthUser(apiUser, token))
+  }, [])
+
   const logout = useCallback(async () => {
     if (user) {
       await logAuditEvent({
@@ -264,6 +282,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       logout,
       refreshSessionUser,
+      applySessionUser,
       can: (permission) => {
         if (typeof localStorage !== 'undefined' && localStorage.getItem('doctorSEO_rol') === 'superadmin') {
           return true
@@ -275,7 +294,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return effective ? normalizeRole(effective) === normalizeRole(role) : false
       },
     }),
-    [user, isLoading, login, logout, refreshSessionUser],
+    [user, isLoading, login, logout, refreshSessionUser, applySessionUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

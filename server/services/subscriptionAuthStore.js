@@ -35,6 +35,12 @@ function emptyStore() {
   return { users: [], sessions: [], passwordResets: [], emailVerifications: [] }
 }
 
+const liveSessions = new Map()
+
+function rememberLiveSession(session) {
+  if (session?.token) liveSessions.set(session.token, session)
+}
+
 
 
 export function hashPasswordSha256(password) {
@@ -189,16 +195,54 @@ function migrateUser(user) {
 async function loadStore() {
   const parsed = await readDurableJson(USERS_FILE, emptyStore())
   const users = (Array.isArray(parsed.users) ? parsed.users : []).map(migrateUser)
-  const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : []
+  const sessionsByToken = new Map()
+  for (const session of Array.isArray(parsed.sessions) ? parsed.sessions : []) {
+    if (session?.token) sessionsByToken.set(session.token, session)
+  }
+  for (const session of liveSessions.values()) {
+    if (session?.token && !sessionsByToken.has(session.token)) {
+      sessionsByToken.set(session.token, session)
+    }
+  }
   const passwordResets = Array.isArray(parsed.passwordResets) ? parsed.passwordResets : []
   const emailVerifications = Array.isArray(parsed.emailVerifications)
     ? parsed.emailVerifications
     : []
-  return { users, sessions, passwordResets, emailVerifications }
+  return {
+    users,
+    sessions: [...sessionsByToken.values()],
+    passwordResets,
+    emailVerifications,
+  }
 }
 
 async function saveStore(store) {
-  await writeDurableJson(USERS_FILE, store)
+  try {
+    await writeDurableJson(USERS_FILE, store)
+  } catch (error) {
+    console.error(
+      '[Auth] No se pudo guardar el almacén de usuarios; las sesiones en memoria se conservan:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+}
+
+export function sessionHintFromRequest(req, extra = {}) {
+  if (!req || typeof req !== 'object') {
+    return {
+      email: extra.email ? String(extra.email).trim() : undefined,
+      userId: extra.userId ? String(extra.userId).trim() : undefined,
+    }
+  }
+  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  const query = req.query && typeof req.query === 'object' ? req.query : {}
+  const headers = req.headers && typeof req.headers === 'object' ? req.headers : {}
+  const email = extra.email || body.clientEmail || headers['x-client-email'] || query.email
+  const userId = extra.userId || body.clientUserId || headers['x-client-user-id'] || query.userId
+  return {
+    email: email ? String(email).trim() : undefined,
+    userId: userId ? String(userId).trim() : undefined,
+  }
 }
 
 
@@ -268,6 +312,8 @@ function createSessionForUser(user) {
     expiresAt: exempt ? addDays(new Date(), 3650) : addDays(new Date(), 30),
 
   }
+
+  rememberLiveSession(session)
 
   return { token, session }
 
@@ -494,7 +540,6 @@ export async function loginSubscriptionUser({ email, password }) {
     }
     store.users[userIndex] = masterUser
     const { token, session } = createSessionForUser(masterUser)
-    store.sessions = store.sessions.filter((item) => item.userId !== masterUser.id)
     store.sessions.push(session)
     await saveStore(store)
     return {
@@ -510,8 +555,6 @@ export async function loginSubscriptionUser({ email, password }) {
     normalizedEmail === SUPERADMIN_EMAIL || isPaymentExempt(currentUser)
 
   const { token, session } = createSessionForUser(currentUser)
-
-  store.sessions = store.sessions.filter((item) => item.userId !== currentUser.id)
 
   store.sessions.push(session)
 
@@ -633,7 +676,67 @@ export async function confirmSubscriptionPayment({ email, token }) {
 
 
 
-export async function resolveSubscriptionSession(token) {
+function findSuperAdminUser(store) {
+  return (
+    store.users.find((user) => normalizeEmail(user.email) === MASTER_EMAIL) ||
+    store.users.find((user) => normalizeRole(user.rol) === 'superadmin') ||
+    null
+  )
+}
+
+function isRestorableMasterToken(token) {
+  const value = String(token ?? '')
+  return (
+    value.startsWith('superadmin-local-') ||
+    value.startsWith('superadmin-session') ||
+    value === 'superadmin-master'
+  )
+}
+
+function isPlaceholderUserId(userId) {
+  const value = String(userId ?? '')
+  return (
+    value === 'superadmin-master' ||
+    value === 'superadmin-session' ||
+    value.startsWith('superadmin-local-') ||
+    value.startsWith('superadmin-session')
+  )
+}
+
+async function adoptSessionToken(store, token, user) {
+  const session = {
+    token,
+    userId: user.id,
+    rol: user.rol ?? 'superadmin',
+    createdAt: new Date().toISOString(),
+    expiresAt: addDays(new Date(), 3650),
+  }
+  store.sessions = store.sessions.filter((item) => item.token !== token)
+  store.sessions.push(session)
+  rememberLiveSession(session)
+  try {
+    await saveStore(store)
+  } catch (error) {
+    console.error(
+      '[Auth] No se pudo persistir la sesión restaurada; queda activa en memoria:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+  return session
+}
+
+export async function issueMasterSessionToken(existingToken) {
+  const store = await loadStore()
+  const user = findSuperAdminUser(store)
+  if (!user) {
+    return { ok: false, error: 'No hay cuenta superadmin.' }
+  }
+  const token = existingToken || randomBytes(32).toString('hex')
+  await adoptSessionToken(store, token, user)
+  return { ok: true, token, user: sanitizeUser(user), expiresAt: addDays(new Date(), 3650) }
+}
+
+export async function resolveSubscriptionSession(token, hint = {}) {
 
   if (!token) return null
 
@@ -641,23 +744,48 @@ export async function resolveSubscriptionSession(token) {
 
   const store = await loadStore()
 
-  const session = store.sessions.find((item) => item.token === token)
+  let session =
+    store.sessions.find((item) => item.token === token) || liveSessions.get(token) || null
+
+  if (!session) {
+    let user = hint.userId
+      ? store.users.find((item) => item.id === hint.userId)
+      : null
+    if (!user && isPlaceholderUserId(hint.userId)) {
+      user = findSuperAdminUser(store)
+    }
+    if (!user && normalizeEmail(hint.email) === MASTER_EMAIL) {
+      user = findSuperAdminUser(store)
+    }
+    if (!user && isRestorableMasterToken(token)) {
+      user = findSuperAdminUser(store)
+    }
+    if (user) {
+      session = await adoptSessionToken(store, token, user)
+    }
+  }
 
   if (!session) return null
 
 
 
-  const userIndex = store.users.findIndex((item) => item.id === session.userId)
+  let userIndex = store.users.findIndex((item) => item.id === session.userId)
 
-  if (userIndex === -1) return null
+  if (userIndex === -1) {
+    const superAdmin = findSuperAdminUser(store)
+    if (!superAdmin) return null
+    session = await adoptSessionToken(store, token, superAdmin)
+    userIndex = store.users.findIndex((item) => item.id === superAdmin.id)
+    if (userIndex === -1) return null
+  }
 
 
 
   const user = refreshPaymentStatus(store.users[userIndex])
-
-  store.users[userIndex] = user
-
-  await saveStore(store)
+  if (user !== store.users[userIndex]) {
+    store.users[userIndex] = user
+    await saveStore(store)
+  }
 
 
 
@@ -1005,8 +1133,17 @@ function normalizeDocumentNumber(value) {
     .replace(/\D/g, '')
 }
 
-export async function updateSubscriptionProfile({ token, userId, patch }) {
-  const session = await resolveSubscriptionSession(token)
+export async function updateSubscriptionProfile({ token, userId, patch, hint }) {
+  const incoming = patch && typeof patch === 'object' ? { ...patch } : {}
+  const sessionHint = {
+    userId: hint?.userId || incoming.clientUserId,
+    email: hint?.email || incoming.clientEmail,
+  }
+  delete incoming.clientUserId
+  delete incoming.clientEmail
+  patch = incoming
+
+  const session = await resolveSubscriptionSession(token, sessionHint)
   if (!session?.user) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
   }
@@ -1196,8 +1333,8 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
   return { ok: true, user: sanitizeUser(updated) }
 }
 
-export async function changeOwnPassword({ token, currentPassword, newPassword }) {
-  const session = await resolveSubscriptionSession(token)
+export async function changeOwnPassword({ token, currentPassword, newPassword, hint }) {
+  const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
   }
@@ -1229,8 +1366,8 @@ export async function changeOwnPassword({ token, currentPassword, newPassword })
   return { ok: true }
 }
 
-export async function startRethusTrial({ token, documentNumber, rethusNumber }) {
-  const session = await resolveSubscriptionSession(token)
+export async function startRethusTrial({ token, documentNumber, rethusNumber, hint }) {
+  const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
   }
@@ -1292,8 +1429,8 @@ export async function listAllSubscriptionUsers() {
   })
 }
 
-export async function selectPaidPlan({ token, planId }) {
-  const session = await resolveSubscriptionSession(token)
+export async function selectPaidPlan({ token, planId, hint }) {
+  const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
   }

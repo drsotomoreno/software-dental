@@ -61,13 +61,21 @@ export function isApiSuperAdmin(user: ApiSubscriptionUser | null | undefined): b
 }
 
 export function grantMasterLocalSession(token?: string): { token: string; user: ApiSubscriptionUser } {
+  const existing = getStoredApiAuth()?.user
   const sessionToken = token || `superadmin-local-${Date.now()}`
-  const names = splitPersonName({ nombre: 'Dr. Mauricio Soto' })
+  const names = splitPersonName({
+    nombre: existing?.nombre || 'Dr. Mauricio Soto',
+    firstName: existing?.firstName,
+    lastName: existing?.lastName,
+  })
   const user: ApiSubscriptionUser = {
-    id: 'superadmin-session',
-    nombre: [names.firstName, names.lastName].filter(Boolean).join(' '),
-    firstName: names.firstName,
-    lastName: names.lastName,
+    ...existing,
+    id: existing?.id && !String(existing.id).startsWith('superadmin')
+      ? existing.id
+      : existing?.id || 'superadmin-session',
+    nombre: [names.firstName, names.lastName].filter(Boolean).join(' ') || existing?.nombre || 'Dr. Mauricio Soto',
+    firstName: names.firstName || existing?.firstName,
+    lastName: names.lastName || existing?.lastName,
     email: SUPERADMIN_EMAIL,
     rol: 'superadmin',
     estado_pago: 'exento',
@@ -78,6 +86,58 @@ export function grantMasterLocalSession(token?: string): { token: string; user: 
     document.documentElement.dataset.superadmin = 'true'
   }
   return { token: sessionToken, user }
+}
+
+export async function restoreMasterApiSession(): Promise<{ token: string; user: ApiSubscriptionUser } | null> {
+  const stored = getStoredApiAuth()
+  if (!stored || !isApiSuperAdmin(stored.user)) return null
+
+  try {
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ email: SUPERADMIN_EMAIL, password: MASTER_PASSWORD }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (response.ok && payload.token && payload.user) {
+      const user: ApiSubscriptionUser = {
+        ...stored.user,
+        ...payload.user,
+        rol: 'superadmin',
+        estado_pago: 'exento',
+        email: SUPERADMIN_EMAIL,
+      }
+      setStoredApiAuth(payload.token, user)
+      return { token: payload.token, user }
+    }
+  } catch {
+    // El servidor puede estar reiniciando; se intenta reatar el token local.
+  }
+
+  const granted = grantMasterLocalSession(stored.token?.startsWith('superadmin-local-')
+    ? stored.token
+    : undefined)
+  try {
+    const response = await fetch('/api/sesion', {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${granted.token}`,
+        'X-Client-Email': SUPERADMIN_EMAIL,
+        'X-Client-User-Id': granted.user.id,
+      },
+    })
+    if (response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      if (payload.user) {
+        const user = payload.user as ApiSubscriptionUser
+        setStoredApiAuth(granted.token, user)
+        return { token: granted.token, user }
+      }
+    }
+  } catch {
+    // sin red
+  }
+  return granted
 }
 
 export function getStoredApiAuth():
@@ -118,9 +178,13 @@ export function clearStoredApiAuth(): void {
 }
 
 export async function validateApiSession(token: string) {
+  const stored = getStoredApiAuth()
   const response = await fetch('/api/sesion', {
     headers: {
+      Accept: 'application/json',
       Authorization: `Bearer ${token}`,
+      ...(stored?.user?.email ? { 'X-Client-Email': String(stored.user.email) } : {}),
+      ...(stored?.user?.id ? { 'X-Client-User-Id': String(stored.user.id) } : {}),
     },
   })
 
@@ -144,15 +208,6 @@ export async function validateApiSession(token: string) {
   }
 
   if (!response.ok) {
-    const stored = getStoredApiAuth()
-    if (stored && isApiSuperAdmin(stored.user)) {
-      return {
-        ok: true as const,
-        user: stored.user,
-        expiresAt: null as unknown as string,
-        rol: 'superadmin' as const,
-      }
-    }
     return { ok: false as const, requiresPayment: false }
   }
 

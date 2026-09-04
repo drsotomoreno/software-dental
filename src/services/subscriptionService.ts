@@ -1,7 +1,20 @@
-import { getStoredApiAuth, setStoredApiAuth, type ApiSubscriptionUser } from '@/services/apiAuthService'
+import {
+  getStoredApiAuth,
+  restoreMasterApiSession,
+  setStoredApiAuth,
+  type ApiSubscriptionUser,
+} from '@/services/apiAuthService'
 import { PAID_PLANS, TRIAL_DAYS } from '../../shared/subscriptionPlans.js'
 
 export { PAID_PLANS, TRIAL_DAYS }
+
+function identityHeaders(auth = getStoredApiAuth()) {
+  return {
+    ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
+    ...(auth?.user?.email ? { 'X-Client-Email': String(auth.user.email) } : {}),
+    ...(auth?.user?.id ? { 'X-Client-User-Id': String(auth.user.id) } : {}),
+  }
+}
 
 async function authFetch(url: string, init?: RequestInit) {
   const auth = getStoredApiAuth()
@@ -10,7 +23,7 @@ async function authFetch(url: string, init?: RequestInit) {
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
+      ...identityHeaders(auth),
       ...(init?.headers ?? {}),
     },
   })
@@ -49,11 +62,30 @@ export async function activateRethusTrial(documentNumber: string, rethusNumber: 
   return { ok: true as const, user: payload.user as ApiSubscriptionUser, message: payload.message as string }
 }
 
-export async function updateOwnProfile(patch: Record<string, unknown>) {
-  const { response, payload } = await authFetch('/api/profile', {
+function isSessionLostError(message: string) {
+  return /sesi[oó]n inv[aá]lida|expirada/i.test(message)
+}
+
+async function putOwnProfile(patch: Record<string, unknown>) {
+  const auth = getStoredApiAuth()
+  return authFetch('/api/profile', {
     method: 'PUT',
-    body: JSON.stringify(patch),
+    body: JSON.stringify({
+      ...patch,
+      clientUserId: auth?.user?.id,
+      clientEmail: auth?.user?.email,
+    }),
   })
+}
+
+export async function updateOwnProfile(patch: Record<string, unknown>) {
+  let { response, payload } = await putOwnProfile(patch)
+  if (response.status === 401 || isSessionLostError(String(payload.error ?? ''))) {
+    const restored = await restoreMasterApiSession()
+    if (restored) {
+      ;({ response, payload } = await putOwnProfile(patch))
+    }
+  }
   if (!response.ok) {
     return { ok: false as const, error: String(payload.error || 'No se pudo guardar el perfil.') }
   }

@@ -78,6 +78,14 @@ export async function verifyAndClaimPrestador({
   const nit = extractNitDigits(identity.providerNit)
   const rethus = identity.rethusNumber ? normalizeRethusNumber(identity.rethusNumber) : ''
   const registry = await loadRegistry()
+  const uid = String(userId ?? '')
+
+  const belongsToUser = (record) => {
+    if (!record) return false
+    const ids = new Set((record.linkedUserIds ?? []).map(String))
+    if (record.claimedByUserId) ids.add(String(record.claimedByUserId))
+    return ids.has(uid)
+  }
 
   const byReps = registry.records.find((item) => extractRepsDigits(item.repsCode) === reps)
   const byDocument = document
@@ -86,8 +94,9 @@ export async function verifyAndClaimPrestador({
   const byRethus = rethus
     ? registry.records.find((item) => normalizeRethusNumber(item.rethusNumber) === rethus)
     : null
+  const updatingOwnSede = belongsToUser(byReps)
 
-  if (byReps && extractNitDigits(byReps.providerNit) !== nit) {
+  if (byReps && !updatingOwnSede && extractNitDigits(byReps.providerNit) !== nit) {
     return {
       ok: false,
       status: 409,
@@ -96,7 +105,12 @@ export async function verifyAndClaimPrestador({
   }
 
   if (institution) {
-    if (byReps && byReps.legalName && !razonSocialCorresponds(identity.legalName, byReps.legalName)) {
+    if (
+      byReps &&
+      !updatingOwnSede &&
+      byReps.legalName &&
+      !razonSocialCorresponds(identity.legalName, byReps.legalName)
+    ) {
       return {
         ok: false,
         status: 409,
@@ -114,7 +128,12 @@ export async function verifyAndClaimPrestador({
     }
     if (byReps && isInstitutionProvider(byReps.providerType) && extractNitDigits(byReps.providerNit) === nit) {
       // Odontólogo vinculado a la IPS: misma sede, identidad profesional propia.
-    } else if (byReps && normalizeDocument(byReps.documentNumber) && normalizeDocument(byReps.documentNumber) !== document) {
+    } else if (
+      byReps &&
+      !updatingOwnSede &&
+      normalizeDocument(byReps.documentNumber) &&
+      normalizeDocument(byReps.documentNumber) !== document
+    ) {
       return {
         ok: false,
         status: 409,
@@ -122,14 +141,20 @@ export async function verifyAndClaimPrestador({
           'El nombre y el documento no corresponden al código REPS de habilitación de esta sede.',
       }
     }
-    if (byReps && byReps.legalName && !isInstitutionProvider(byReps.providerType) && !namesCorrespond(identity.legalName, byReps.legalName)) {
+    if (
+      byReps &&
+      !updatingOwnSede &&
+      byReps.legalName &&
+      !isInstitutionProvider(byReps.providerType) &&
+      !namesCorrespond(identity.legalName, byReps.legalName)
+    ) {
       return {
         ok: false,
         status: 409,
         error: `El nombre digitado no coincide con el profesional habilitado en el REPS ${byReps.repsDisplay || reps}.`,
       }
     }
-    if (byDocument && extractRepsDigits(byDocument.repsCode) !== reps) {
+    if (byDocument && !belongsToUser(byDocument) && extractRepsDigits(byDocument.repsCode) !== reps) {
       const sameNit = extractNitDigits(byDocument.providerNit) === nit
       if (!sameNit) {
         return {
@@ -139,14 +164,24 @@ export async function verifyAndClaimPrestador({
         }
       }
     }
-    if (byRethus && normalizeDocument(byRethus.documentNumber) && normalizeDocument(byRethus.documentNumber) !== document) {
+    if (
+      byRethus &&
+      !belongsToUser(byRethus) &&
+      normalizeDocument(byRethus.documentNumber) &&
+      normalizeDocument(byRethus.documentNumber) !== document
+    ) {
       return {
         ok: false,
         status: 409,
         error: 'El código ReTHUS ya está asociado a otro documento de identidad.',
       }
     }
-    if (byDocument && byDocument.rethusNumber && normalizeRethusNumber(byDocument.rethusNumber) !== rethus) {
+    if (
+      byDocument &&
+      !belongsToUser(byDocument) &&
+      byDocument.rethusNumber &&
+      normalizeRethusNumber(byDocument.rethusNumber) !== rethus
+    ) {
       return {
         ok: false,
         status: 409,
@@ -158,7 +193,7 @@ export async function verifyAndClaimPrestador({
   const sedeOwner = String(byReps?.claimedByUserId || '')
   const linked = new Set(byReps?.linkedUserIds ?? [])
   if (sedeOwner) linked.add(sedeOwner)
-  const isLinked = !sedeOwner || sedeOwner === String(userId ?? '') || linked.has(String(userId ?? ''))
+  const isLinked = !sedeOwner || sedeOwner === uid || linked.has(uid)
   if (sedeOwner && !isLinked && extractNitDigits(byReps.providerNit) !== nit) {
     return {
       ok: false,
@@ -166,7 +201,7 @@ export async function verifyAndClaimPrestador({
       error: 'Esta sede REPS ya está reclamada por otra cuenta.',
     }
   }
-  linked.add(String(userId ?? ''))
+  linked.add(uid)
 
   const now = new Date().toISOString()
   const record = {

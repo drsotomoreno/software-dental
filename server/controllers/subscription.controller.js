@@ -1,6 +1,7 @@
 import {
   resolveSubscriptionSession,
   selectPaidPlan,
+  sessionHintFromRequest,
   startRethusTrial,
 } from '../services/subscriptionAuthStore.js'
 import { PAID_PLANS, TRIAL_DAYS } from '../../shared/subscriptionPlans.js'
@@ -12,7 +13,7 @@ function bearerToken(req) {
 
 export async function getSubscriptionStatus(req, res) {
   try {
-    const session = await resolveSubscriptionSession(bearerToken(req))
+    const session = await resolveSubscriptionSession(bearerToken(req), sessionHintFromRequest(req))
     if (!session?.user) {
       return res.status(401).json({ success: false, ok: false, error: 'Sesión inválida o expirada.' })
     }
@@ -37,6 +38,7 @@ export async function requestRethusTrial(req, res) {
       token: bearerToken(req),
       documentNumber: body.documentNumber,
       rethusNumber: body.rethusNumber,
+      hint: sessionHintFromRequest(req),
     })
     if (!result.ok) {
       return res.status(result.status).json({ success: false, ok: false, error: result.error })
@@ -59,6 +61,7 @@ export async function choosePaidPlan(req, res) {
     const result = await selectPaidPlan({
       token: bearerToken(req),
       planId: body.planId,
+      hint: sessionHintFromRequest(req),
     })
     if (!result.ok) {
       return res.status(result.status).json({ success: false, ok: false, error: result.error })
