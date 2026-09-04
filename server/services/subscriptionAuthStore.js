@@ -1,12 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-
 import { join } from 'node:path'
 
 import { config } from '../config.js'
 import { claimRethusForUser } from './rethusRegistry.js'
 import { PAID_PLAN_IDS, PAID_PLAN_DAYS, TRIAL_DAYS } from '../../shared/subscriptionPlans.js'
+import { readDurableJson, writeDurableJson } from './durableStore.js'
 
 
 
@@ -150,6 +149,15 @@ function isPaymentExempt(user) {
 
 
 
+function stripProfessionalCard(user) {
+  if (!user || typeof user !== 'object') return user
+  const next = { ...user }
+  delete next.professionalLicense
+  delete next.tarjetaProfesional
+  delete next.tarjeta_profesional
+  return next
+}
+
 function migrateUser(user) {
 
   const email = normalizeEmail(user.email ?? '')
@@ -158,7 +166,7 @@ function migrateUser(user) {
 
 
 
-  return {
+  return stripProfessionalCard({
 
     ...user,
 
@@ -166,42 +174,25 @@ function migrateUser(user) {
 
     estado_pago: isSuper ? 'exento' : user.estado_pago ?? 'pendiente',
 
-  }
+  })
 
 }
 
 
 
 async function loadStore() {
-
-  try {
-
-    const raw = await readFile(USERS_FILE, 'utf8')
-
-    const parsed = JSON.parse(raw)
-
-    const users = (Array.isArray(parsed.users) ? parsed.users : []).map(migrateUser)
-    const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : []
-    const passwordResets = Array.isArray(parsed.passwordResets) ? parsed.passwordResets : []
-    const emailVerifications = Array.isArray(parsed.emailVerifications) ? parsed.emailVerifications : []
-    return { users, sessions, passwordResets, emailVerifications }
-
-  } catch {
-
-    return emptyStore()
-
-  }
-
+  const parsed = await readDurableJson(USERS_FILE, emptyStore())
+  const users = (Array.isArray(parsed.users) ? parsed.users : []).map(migrateUser)
+  const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : []
+  const passwordResets = Array.isArray(parsed.passwordResets) ? parsed.passwordResets : []
+  const emailVerifications = Array.isArray(parsed.emailVerifications)
+    ? parsed.emailVerifications
+    : []
+  return { users, sessions, passwordResets, emailVerifications }
 }
 
-
-
 async function saveStore(store) {
-
-  await mkdir(config.dataDir, { recursive: true })
-
-  await writeFile(USERS_FILE, JSON.stringify(store, null, 2), 'utf8')
-
+  await writeDurableJson(USERS_FILE, store)
 }
 
 
@@ -965,21 +956,140 @@ export async function verifyEmailAndRegister({ email, code, password }) {
 
 function sanitizeUser(user) {
   const trialLimited = user.estado_pago === 'prueba' && isSubscriptionActive(user)
+  const firstName = String(user.firstName ?? '').trim()
+  const lastName = String(user.lastName ?? '').trim()
+  const nombre =
+    [firstName, lastName].filter(Boolean).join(' ').trim() || String(user.nombre ?? '').trim()
   return {
     id: user.id,
-    nombre: user.nombre,
+    nombre,
+    firstName: firstName || nombre.split(/\s+/)[0] || '',
+    lastName: lastName || nombre.split(/\s+/).slice(1).join(' '),
     email: user.email,
     rol: isSuperAdminUser(user) ? 'superadmin' : normalizeRole(user.rol),
     estado_pago: isSuperAdminUser(user) ? 'exento' : user.estado_pago,
     fecha_vencimiento: user.fecha_vencimiento,
     plan: isSuperAdminUser(user) ? 'exento' : user.plan ?? null,
+    documentType: user.documentType || 'CC',
     documentNumber: user.documentNumber ?? '',
     rethusNumber: user.rethusNumber ?? '',
+    rethusStatus: user.rethusStatus ?? (user.rethusNumber ? 'activo' : undefined),
+    clinicName: user.clinicName ?? '',
+    providerNit: user.providerNit ?? '',
+    repsCode: user.repsCode ?? '',
+    repsStatus: user.repsStatus ?? 'activo',
+    thsSpecialty: user.thsSpecialty ?? 'odontologia_general',
+    rehusSpecialty: user.rehusSpecialty ?? user.thsSpecialty ?? 'odontologia_general',
+    repsEnabledSpecialties: Array.isArray(user.repsEnabledSpecialties)
+      ? user.repsEnabledSpecialties
+      : [user.thsSpecialty ?? 'odontologia_general'],
     trialLimited,
     trialLimits: trialLimited ? { maxPatients: 1, maxVoiceNotesPerField: 1 } : null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   }
+}
+
+function normalizeDocumentNumber(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/[.\s-]/g, '')
+}
+
+export async function updateSubscriptionProfile({ token, userId, patch }) {
+  const session = await resolveSubscriptionSession(token)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+
+  const actor = session.user
+  const targetId = userId && userId !== 'me' ? String(userId) : actor.id
+  const isSelf = targetId === actor.id
+  const actorRol = String(actor.rol ?? '').toLowerCase()
+  const actorEmail = String(actor.email ?? '').toLowerCase()
+  const canEditOthers =
+    actorEmail === MASTER_EMAIL || actorRol === 'superadmin' || actorRol === 'admin'
+
+  if (!isSelf && !canEditOthers) {
+    return { ok: false, status: 403, error: 'No puede editar el perfil de otro usuario.' }
+  }
+
+  const store = await loadStore()
+  const index = store.users.findIndex((item) => item.id === targetId)
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+
+  const current = store.users[index]
+  const firstName = String(patch.firstName ?? current.firstName ?? '').trim()
+  const lastName = String(patch.lastName ?? current.lastName ?? '').trim()
+  const documentNumber = normalizeDocumentNumber(
+    patch.documentNumber ?? current.documentNumber ?? '',
+  )
+  if (!documentNumber || documentNumber.length < 5 || documentNumber.length > 20) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'El número de documento (cédula) es obligatorio y debe quedar guardado.',
+    }
+  }
+
+  const rethusNumber = String(patch.rethusNumber ?? current.rethusNumber ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '')
+  if (rethusNumber) {
+    const digits = rethusNumber.replace(/\D/g, '')
+    if (digits.length < 6 || digits.length > 12) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'El código ReTHUS debe tener entre 6 y 12 dígitos.',
+      }
+    }
+  }
+
+  let email = current.email
+  if (patch.email !== undefined) {
+    const nextEmail = String(patch.email).trim().toLowerCase()
+    if (nextEmail && nextEmail !== current.email) {
+      const duplicate = store.users.some(
+        (item) => item.id !== current.id && normalizeEmail(item.email) === nextEmail,
+      )
+      if (duplicate) {
+        return { ok: false, status: 400, error: 'Ya existe otro usuario con este correo.' }
+      }
+      email = nextEmail
+    }
+  }
+
+  const now = new Date().toISOString()
+  const updated = stripProfessionalCard({
+    ...current,
+    firstName,
+    lastName,
+    nombre: [firstName, lastName].filter(Boolean).join(' ') || current.nombre,
+    email,
+    documentType: String(patch.documentType ?? current.documentType ?? 'CC').trim() || 'CC',
+    documentNumber,
+    rethusNumber,
+    rethusStatus: patch.rethusStatus ?? current.rethusStatus ?? (rethusNumber ? 'activo' : current.rethusStatus),
+    clinicName: String(patch.clinicName ?? current.clinicName ?? '').trim(),
+    providerNit: String(patch.providerNit ?? current.providerNit ?? '').trim(),
+    repsCode: String(patch.repsCode ?? current.repsCode ?? '').trim(),
+    repsStatus: patch.repsStatus ?? current.repsStatus ?? 'activo',
+    thsSpecialty: patch.thsSpecialty ?? current.thsSpecialty ?? 'odontologia_general',
+    rehusSpecialty:
+      patch.rehusSpecialty ?? patch.thsSpecialty ?? current.rehusSpecialty ?? current.thsSpecialty,
+    repsEnabledSpecialties: Array.isArray(patch.repsEnabledSpecialties)
+      ? patch.repsEnabledSpecialties
+      : current.repsEnabledSpecialties,
+    updatedAt: now,
+  })
+
+  store.users[index] = updated
+  await saveStore(store)
+  return { ok: true, user: sanitizeUser(updated) }
 }
 
 export async function startRethusTrial({ token, documentNumber, rethusNumber }) {

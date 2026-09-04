@@ -49,6 +49,18 @@ export async function activateRethusTrial(documentNumber: string, rethusNumber: 
   return { ok: true as const, user: payload.user as ApiSubscriptionUser, message: payload.message as string }
 }
 
+export async function updateOwnProfile(patch: Record<string, unknown>) {
+  const { response, payload } = await authFetch('/api/profile', {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  })
+  if (!response.ok) {
+    return { ok: false as const, error: String(payload.error || 'No se pudo guardar el perfil.') }
+  }
+  persistUser(payload.user)
+  return { ok: true as const, user: payload.user as ApiSubscriptionUser }
+}
+
 export async function activatePaidPlan(planId: string) {
   const { response, payload } = await authFetch('/api/subscription/plan', {
     method: 'POST',

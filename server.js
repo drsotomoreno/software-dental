@@ -29,7 +29,7 @@ app.use(
         /^https:\/\/([a-z0-9-]+\.)?mihistoriadental\.com$/.test(origin)
       callback(null, allowed)
     },
-    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   }),
 )

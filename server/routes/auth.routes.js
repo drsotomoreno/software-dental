@@ -18,17 +18,29 @@ import {
   MASTER_EMAIL,
   registerSubscriptionUser,
   resolveSubscriptionSession,
+  updateSubscriptionProfile,
 } from '../services/subscriptionAuthStore.js'
 
 function masterUserPayload(user) {
-  return {
-    id: user?.id ?? 'superadmin-master',
-    nombre: user?.nombre ?? config.superAdmin.nombre,
-    email: MASTER_EMAIL,
-    rol: 'superadmin',
-    estado_pago: 'exento',
-    fecha_vencimiento: null,
-  }
+  const base = user
+    ? {
+        ...user,
+        id: user.id,
+        nombre: user.nombre ?? config.superAdmin.nombre,
+        email: MASTER_EMAIL,
+        rol: 'superadmin',
+        estado_pago: 'exento',
+        fecha_vencimiento: null,
+      }
+    : {
+        id: 'superadmin-master',
+        nombre: config.superAdmin.nombre,
+        email: MASTER_EMAIL,
+        rol: 'superadmin',
+        estado_pago: 'exento',
+        fecha_vencimiento: null,
+      }
+  return base
 }
 
 const router = Router()
@@ -144,19 +156,10 @@ router.post('/login', async (req, res) => {
       success: true,
       ok: true,
       token: result.token,
-      user: {
-        id: user.id,
-        nombre: user.nombre,
-        email: user.email,
-        rol: isSuperAdmin ? 'superadmin' : user.rol,
-        estado_pago: isSuperAdmin ? 'exento' : user.estado_pago,
-        fecha_vencimiento: user.fecha_vencimiento,
-        plan: user.plan ?? null,
-        trialLimited: user.trialLimited === true,
-        trialLimits: user.trialLimits ?? null,
-        documentNumber: user.documentNumber ?? '',
-        rethusNumber: user.rethusNumber ?? '',
-      },
+      user: isSuperAdmin
+        ? { ...user, rol: 'superadmin', estado_pago: 'exento', email: user.email }
+        : user,
+      rol: isSuperAdmin ? 'superadmin' : user.rol,
       rol: isSuperAdmin ? 'superadmin' : user.rol,
       expiresAt: result.expiresAt,
       unlimitedAccess: isSuperAdmin || result.unlimitedAccess === true,
@@ -238,6 +241,50 @@ router.get('/admin/users', async (req, res) => {
   } catch (error) {
     console.error('[Auth] Error en GET /admin/users:', error)
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo listar los usuarios.' })
+  }
+})
+
+router.put('/profile', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const result = await updateSubscriptionProfile({ token, patch: body })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true, user: result.user })
+  } catch (error) {
+    console.error('[Auth] Error en PUT /profile:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo guardar el perfil.',
+    })
+  }
+})
+
+router.put('/users/:id', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const result = await updateSubscriptionProfile({
+      token,
+      userId: req.params.id,
+      patch: body,
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true, user: result.user })
+  } catch (error) {
+    console.error('[Auth] Error en PUT /users/:id:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo guardar el usuario.',
+    })
   }
 })
 

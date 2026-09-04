@@ -21,8 +21,12 @@ export interface ApiSubscriptionUser {
   estado_pago: 'pendiente' | 'activo' | 'vencido' | 'exento' | 'prueba'
   fecha_vencimiento: string | null
   plan?: string | null
+  documentType?: string
   documentNumber?: string
   rethusNumber?: string
+  rethusStatus?: 'activo' | 'inactivo' | 'pendiente'
+  firstName?: string
+  lastName?: string
   repsCode?: string
   repsStatus?: 'activo' | 'inactivo'
   thsSpecialty?: string
@@ -177,24 +181,24 @@ export function mapApiUserToAuthUser(
   token: string,
 ): import('@/types/auth').AuthUser {
   const nameParts = (user.nombre || user.email).trim().split(/\s+/)
-  const firstName = nameParts[0] ?? user.email
-  const lastName = nameParts.slice(1).join(' ') || 'Usuario'
+  const firstName = user.firstName?.trim() || nameParts[0] || user.email
+  const lastName = user.lastName?.trim() || nameParts.slice(1).join(' ') || 'Usuario'
 
   return {
     id: user.id,
     email: user.email,
     firstName,
     lastName,
-    documentType: 'CC',
-    documentNumber: user.documentNumber || '0000000000',
+    documentType: user.documentType || 'CC',
+    documentNumber: user.documentNumber || '',
     role: mapApiRoleToUserRole(user.rol),
-    clinicName: user.clinicName || 'doctorSEOlabs',
+    clinicName: user.clinicName || '',
     sessionId: token,
     providerNit: user.providerNit,
     repsCode: user.repsCode,
     repsStatus: user.repsStatus,
     rethusNumber: user.rethusNumber,
-    rethusStatus: user.rethusNumber ? 'activo' : undefined,
+    rethusStatus: user.rethusStatus ?? (user.rethusNumber ? 'activo' : undefined),
     thsSpecialty: user.thsSpecialty as import('@/constants/ripsThsSpecialty').OdontologyThsSpecialtyId | undefined,
     rehusSpecialty: user.thsSpecialty as import('@/constants/ripsThsSpecialty').OdontologyThsSpecialtyId | undefined,
     repsEnabledSpecialties: user.repsEnabledSpecialties as

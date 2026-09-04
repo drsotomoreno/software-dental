@@ -11,14 +11,17 @@ import { MailSettingsPanel } from '@/components/settings/MailSettingsPanel'
 import {
   DocumentIdentityField,
   RepsHabilitationField,
+  RethusCodeField,
   RethusSpecialtyField,
   ensureSpecialtyInRepsPortfolio,
 } from '@/components/settings/RegulatoryIdentityFields'
 import { getStoredApiAuth, setStoredApiAuth } from '@/services/apiAuthService'
+import { updateOwnProfile } from '@/services/subscriptionService'
 import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
 import type { RepsHabilitationStatus } from '@/utils/repsCode'
 import { validateActiveRepsSede } from '@/utils/repsCode'
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
+import { validateRethusNumberFormat } from '@/utils/rethusNumber'
 
 export function ProfilePage() {
   const { user, can, refreshSessionUser } = useAuth()
@@ -34,6 +37,7 @@ export function ProfilePage() {
     email: '',
     documentType: 'CC',
     documentNumber: '',
+    rethusNumber: '',
     clinicName: '',
     providerNit: '',
     repsCode: '',
@@ -56,6 +60,7 @@ export function ProfilePage() {
         email: user.email,
         documentType: user.documentType || 'CC',
         documentNumber: user.documentNumber ?? '',
+        rethusNumber: user.rethusNumber ?? '',
         clinicName: user.clinicName,
         providerNit: user.providerNit ?? '',
         repsCode: user.repsCode ?? '',
@@ -80,6 +85,14 @@ export function ProfilePage() {
       return
     }
 
+    if (form.rethusNumber.trim()) {
+      const rethus = validateRethusNumberFormat(form.rethusNumber)
+      if (!rethus.valid) {
+        setSaveError(rethus.message ?? 'El código ReTHUS no es válido.')
+        return
+      }
+    }
+
     if (form.repsCode.trim()) {
       const reps = validateActiveRepsSede(form.repsCode, form.repsStatus)
       if (!reps.valid) {
@@ -98,6 +111,7 @@ export function ProfilePage() {
       email: form.email,
       documentType: form.documentType,
       documentNumber: documentCheck.normalized ?? form.documentNumber.trim(),
+      rethusNumber: form.rethusNumber.trim(),
       clinicName: form.clinicName,
       providerNit: form.providerNit,
       repsCode: form.repsCode,
@@ -106,20 +120,23 @@ export function ProfilePage() {
       rehusSpecialty: form.thsSpecialty,
       repsEnabledSpecialties,
     }
-    await db.users.update(user.id, patch)
-    await upsertProfessionalFromUser({ ...user, ...patch })
+
     const apiAuth = getStoredApiAuth()
-    if (apiAuth) {
-      setStoredApiAuth(apiAuth.token, {
-        ...apiAuth.user,
-        documentNumber: documentCheck.normalized ?? form.documentNumber.trim(),
-        repsCode: form.repsCode,
-        repsStatus: form.repsStatus,
-        thsSpecialty: form.thsSpecialty,
-        repsEnabledSpecialties,
-        providerNit: form.providerNit,
-        clinicName: form.clinicName,
-      })
+    if (apiAuth?.token) {
+      const remote = await updateOwnProfile(patch)
+      if (!remote.ok) {
+        setSaveError(remote.error)
+        return
+      }
+      setStoredApiAuth(apiAuth.token, remote.user)
+    }
+
+    const localUser = await db.users.get(user.id)
+    if (localUser) {
+      await db.users.update(user.id, patch)
+      await upsertProfessionalFromUser({ ...localUser, ...patch })
+    } else {
+      await upsertProfessionalFromUser({ ...user, ...patch })
     }
     await refreshSessionUser()
     await audit({
@@ -217,15 +234,22 @@ export function ProfilePage() {
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
         </div>
-        <div>
-          <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
-            Nombre de la clínica / consultorio
-          </label>
-          <input
-            value={form.clinicName || user.clinicName}
-            onChange={(e) => setForm({ ...form, clinicName: e.target.value })}
-            className="input-field"
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <RethusCodeField
+            compact
+            value={form.rethusNumber}
+            onChange={(rethusNumber) => setForm({ ...form, rethusNumber })}
           />
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
+              Nombre de la clínica / consultorio
+            </label>
+            <input
+              value={form.clinicName || user.clinicName}
+              onChange={(e) => setForm({ ...form, clinicName: e.target.value })}
+              className="input-field"
+            />
+          </div>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>

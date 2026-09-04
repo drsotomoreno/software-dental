@@ -18,6 +18,7 @@ import {
   DocumentIdentityField,
   RegulatoryIdentityAdminExtras,
   RepsHabilitationField,
+  RethusCodeField,
   RethusSpecialtyField,
   ensureSpecialtyInRepsPortfolio,
 } from '@/components/settings/RegulatoryIdentityFields'
@@ -461,6 +462,13 @@ function UserFields({
         documentNumber={values.documentNumber ?? ''}
         onChange={onChange}
       />
+      <div>
+        <RethusCodeField
+          compact
+          value={values.rethusNumber ?? ''}
+          onChange={(rethusNumber) => onChange({ rethusNumber })}
+        />
+      </div>
       <div>
         <label className="label-field">Rol</label>
         <select

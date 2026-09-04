@@ -8,7 +8,11 @@ import {
   validateProfessionalDocumentNumber,
 } from '@/utils/professionalDocument'
 import type { RepsHabilitationStatus } from '@/utils/repsCode'
-import type { RethusStatus } from '@/utils/rethusNumber'
+import {
+  validateRethusNumberFormat,
+  VERIFIED_RETHUS_EXAMPLE,
+  type RethusStatus,
+} from '@/utils/rethusNumber'
 
 export interface RegulatoryIdentityValues {
   repsCode: string
@@ -112,6 +116,49 @@ export function DocumentIdentityField({
         )}
       </div>
     </>
+  )
+}
+
+export function RethusCodeField({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: string
+  onChange: (value: string) => void
+  compact?: boolean
+}) {
+  const format = value.trim() ? validateRethusNumberFormat(value) : null
+
+  return (
+    <div>
+      <div className={`mb-1 ${compact ? '' : 'flex items-center justify-between gap-3'}`}>
+        <label className="block text-xs font-semibold uppercase text-slate-700">
+          Código ReTHUS
+        </label>
+        {compact ? null : (
+          <CatalogLookupHelp summary="¿Qué es el código ReTHUS?">
+            Es el consecutivo nacional del Registro Único de Talento Humano en Salud (6 a 12
+            dígitos). No es una tarjeta profesional. Ejemplo: {VERIFIED_RETHUS_EXAMPLE}.
+          </CatalogLookupHelp>
+        )}
+      </div>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="input-field font-mono"
+        placeholder={`Ej: ${VERIFIED_RETHUS_EXAMPLE}`}
+        inputMode="numeric"
+        autoComplete="off"
+      />
+      {format && !format.valid ? (
+        <p className="mt-1 text-xs text-red-600">{format.message}</p>
+      ) : compact ? null : (
+        <p className="mt-1 text-xs text-slate-500">
+          Queda guardado en su perfil junto con la cédula.
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -278,6 +325,12 @@ export function RegulatoryIdentityFields({
 
   return (
     <>
+      <div className="sm:col-span-2">
+        <RethusCodeField
+          value={values.rethusNumber}
+          onChange={(rethusNumber) => onChange({ rethusNumber })}
+        />
+      </div>
       <div className="sm:col-span-2">
         <RepsHabilitationField
           value={values.repsCode}
