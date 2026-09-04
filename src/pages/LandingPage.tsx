@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { APP_SHORT_NAME } from '@/constants/branding'
+import { PAID_PLANS } from '../../shared/subscriptionPlans.js'
 
 const FEATURES: Array<{ title: string; text: string; icon: LucideIcon }> = [
   {
@@ -54,75 +55,6 @@ const FEATURES: Array<{ title: string; text: string; icon: LucideIcon }> = [
     icon: MessageCircle,
   },
 ]
-
-const PLANS = [
-  {
-    id: 'nomad',
-    name: 'Nomad',
-    price: '$50.000',
-    period: 'COP/mes',
-    blurb: 'Para el especialista independiente.',
-    featured: false,
-    cta: 'Comenzar',
-    features: [
-      '2 Usuarios (Doctor + Auxiliar)',
-      '1 GB de almacenamiento',
-      'Dictado por voz IA (2 horas/mes)',
-      'WhatsApp manual ilimitado',
-      'Compra de paquetes extra',
-    ],
-  },
-  {
-    id: 'smart',
-    name: 'Smart',
-    price: '$100.000',
-    period: 'COP/mes',
-    blurb: 'El equilibrio ideal para consultas en crecimiento.',
-    featured: true,
-    cta: 'Elegir Smart',
-    features: [
-      'Hasta 4 Usuarios',
-      '5 GB de almacenamiento',
-      'Dictado por voz IA (15 horas/mes)',
-      'WhatsApp manual ilimitado + 150 automáticos',
-      'Facturación DIAN (50 facturas/mes)',
-      'Compra de paquetes extra',
-    ],
-  },
-  {
-    id: 'bionic',
-    name: 'BioniC',
-    price: '$150.000',
-    period: 'COP/mes',
-    blurb: 'La suite definitiva.',
-    featured: false,
-    cta: 'Comenzar',
-    features: [
-      'Hasta 6 Usuarios',
-      '15 GB de almacenamiento',
-      'Dictado por voz IA (35 horas/mes)',
-      'WhatsApp manual ilimitado + 500 automáticos',
-      'Facturación DIAN (100 facturas/mes)',
-      'Compra de paquetes extra',
-    ],
-  },
-  {
-    id: 'corporativo',
-    name: 'Corporativo',
-    price: 'Hablemos',
-    period: '',
-    blurb: 'Para clínicas de alto volumen o múltiples sedes.',
-    featured: false,
-    cta: 'Hablemos',
-    features: [
-      'Usuarios y almacenamiento a medida',
-      'Paquetes WhatsApp mayorista',
-      'Facturación DIAN por volumen',
-      'Capacitación presencial',
-      'Gerente de cuenta asignado',
-    ],
-  },
-] as const
 
 export function LandingPage() {
   return (
@@ -214,7 +146,7 @@ export function LandingPage() {
           </p>
 
           <div className="mt-12 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-            {PLANS.map((plan) => (
+            {PAID_PLANS.map((plan) => (
               <article
                 key={plan.id}
                 className={`relative flex flex-col rounded-2xl border p-6 shadow-sm ${
@@ -235,7 +167,7 @@ export function LandingPage() {
                   {plan.blurb}
                 </p>
                 <p className="mt-5 flex items-end gap-1">
-                  <span className="text-3xl font-bold tracking-tight">{plan.price}</span>
+                  <span className="text-3xl font-bold tracking-tight">{plan.priceLabel}</span>
                   {plan.period ? (
                     <span
                       className={`mb-1 text-sm font-medium ${

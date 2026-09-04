@@ -6,6 +6,7 @@ declare module '../../shared/subscriptionPlans.js' {
     period: string
     blurb: string
     featured: boolean
+    cta: string
     features: string[]
     maxSeats: number
   }>
