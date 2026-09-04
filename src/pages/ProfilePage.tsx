@@ -23,7 +23,88 @@ import { validateActiveRepsSede } from '@/utils/repsCode'
 import { cleanPersonNameInput, splitPersonName } from '@/utils/personName'
 import { computeNitDv, extractNitDigits, formatNitInput } from '@/utils/nit'
 import { validatePrestadorIdentityFields } from '@/utils/prestadorIdentity'
-import { PROVIDER_TYPES, isInstitutionProvider, normalizeProviderType } from '@/utils/providerType'
+import {
+  PROVIDER_TYPES,
+  isInstitutionProvider,
+  normalizeProviderType,
+} from '@/utils/providerType'
+
+type ProviderTypeId = 'institucion' | 'profesional_independiente'
+
+type IdentityDraft = {
+  firstName: string
+  lastName: string
+  legalName: string
+  documentType: string
+  documentNumber: string
+  rethusNumber: string
+  clinicName: string
+  providerNit: string
+  repsCode: string
+  repsStatus: RepsHabilitationStatus
+  thsSpecialty: OdontologyThsSpecialtyId
+  repsEnabledSpecialties: OdontologyThsSpecialtyId[]
+}
+
+function emptyIdentityDraft(): IdentityDraft {
+  return {
+    firstName: '',
+    lastName: '',
+    legalName: '',
+    documentType: 'CC',
+    documentNumber: '',
+    rethusNumber: '',
+    clinicName: '',
+    providerNit: '',
+    repsCode: '',
+    repsStatus: 'activo',
+    thsSpecialty: 'odontologia_general',
+    repsEnabledSpecialties: ['odontologia_general'],
+  }
+}
+
+function identityDraftFromUser(
+  user: {
+    providerType?: string
+    firstName?: string
+    lastName?: string
+    legalName?: string
+    clinicName?: string
+    documentType?: string
+    documentNumber?: string
+    rethusNumber?: string
+    providerNit?: string
+    repsCode?: string
+    repsStatus?: RepsHabilitationStatus
+    thsSpecialty?: OdontologyThsSpecialtyId
+    repsEnabledSpecialties?: OdontologyThsSpecialtyId[]
+  },
+  type: ProviderTypeId,
+): IdentityDraft {
+  const savedType = normalizeProviderType(user.providerType)
+  if (savedType !== type) return emptyIdentityDraft()
+  const names = splitPersonName({
+    firstName: user.firstName,
+    lastName: user.lastName,
+  })
+  const institution = isInstitutionProvider(type)
+  return {
+    firstName: names.firstName,
+    lastName: names.lastName,
+    legalName: institution ? user.legalName ?? '' : '',
+    documentType: user.documentType || 'CC',
+    documentNumber: institution ? '' : user.documentNumber ?? '',
+    rethusNumber: institution ? '' : user.rethusNumber ?? '',
+    clinicName: user.clinicName ?? '',
+    providerNit: formatNitInput(user.providerNit ?? ''),
+    repsCode: user.repsCode ?? '',
+    repsStatus: user.repsStatus ?? 'activo',
+    thsSpecialty: user.thsSpecialty ?? 'odontologia_general',
+    repsEnabledSpecialties: user.repsEnabledSpecialties?.length
+      ? user.repsEnabledSpecialties
+      : [user.thsSpecialty ?? 'odontologia_general'],
+  }
+}
 
 export function ProfilePage() {
   const { user, can, applySessionUser } = useAuth()
@@ -33,22 +114,19 @@ export function ProfilePage() {
   const [passwordSaved, setPasswordSaved] = useState(false)
   const [passwordError, setPasswordError] = useState('')
 
-  const [form, setForm] = useState({
-    providerType: 'profesional_independiente' as 'institucion' | 'profesional_independiente',
-    firstName: '',
-    lastName: '',
-    legalName: '',
-    email: '',
-    documentType: 'CC',
-    documentNumber: '',
-    rethusNumber: '',
-    clinicName: '',
-    providerNit: '',
-    repsCode: '',
-    repsStatus: 'activo' as RepsHabilitationStatus,
-    thsSpecialty: 'odontologia_general' as OdontologyThsSpecialtyId,
-    repsEnabledSpecialties: ['odontologia_general'] as OdontologyThsSpecialtyId[],
+  const [providerType, setProviderType] = useState<ProviderTypeId>('profesional_independiente')
+  const [email, setEmail] = useState('')
+  const [drafts, setDrafts] = useState<Record<ProviderTypeId, IdentityDraft>>({
+    institucion: emptyIdentityDraft(),
+    profesional_independiente: emptyIdentityDraft(),
   })
+  const form = drafts[providerType]
+  const updateDraft = (patch: Partial<IdentityDraft>) => {
+    setDrafts((current) => ({
+      ...current,
+      [providerType]: { ...current[providerType], ...patch },
+    }))
+  }
 
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
@@ -60,28 +138,12 @@ export function ProfilePage() {
 
   useEffect(() => {
     if (!user) return
-    const names = splitPersonName({
-      firstName: user.firstName,
-      lastName: user.lastName,
-    })
-    setForm({
-      providerType: normalizeProviderType(user.providerType),
-      firstName: names.firstName,
-      lastName: names.lastName,
-      legalName: user.legalName ?? user.clinicName ?? '',
-      email: user.email,
-      documentType: user.documentType || 'CC',
-      documentNumber: user.documentNumber ?? '',
-      rethusNumber: user.rethusNumber ?? '',
-      clinicName: user.clinicName ?? '',
-      providerNit: formatNitInput(user.providerNit ?? ''),
-      repsCode: user.repsCode ?? '',
-      repsStatus: user.repsStatus ?? 'activo',
-      thsSpecialty: user.thsSpecialty ?? 'odontologia_general',
-      repsEnabledSpecialties:
-        user.repsEnabledSpecialties?.length
-          ? user.repsEnabledSpecialties
-          : [user.thsSpecialty ?? 'odontologia_general'],
+    const savedType = normalizeProviderType(user.providerType)
+    setProviderType(savedType)
+    setEmail(user.email)
+    setDrafts({
+      institucion: identityDraftFromUser(user, 'institucion'),
+      profesional_independiente: identityDraftFromUser(user, 'profesional_independiente'),
     })
   }, [user?.id])
 
@@ -95,7 +157,7 @@ export function ProfilePage() {
 
     try {
       const identityCheck = validatePrestadorIdentityFields({
-        providerType: form.providerType,
+        providerType,
         firstName: form.firstName,
         lastName: form.lastName,
         legalName: form.legalName,
@@ -128,10 +190,10 @@ export function ProfilePage() {
         providerType: identity.providerType,
         firstName: identity.firstName,
         lastName: identity.lastName,
-        legalName: identity.legalName,
+        legalName: isInstitutionProvider(identity.providerType) ? identity.legalName : '',
         documentType: identity.documentType,
-        documentNumber: identity.documentNumber,
-        rethusNumber: identity.rethusNumber,
+        documentNumber: isInstitutionProvider(identity.providerType) ? '' : identity.documentNumber,
+        rethusNumber: isInstitutionProvider(identity.providerType) ? '' : identity.rethusNumber,
         clinicName: identity.clinicName,
         providerNit: identity.providerNitDisplay || identity.providerNit,
         repsCode: identity.repsDisplay || identity.repsCode,
@@ -141,23 +203,10 @@ export function ProfilePage() {
         repsEnabledSpecialties,
       }
 
-      setForm((current) => ({
-        ...current,
-        providerType: identity.providerType,
-        firstName: identity.firstName,
-        lastName: identity.lastName,
-        legalName: identity.legalName,
-        documentNumber: identity.documentNumber,
-        rethusNumber: identity.rethusNumber,
-        clinicName: identity.clinicName,
-        providerNit: identity.providerNitDisplay || identity.providerNit,
-        repsCode: identity.repsDisplay || identity.repsCode,
-      }))
-
       const apiAuth = getStoredApiAuth()
       const remote = await updateOwnProfile({
         ...patch,
-        clientEmail: form.email || apiAuth?.user?.email,
+        clientEmail: email || apiAuth?.user?.email,
         clientUserId: apiAuth?.user?.id,
       })
       const sessionUnavailable =
@@ -187,20 +236,21 @@ export function ProfilePage() {
         setStoredApiAuth(latestAuth?.token ?? apiAuth?.token ?? `session-${remote.user.id}`, remote.user)
         applySessionUser(remote.user)
         const remoteType = normalizeProviderType(remote.user.providerType)
-        setForm((current) => ({
-          ...current,
-          providerType: remoteType,
-          firstName: remote.user.firstName ?? current.firstName,
-          lastName: remote.user.lastName ?? current.lastName,
-          legalName: remote.user.legalName ?? current.legalName,
-          clinicName: remote.user.clinicName ?? current.clinicName,
-          providerNit: formatNitInput(remote.user.providerNit ?? current.providerNit),
-          repsCode: remote.user.repsCode ?? current.repsCode,
-          documentNumber: remote.user.documentNumber ?? current.documentNumber,
-          rethusNumber: remote.user.rethusNumber ?? current.rethusNumber,
-          thsSpecialty:
-            (remote.user.thsSpecialty as OdontologyThsSpecialtyId | undefined) ?? current.thsSpecialty,
-        }))
+        setProviderType(remoteType)
+        setDrafts({
+          institucion: identityDraftFromUser(remote.user, 'institucion'),
+          profesional_independiente: identityDraftFromUser(remote.user, 'profesional_independiente'),
+        })
+      } else {
+        const savedType = normalizeProviderType(identity.providerType)
+        setProviderType(savedType)
+        setDrafts({
+          institucion: savedType === 'institucion' ? { ...form, legalName: identity.legalName } : emptyIdentityDraft(),
+          profesional_independiente:
+            savedType === 'profesional_independiente'
+              ? { ...form, legalName: '', documentNumber: identity.documentNumber, rethusNumber: identity.rethusNumber }
+              : emptyIdentityDraft(),
+        })
       }
 
       try {
@@ -307,7 +357,7 @@ export function ProfilePage() {
             Tipo de prestador
           </legend>
           {PROVIDER_TYPES.map((option) => {
-            const selected = form.providerType === option.id
+            const selected = providerType === option.id
             return (
               <label
                 key={option.id}
@@ -320,12 +370,11 @@ export function ProfilePage() {
                   name="providerType"
                   className="mt-1"
                   checked={selected}
-                  onChange={() =>
-                    setForm({
-                      ...form,
-                      providerType: option.id as typeof form.providerType,
-                    })
-                  }
+                  onChange={() => {
+                    setFieldErrors({})
+                    setSaveError('')
+                    setProviderType(option.id as ProviderTypeId)
+                  }}
                 />
                 <span>
                   <span className="block text-sm font-medium text-slate-800">{option.label}</span>
@@ -334,15 +383,19 @@ export function ProfilePage() {
               </label>
             )
           })}
+          <p className="text-xs text-slate-500">
+            IPS y profesional independiente tienen formularios distintos. Solo se conserva el tipo
+            que pulse en Guardar.
+          </p>
         </fieldset>
-        {isInstitutionProvider(form.providerType) ? (
+        {isInstitutionProvider(providerType) ? (
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
               Razón social
             </label>
             <input
               value={form.legalName}
-              onChange={(e) => setForm({ ...form, legalName: e.target.value, clinicName: e.target.value })}
+              onChange={(e) => updateDraft({ legalName: e.target.value })}
               autoComplete="organization"
               required
               className={`input-field ${fieldErrors.legalName ? 'border-red-400' : ''}`}
@@ -356,11 +409,11 @@ export function ProfilePage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
-              {isInstitutionProvider(form.providerType) ? 'Nombres del representante' : 'Nombres'}
+              {isInstitutionProvider(providerType) ? 'Nombres del representante' : 'Nombres'}
             </label>
             <input
               value={form.firstName}
-              onChange={(e) => setForm({ ...form, firstName: cleanPersonNameInput(e.target.value) })}
+              onChange={(e) => updateDraft({ firstName: cleanPersonNameInput(e.target.value) })}
               autoComplete="given-name"
               required
               className={`input-field ${fieldErrors.firstName ? 'border-red-400' : ''}`}
@@ -372,11 +425,11 @@ export function ProfilePage() {
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
-              {isInstitutionProvider(form.providerType) ? 'Apellidos del representante' : 'Apellidos'}
+              {isInstitutionProvider(providerType) ? 'Apellidos del representante' : 'Apellidos'}
             </label>
             <input
               value={form.lastName}
-              onChange={(e) => setForm({ ...form, lastName: cleanPersonNameInput(e.target.value) })}
+              onChange={(e) => updateDraft({ lastName: cleanPersonNameInput(e.target.value) })}
               autoComplete="family-name"
               required
               className={`input-field ${fieldErrors.lastName ? 'border-red-400' : ''}`}
@@ -393,7 +446,7 @@ export function ProfilePage() {
           </label>
           <input
             type="email"
-            value={form.email}
+            value={email}
             readOnly
             autoComplete="email"
             className="input-field bg-slate-50 text-slate-600"
@@ -402,44 +455,48 @@ export function ProfilePage() {
             El correo de sesión no se modifica desde aquí.
           </p>
         </div>
+        {!isInstitutionProvider(providerType) ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <DocumentIdentityField
+              compact
+              required
+              documentType={form.documentType}
+              documentNumber={form.documentNumber}
+              error={fieldErrors.documentNumber}
+              onChange={(patch) => updateDraft(patch)}
+            />
+          </div>
+        ) : null}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <DocumentIdentityField
-            compact
-            required={!isInstitutionProvider(form.providerType)}
-            documentType={form.documentType}
-            documentNumber={form.documentNumber}
-            error={fieldErrors.documentNumber}
-            onChange={(patch) => setForm({ ...form, ...patch })}
-          />
-        </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <RethusCodeField
-            compact
-            required={!isInstitutionProvider(form.providerType)}
-            value={form.rethusNumber}
-            error={fieldErrors.rethusNumber}
-            onChange={(rethusNumber) => setForm({ ...form, rethusNumber })}
-          />
-          <div>
+          {!isInstitutionProvider(providerType) ? (
+            <RethusCodeField
+              compact
+              required
+              value={form.rethusNumber}
+              error={fieldErrors.rethusNumber}
+              onChange={(rethusNumber) => updateDraft({ rethusNumber })}
+            />
+          ) : null}
+          <div className={isInstitutionProvider(providerType) ? 'sm:col-span-2' : ''}>
             <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
-              {isInstitutionProvider(form.providerType)
+              {isInstitutionProvider(providerType)
                 ? 'Nombre comercial de la sede'
                 : 'Nombre de la clínica / consultorio'}
             </label>
             <input
               value={form.clinicName}
-              onChange={(e) => setForm({ ...form, clinicName: e.target.value })}
+              onChange={(e) => updateDraft({ clinicName: e.target.value })}
               autoComplete="organization"
               className={`input-field ${fieldErrors.clinicName ? 'border-red-400' : ''}`}
               placeholder={
-                isInstitutionProvider(form.providerType)
+                isInstitutionProvider(providerType)
                   ? 'Opcional si coincide con la razón social'
                   : ''
               }
             />
             {fieldErrors.clinicName ? (
               <p className="mt-1 text-xs text-red-600">{fieldErrors.clinicName}</p>
-            ) : isInstitutionProvider(form.providerType) ? (
+            ) : isInstitutionProvider(providerType) ? (
               <p className="mt-1 text-xs text-slate-500">
                 Los odontólogos se vinculan en Gestión de usuarios con su ReTHUS individual. Esta
                 cuenta factura y genera RIPS con el REPS y el NIT de la IPS.
@@ -454,7 +511,7 @@ export function ProfilePage() {
             </label>
             <input
               value={form.providerNit}
-              onChange={(e) => setForm({ ...form, providerNit: formatNitInput(e.target.value) })}
+              onChange={(e) => updateDraft({ providerNit: formatNitInput(e.target.value) })}
               className={`input-field font-mono ${fieldErrors.providerNit ? 'border-red-400' : ''}`}
               placeholder="Ej: 79904620-4"
               inputMode="numeric"
@@ -476,14 +533,13 @@ export function ProfilePage() {
             compact
             value={form.repsCode}
             error={fieldErrors.repsCode}
-            onChange={(repsCode) => setForm({ ...form, repsCode })}
+            onChange={(repsCode) => updateDraft({ repsCode })}
           />
         </div>
         <RethusSpecialtyField
           value={form.thsSpecialty}
           onChange={(thsSpecialty) =>
-            setForm({
-              ...form,
+            updateDraft({
               thsSpecialty,
               repsEnabledSpecialties: ensureSpecialtyInRepsPortfolio(
                 thsSpecialty,

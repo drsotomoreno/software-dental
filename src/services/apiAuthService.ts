@@ -35,6 +35,8 @@ export interface ApiSubscriptionUser {
   providerNit?: string
   clinicName?: string
   legalName?: string
+  clinicId?: string
+  isClinicOwner?: boolean
   providerType?: 'institucion' | 'profesional_independiente'
   prestadorVerifiedAt?: string | null
   trialLimited?: boolean
@@ -194,6 +196,9 @@ export async function validateApiSession(token: string) {
       Authorization: `Bearer ${token}`,
       ...(stored?.user?.email ? { 'X-Client-Email': String(stored.user.email) } : {}),
       ...(stored?.user?.id ? { 'X-Client-User-Id': String(stored.user.id) } : {}),
+      ...(stored?.user?.documentNumber
+        ? { 'X-Client-Document': String(stored.user.documentNumber) }
+        : {}),
     },
   })
 
@@ -267,9 +272,11 @@ export function mapApiUserToAuthUser(
     documentType: user.documentType || 'CC',
     documentNumber: user.documentNumber || '',
     role: mapApiRoleToUserRole(user.rol),
-    clinicName: user.clinicName || user.legalName || '',
-    legalName: user.legalName || user.clinicName || '',
+    clinicName: user.clinicName || '',
+    legalName: user.providerType === 'institucion' ? user.legalName || '' : '',
     providerType: user.providerType === 'institucion' ? 'institucion' : 'profesional_independiente',
+    clinicId: user.clinicId || user.id,
+    isClinicOwner: user.isClinicOwner === true || String(user.clinicId || user.id) === String(user.id),
     sessionId: token,
     providerNit: user.providerNit,
     repsCode: user.repsCode,

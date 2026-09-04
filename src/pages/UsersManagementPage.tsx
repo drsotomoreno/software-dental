@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { useCallback, useEffect, useState } from 'react'
 import { db } from '@/db/database'
 import { RequirePermission } from '@/components/auth/RequirePermission'
 import { useAuth } from '@/contexts/AuthContext'
@@ -12,8 +11,14 @@ import {
   resetAppUserPassword,
   updateAppUser,
 } from '@/services/authService'
+import { fetchClinicUsers, type ClinicSeatSnapshot } from '@/services/subscriptionService'
 import type { UserProfile, UserRole } from '@/types/user'
-import { ASSIGNABLE_ROLES, ROLE_LABELS, USERS_MANAGE_DENIED, canManageUsers } from '@/utils/permissions'
+import {
+  ASSIGNABLE_ROLES,
+  ROLE_LABELS,
+  USERS_MANAGE_DENIED,
+  canManageClinicTeam,
+} from '@/utils/permissions'
 import {
   DocumentIdentityField,
   RegulatoryIdentityAdminExtras,
@@ -66,10 +71,17 @@ function sedeDefaults(user: UserProfile | null | undefined) {
   }
 }
 
+function userLabel(user: Pick<UserProfile, 'firstName' | 'lastName' | 'documentNumber' | 'email'>) {
+  const name = `${user.firstName} ${user.lastName}`.trim()
+  if (user.documentNumber) return `${name} · ${user.documentNumber}`
+  return user.email ? `${name} · ${user.email}` : name
+}
+
 export function UsersManagementPage() {
   const { user: currentUser } = useAuth()
   const { audit } = useAudit()
-  const users = useLiveQuery(() => listAppUsers())
+  const [users, setUsers] = useState<UserProfile[] | null>(null)
+  const [seats, setSeats] = useState<ClinicSeatSnapshot | null>(null)
 
   const [showCreate, setShowCreate] = useState(false)
   const [createForm, setCreateForm] = useState(() =>
@@ -82,7 +94,22 @@ export function UsersManagementPage() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
-  const canManage = canManageUsers(currentUser?.role)
+  const canManage = canManageClinicTeam(currentUser)
+  const seatsExhausted = Boolean(seats && seats.max != null && seats.used >= seats.max)
+
+  const reloadUsers = useCallback(async () => {
+    const api = await fetchClinicUsers()
+    if (api.ok) {
+      setUsers(api.users)
+      setSeats(api.seats)
+      return
+    }
+    setUsers(await listAppUsers())
+  }, [])
+
+  useEffect(() => {
+    void reloadUsers()
+  }, [reloadUsers])
 
   const showMsg = (text: string) => {
     setMessage(text)
@@ -102,6 +129,12 @@ export function UsersManagementPage() {
       return
     }
     const { password, ...userData } = createForm
+    if (seatsExhausted) {
+      showErr(
+        `Su plan ${seats?.planName ?? 'actual'} permite máximo ${seats?.max} colaboradores. Actualmente tiene ${seats?.used}. Mejore el plan para agregar más usuarios.`,
+      )
+      return
+    }
     const result = await createAppUser(userData, password)
     if (!result.ok) {
       showErr(result.error)
@@ -112,10 +145,11 @@ export function UsersManagementPage() {
       action: 'CREATE_USER',
       resourceType: 'user',
       resourceId: result.user.id,
-      details: `${result.user.email} — ${ROLE_LABELS[result.user.role]}`,
+      details: `${userLabel(result.user)} — ${ROLE_LABELS[result.user.role]}`,
     })
     setShowCreate(false)
     setCreateForm(emptyUserForm(sedeDefaults(currentUser)))
+    await reloadUsers()
     showMsg('Usuario creado correctamente.')
   }
 
@@ -169,6 +203,7 @@ export function UsersManagementPage() {
       details: `Actualización de ${editingUser.email}`,
     })
     setEditingUser(null)
+    await reloadUsers()
     showMsg('Usuario actualizado.')
   }
 
@@ -192,12 +227,13 @@ export function UsersManagementPage() {
     })
     setResetUserId(null)
     setNewPassword('')
-    showMsg('Contraseña restablecida.')
+    await reloadUsers()
+    showMsg('Contraseña temporal asignada.')
   }
 
   const handleDelete = async (u: UserProfile) => {
     if (!currentUser || !canManage) return
-    if (!window.confirm(`¿Eliminar el usuario ${u.email}? Esta acción no se puede deshacer.`)) {
+    if (!window.confirm(`¿Eliminar el usuario ${userLabel(u)}? Esta acción no se puede deshacer.`)) {
       return
     }
     const result = await deleteAppUser(u.id, currentUser.id)
@@ -209,8 +245,9 @@ export function UsersManagementPage() {
       action: 'DELETE_USER',
       resourceType: 'user',
       resourceId: u.id,
-      details: `Usuario eliminado: ${u.email}`,
+      details: `Usuario eliminado: ${userLabel(u)}`,
     })
+    await reloadUsers()
     showMsg('Usuario eliminado.')
   }
 
@@ -226,8 +263,9 @@ export function UsersManagementPage() {
       action: 'UPDATE_USER',
       resourceType: 'user',
       resourceId: u.id,
-      details: `Rol de ${u.email} → ${ROLE_LABELS[role]}`,
+      details: `Rol de ${userLabel(u)} → ${ROLE_LABELS[role]}`,
     })
+    await reloadUsers()
     showMsg(`Rol actualizado a ${ROLE_LABELS[role]}.`)
   }
 
@@ -245,11 +283,24 @@ export function UsersManagementPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Gestión de Usuarios</h1>
             <p className="mt-1 text-sm text-slate-600">
-              Solo Administración y Super Administrador pueden crear, editar y asignar roles.
+              El administrador de esta clínica crea colaboradores con cédula y una contraseña
+              temporal. El correo no es obligatorio.
             </p>
           </div>
           {canManage && (
-            <button type="button" onClick={() => setShowCreate(true)} className="btn-primary">
+            <button
+              type="button"
+              onClick={() => {
+                if (seatsExhausted) {
+                  showErr(
+                    `Su plan ${seats?.planName ?? 'actual'} permite máximo ${seats?.max} colaboradores. Actualmente tiene ${seats?.used}. Mejore el plan para agregar más usuarios.`,
+                  )
+                  return
+                }
+                setShowCreate(true)
+              }}
+              className="btn-primary"
+            >
               + Nuevo usuario
             </button>
           )}
@@ -265,6 +316,27 @@ export function UsersManagementPage() {
           </div>
         )}
 
+        {seats && (
+          <div
+            className={`rounded-lg border px-4 py-3 text-sm ${
+              seatsExhausted
+                ? 'border-amber-200 bg-amber-50 text-amber-900'
+                : 'border-slate-200 bg-slate-50 text-slate-700'
+            }`}
+          >
+            {seats.max == null ? (
+              <>Licencias de colaboradores: sin tope en esta cuenta.</>
+            ) : (
+              <>
+                Plan {seats.planName}: {seats.used} de {seats.max} colaboradores.
+                {seatsExhausted
+                  ? ' Alcanzó el máximo de su plan. Mejore la suscripción para agregar más usuarios.'
+                  : ''}
+              </>
+            )}
+          </div>
+        )}
+
         <div className="card overflow-hidden p-0">
           {!users ? (
             <p className="p-4 text-sm text-slate-500">Cargando usuarios...</p>
@@ -274,9 +346,9 @@ export function UsersManagementPage() {
                 <thead className="border-b border-slate-200 bg-slate-50">
                   <tr>
                     <th className="px-3 py-2 font-medium text-slate-600">Nombre</th>
-                    <th className="px-3 py-2 font-medium text-slate-600">Correo</th>
-                    <th className="px-3 py-2 font-medium text-slate-600">Rol</th>
                     <th className="px-3 py-2 font-medium text-slate-600">Documento</th>
+                    <th className="px-3 py-2 font-medium text-slate-600">Correo (opcional)</th>
+                    <th className="px-3 py-2 font-medium text-slate-600">Rol</th>
                     <th className="px-3 py-2 font-medium text-slate-600">Acciones</th>
                   </tr>
                 </thead>
@@ -286,7 +358,15 @@ export function UsersManagementPage() {
                       <td className="px-3 py-2 font-medium text-slate-800">
                         {u.firstName} {u.lastName}
                       </td>
-                      <td className="px-3 py-2 text-slate-600">{u.email}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-slate-600">
+                        {u.documentType} {u.documentNumber}
+                        {u.isClinicOwner ? (
+                          <span className="ml-2 rounded bg-dental-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-dental-700">
+                            Titular
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2 text-slate-600">{u.email || '—'}</td>
                       <td className="px-3 py-2">
                         <select
                           value={assignableRoleValue(u.role)}
@@ -303,9 +383,6 @@ export function UsersManagementPage() {
                             </option>
                           ))}
                         </select>
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs text-slate-600">
-                        {u.documentType} {u.documentNumber}
                       </td>
                       <td className="px-3 py-2">
                         {canManage ? (
@@ -327,7 +404,7 @@ export function UsersManagementPage() {
                           >
                             Restablecer clave
                           </button>
-                          {u.id !== currentUser?.id && (
+                          {u.id !== currentUser?.id && !u.isClinicOwner && (
                             <button
                               type="button"
                               onClick={() => handleDelete(u)}
@@ -372,7 +449,7 @@ export function UsersManagementPage() {
         )}
 
         {editingUser && (
-          <Modal title={`Editar: ${editingUser.email}`} onClose={() => setEditingUser(null)}>
+          <Modal title={`Editar: ${userLabel(editingUser)}`} onClose={() => setEditingUser(null)}>
             <form onSubmit={handleUpdate} className="space-y-4">
               <UserFields values={editForm} onChange={(patch) => setEditForm({ ...editForm, ...patch })} />
               <div className="flex gap-2">
@@ -467,14 +544,18 @@ function UserFields({
         />
       </div>
       <div className="sm:col-span-2">
-        <label className="label-field">Correo electrónico</label>
+        <label className="label-field">Correo electrónico (opcional)</label>
         <input
           type="email"
-          required
           value={values.email ?? ''}
           onChange={(e) => onChange({ email: e.target.value })}
           className="input-field"
+          placeholder="No es necesario para ingresar"
         />
+        <p className="mt-1 text-xs text-slate-500">
+          El colaborador inicia sesión con su cédula y la contraseña que usted asigne. El correo no
+          se verifica ni es obligatorio.
+        </p>
       </div>
       <DocumentIdentityField
         compact
@@ -485,7 +566,7 @@ function UserFields({
       <div>
         <RethusCodeField
           compact
-          required
+          required={false}
           value={values.rethusNumber ?? ''}
           onChange={(rethusNumber) => onChange({ rethusNumber })}
         />
@@ -519,7 +600,7 @@ function UserFields({
       <div>
         <label className="label-field">Nombre de la clínica / consultorio</label>
         <input
-          required
+          required={false}
           value={values.clinicName ?? ''}
           onChange={(e) => onChange({ clinicName: e.target.value })}
           className="input-field"
@@ -576,7 +657,7 @@ function UserFields({
       />
       {includePassword && (
         <div className="sm:col-span-2">
-          <label className="label-field">Contraseña inicial</label>
+          <label className="label-field">Contraseña temporal</label>
           <input
             type="password"
             required
@@ -585,6 +666,10 @@ function UserFields({
             onChange={(e) => onPasswordChange?.(e.target.value)}
             className="input-field"
           />
+          <p className="mt-1 text-xs text-slate-500">
+            El administrador de la clínica asigna esta clave. El colaborador la usa junto con su
+            cédula, sin verificación externa.
+          </p>
         </div>
       )}
     </div>

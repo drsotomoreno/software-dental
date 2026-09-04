@@ -36,6 +36,7 @@ app.use(
       'Accept',
       'X-Client-Email',
       'X-Client-User-Id',
+      'X-Client-Document',
     ],
   }),
 )

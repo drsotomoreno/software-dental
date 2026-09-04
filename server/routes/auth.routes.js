@@ -12,15 +12,20 @@ import {
 import {
   changeOwnPassword,
   confirmSubscriptionPayment,
+  createClinicUser,
+  deleteClinicUser,
   ensureSuperAdmin,
   isMasterCredentials,
   listAllSubscriptionUsers,
+  listClinicUsers,
   loginSubscriptionUser,
   issueMasterSessionToken,
   MASTER_EMAIL,
   registerSubscriptionUser,
+  resetClinicUserPassword,
   resolveSubscriptionSession,
   sessionHintFromRequest,
+  updateClinicUser,
   updateSubscriptionProfile,
 } from '../services/subscriptionAuthStore.js'
 
@@ -105,20 +110,23 @@ router.post('/login', async (req, res) => {
 
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     const email = String(body.email ?? '').trim().toLowerCase()
+    const documentNumber = String(body.documentNumber ?? body.documento ?? '').replace(/\D/g, '')
     const password = String(body.password ?? '')
+    const hasEmail = Boolean(email.includes('@') && email)
+    const hasDocument = documentNumber.length >= 6
 
-    if (!email || !password) {
+    if (!password || (!hasEmail && !hasDocument)) {
       return res.status(400).json({
         success: false,
         ok: false,
-        error: 'Correo y contraseña son obligatorios.',
+        error: 'Indique su número de documento (cédula) o el correo del titular, y su contraseña.',
       })
     }
 
-    if (isMasterCredentials(email, password)) {
+    if (hasEmail && isMasterCredentials(email, password)) {
       let result
       try {
-        result = await loginSubscriptionUser({ email, password })
+        result = await loginSubscriptionUser({ email, documentNumber, password })
       } catch (masterError) {
         console.error('[Auth] Login maestro: store falló, se otorga sesión persistida de respaldo', masterError)
         result = { ok: false }
@@ -143,7 +151,7 @@ router.post('/login', async (req, res) => {
       })
     }
 
-    const result = await loginSubscriptionUser({ email, password })
+    const result = await loginSubscriptionUser({ email, documentNumber, password })
 
     if (!result.ok) {
       return res.status(result.status).json({
@@ -239,14 +247,120 @@ router.get('/admin/users', async (req, res) => {
     }
     const email = String(session.user.email ?? '').toLowerCase()
     const rol = String(session.user.rol ?? '').toLowerCase()
-    if (email !== MASTER_EMAIL && rol !== 'superadmin' && rol !== 'admin') {
-      return res.status(403).json({ success: false, ok: false, error: 'Solo el administrador puede ver los usuarios.' })
+    if (email !== MASTER_EMAIL && rol !== 'superadmin') {
+      return res.status(403).json({ success: false, ok: false, error: 'Solo el superadministrador puede ver todas las cuentas.' })
     }
     const users = await listAllSubscriptionUsers()
     return res.json({ success: true, ok: true, users })
   } catch (error) {
     console.error('[Auth] Error en GET /admin/users:', error)
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo listar los usuarios.' })
+  }
+})
+
+router.get('/clinic/users', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const result = await listClinicUsers({ token, hint: sessionHintFromRequest(req) })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true, users: result.users, seats: result.seats })
+  } catch (error) {
+    console.error('[Auth] Error en GET /clinic/users:', error)
+    return res.status(500).json({ success: false, ok: false, error: 'No se pudo listar el equipo de la clínica.' })
+  }
+})
+
+router.post('/clinic/users', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const result = await createClinicUser({
+      token,
+      hint: sessionHintFromRequest(req),
+      member: body,
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({
+        success: false,
+        ok: false,
+        error: result.error,
+        seats: result.seats,
+      })
+    }
+    return res.status(201).json({
+      success: true,
+      ok: true,
+      user: result.user,
+      seats: result.seats,
+    })
+  } catch (error) {
+    console.error('[Auth] Error en POST /clinic/users:', error)
+    return res.status(500).json({ success: false, ok: false, error: 'No se pudo crear el colaborador.' })
+  }
+})
+
+router.put('/clinic/users/:id', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const result = await updateClinicUser({
+      token,
+      hint: sessionHintFromRequest(req),
+      userId: req.params.id,
+      patch: body,
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true, user: result.user })
+  } catch (error) {
+    console.error('[Auth] Error en PUT /clinic/users/:id:', error)
+    return res.status(500).json({ success: false, ok: false, error: 'No se pudo actualizar el colaborador.' })
+  }
+})
+
+router.put('/clinic/users/:id/password', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const result = await resetClinicUserPassword({
+      token,
+      hint: sessionHintFromRequest(req),
+      userId: req.params.id,
+      newPassword: body.password ?? body.newPassword,
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true })
+  } catch (error) {
+    console.error('[Auth] Error en PUT /clinic/users/:id/password:', error)
+    return res.status(500).json({ success: false, ok: false, error: 'No se pudo asignar la contraseña.' })
+  }
+})
+
+router.delete('/clinic/users/:id', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const result = await deleteClinicUser({
+      token,
+      hint: sessionHintFromRequest(req),
+      userId: req.params.id,
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true, seats: result.seats })
+  } catch (error) {
+    console.error('[Auth] Error en DELETE /clinic/users/:id:', error)
+    return res.status(500).json({ success: false, ok: false, error: 'No se pudo eliminar el colaborador.' })
   }
 })
 

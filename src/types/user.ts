@@ -9,14 +9,19 @@ export type LegacyUserRole = 'administrador' | 'auxiliar'
 
 export interface UserProfile {
   id: string
+  /** Opcional en colaboradores: el acceso es por cédula. */
   email: string
   firstName: string
   lastName: string
   documentType: string
-  /** Cédula / documento de identidad — llave de consulta en ReTHUS. */
+  /** Cédula / documento de identidad — llave de acceso y de consulta en ReTHUS. */
   documentNumber: string
   role: UserRole
   clinicName: string
+  /** Tenant: id de la cuenta titular de la clínica. */
+  clinicId?: string
+  /** Titular de la suscripción / clínica. */
+  isClinicOwner?: boolean
   /** Razón social (IPS) o nombre legal del profesional independiente. */
   legalName?: string
   /** Tipo de prestador: IPS / persona jurídica vs consultorio unipersonal. */

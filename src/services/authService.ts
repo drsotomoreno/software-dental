@@ -5,14 +5,23 @@ import type { UserProfile, UserRole } from '@/types/user'
 import {
   ASSIGNABLE_ROLES,
   USERS_MANAGE_DENIED,
+  canManageClinicTeam,
   canManageUsers,
   normalizeRole,
   type CanonicalRole,
 } from '@/utils/permissions'
 import { generateId } from '@/utils/crypto'
 import { getSessionExpiryDate, hashPassword, isSessionExpired, verifyPassword } from '@/utils/authCrypto'
-import { getEffectiveRole, getStoredApiAuth } from '@/services/apiAuthService'
+import { getEffectiveRole, getStoredApiAuth, mapApiUserToAuthUser } from '@/services/apiAuthService'
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
+import { seatLimitForAccount, planDisplayName } from '../../shared/subscriptionPlans.js'
+import {
+  createClinicMember,
+  deleteClinicMember,
+  fetchClinicUsers,
+  resetClinicMemberPassword,
+  updateClinicMember,
+} from '@/services/subscriptionService'
 
 export async function getStoredSessionToken(): Promise<string | null> {
   return localStorage.getItem(SESSION_STORAGE_KEY)
@@ -41,11 +50,25 @@ export async function createUserCredentials(
 }
 
 export async function authenticateUser(
-  email: string,
+  identifier: string,
   password: string,
 ): Promise<{ user: UserProfile; session: AuthSession } | null> {
-  const normalizedEmail = email.trim().toLowerCase()
-  const user = await db.users.where('email').equals(normalizedEmail).first()
+  const raw = identifier.trim()
+  const isEmail = raw.includes('@')
+  const normalizedEmail = isEmail ? raw.toLowerCase() : ''
+  const documentNumber = isEmail ? '' : raw.replace(/\D/g, '')
+
+  let user: UserProfile | undefined
+  if (documentNumber.length >= 6) {
+    user = await db.users.where('documentNumber').equals(documentNumber).first()
+    if (!user) {
+      const all = await db.users.toArray()
+      user = all.find((item) => String(item.documentNumber ?? '').replace(/\D/g, '') === documentNumber)
+    }
+  }
+  if (!user && normalizedEmail) {
+    user = await db.users.where('email').equals(normalizedEmail).first()
+  }
   if (!user) return null
 
   const credentials = await db.userCredentials.get(user.id)
@@ -152,21 +175,65 @@ export function validatePasswordStrength(password: string): string | null {
   return null
 }
 
-async function resolveActingRole(): Promise<CanonicalRole | null> {
-  const token = await getStoredSessionToken()
-  const localUser = await resolveAuthUser(token)
+function currentClinicScope() {
   const apiAuth = getStoredApiAuth()
-  return getEffectiveRole(localUser?.role ?? apiAuth?.user?.rol ?? null)
+  const apiUser = apiAuth?.user
+  return {
+    apiAuth,
+    clinicId: apiUser?.clinicId || apiUser?.id || '',
+    isSuperAdmin: Boolean(apiUser && (apiUser.rol === 'superadmin' || isApiSuperAdminSafe(apiUser))),
+  }
+}
+
+function isApiSuperAdminSafe(user: { email?: string; rol?: string; estado_pago?: string } | null | undefined) {
+  if (!user) return false
+  return (
+    String(user.rol ?? '').toLowerCase() === 'superadmin' ||
+    String(user.email ?? '').toLowerCase() === 'doctormauriciosoto@gmail.com'
+  )
+}
+
+function actorFromStores(
+  localUser: UserProfile | null | undefined,
+): {
+  role: CanonicalRole | null
+  isClinicOwner: boolean
+  id?: string
+  clinicId?: string
+} {
+  const apiAuth = getStoredApiAuth()
+  const mapped = apiAuth?.user ? mapApiUserToAuthUser(apiAuth.user, '') : null
+  const id = localUser?.id || mapped?.id || apiAuth?.user?.id
+  const clinicId = localUser?.clinicId || mapped?.clinicId || apiAuth?.user?.clinicId || id
+  return {
+    role: getEffectiveRole(localUser?.role ?? apiAuth?.user?.rol ?? null),
+    isClinicOwner:
+      localUser?.isClinicOwner === true ||
+      mapped?.isClinicOwner === true ||
+      Boolean(id && clinicId && String(id) === String(clinicId)),
+    id,
+    clinicId,
+  }
 }
 
 async function requireUserManager(): Promise<
   { ok: true; actorRole: CanonicalRole } | { ok: false; error: string }
 > {
-  const actorRole = await resolveActingRole()
-  if (!canManageUsers(actorRole)) {
+  const token = await getStoredSessionToken()
+  const localUser = await resolveAuthUser(token)
+  const actor = actorFromStores(localUser)
+  if (!canManageClinicTeam(actor)) {
     return { ok: false, error: USERS_MANAGE_DENIED }
   }
-  return { ok: true, actorRole: actorRole! }
+  return { ok: true, actorRole: actor.role ?? 'admin' }
+}
+
+function localSeatError(used: number, max: number | null, planName: string): string | null {
+  if (max == null) return null
+  if (used >= max) {
+    return `Su plan ${planName} permite máximo ${max} colaboradores. Actualmente tiene ${used}. Mejore el plan para agregar más usuarios.`
+  }
+  return null
 }
 
 function sanitizeAssignableRole(
@@ -198,7 +265,23 @@ async function ensureRemainingUserManager(excludeUserId?: string): Promise<strin
 export async function listAppUsers(): Promise<UserProfile[]> {
   const gate = await requireUserManager()
   if (!gate.ok) return []
-  return db.users.orderBy('email').toArray()
+  const api = await fetchClinicUsers()
+  if (api.ok) {
+    for (const user of api.users) {
+      await db.users.put(user)
+    }
+    return api.users
+  }
+  const { clinicId, isSuperAdmin } = currentClinicScope()
+  const all = await db.users.toArray()
+  const scoped = isSuperAdmin || !clinicId
+    ? all
+    : all.filter((user) => String(user.clinicId || user.id) === String(clinicId))
+  return scoped.sort((a, b) => {
+    const left = `${a.lastName} ${a.firstName}`.toLowerCase()
+    const right = `${b.lastName} ${b.firstName}`.toLowerCase()
+    return left.localeCompare(right, 'es')
+  })
 }
 
 export async function createAppUser(
@@ -211,28 +294,78 @@ export async function createAppUser(
   const passwordError = validatePasswordStrength(password)
   if (passwordError) return { ok: false, error: passwordError }
 
-  const email = data.email.trim().toLowerCase()
-  if (!email) return { ok: false, error: 'El correo es obligatorio.' }
+  const email = String(data.email ?? '').trim().toLowerCase()
+  const firstName = data.firstName.trim()
+  const lastName = data.lastName.trim()
+  if (!firstName || !lastName) {
+    return { ok: false, error: 'Nombres y apellidos son obligatorios.' }
+  }
 
-  const existing = await db.users.where('email').equals(email).first()
-  if (existing) return { ok: false, error: 'Ya existe un usuario con este correo.' }
+  const documentCheck = validateProfessionalDocumentNumber(data.documentNumber)
+  if (!documentCheck.valid) {
+    return { ok: false, error: documentCheck.message ?? 'La cédula es obligatoria (6 a 12 dígitos).' }
+  }
+  const documentNumber = documentCheck.normalized ?? data.documentNumber.trim()
 
   const roleResult = sanitizeAssignableRole(data.role, gate.actorRole)
   if (!roleResult.ok) return roleResult
 
+  const api = await createClinicMember({
+    firstName,
+    lastName,
+    email,
+    documentType: data.documentType || 'CC',
+    documentNumber,
+    rol: roleResult.role,
+    role: roleResult.role,
+    rethusNumber: data.rethusNumber?.trim() || '',
+    thsSpecialty: data.thsSpecialty,
+    password,
+  })
+  if (api.ok) {
+    await db.users.put(api.user)
+    await seedUserCredentials(api.user.id, password)
+    return { ok: true, user: api.user }
+  }
+  if (getStoredApiAuth()?.token) {
+    return { ok: false, error: api.error }
+  }
+
+  if (email) {
+    const existingEmail = await db.users.where('email').equals(email).first()
+    if (existingEmail) return { ok: false, error: 'Ya existe un usuario con este correo.' }
+  }
+  const allUsers = await db.users.toArray()
+  const duplicateDoc = allUsers.find(
+    (item) => String(item.documentNumber ?? '').replace(/\D/g, '') === documentNumber,
+  )
+  if (duplicateDoc) return { ok: false, error: 'Ya existe un usuario con esta cédula.' }
+
+  const { clinicId, apiAuth } = currentClinicScope()
+  const members = clinicId
+    ? allUsers.filter((item) => String(item.clinicId || item.id) === String(clinicId))
+    : allUsers
+  const maxSeats = seatLimitForAccount(apiAuth?.user ?? {})
+  const seatError = localSeatError(
+    members.length,
+    maxSeats,
+    planDisplayName(apiAuth?.user?.plan, apiAuth?.user?.estado_pago),
+  )
+  if (seatError) return { ok: false, error: seatError }
+
   const user: UserProfile = {
     id: data.id ?? generateId(),
     email,
-    firstName: data.firstName.trim(),
-    lastName: data.lastName.trim(),
+    firstName,
+    lastName,
     documentType: data.documentType,
-    documentNumber: data.documentNumber.trim(),
+    documentNumber,
     role: roleResult.role,
-    clinicName: data.clinicName.trim(),
-    legalName: data.legalName?.trim() || data.clinicName.trim(),
+    clinicName: data.clinicName?.trim() || apiAuth?.user?.clinicName || '',
+    legalName: data.legalName?.trim() || data.clinicName?.trim() || apiAuth?.user?.legalName || '',
     providerType: data.providerType ?? 'profesional_independiente',
-    providerNit: data.providerNit?.trim() || undefined,
-    repsCode: data.repsCode?.trim() || undefined,
+    providerNit: data.providerNit?.trim() || apiAuth?.user?.providerNit || undefined,
+    repsCode: data.repsCode?.trim() || apiAuth?.user?.repsCode || undefined,
     repsStatus: data.repsStatus ?? 'activo',
     rethusNumber: data.rethusNumber?.trim() || undefined,
     rethusStatus: data.rethusStatus ?? 'activo',
@@ -240,21 +373,8 @@ export async function createAppUser(
     rehusSpecialty: data.rehusSpecialty ?? data.thsSpecialty,
     repsEnabledSpecialties: data.repsEnabledSpecialties,
     avatarUrl: data.avatarUrl,
-  }
-
-  if (!user.firstName || !user.lastName) {
-    return { ok: false, error: 'Nombres y apellidos son obligatorios.' }
-  }
-  if (!user.documentNumber) {
-    return { ok: false, error: 'El documento es obligatorio.' }
-  }
-  const documentCheck = validateProfessionalDocumentNumber(user.documentNumber)
-  if (!documentCheck.valid) {
-    return { ok: false, error: documentCheck.message ?? 'El documento no es válido.' }
-  }
-  user.documentNumber = documentCheck.normalized ?? user.documentNumber
-  if (!user.clinicName) {
-    return { ok: false, error: 'El nombre de la clínica es obligatorio.' }
+    clinicId: clinicId || undefined,
+    isClinicOwner: false,
   }
 
   await db.users.add(user)
@@ -270,8 +390,6 @@ export async function updateAppUser(
   if (!gate.ok) return gate
 
   const current = await db.users.get(userId)
-  if (!current) return { ok: false, error: 'Usuario no encontrado.' }
-
   const nextPatch: Partial<UserProfile> = { ...patch }
 
   if (nextPatch.role !== undefined) {
@@ -279,17 +397,19 @@ export async function updateAppUser(
     if (!roleResult.ok) return roleResult
     nextPatch.role = roleResult.role
 
-    if (canManageUsers(current.role) && !canManageUsers(roleResult.role)) {
+    if (current && canManageUsers(current.role) && !canManageUsers(roleResult.role)) {
       const remainingError = await ensureRemainingUserManager(userId)
       if (remainingError) return { ok: false, error: remainingError }
     }
   }
 
-  if (nextPatch.email) {
-    const email = nextPatch.email.trim().toLowerCase()
-    const duplicate = await db.users.where('email').equals(email).first()
-    if (duplicate && duplicate.id !== userId) {
-      return { ok: false, error: 'Ya existe otro usuario con este correo.' }
+  if (nextPatch.email !== undefined) {
+    const email = String(nextPatch.email ?? '').trim().toLowerCase()
+    if (email) {
+      const duplicate = await db.users.where('email').equals(email).first()
+      if (duplicate && duplicate.id !== userId) {
+        return { ok: false, error: 'Ya existe otro usuario con este correo.' }
+      }
     }
     nextPatch.email = email
   }
@@ -302,6 +422,26 @@ export async function updateAppUser(
     nextPatch.documentNumber = documentCheck.normalized ?? nextPatch.documentNumber.trim()
   }
 
+  const api = await updateClinicMember(userId, {
+    firstName: nextPatch.firstName,
+    lastName: nextPatch.lastName,
+    email: nextPatch.email,
+    documentType: nextPatch.documentType,
+    documentNumber: nextPatch.documentNumber,
+    rol: nextPatch.role,
+    role: nextPatch.role,
+    rethusNumber: nextPatch.rethusNumber,
+    thsSpecialty: nextPatch.thsSpecialty,
+  })
+  if (api.ok) {
+    await db.users.put(api.user)
+    return { ok: true }
+  }
+  if (getStoredApiAuth()?.token) {
+    return { ok: false, error: api.error }
+  }
+  if (!current) return { ok: false, error: 'Usuario no encontrado.' }
+
   await db.users.update(userId, nextPatch)
   return { ok: true }
 }
@@ -313,11 +453,20 @@ export async function resetAppUserPassword(
   const gate = await requireUserManager()
   if (!gate.ok) return gate
 
-  const user = await db.users.get(userId)
-  if (!user) return { ok: false, error: 'Usuario no encontrado.' }
-
   const passwordError = validatePasswordStrength(newPassword)
   if (passwordError) return { ok: false, error: passwordError }
+
+  const api = await resetClinicMemberPassword(userId, newPassword)
+  if (api.ok) {
+    await seedUserCredentials(userId, newPassword)
+    return { ok: true }
+  }
+  if (getStoredApiAuth()?.token) {
+    return { ok: false, error: api.error }
+  }
+
+  const user = await db.users.get(userId)
+  if (!user) return { ok: false, error: 'Usuario no encontrado.' }
 
   await seedUserCredentials(userId, newPassword)
   return { ok: true }
@@ -332,6 +481,18 @@ export async function deleteAppUser(
 
   if (userId === actingUserId) {
     return { ok: false, error: 'No puede eliminar su propio usuario.' }
+  }
+
+  const api = await deleteClinicMember(userId)
+  if (api.ok) {
+    await db.userCredentials.delete(userId)
+    const sessions = await db.sessions.where('userId').equals(userId).toArray()
+    await Promise.all(sessions.map((s) => db.sessions.delete(s.id)))
+    await db.users.delete(userId)
+    return { ok: true }
+  }
+  if (getStoredApiAuth()?.token) {
+    return { ok: false, error: api.error }
   }
 
   const user = await db.users.get(userId)

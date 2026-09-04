@@ -258,7 +258,11 @@ export function TopNavbar() {
               <div className="absolute right-0 mt-1 w-56 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
                 {user && (
                   <div className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
-                    <p className="font-medium text-slate-700">{user.email}</p>
+                    <p className="font-medium text-slate-700">
+                      {user.email ||
+                        [user.documentType, user.documentNumber].filter(Boolean).join(' ') ||
+                        `${user.firstName} ${user.lastName}`.trim()}
+                    </p>
                     <p>{ROLE_LABELS[user.role]}</p>
                   </div>
                 )}

@@ -99,16 +99,36 @@ export const ROLE_LABELS: Record<CanonicalRole, string> = {
 export const ASSIGNABLE_ROLES: CanonicalRole[] = ['admin', 'odontologo', 'recepcion']
 
 export const USERS_MANAGE_DENIED =
-  'Solo Administración o Super Administrador pueden gestionar, editar o asignar usuarios.'
+  'Solo el administrador de esta clínica o el Super Administrador pueden gestionar el equipo.'
 
 /**
- * Gestión de Usuarios: crear, editar, eliminar y asignar roles
- * queda reservado a administrador y superadministrador.
+ * Gestión de Usuarios: el titular de la clínica y quienes tienen rol
+ * Administración pueden crear, editar y asignar accesos de su propio tenant.
  */
 export function canManageUsers(role: UserRole | string | null | undefined): boolean {
   if (!role) return false
   const canonical = normalizeRole(role)
   return canonical === 'admin' || canonical === 'superadmin'
+}
+
+export function canManageClinicTeam(
+  user:
+    | {
+        role?: UserRole | string | null
+        rol?: string | null
+        isClinicOwner?: boolean
+        id?: string
+        clinicId?: string
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!user) return false
+  const role = user.role ?? user.rol
+  if (canManageUsers(role)) return true
+  if (user.isClinicOwner) return true
+  if (user.id && user.clinicId && String(user.id) === String(user.clinicId)) return true
+  return false
 }
 
 /** Compatibilidad con roles legacy en IndexedDB. */

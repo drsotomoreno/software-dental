@@ -1,6 +1,7 @@
 import {
   getStoredApiAuth,
   isApiSuperAdmin,
+  mapApiUserToAuthUser,
   restoreMasterApiSession,
   setStoredApiAuth,
   SUPERADMIN_EMAIL,
@@ -15,6 +16,9 @@ function identityHeaders(auth = getStoredApiAuth()) {
     ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
     ...(auth?.user?.email ? { 'X-Client-Email': String(auth.user.email) } : {}),
     ...(auth?.user?.id ? { 'X-Client-User-Id': String(auth.user.id) } : {}),
+    ...(auth?.user?.documentNumber
+      ? { 'X-Client-Document': String(auth.user.documentNumber) }
+      : {}),
   }
 }
 
@@ -129,4 +133,109 @@ export async function activatePaidPlan(planId: string) {
   }
   persistUser(payload.user)
   return { ok: true as const, user: payload.user as ApiSubscriptionUser, message: payload.message as string }
+}
+
+export type ClinicSeatSnapshot = {
+  clinicId: string
+  used: number
+  max: number | null
+  plan: string | null
+  planName: string
+  estado_pago: string | null
+}
+
+export function mapClinicMemberToProfile(
+  user: ApiSubscriptionUser & { rol?: string },
+): import('@/types/user').UserProfile {
+  const mapped = mapApiUserToAuthUser(user, '')
+  const { sessionId: _sessionId, ...profile } = mapped
+  return {
+    ...profile,
+    email: user.email || '',
+    clinicId: user.clinicId || user.id,
+    isClinicOwner: user.isClinicOwner === true || String(user.clinicId || user.id) === String(user.id),
+  }
+}
+
+export async function fetchClinicUsers() {
+  const { response, payload } = await authFetch('/api/clinic/users')
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      status: response.status,
+      error: String(payload.error || 'No se pudo listar el equipo de la clínica.'),
+    }
+  }
+  const seats = (payload.seats ?? null) as ClinicSeatSnapshot | null
+  const users = Array.isArray(payload.users)
+    ? (payload.users as ApiSubscriptionUser[]).map(mapClinicMemberToProfile)
+    : []
+  return { ok: true as const, users, seats }
+}
+
+export async function createClinicMember(member: Record<string, unknown>) {
+  const { response, payload } = await authFetch('/api/clinic/users', {
+    method: 'POST',
+    body: JSON.stringify(member),
+  })
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      status: response.status,
+      error: String(payload.error || 'No se pudo crear el colaborador.'),
+      seats: (payload.seats ?? null) as ClinicSeatSnapshot | null,
+    }
+  }
+  return {
+    ok: true as const,
+    user: mapClinicMemberToProfile(payload.user),
+    seats: (payload.seats ?? null) as ClinicSeatSnapshot | null,
+  }
+}
+
+export async function updateClinicMember(userId: string, patch: Record<string, unknown>) {
+  const { response, payload } = await authFetch(`/api/clinic/users/${encodeURIComponent(userId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  })
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      status: response.status,
+      error: String(payload.error || 'No se pudo actualizar el colaborador.'),
+    }
+  }
+  return { ok: true as const, user: mapClinicMemberToProfile(payload.user) }
+}
+
+export async function resetClinicMemberPassword(userId: string, password: string) {
+  const { response, payload } = await authFetch(
+    `/api/clinic/users/${encodeURIComponent(userId)}/password`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ password }),
+    },
+  )
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      status: response.status,
+      error: String(payload.error || 'No se pudo asignar la contraseña.'),
+    }
+  }
+  return { ok: true as const }
+}
+
+export async function deleteClinicMember(userId: string) {
+  const { response, payload } = await authFetch(`/api/clinic/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      status: response.status,
+      error: String(payload.error || 'No se pudo eliminar el colaborador.'),
+    }
+  }
+  return { ok: true as const, seats: (payload.seats ?? null) as ClinicSeatSnapshot | null }
 }

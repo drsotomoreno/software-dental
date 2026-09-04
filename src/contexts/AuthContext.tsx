@@ -24,7 +24,7 @@ import {
 import { logAuditEvent } from '@/services/auditService'
 import type { AuthUser } from '@/types/auth'
 import type { Permission } from '@/utils/permissions'
-import { normalizeRole } from '@/utils/permissions'
+import { canManageClinicTeam, normalizeRole } from '@/utils/permissions'
 import type { UserRole } from '@/types/user'
 import { userHasTrialLimits, userNeedsWelcome } from '@/utils/subscriptionAccess'
 
@@ -34,7 +34,7 @@ interface AuthContextValue {
   needsWelcome: boolean
   isTrialLimited: boolean
   login: (
-    email: string,
+    identifier: string,
     password: string,
   ) => Promise<{ ok: true; requiresSubscription?: boolean } | { ok: false; error: string }>
   logout: () => Promise<void>
@@ -121,8 +121,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('doctorseolabs-auth-ready', handleApiAuthReady)
   }, [loadSession])
 
-  const login = useCallback(async (email: string, password: string) => {
-    const normalizedEmail = email.trim().toLowerCase()
+  const login = useCallback(async (identifier: string, password: string) => {
+    const raw = identifier.trim()
+    const isEmail = raw.includes('@')
+    const normalizedEmail = isEmail ? raw.toLowerCase() : ''
+    const documentNumber = isEmail ? '' : raw.replace(/\D/g, '')
     const passwordValue = password.trim()
     const masterLogin = isMasterCredentials(normalizedEmail, passwordValue)
 
@@ -149,7 +152,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ email: normalizedEmail, password: passwordValue }),
+        body: JSON.stringify(
+          isEmail
+            ? { email: normalizedEmail, password: passwordValue }
+            : { documentNumber, password: passwordValue },
+        ),
       })
       const payload = await response.json().catch(() => ({}))
 
@@ -186,13 +193,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await logAuditEvent({
           action: 'LOGIN_FAILED',
           resourceType: 'session',
-          details: `Intento fallido: ${normalizedEmail}`,
+          details: `Intento fallido: ${isEmail ? normalizedEmail : documentNumber}`,
           success: false,
           user: null,
         })
         return {
           ok: false as const,
-          error: apiError || 'Correo o contraseña incorrectos.',
+          error: apiError || 'Documento o contraseña incorrectos.',
         }
       }
     } catch {
@@ -213,16 +220,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { ok: true as const }
     }
 
-    const result = await authenticateUser(normalizedEmail, passwordValue)
+    const result = await authenticateUser(isEmail ? normalizedEmail : documentNumber, passwordValue)
     if (!result) {
       await logAuditEvent({
         action: 'LOGIN_FAILED',
         resourceType: 'session',
-        details: `Intento fallido: ${email.trim().toLowerCase()}`,
+        details: `Intento fallido: ${raw.toLowerCase()}`,
         success: false,
         user: null,
       })
-      return { ok: false as const, error: 'Correo o contraseña incorrectos.' }
+      return { ok: false as const, error: 'Documento o contraseña incorrectos.' }
     }
 
     const authUser: AuthUser = { ...result.user, sessionId: result.session.id }
@@ -286,6 +293,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       can: (permission) => {
         if (typeof localStorage !== 'undefined' && localStorage.getItem('doctorSEO_rol') === 'superadmin') {
           return true
+        }
+        if (permission === 'users.manage') {
+          return canManageClinicTeam(user) || canManageClinicTeam(getStoredApiAuth()?.user)
         }
         return canWithEffectiveRole(permission, user?.role)
       },

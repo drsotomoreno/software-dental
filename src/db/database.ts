@@ -614,6 +614,20 @@ export class DentalDatabase extends Dexie {
         }
       }
     })
+
+    this.version(23)
+      .stores({
+        users: '++id, email, documentNumber, clinicId',
+      })
+      .upgrade(async (tx) => {
+        const users = await tx.table('users').toArray()
+        for (const user of users) {
+          if (!user?.id) continue
+          if (!user.clinicId) {
+            await tx.table('users').update(user.id, { clinicId: user.id, isClinicOwner: true })
+          }
+        }
+      })
   }
 }
 
@@ -721,6 +735,8 @@ export async function seedDemoData(): Promise<void> {
         documentNumber: '1234567890',
         role: 'odontologo',
         clinicName: 'Clínica Dental Sonrisa',
+        clinicId: 'user-demo-admin',
+        isClinicOwner: false,
         providerNit: '900123456-1',
         repsCode: '6800103898-01',
         repsStatus: 'activo',
@@ -739,6 +755,8 @@ export async function seedDemoData(): Promise<void> {
         documentNumber: '9876543210',
         role: 'admin',
         clinicName: 'Clínica Dental Sonrisa',
+        clinicId: 'user-demo-admin',
+        isClinicOwner: true,
         providerNit: '900123456-1',
         repsCode: '6800103898-01',
         repsStatus: 'activo',
@@ -758,6 +776,8 @@ export async function seedDemoData(): Promise<void> {
       documentNumber: '9876543210',
       role: 'admin',
       clinicName: 'Clínica Dental Sonrisa',
+      clinicId: 'user-demo-admin',
+      isClinicOwner: true,
       providerNit: '900123456-1',
       repsCode: '6800103898-01',
       repsStatus: 'activo',

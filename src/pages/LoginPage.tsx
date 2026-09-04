@@ -134,7 +134,7 @@ export function LoginPage() {
       ? 'Cree su cuenta — verificaremos su correo'
       : mode === 'verify'
         ? `Ingrese el código enviado a ${email.trim().toLowerCase() || 'su correo'}`
-        : 'Acceso seguro — Historia clínica odontológica'
+        : 'Acceso seguro — cédula y contraseña de su clínica'
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-dental-50 px-4">
@@ -150,16 +150,21 @@ export function LoginPage() {
         {mode === 'login' && (
           <form onSubmit={handleLogin} className="card space-y-4">
             <div>
-              <label className="label-field">Correo electrónico</label>
+              <label className="label-field">Número de documento (cédula)</label>
               <input
-                type="email"
+                type="text"
+                inputMode="text"
                 autoComplete="username"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="input-field"
-                placeholder="usuario@clinica.co"
+                placeholder="Cédula o correo del titular"
               />
+              <p className="mt-1 text-xs text-slate-500">
+                Los colaboradores ingresan con su cédula y la clave asignada por el administrador de
+                la clínica. El titular también puede usar su correo.
+              </p>
             </div>
             <div>
               <div className="mb-1 flex items-baseline justify-between gap-3">
@@ -168,7 +173,7 @@ export function LoginPage() {
                   to="/forgot-password"
                   className="shrink-0 text-sm font-semibold text-dental-700 underline underline-offset-2 hover:text-dental-800"
                 >
-                  ¿Olvidaste tu contraseña?
+                  ¿Olvidó su contraseña?
                 </Link>
               </div>
               <input

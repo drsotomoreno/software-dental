@@ -79,7 +79,7 @@ export function validatePrestadorIdentityFields(input = {}) {
   const documentType = String(input.documentType ?? 'CC').trim() || 'CC'
   const clinicName = String(input.clinicName ?? '').trim()
   const legalName = institution
-    ? String(input.legalName ?? clinicName ?? '').trim()
+    ? String(input.legalName ?? '').trim()
     : composeLegalName(firstName, lastName)
   const reps = parseRepsCode(input.repsCode)
   const nit = validateProviderNit(input.providerNit)
@@ -140,7 +140,7 @@ export function validatePrestadorIdentityFields(input = {}) {
         documentType === 'PA'
           ? String(input.documentNumber ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
           : documentNumber,
-      clinicName: clinicName || legalName,
+      clinicName: clinicName || (institution ? legalName : ''),
       providerNit: nit.digits ?? extractNitDigits(input.providerNit),
       providerNitDisplay: nit.display ?? '',
       repsCode: reps.digits ?? extractRepsDigits(input.repsCode),

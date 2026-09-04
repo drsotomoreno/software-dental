@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { config } from '../config.js'
 import { claimRethusForUser } from './rethusRegistry.js'
 import { verifyAndClaimPrestador } from './prestadorRegistry.js'
-import { PAID_PLAN_IDS, PAID_PLAN_DAYS, TRIAL_DAYS } from '../../shared/subscriptionPlans.js'
+import { PAID_PLAN_IDS, PAID_PLAN_DAYS, TRIAL_DAYS, seatLimitForAccount, planDisplayName } from '../../shared/subscriptionPlans.js'
 import { readDurableJson, writeDurableJson } from './durableStore.js'
 import { splitPersonName, composeLegalName } from '../../shared/personName.js'
 import { formatNitInput, validateProviderNit } from '../../shared/nit.js'
@@ -239,9 +239,12 @@ export function sessionHintFromRequest(req, extra = {}) {
   const headers = req.headers && typeof req.headers === 'object' ? req.headers : {}
   const email = extra.email || body.clientEmail || headers['x-client-email'] || query.email
   const userId = extra.userId || body.clientUserId || headers['x-client-user-id'] || query.userId
+  const documentNumber =
+    extra.documentNumber || body.clientDocument || headers['x-client-document'] || query.documentNumber
   return {
     email: email ? String(email).trim() : undefined,
     userId: userId ? String(userId).trim() : undefined,
+    documentNumber: documentNumber ? String(documentNumber).replace(/\D/g, '') : undefined,
   }
 }
 
@@ -454,6 +457,7 @@ export async function registerSubscriptionUser({ nombre, email, password }) {
     updatedAt: new Date().toISOString(),
 
   }
+  user.clinicId = user.id
 
 
 
@@ -475,23 +479,43 @@ export async function registerSubscriptionUser({ nombre, email, password }) {
 
 
 
-export async function loginSubscriptionUser({ email, password }) {
+export async function loginSubscriptionUser({ email, documentNumber, password }) {
   await ensureSuperAdmin()
   const store = await loadStore()
-  const normalizedEmail = normalizeEmail(email)
+  const identifier = String(email ?? '').trim()
+  const normalizedEmail = identifier.includes('@') ? normalizeEmail(identifier) : ''
+  const docDigits = String(documentNumber || (!identifier.includes('@') ? identifier : ''))
+    .replace(/\D/g, '')
 
-  if (!normalizedEmail || !password) {
-    return { ok: false, status: 400, error: 'Correo y contraseña son obligatorios.' }
+  if (!password) {
+    return { ok: false, status: 400, error: 'La contraseña es obligatoria.' }
+  }
+  if (!normalizedEmail && docDigits.length < 6) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Indique su número de documento (cédula) o el correo del titular, y su contraseña.',
+    }
   }
 
-  const masterLogin = isMasterCredentials(normalizedEmail, password)
+  const masterLogin = Boolean(normalizedEmail) && isMasterCredentials(normalizedEmail, password)
 
-  let userIndex = store.users.findIndex((item) => item.email === normalizedEmail)
+  let userIndex = -1
+  if (docDigits.length >= 6) {
+    userIndex = store.users.findIndex(
+      (item) => normalizeDocumentNumber(item.documentNumber) === docDigits,
+    )
+  }
+  if (userIndex === -1 && normalizedEmail) {
+    userIndex = store.users.findIndex((item) => item.email === normalizedEmail)
+  }
 
   if (masterLogin && userIndex === -1) {
     await ensureSuperAdmin()
     const refreshed = await loadStore()
-    userIndex = refreshed.users.findIndex((item) => item.email === normalizedEmail)
+    userIndex = refreshed.users.findIndex(
+      (item) => item.email === normalizedEmail || (docDigits && normalizeDocumentNumber(item.documentNumber) === docDigits),
+    )
     store.users = refreshed.users
     store.sessions = refreshed.sessions
   }
@@ -514,7 +538,7 @@ export async function loginSubscriptionUser({ email, password }) {
   }
 
   if (userIndex === -1) {
-    return { ok: false, status: 401, error: 'Correo o contraseña incorrectos.' }
+    return { ok: false, status: 401, error: 'Documento o contraseña incorrectos.' }
   }
 
   let currentUser = refreshPaymentStatus(store.users[userIndex])
@@ -523,11 +547,16 @@ export async function loginSubscriptionUser({ email, password }) {
   const matchedHash = resolvedPasswordHash(currentUser.passwordHash, password)
   if (!masterLogin && !matchedHash) {
     await saveStore(store)
-    return { ok: false, status: 401, error: 'Correo o contraseña incorrectos.' }
+    return { ok: false, status: 401, error: 'Documento o contraseña incorrectos.' }
   }
 
   if (!masterLogin && matchedHash && matchedHash !== currentUser.passwordHash) {
     currentUser = { ...currentUser, passwordHash: matchedHash, updatedAt: new Date().toISOString() }
+    store.users[userIndex] = currentUser
+  }
+
+  if (!currentUser.clinicId) {
+    currentUser = { ...currentUser, clinicId: currentUser.id, updatedAt: new Date().toISOString() }
     store.users[userIndex] = currentUser
   }
 
@@ -551,8 +580,11 @@ export async function loginSubscriptionUser({ email, password }) {
     }
   }
 
+  const clinicId = currentUser.clinicId || currentUser.id
+  const owner = store.users.find((item) => item.id === clinicId) || currentUser
+  const billingUser = refreshPaymentStatus(owner)
   const superAdminAccess =
-    normalizedEmail === SUPERADMIN_EMAIL || isPaymentExempt(currentUser)
+    normalizedEmail === SUPERADMIN_EMAIL || isPaymentExempt(currentUser) || isPaymentExempt(billingUser)
 
   const { token, session } = createSessionForUser(currentUser)
 
@@ -560,7 +592,7 @@ export async function loginSubscriptionUser({ email, password }) {
 
   await saveStore(store)
 
-  const active = superAdminAccess || isSubscriptionActive(currentUser)
+  const active = superAdminAccess || isSubscriptionActive(billingUser)
 
   return {
 
@@ -572,9 +604,9 @@ export async function loginSubscriptionUser({ email, password }) {
 
     expiresAt: session.expiresAt,
 
-    unlimitedAccess: isPaymentExempt(currentUser),
+    unlimitedAccess: isPaymentExempt(currentUser) || isPaymentExempt(billingUser),
 
-    requiresSubscription: !active,
+    requiresSubscription: !active && String(currentUser.id) === String(clinicId),
 
   }
 
@@ -751,6 +783,10 @@ export async function resolveSubscriptionSession(token, hint = {}) {
     let user = hint.userId
       ? store.users.find((item) => item.id === hint.userId)
       : null
+    if (!user && hint.documentNumber && String(hint.documentNumber).replace(/\D/g, '').length >= 6) {
+      const digits = String(hint.documentNumber).replace(/\D/g, '')
+      user = store.users.find((item) => normalizeDocumentNumber(item.documentNumber) === digits) || null
+    }
     if (!user && (isPlaceholderUserId(hint.userId) || normalizeEmail(hint.email) === MASTER_EMAIL || isRestorableMasterToken(token))) {
       await ensureSuperAdmin()
       const refreshed = await loadStore()
@@ -1087,9 +1123,10 @@ function sanitizeUser(user) {
   })
   const firstName = names.firstName
   const lastName = names.lastName
-  const legalName = String(user.legalName ?? user.clinicName ?? '').trim()
   const providerType = normalizeProviderType(user.providerType)
-  const nombre = isInstitutionProvider(providerType)
+  const institution = isInstitutionProvider(providerType)
+  const legalName = String(institution ? user.legalName ?? '' : '').trim()
+  const nombre = institution
     ? legalName || [firstName, lastName].filter(Boolean).join(' ').trim() || String(user.nombre ?? '').trim()
     : [firstName, lastName].filter(Boolean).join(' ').trim() || String(user.nombre ?? '').trim()
   return {
@@ -1107,8 +1144,10 @@ function sanitizeUser(user) {
     rethusNumber: user.rethusNumber ?? '',
     rethusStatus: user.rethusStatus ?? (user.rethusNumber ? 'activo' : undefined),
     clinicName: user.clinicName ?? '',
-    legalName: user.legalName ?? user.clinicName ?? '',
+    legalName: institution ? user.legalName ?? '' : '',
     providerType: normalizeProviderType(user.providerType),
+    clinicId: user.clinicId || user.id,
+    isClinicOwner: String(user.clinicId || user.id) === String(user.id),
     providerNit: user.providerNit ?? '',
     repsCode: user.repsCode ?? '',
     repsStatus: user.repsStatus ?? 'activo',
@@ -1164,6 +1203,15 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
   if (index === -1) {
     return { ok: false, status: 404, error: 'Usuario no encontrado.' }
   }
+  const target = store.users[index]
+  if (
+    !isSelf &&
+    actorRol === 'admin' &&
+    actorEmail !== MASTER_EMAIL &&
+    String(target.clinicId || target.id) !== String(actor.clinicId || actor.id)
+  ) {
+    return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
+  }
 
   const current = store.users[index]
   const targetRole = normalizeRole(current.rol)
@@ -1189,7 +1237,9 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
 
   const documentType = String(patch.documentType ?? current.documentType ?? 'CC').trim() || 'CC'
   const incomingDocument = normalizeDocumentNumber(patch.documentNumber ?? '')
-  const documentNumber = incomingDocument || normalizeDocumentNumber(current.documentNumber ?? '')
+  const documentNumber = institution
+    ? incomingDocument
+    : incomingDocument || normalizeDocumentNumber(current.documentNumber ?? '')
   if (!institution && (!documentNumber || documentNumber.length < 6 || documentNumber.length > 12)) {
     return {
       ok: false,
@@ -1206,10 +1256,12 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
   }
 
   const rethusIncoming = String(patch.rethusNumber ?? '').trim()
-  const rethusNumber = (rethusIncoming || String(current.rethusNumber ?? ''))
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, '')
+  const rethusNumber = institution
+    ? ''
+    : (rethusIncoming || String(current.rethusNumber ?? ''))
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, '')
   if (!institution && (mustVerifyPrestador || rethusNumber)) {
     const digits = rethusNumber.replace(/\D/g, '')
     if (digits.length < 6 || digits.length > 12) {
@@ -1231,11 +1283,12 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
     }
   }
 
-  const legalName = String(patch.legalName ?? current.legalName ?? patch.clinicName ?? current.clinicName ?? '')
-    .trim()
-  const clinicName = String(patch.clinicName ?? current.clinicName ?? legalName).trim()
-  const providerNit = formatNitInput(patch.providerNit || current.providerNit || '')
-  const repsCode = sanitizeRepsInput(patch.repsCode || current.repsCode || '')
+  const legalName = institution
+    ? String(patch.legalName ?? '').trim()
+    : composeLegalName(firstName, lastName)
+  const clinicName = String(patch.clinicName ?? '').trim() || (institution ? legalName : '')
+  const providerNit = formatNitInput(patch.providerNit || '')
+  const repsCode = sanitizeRepsInput(patch.repsCode || '')
 
   if (institution && !legalName) {
     return { ok: false, status: 400, error: 'La razón social de la IPS es obligatoria.' }
@@ -1310,9 +1363,9 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
     documentType,
     documentNumber,
     rethusNumber,
-    rethusStatus: patch.rethusStatus ?? current.rethusStatus ?? (rethusNumber ? 'activo' : current.rethusStatus),
-    clinicName: clinicName || legalName,
-    legalName: legalName || clinicName,
+    rethusStatus: institution ? undefined : (patch.rethusStatus ?? current.rethusStatus ?? (rethusNumber ? 'activo' : current.rethusStatus)),
+    clinicName: clinicName || (institution ? legalName : ''),
+    legalName: institution ? legalName : '',
     providerType,
     providerNit: providerNitStored,
     repsCode: repsCodeStored,
@@ -1426,6 +1479,303 @@ export async function listAllSubscriptionUsers() {
       emailVerifiedAt: refreshed.emailVerifiedAt ?? null,
     }
   })
+}
+
+function clinicIdOf(user) {
+  return String(user?.clinicId || user?.id || '')
+}
+
+function isClinicOwner(user) {
+  if (!user?.id) return false
+  return String(user.id) === clinicIdOf(user)
+}
+
+function canManageClinicTeam(user) {
+  if (!user) return false
+  if (isSuperAdminUser(user)) return true
+  if (isClinicOwner(user)) return true
+  return normalizeRole(user.rol) === 'admin'
+}
+
+function usersInClinic(store, clinicId) {
+  const id = String(clinicId)
+  return store.users.filter((item) => clinicIdOf(item) === id)
+}
+
+function clinicSeatSnapshot(store, clinicId) {
+  const owner = store.users.find((item) => item.id === clinicId) || null
+  const members = usersInClinic(store, clinicId)
+  const maxSeats = owner ? seatLimitForAccount(owner) : seatLimitForAccount({})
+  return {
+    clinicId,
+    used: members.length,
+    max: maxSeats,
+    plan: owner?.plan ?? null,
+    planName: planDisplayName(owner?.plan, owner?.estado_pago),
+    estado_pago: owner?.estado_pago ?? null,
+  }
+}
+
+function publicClinicUser(user) {
+  const safe = sanitizeUser(user)
+  return {
+    ...safe,
+    email: safe.email || '',
+    clinicId: clinicIdOf(user),
+    isClinicOwner: isClinicOwner(user),
+  }
+}
+
+export async function listClinicUsers({ token, hint }) {
+  const session = await resolveSubscriptionSession(token, hint)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+  if (!canManageClinicTeam(session.user)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Solo el administrador de la clínica puede gestionar el equipo.',
+    }
+  }
+  const store = await loadStore()
+  const clinicId = clinicIdOf(session.user)
+  const seats = clinicSeatSnapshot(store, clinicId)
+  const users = usersInClinic(store, clinicId).map(publicClinicUser)
+  return { ok: true, users, seats }
+}
+
+export async function createClinicUser({ token, hint, member }) {
+  const session = await resolveSubscriptionSession(token, hint)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+  if (!canManageClinicTeam(session.user)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Solo el administrador de la clínica puede crear colaboradores.',
+    }
+  }
+
+  const password = String(member?.password ?? '')
+  if (password.length < 8) {
+    return { ok: false, status: 400, error: 'La contraseña debe tener al menos 8 caracteres.' }
+  }
+
+  const firstName = String(member?.firstName ?? '').trim()
+  const lastName = String(member?.lastName ?? '').trim()
+  if (!firstName || !lastName) {
+    return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
+  }
+
+  const documentType = String(member?.documentType ?? 'CC').trim() || 'CC'
+  const documentNumber = String(member?.documentNumber ?? '').replace(/\D/g, '')
+  if (documentNumber.length < 6 || documentNumber.length > 12) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'La cédula es obligatoria (6 a 12 dígitos) y es la llave de acceso del colaborador.',
+    }
+  }
+
+  const requestedRole = normalizeRole(member?.rol ?? member?.role ?? 'odontologo')
+  const role = requestedRole === 'superadmin' ? 'odontologo' : requestedRole
+  if (!VALID_ROLES.has(role) || role === 'superadmin') {
+    return { ok: false, status: 400, error: 'El rol indicado no está permitido.' }
+  }
+
+  const store = await loadStore()
+  const clinicId = clinicIdOf(session.user)
+  const owner = store.users.find((item) => item.id === clinicId) || store.users.find((item) => item.id === session.user.id)
+  if (!owner) {
+    return { ok: false, status: 404, error: 'No se encontró la cuenta de la clínica.' }
+  }
+
+  const seats = clinicSeatSnapshot(store, clinicId)
+  if (seats.max != null && seats.used >= seats.max) {
+    return {
+      ok: false,
+      status: 403,
+      error: `Su plan ${seats.planName} permite máximo ${seats.max} colaboradores. Actualmente tiene ${seats.used}. Mejore el plan para agregar más usuarios.`,
+      seats,
+    }
+  }
+
+  const duplicateDoc = store.users.find(
+    (item) => normalizeDocumentNumber(item.documentNumber) === documentNumber,
+  )
+  if (duplicateDoc) {
+    return { ok: false, status: 409, error: 'Ya existe un usuario con esta cédula.' }
+  }
+
+  const email = String(member?.email ?? '').trim().toLowerCase()
+  if (email) {
+    if (store.users.some((item) => normalizeEmail(item.email) === email)) {
+      return { ok: false, status: 409, error: 'Ya existe un usuario con este correo.' }
+    }
+  }
+
+  const now = new Date().toISOString()
+  const user = {
+    id: randomUUID(),
+    firstName,
+    lastName,
+    nombre: [firstName, lastName].filter(Boolean).join(' '),
+    email: email || '',
+    passwordHash: hashPasswordSha256(password),
+    rol: role,
+    documentType,
+    documentNumber,
+    rethusNumber: String(member?.rethusNumber ?? '').trim(),
+    clinicId,
+    clinicName: owner.clinicName || member?.clinicName || '',
+    legalName: owner.legalName || '',
+    providerType: owner.providerType || 'profesional_independiente',
+    providerNit: owner.providerNit || '',
+    repsCode: owner.repsCode || '',
+    repsStatus: owner.repsStatus || 'activo',
+    thsSpecialty: member?.thsSpecialty || 'odontologia_general',
+    plan: owner.plan || null,
+    estado_pago: owner.estado_pago === 'exento' ? 'activo' : owner.estado_pago,
+    fecha_vencimiento: owner.fecha_vencimiento || null,
+    createdAt: now,
+    updatedAt: now,
+  }
+  store.users.push(user)
+  await saveStore(store)
+  return {
+    ok: true,
+    user: publicClinicUser(user),
+    seats: clinicSeatSnapshot(store, clinicId),
+  }
+}
+
+export async function updateClinicUser({ token, hint, userId, patch }) {
+  const session = await resolveSubscriptionSession(token, hint)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+  if (!canManageClinicTeam(session.user)) {
+    return { ok: false, status: 403, error: 'Solo el administrador de la clínica puede editar colaboradores.' }
+  }
+  const store = await loadStore()
+  const clinicId = clinicIdOf(session.user)
+  const index = store.users.findIndex((item) => item.id === userId)
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+  const current = store.users[index]
+  if (clinicIdOf(current) !== clinicId && !isSuperAdminUser(session.user)) {
+    return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
+  }
+
+  const incoming = patch && typeof patch === 'object' ? { ...patch } : {}
+  const firstName = String(incoming.firstName ?? current.firstName ?? '').trim()
+  const lastName = String(incoming.lastName ?? current.lastName ?? '').trim()
+  const documentNumber = incoming.documentNumber !== undefined
+    ? String(incoming.documentNumber).replace(/\D/g, '')
+    : normalizeDocumentNumber(current.documentNumber)
+  if (!firstName || !lastName) {
+    return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
+  }
+  if (documentNumber && (documentNumber.length < 6 || documentNumber.length > 12)) {
+    return { ok: false, status: 400, error: 'La cédula debe tener entre 6 y 12 dígitos.' }
+  }
+  if (documentNumber) {
+    const duplicate = store.users.find(
+      (item) => item.id !== current.id && normalizeDocumentNumber(item.documentNumber) === documentNumber,
+    )
+    if (duplicate) {
+      return { ok: false, status: 409, error: 'Ya existe otro usuario con esta cédula.' }
+    }
+  }
+
+  let role = current.rol
+  if (incoming.role !== undefined || incoming.rol !== undefined) {
+    const requested = normalizeRole(incoming.role ?? incoming.rol)
+    if (requested === 'superadmin' && !isSuperAdminUser(session.user)) {
+      return { ok: false, status: 403, error: 'No puede asignar el rol de superadministrador.' }
+    }
+    role = requested === 'superadmin' ? current.rol : requested
+  }
+
+  const email = incoming.email !== undefined ? String(incoming.email ?? '').trim().toLowerCase() : current.email
+  store.users[index] = {
+    ...current,
+    firstName,
+    lastName,
+    nombre: [firstName, lastName].filter(Boolean).join(' '),
+    email: email || '',
+    documentType: incoming.documentType ?? current.documentType ?? 'CC',
+    documentNumber: documentNumber || current.documentNumber,
+    rethusNumber: incoming.rethusNumber !== undefined ? String(incoming.rethusNumber).trim() : current.rethusNumber,
+    rol: role,
+    thsSpecialty: incoming.thsSpecialty ?? current.thsSpecialty,
+    updatedAt: new Date().toISOString(),
+  }
+  await saveStore(store)
+  return { ok: true, user: publicClinicUser(store.users[index]) }
+}
+
+export async function resetClinicUserPassword({ token, hint, userId, newPassword }) {
+  const session = await resolveSubscriptionSession(token, hint)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+  if (!canManageClinicTeam(session.user)) {
+    return { ok: false, status: 403, error: 'Solo el administrador de la clínica puede asignar contraseñas.' }
+  }
+  const password = String(newPassword ?? '')
+  if (password.length < 8) {
+    return { ok: false, status: 400, error: 'La contraseña debe tener al menos 8 caracteres.' }
+  }
+  const store = await loadStore()
+  const clinicId = clinicIdOf(session.user)
+  const index = store.users.findIndex((item) => item.id === userId)
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+  if (clinicIdOf(store.users[index]) !== clinicId && !isSuperAdminUser(session.user)) {
+    return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
+  }
+  store.users[index] = {
+    ...store.users[index],
+    passwordHash: hashPasswordSha256(password),
+    updatedAt: new Date().toISOString(),
+  }
+  await saveStore(store)
+  return { ok: true }
+}
+
+export async function deleteClinicUser({ token, hint, userId }) {
+  const session = await resolveSubscriptionSession(token, hint)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+  if (!canManageClinicTeam(session.user)) {
+    return { ok: false, status: 403, error: 'Solo el administrador de la clínica puede eliminar colaboradores.' }
+  }
+  if (String(userId) === String(session.user.id)) {
+    return { ok: false, status: 400, error: 'No puede eliminar su propio usuario.' }
+  }
+  const store = await loadStore()
+  const clinicId = clinicIdOf(session.user)
+  const index = store.users.findIndex((item) => item.id === userId)
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+  const target = store.users[index]
+  if (clinicIdOf(target) !== clinicId && !isSuperAdminUser(session.user)) {
+    return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
+  }
+  if (isClinicOwner(target)) {
+    return { ok: false, status: 400, error: 'No puede eliminar al titular de la clínica.' }
+  }
+  store.users.splice(index, 1)
+  store.sessions = store.sessions.filter((item) => item.userId !== userId)
+  await saveStore(store)
+  return { ok: true, seats: clinicSeatSnapshot(store, clinicId) }
 }
 
 export async function selectPaidPlan({ token, planId, hint }) {
