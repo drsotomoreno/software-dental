@@ -8,9 +8,10 @@ import { verifyAndClaimPrestador } from './prestadorRegistry.js'
 import { PAID_PLAN_IDS, PAID_PLAN_DAYS, TRIAL_DAYS } from '../../shared/subscriptionPlans.js'
 import { readDurableJson, writeDurableJson } from './durableStore.js'
 import { splitPersonName, composeLegalName } from '../../shared/personName.js'
-import { formatNitInput } from '../../shared/nit.js'
+import { formatNitInput, validateProviderNit } from '../../shared/nit.js'
 import { sanitizeRepsInput } from '../../shared/prestadorIdentity.js'
 import { isInstitutionProvider, normalizeProviderType } from '../../shared/providerType.js'
+import { parseRepsCodeWithDane } from './repsDane.js'
 
 
 
@@ -1035,8 +1036,8 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
   const institution = isInstitutionProvider(providerType)
 
   const names = splitPersonName({
-    firstName: String(patch.firstName ?? current.firstName ?? '').trim(),
-    lastName: String(patch.lastName ?? current.lastName ?? '').trim(),
+    firstName: String(patch.firstName !== undefined ? patch.firstName : current.firstName ?? '').trim(),
+    lastName: String(patch.lastName !== undefined ? patch.lastName : current.lastName ?? '').trim(),
   })
   const firstName = names.firstName
   const lastName = names.lastName
@@ -1051,9 +1052,8 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
   }
 
   const documentType = String(patch.documentType ?? current.documentType ?? 'CC').trim() || 'CC'
-  const documentNumber = normalizeDocumentNumber(
-    patch.documentNumber ?? current.documentNumber ?? '',
-  )
+  const incomingDocument = normalizeDocumentNumber(patch.documentNumber ?? '')
+  const documentNumber = incomingDocument || normalizeDocumentNumber(current.documentNumber ?? '')
   if (!institution && (!documentNumber || documentNumber.length < 6 || documentNumber.length > 12)) {
     return {
       ok: false,
@@ -1069,7 +1069,8 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
     }
   }
 
-  const rethusNumber = String(patch.rethusNumber ?? current.rethusNumber ?? '')
+  const rethusIncoming = String(patch.rethusNumber ?? '').trim()
+  const rethusNumber = (rethusIncoming || String(current.rethusNumber ?? ''))
     .trim()
     .toUpperCase()
     .replace(/\s+/g, '')
@@ -1097,12 +1098,23 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
   const legalName = String(patch.legalName ?? current.legalName ?? patch.clinicName ?? current.clinicName ?? '')
     .trim()
   const clinicName = String(patch.clinicName ?? current.clinicName ?? legalName).trim()
-  const providerNit = formatNitInput(patch.providerNit ?? current.providerNit ?? '')
-  const repsCode = sanitizeRepsInput(patch.repsCode ?? current.repsCode ?? '')
+  const providerNit = formatNitInput(patch.providerNit || current.providerNit || '')
+  const repsCode = sanitizeRepsInput(patch.repsCode || current.repsCode || '')
 
   if (institution && !legalName) {
     return { ok: false, status: 400, error: 'La razón social de la IPS es obligatoria.' }
   }
+
+  const nitCheck = validateProviderNit(providerNit)
+  if (!nitCheck.valid) {
+    return { ok: false, status: 400, error: nitCheck.message }
+  }
+  const repsCheck = parseRepsCodeWithDane(repsCode)
+  if (!repsCheck.valid) {
+    return { ok: false, status: 400, error: repsCheck.message }
+  }
+  const providerNitStored = nitCheck.display || providerNit
+  const repsCodeStored = repsCheck.display || repsCode
 
   if (mustVerifyPrestador) {
     const claimed = await verifyAndClaimPrestador({
@@ -1114,8 +1126,8 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
       documentType,
       documentNumber,
       rethusNumber,
-      repsCode,
-      providerNit,
+      repsCode: repsCodeStored,
+      providerNit: providerNitStored,
       clinicName: clinicName || legalName,
     })
     if (!claimed.ok) {
@@ -1124,9 +1136,22 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
   }
 
   let email = current.email
-  if (patch.email !== undefined) {
+  const emailLocked = isSelf || normalizeEmail(current.email) === MASTER_EMAIL
+  if (emailLocked && patch.email !== undefined) {
+    const attempted = String(patch.email).trim().toLowerCase()
+    if (attempted && attempted !== normalizeEmail(current.email)) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'El correo de sesión no se modifica desde el perfil.',
+      }
+    }
+  } else if (patch.email !== undefined) {
     const nextEmail = String(patch.email).trim().toLowerCase()
     if (nextEmail && nextEmail !== current.email) {
+      if (nextEmail === MASTER_EMAIL) {
+        return { ok: false, status: 403, error: 'Este correo está reservado para el administrador del sistema.' }
+      }
       const duplicate = store.users.some(
         (item) => item.id !== current.id && normalizeEmail(item.email) === nextEmail,
       )
@@ -1153,8 +1178,8 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
     clinicName: clinicName || legalName,
     legalName: legalName || clinicName,
     providerType,
-    providerNit,
-    repsCode,
+    providerNit: providerNitStored,
+    repsCode: repsCodeStored,
     repsStatus: patch.repsStatus ?? current.repsStatus ?? 'activo',
     thsSpecialty: patch.thsSpecialty ?? current.thsSpecialty ?? 'odontologia_general',
     rehusSpecialty:

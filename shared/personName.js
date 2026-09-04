@@ -46,8 +46,8 @@ function splitFromFullName(full) {
 
 /**
  * Resuelve nombres/apellidos legales.
- * Si ambos campos vienen diligenciados, se respetan (solo se limpian títulos y símbolos).
- * No reescribe con un nombre anterior.
+ * Si hay firstName o lastName, se respetan (trim + limpieza). No rellena el lado vacío
+ * con un nombre anterior. Solo parte `nombre` cuando ambos campos estructurados están vacíos.
  */
 export function splitPersonName(input = {}) {
   const first = cleanPersonNamePart(input.firstName)
@@ -57,11 +57,11 @@ export function splitPersonName(input = {}) {
     return { firstName: first, lastName: last }
   }
 
-  const fromFull = splitFromFullName(input.nombre)
-  return {
-    firstName: first || fromFull.firstName,
-    lastName: last || fromFull.lastName,
+  if (first || last) {
+    return { firstName: first, lastName: last }
   }
+
+  return splitFromFullName(input.nombre)
 }
 
 export function composeLegalName(firstName, lastName) {

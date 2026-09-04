@@ -7,6 +7,7 @@ import {
   validatePrestadorIdentityFields,
 } from '../../shared/prestadorIdentity.js'
 import { extractRepsDigits } from '../../shared/repsCode.js'
+import { parseRepsCodeWithDane } from './repsDane.js'
 import { extractNitDigits } from '../../shared/nit.js'
 import { normalizeRethusNumber } from '../../shared/rethusNumber.js'
 import { isInstitutionProvider } from '../../shared/providerType.js'
@@ -67,6 +68,10 @@ export async function verifyAndClaimPrestador({
   }
 
   const identity = fields.identity
+  const repsDane = parseRepsCodeWithDane(identity.repsDisplay || identity.repsCode)
+  if (!repsDane.valid) {
+    return { ok: false, status: 400, error: repsDane.message }
+  }
   const institution = isInstitutionProvider(identity.providerType)
   const document = normalizeDocument(identity.documentNumber)
   const reps = extractRepsDigits(identity.repsCode)

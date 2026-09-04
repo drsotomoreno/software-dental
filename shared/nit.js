@@ -18,7 +18,8 @@ export function computeNitDv(nitWithoutDv) {
 export function formatNitInput(value) {
   const digits = extractNitDigits(value)
   if (!digits) return ''
-  if (digits.length <= 9) return digits
+  // 8–10 dígitos de documento + DV (cédula antigua, NIT de 9 o cédula de 10).
+  if (digits.length < 9) return digits
   return `${digits.slice(0, -1)}-${digits.slice(-1)}`
 }
 
@@ -27,10 +28,12 @@ export function validateProviderNit(value) {
   if (!digits) {
     return { valid: false, message: 'El NIT fiscal (DIAN) es obligatorio para identificar al prestador.' }
   }
-  if (digits.length < 10 || digits.length > 11) {
+  // Persona natural: cédula de 8 dígitos + DV (ej. 79904620-4). Persona jurídica o cédula de 9–10 + DV.
+  if (digits.length < 9 || digits.length > 11) {
     return {
       valid: false,
-      message: 'Ingrese el NIT con dígito de verificación (9 o 10 dígitos + DV).',
+      message:
+        'Ingrese el NIT o cédula con dígito de verificación (8 a 10 dígitos + DV). Ejemplo de cédula antigua: 79904620-4.',
     }
   }
   const body = digits.slice(0, -1)

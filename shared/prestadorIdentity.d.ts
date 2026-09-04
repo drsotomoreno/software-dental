@@ -18,6 +18,7 @@ export function validatePrestadorIdentityFields(input?: {
 }): {
   valid: boolean
   errors: string[]
+  fieldErrors?: Record<string, string>
   message?: string
   identity: {
     providerType: 'institucion' | 'profesional_independiente'

@@ -59,12 +59,14 @@ export function DocumentIdentityField({
   onChange,
   compact = false,
   required = true,
+  error,
 }: {
   documentType: string
   documentNumber: string
   onChange: (patch: { documentType?: string; documentNumber?: string }) => void
   compact?: boolean
   required?: boolean
+  error?: string
 }) {
   const format = documentNumber.trim()
     ? validateProfessionalDocumentNumber(documentNumber, documentType)
@@ -107,13 +109,14 @@ export function DocumentIdentityField({
           onChange={(e) =>
             onChange({ documentNumber: sanitizeDocumentNumber(e.target.value, documentType) })
           }
-          className="input-field font-mono"
+          className={`input-field font-mono ${error || (format && !format.valid) ? 'border-red-400' : ''}`}
           placeholder="Ej: 1234567890"
           inputMode="numeric"
           autoComplete="off"
+          aria-invalid={Boolean(error || (format && !format.valid))}
         />
-        {format && !format.valid ? (
-          <p className="mt-1 text-xs text-red-600">{format.message}</p>
+        {error || (format && !format.valid) ? (
+          <p className="mt-1 text-xs text-red-600">{error || format?.message}</p>
         ) : compact ? null : (
           <p className="mt-1 text-xs text-slate-500">
             Obligatorio. La cédula es la llave de consulta en ReTHUS para firmar historias clínicas y
@@ -130,11 +133,13 @@ export function RethusCodeField({
   onChange,
   compact = false,
   required = false,
+  error,
 }: {
   value: string
   onChange: (value: string) => void
   compact?: boolean
   required?: boolean
+  error?: string
 }) {
   const format = value.trim() ? validateRethusNumberFormat(value) : null
 
@@ -154,14 +159,15 @@ export function RethusCodeField({
       <input
         value={sanitizeRethusInput(value)}
         onChange={(e) => onChange(sanitizeRethusInput(e.target.value))}
-        className="input-field font-mono"
+        className={`input-field font-mono ${error || (format && !format.valid) ? 'border-red-400' : ''}`}
         placeholder={`Ej: ${VERIFIED_RETHUS_EXAMPLE}`}
         inputMode="numeric"
         autoComplete="off"
         required={required}
+        aria-invalid={Boolean(error || (format && !format.valid))}
       />
-      {format && !format.valid ? (
-        <p className="mt-1 text-xs text-red-600">{format.message}</p>
+      {error || (format && !format.valid) ? (
+        <p className="mt-1 text-xs text-red-600">{error || format?.message}</p>
       ) : compact ? null : (
         <p className="mt-1 text-xs text-slate-500">
           Queda guardado en su perfil junto con la cédula.
@@ -175,10 +181,12 @@ export function RepsHabilitationField({
   value,
   onChange,
   compact = false,
+  error,
 }: {
   value: string
   onChange: (value: string) => void
   compact?: boolean
+  error?: string
 }) {
   const parsed = parseRepsCodeWithDane(value)
 
@@ -199,11 +207,14 @@ export function RepsHabilitationField({
       <input
         value={sanitizeRepsInput(value)}
         onChange={(e) => onChange(sanitizeRepsInput(e.target.value))}
-        className="input-field font-mono"
+        className={`input-field font-mono ${error || (value.trim() && !parsed.valid) ? 'border-red-400' : ''}`}
         placeholder={`Ej: ${VERIFIED_REPS_EXAMPLE_DISPLAY}`}
         autoComplete="off"
+        aria-invalid={Boolean(error || (value.trim() && !parsed.valid))}
       />
-      {value.trim() ? (
+      {error ? (
+        <p className="mt-1 text-xs text-red-600">{error}</p>
+      ) : value.trim() ? (
         <p className={`mt-1 text-xs ${parsed.valid ? 'text-emerald-700' : 'text-red-600'}`}>
           {parsed.valid
             ? compact
@@ -230,7 +241,7 @@ export function RethusSpecialtyField({
   return (
     <div>
       <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
-        Especialidad (RETHUS)
+        Especialidad (REPS)
       </label>
       <select
         value={value}
@@ -244,7 +255,7 @@ export function RethusSpecialtyField({
         ))}
       </select>
       <p className="mt-1 text-xs text-slate-400">
-        Debe coincidir con la especialidad habilitada en el REPS y el RETHUS para la validación MUV.
+        Indique la especialidad habilitada de la sede en el REPS. Debe coincidir con el RETHUS para la validación MUV.
       </p>
     </div>
   )

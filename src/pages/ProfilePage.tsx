@@ -56,6 +56,7 @@ export function ProfilePage() {
     confirmPassword: '',
   })
   const [saving, setSaving] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!user) return
@@ -89,6 +90,7 @@ export function ProfilePage() {
     if (!user?.id) return
     setSaveError('')
     setSaved(false)
+    setFieldErrors({})
     setSaving(true)
 
     try {
@@ -105,12 +107,14 @@ export function ProfilePage() {
         rethusNumber: form.rethusNumber,
       })
       if (!identityCheck.valid) {
+        setFieldErrors(identityCheck.fieldErrors ?? {})
         setSaveError(identityCheck.message ?? 'Complete la identidad del prestador.')
         return
       }
 
       const reps = validateActiveRepsSede(identityCheck.identity.repsDisplay || form.repsCode, form.repsStatus)
       if (!reps.valid) {
+        setFieldErrors({ repsCode: reps.message ?? 'El código REPS no es válido.' })
         setSaveError(reps.message ?? 'El código REPS no es válido.')
         return
       }
@@ -125,7 +129,6 @@ export function ProfilePage() {
         firstName: identity.firstName,
         lastName: identity.lastName,
         legalName: identity.legalName,
-        email: form.email,
         documentType: identity.documentType,
         documentNumber: identity.documentNumber,
         rethusNumber: identity.rethusNumber,
@@ -156,6 +159,20 @@ export function ProfilePage() {
         const remote = await updateOwnProfile(patch)
         if (!remote.ok) {
           setSaveError(remote.error)
+          const lower = remote.error.toLowerCase()
+          if (lower.includes('cédula') || lower.includes('documento')) {
+            setFieldErrors({ documentNumber: remote.error })
+          } else if (lower.includes('reps') || lower.includes('dane')) {
+            setFieldErrors({ repsCode: remote.error })
+          } else if (lower.includes('nit')) {
+            setFieldErrors({ providerNit: remote.error })
+          } else if (lower.includes('rethus')) {
+            setFieldErrors({ rethusNumber: remote.error })
+          } else if (lower.includes('apellido')) {
+            setFieldErrors({ lastName: remote.error })
+          } else if (lower.includes('nombre') || lower.includes('razón')) {
+            setFieldErrors({ firstName: remote.error })
+          }
           return
         }
         setStoredApiAuth(apiAuth.token, remote.user)
@@ -219,6 +236,11 @@ export function ProfilePage() {
         setPasswordError(remote.error)
         return
       }
+      await changeUserPassword(
+        user.id,
+        passwordForm.currentPassword,
+        passwordForm.newPassword,
+      )
     } else {
       const result = await changeUserPassword(
         user.id,
@@ -308,9 +330,12 @@ export function ProfilePage() {
               onChange={(e) => setForm({ ...form, legalName: e.target.value, clinicName: e.target.value })}
               autoComplete="organization"
               required
-              className="input-field"
+              className={`input-field ${fieldErrors.legalName ? 'border-red-400' : ''}`}
               placeholder="Nombre jurídico de la IPS / SAS"
             />
+            {fieldErrors.legalName ? (
+              <p className="mt-1 text-xs text-red-600">{fieldErrors.legalName}</p>
+            ) : null}
           </div>
         ) : null}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -323,8 +348,12 @@ export function ProfilePage() {
               onChange={(e) => setForm({ ...form, firstName: cleanPersonNameInput(e.target.value) })}
               autoComplete="given-name"
               required
-              className="input-field"
+              className={`input-field ${fieldErrors.firstName ? 'border-red-400' : ''}`}
+              aria-invalid={Boolean(fieldErrors.firstName)}
             />
+            {fieldErrors.firstName ? (
+              <p className="mt-1 text-xs text-red-600">{fieldErrors.firstName}</p>
+            ) : null}
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
@@ -335,8 +364,12 @@ export function ProfilePage() {
               onChange={(e) => setForm({ ...form, lastName: cleanPersonNameInput(e.target.value) })}
               autoComplete="family-name"
               required
-              className="input-field"
+              className={`input-field ${fieldErrors.lastName ? 'border-red-400' : ''}`}
+              aria-invalid={Boolean(fieldErrors.lastName)}
             />
+            {fieldErrors.lastName ? (
+              <p className="mt-1 text-xs text-red-600">{fieldErrors.lastName}</p>
+            ) : null}
           </div>
         </div>
         <div>
@@ -350,6 +383,9 @@ export function ProfilePage() {
             autoComplete="email"
             className="input-field bg-slate-50 text-slate-600"
           />
+          <p className="mt-1 text-xs text-slate-500">
+            El correo de sesión no se modifica desde aquí.
+          </p>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <DocumentIdentityField
@@ -357,6 +393,7 @@ export function ProfilePage() {
             required={!isInstitutionProvider(form.providerType)}
             documentType={form.documentType}
             documentNumber={form.documentNumber}
+            error={fieldErrors.documentNumber}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
         </div>
@@ -365,6 +402,7 @@ export function ProfilePage() {
             compact
             required={!isInstitutionProvider(form.providerType)}
             value={form.rethusNumber}
+            error={fieldErrors.rethusNumber}
             onChange={(rethusNumber) => setForm({ ...form, rethusNumber })}
           />
           <div>
@@ -377,14 +415,16 @@ export function ProfilePage() {
               value={form.clinicName}
               onChange={(e) => setForm({ ...form, clinicName: e.target.value })}
               autoComplete="organization"
-              className="input-field"
+              className={`input-field ${fieldErrors.clinicName ? 'border-red-400' : ''}`}
               placeholder={
                 isInstitutionProvider(form.providerType)
                   ? 'Opcional si coincide con la razón social'
                   : ''
               }
             />
-            {isInstitutionProvider(form.providerType) ? (
+            {fieldErrors.clinicName ? (
+              <p className="mt-1 text-xs text-red-600">{fieldErrors.clinicName}</p>
+            ) : isInstitutionProvider(form.providerType) ? (
               <p className="mt-1 text-xs text-slate-500">
                 Los odontólogos se vinculan en Gestión de usuarios con su ReTHUS individual. Esta
                 cuenta factura y genera RIPS con el REPS y el NIT de la IPS.
@@ -400,12 +440,18 @@ export function ProfilePage() {
             <input
               value={form.providerNit}
               onChange={(e) => setForm({ ...form, providerNit: formatNitInput(e.target.value) })}
-              className="input-field font-mono"
-              placeholder="NIT con dígito de verificación"
+              className={`input-field font-mono ${fieldErrors.providerNit ? 'border-red-400' : ''}`}
+              placeholder="Ej: 79904620-4"
               inputMode="numeric"
               autoComplete="off"
+              aria-invalid={Boolean(fieldErrors.providerNit)}
             />
-            {extractNitDigits(form.providerNit).length === 9 ? (
+            {fieldErrors.providerNit ? (
+              <p className="mt-1 text-xs text-red-600">{fieldErrors.providerNit}</p>
+            ) : null}
+            {!String(form.providerNit).includes('-') &&
+            extractNitDigits(form.providerNit).length >= 8 &&
+            extractNitDigits(form.providerNit).length <= 10 ? (
               <p className="mt-1 text-xs text-slate-500">
                 DV esperado: {computeNitDv(form.providerNit)}
               </p>
@@ -414,6 +460,7 @@ export function ProfilePage() {
           <RepsHabilitationField
             compact
             value={form.repsCode}
+            error={fieldErrors.repsCode}
             onChange={(repsCode) => setForm({ ...form, repsCode })}
           />
         </div>
@@ -493,9 +540,11 @@ export function ProfilePage() {
         <button type="submit" className="btn-secondary">
           Actualizar contraseña
         </button>
-        {passwordSaved && (
-          <p className="text-sm text-green-600">Contraseña actualizada correctamente.</p>
-        )}
+        {passwordSaved ? (
+          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+            Contraseña actualizada. El cambio aplica al inicio de sesión.
+          </p>
+        ) : null}
       </form>
 
       {(getStoredApiAuth()?.user?.rol === 'superadmin' || user.role === 'superadmin') && (

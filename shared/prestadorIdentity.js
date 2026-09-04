@@ -89,34 +89,46 @@ export function validatePrestadorIdentityFields(input = {}) {
     : { valid: false, message: 'El código ReTHUS es obligatorio para el profesional independiente.' }
 
   const errors = []
+  const fieldErrors = {}
+  const addError = (field, message) => {
+    errors.push(message)
+    if (field && !fieldErrors[field]) fieldErrors[field] = message
+  }
+
   if (institution) {
-    if (!legalName) errors.push('La razón social de la IPS es obligatoria.')
+    if (!legalName) addError('legalName', 'La razón social de la IPS es obligatoria.')
     if (!firstName || !lastName) {
-      errors.push('Indique el nombre del representante o responsable de la cuenta.')
+      addError(
+        !firstName ? 'firstName' : 'lastName',
+        'Indique el nombre del representante o responsable de la cuenta.',
+      )
+      if (!firstName) fieldErrors.firstName = fieldErrors.firstName || 'Los nombres del representante son obligatorios.'
+      if (!lastName) fieldErrors.lastName = fieldErrors.lastName || 'Los apellidos del representante son obligatorios.'
     }
   } else {
-    if (!firstName) errors.push('Los nombres del profesional son obligatorios, sin títulos (Dr./Dra.).')
-    if (!lastName) errors.push('Los apellidos del profesional son obligatorios.')
+    if (!firstName) addError('firstName', 'Los nombres del profesional son obligatorios, sin títulos (Dr./Dra.).')
+    if (!lastName) addError('lastName', 'Los apellidos del profesional son obligatorios.')
     if (documentType !== 'PA' && (documentNumber.length < 6 || documentNumber.length > 12)) {
-      errors.push('La cédula debe tener entre 6 y 12 dígitos. No se admiten letras.')
+      addError('documentNumber', 'La cédula debe tener entre 6 y 12 dígitos. No se admiten letras.')
     }
     if (documentType === 'PA' && String(input.documentNumber ?? '').replace(/[^A-Z0-9]/gi, '').length < 5) {
-      errors.push('Ingrese un pasaporte válido.')
+      addError('documentNumber', 'Ingrese un pasaporte válido.')
     }
-    if (!clinicName && !legalName) errors.push('El nombre del consultorio es obligatorio.')
-    if (!rethus.valid) errors.push(rethus.message)
+    if (!clinicName && !legalName) addError('clinicName', 'El nombre del consultorio es obligatorio.')
+    if (!rethus.valid) addError('rethusNumber', rethus.message)
   }
 
   if (documentNumber && documentType !== 'PA' && (documentNumber.length < 6 || documentNumber.length > 12)) {
-    errors.push('La cédula del representante debe tener entre 6 y 12 dígitos.')
+    addError('documentNumber', 'La cédula del representante debe tener entre 6 y 12 dígitos.')
   }
-  if (rethusRaw && !rethus.valid) errors.push(rethus.message)
-  if (!nit.valid) errors.push(nit.message)
-  if (!reps.valid) errors.push(reps.message ?? 'El código REPS de la sede es obligatorio.')
+  if (rethusRaw && !rethus.valid) addError('rethusNumber', rethus.message)
+  if (!nit.valid) addError('providerNit', nit.message)
+  if (!reps.valid) addError('repsCode', reps.message ?? 'El código REPS de la sede es obligatorio.')
 
   return {
     valid: errors.length === 0,
     errors,
+    fieldErrors,
     message: errors[0],
     identity: {
       providerType,
