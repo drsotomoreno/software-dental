@@ -28,7 +28,13 @@ function assignableRoleValue(role: UserRole | undefined): UserRole {
   return role === 'superadmin' ? 'admin' : (role ?? 'odontologo')
 }
 
-function emptyUserForm(clinicName = ''): Omit<UserProfile, 'id'> & { password: string } {
+function emptyUserForm(defaults?: {
+  clinicName?: string
+  legalName?: string
+  providerNit?: string
+  repsCode?: string
+  providerType?: UserProfile['providerType']
+}): Omit<UserProfile, 'id'> & { password: string } {
   return {
     email: '',
     firstName: '',
@@ -36,15 +42,27 @@ function emptyUserForm(clinicName = ''): Omit<UserProfile, 'id'> & { password: s
     documentType: 'CC',
     documentNumber: '',
     role: 'odontologo',
-    clinicName,
-    providerNit: '',
-    repsCode: '',
+    clinicName: defaults?.clinicName ?? '',
+    legalName: defaults?.legalName ?? defaults?.clinicName ?? '',
+    providerType: defaults?.providerType ?? 'profesional_independiente',
+    providerNit: defaults?.providerNit ?? '',
+    repsCode: defaults?.repsCode ?? '',
     repsStatus: 'activo',
     rethusNumber: '',
     rethusStatus: 'activo',
     thsSpecialty: 'odontologia_general',
     repsEnabledSpecialties: ['odontologia_general'],
     password: '',
+  }
+}
+
+function sedeDefaults(user: UserProfile | null | undefined) {
+  return {
+    clinicName: user?.clinicName,
+    legalName: user?.legalName,
+    providerNit: user?.providerNit,
+    repsCode: user?.repsCode,
+    providerType: user?.providerType,
   }
 }
 
@@ -55,7 +73,7 @@ export function UsersManagementPage() {
 
   const [showCreate, setShowCreate] = useState(false)
   const [createForm, setCreateForm] = useState(() =>
-    emptyUserForm(currentUser?.clinicName ?? ''),
+    emptyUserForm(sedeDefaults(currentUser)),
   )
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null)
   const [editForm, setEditForm] = useState<Partial<UserProfile>>({})
@@ -97,7 +115,7 @@ export function UsersManagementPage() {
       details: `${result.user.email} — ${ROLE_LABELS[result.user.role]}`,
     })
     setShowCreate(false)
-    setCreateForm(emptyUserForm(currentUser?.clinicName ?? ''))
+    setCreateForm(emptyUserForm(sedeDefaults(currentUser)))
     showMsg('Usuario creado correctamente.')
   }
 
@@ -111,6 +129,8 @@ export function UsersManagementPage() {
       documentNumber: u.documentNumber,
       role: u.role,
       clinicName: u.clinicName,
+      legalName: u.legalName ?? u.clinicName,
+      providerType: u.providerType ?? 'profesional_independiente',
       providerNit: u.providerNit ?? '',
       repsCode: u.repsCode ?? '',
       repsStatus: u.repsStatus ?? 'activo',
@@ -465,9 +485,14 @@ function UserFields({
       <div>
         <RethusCodeField
           compact
+          required
           value={values.rethusNumber ?? ''}
           onChange={(rethusNumber) => onChange({ rethusNumber })}
         />
+        <p className="mt-1 text-xs text-slate-500">
+          Cada odontólogo se identifica con su ReTHUS. El REPS y el NIT de la sede se heredan de la
+          IPS o del consultorio.
+        </p>
       </div>
       <div>
         <label className="label-field">Rol</label>
@@ -482,6 +507,14 @@ function UserFields({
             </option>
           ))}
         </select>
+      </div>
+      <div>
+        <label className="label-field">Razón social / nombre legal</label>
+        <input
+          value={values.legalName ?? values.clinicName ?? ''}
+          onChange={(e) => onChange({ legalName: e.target.value })}
+          className="input-field"
+        />
       </div>
       <div>
         <label className="label-field">Nombre de la clínica / consultorio</label>

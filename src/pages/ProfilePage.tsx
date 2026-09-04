@@ -16,12 +16,14 @@ import {
   ensureSpecialtyInRepsPortfolio,
 } from '@/components/settings/RegulatoryIdentityFields'
 import { getStoredApiAuth, setStoredApiAuth } from '@/services/apiAuthService'
-import { updateOwnProfile } from '@/services/subscriptionService'
+import { updateOwnProfile, changeOwnPassword } from '@/services/subscriptionService'
 import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
 import type { RepsHabilitationStatus } from '@/utils/repsCode'
 import { validateActiveRepsSede } from '@/utils/repsCode'
-import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
-import { validateRethusNumberFormat } from '@/utils/rethusNumber'
+import { cleanPersonNameInput, splitPersonName } from '@/utils/personName'
+import { computeNitDv, extractNitDigits, formatNitInput } from '@/utils/nit'
+import { validatePrestadorIdentityFields } from '@/utils/prestadorIdentity'
+import { PROVIDER_TYPES, isInstitutionProvider, normalizeProviderType } from '@/utils/providerType'
 
 export function ProfilePage() {
   const { user, can, refreshSessionUser } = useAuth()
@@ -32,8 +34,10 @@ export function ProfilePage() {
   const [passwordError, setPasswordError] = useState('')
 
   const [form, setForm] = useState({
+    providerType: 'profesional_independiente' as 'institucion' | 'profesional_independiente',
     firstName: '',
     lastName: '',
+    legalName: '',
     email: '',
     documentType: 'CC',
     documentNumber: '',
@@ -51,102 +55,148 @@ export function ProfilePage() {
     newPassword: '',
     confirmPassword: '',
   })
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (user) {
-      setForm({
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        documentType: user.documentType || 'CC',
-        documentNumber: user.documentNumber ?? '',
-        rethusNumber: user.rethusNumber ?? '',
-        clinicName: user.clinicName,
-        providerNit: user.providerNit ?? '',
-        repsCode: user.repsCode ?? '',
-        repsStatus: user.repsStatus ?? 'activo',
-        thsSpecialty: user.thsSpecialty ?? 'odontologia_general',
-        repsEnabledSpecialties:
-          user.repsEnabledSpecialties?.length
-            ? user.repsEnabledSpecialties
-            : [user.thsSpecialty ?? 'odontologia_general'],
-      })
-    }
-  }, [user])
+    if (!user) return
+    const names = splitPersonName({
+      firstName: user.firstName,
+      lastName: user.lastName,
+    })
+    setForm({
+      providerType: normalizeProviderType(user.providerType),
+      firstName: names.firstName,
+      lastName: names.lastName,
+      legalName: user.legalName ?? user.clinicName ?? '',
+      email: user.email,
+      documentType: user.documentType || 'CC',
+      documentNumber: user.documentNumber ?? '',
+      rethusNumber: user.rethusNumber ?? '',
+      clinicName: user.clinicName ?? '',
+      providerNit: formatNitInput(user.providerNit ?? ''),
+      repsCode: user.repsCode ?? '',
+      repsStatus: user.repsStatus ?? 'activo',
+      thsSpecialty: user.thsSpecialty ?? 'odontologia_general',
+      repsEnabledSpecialties:
+        user.repsEnabledSpecialties?.length
+          ? user.repsEnabledSpecialties
+          : [user.thsSpecialty ?? 'odontologia_general'],
+    })
+  }, [user?.id])
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user?.id) return
     setSaveError('')
+    setSaved(false)
+    setSaving(true)
 
-    const documentCheck = validateProfessionalDocumentNumber(form.documentNumber)
-    if (!documentCheck.valid) {
-      setSaveError(documentCheck.message ?? 'El número de documento es obligatorio.')
-      return
-    }
-
-    if (form.rethusNumber.trim()) {
-      const rethus = validateRethusNumberFormat(form.rethusNumber)
-      if (!rethus.valid) {
-        setSaveError(rethus.message ?? 'El código ReTHUS no es válido.')
+    try {
+      const identityCheck = validatePrestadorIdentityFields({
+        providerType: form.providerType,
+        firstName: form.firstName,
+        lastName: form.lastName,
+        legalName: form.legalName,
+        documentType: form.documentType,
+        documentNumber: form.documentNumber,
+        clinicName: form.clinicName || form.legalName,
+        providerNit: form.providerNit,
+        repsCode: form.repsCode,
+        rethusNumber: form.rethusNumber,
+      })
+      if (!identityCheck.valid) {
+        setSaveError(identityCheck.message ?? 'Complete la identidad del prestador.')
         return
       }
-    }
 
-    if (form.repsCode.trim()) {
-      const reps = validateActiveRepsSede(form.repsCode, form.repsStatus)
+      const reps = validateActiveRepsSede(identityCheck.identity.repsDisplay || form.repsCode, form.repsStatus)
       if (!reps.valid) {
         setSaveError(reps.message ?? 'El código REPS no es válido.')
         return
       }
-    }
 
-    const repsEnabledSpecialties = ensureSpecialtyInRepsPortfolio(
-      form.thsSpecialty,
-      form.repsEnabledSpecialties,
-    )
-    const patch = {
-      firstName: form.firstName,
-      lastName: form.lastName,
-      email: form.email,
-      documentType: form.documentType,
-      documentNumber: documentCheck.normalized ?? form.documentNumber.trim(),
-      rethusNumber: form.rethusNumber.trim(),
-      clinicName: form.clinicName,
-      providerNit: form.providerNit,
-      repsCode: form.repsCode,
-      repsStatus: form.repsStatus,
-      thsSpecialty: form.thsSpecialty,
-      rehusSpecialty: form.thsSpecialty,
-      repsEnabledSpecialties,
-    }
-
-    const apiAuth = getStoredApiAuth()
-    if (apiAuth?.token) {
-      const remote = await updateOwnProfile(patch)
-      if (!remote.ok) {
-        setSaveError(remote.error)
-        return
+      const identity = identityCheck.identity
+      const repsEnabledSpecialties = ensureSpecialtyInRepsPortfolio(
+        form.thsSpecialty,
+        form.repsEnabledSpecialties,
+      )
+      const patch = {
+        providerType: identity.providerType,
+        firstName: identity.firstName,
+        lastName: identity.lastName,
+        legalName: identity.legalName,
+        email: form.email,
+        documentType: identity.documentType,
+        documentNumber: identity.documentNumber,
+        rethusNumber: identity.rethusNumber,
+        clinicName: identity.clinicName,
+        providerNit: identity.providerNitDisplay || identity.providerNit,
+        repsCode: identity.repsDisplay || identity.repsCode,
+        repsStatus: form.repsStatus,
+        thsSpecialty: form.thsSpecialty,
+        rehusSpecialty: form.thsSpecialty,
+        repsEnabledSpecialties,
       }
-      setStoredApiAuth(apiAuth.token, remote.user)
-    }
 
-    const localUser = await db.users.get(user.id)
-    if (localUser) {
-      await db.users.update(user.id, patch)
-      await upsertProfessionalFromUser({ ...localUser, ...patch })
-    } else {
-      await upsertProfessionalFromUser({ ...user, ...patch })
+      setForm((current) => ({
+        ...current,
+        providerType: identity.providerType,
+        firstName: identity.firstName,
+        lastName: identity.lastName,
+        legalName: identity.legalName,
+        documentNumber: identity.documentNumber,
+        rethusNumber: identity.rethusNumber,
+        clinicName: identity.clinicName,
+        providerNit: identity.providerNitDisplay || identity.providerNit,
+        repsCode: identity.repsDisplay || identity.repsCode,
+      }))
+
+      const apiAuth = getStoredApiAuth()
+      if (apiAuth?.token) {
+        const remote = await updateOwnProfile(patch)
+        if (!remote.ok) {
+          setSaveError(remote.error)
+          return
+        }
+        setStoredApiAuth(apiAuth.token, remote.user)
+        const remoteType = normalizeProviderType(remote.user.providerType)
+        setForm((current) => ({
+          ...current,
+          providerType: remoteType,
+          firstName: remote.user.firstName ?? current.firstName,
+          lastName: remote.user.lastName ?? current.lastName,
+          legalName: remote.user.legalName ?? current.legalName,
+          clinicName: remote.user.clinicName ?? current.clinicName,
+          providerNit: formatNitInput(remote.user.providerNit ?? current.providerNit),
+          repsCode: remote.user.repsCode ?? current.repsCode,
+          documentNumber: remote.user.documentNumber ?? current.documentNumber,
+          rethusNumber: remote.user.rethusNumber ?? current.rethusNumber,
+        }))
+      }
+
+      const localUser = await db.users.get(user.id)
+      if (localUser) {
+        await db.users.update(user.id, patch)
+        await upsertProfessionalFromUser({ ...localUser, ...patch })
+      } else {
+        await upsertProfessionalFromUser({ ...user, ...patch })
+      }
+      await audit({
+        action: 'UPDATE_PROFILE',
+        resourceType: 'profile',
+        resourceId: user.id,
+        details: 'Actualización de identidad del prestador',
+      })
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 5000)
+      await refreshSessionUser()
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : 'No se pudo guardar el perfil. Intente de nuevo.',
+      )
+    } finally {
+      setSaving(false)
     }
-    await refreshSessionUser()
-    await audit({
-      action: 'UPDATE_PROFILE',
-      resourceType: 'profile',
-      resourceId: user.id,
-      details: 'Actualización de datos del profesional',
-    })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
   }
 
   const handlePasswordChange = async (e: React.FormEvent) => {
@@ -159,15 +209,26 @@ export function ProfilePage() {
       return
     }
 
-    const result = await changeUserPassword(
-      user.id,
-      passwordForm.currentPassword,
-      passwordForm.newPassword,
-    )
-
-    if (!result.ok) {
-      setPasswordError(result.error)
-      return
+    const apiAuth = getStoredApiAuth()
+    if (apiAuth?.token) {
+      const remote = await changeOwnPassword({
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+      })
+      if (!remote.ok) {
+        setPasswordError(remote.error)
+        return
+      }
+    } else {
+      const result = await changeUserPassword(
+        user.id,
+        passwordForm.currentPassword,
+        passwordForm.newPassword,
+      )
+      if (!result.ok) {
+        setPasswordError(result.error)
+        return
+      }
     }
 
     await audit({
@@ -179,10 +240,12 @@ export function ProfilePage() {
 
     setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
     setPasswordSaved(true)
-    setTimeout(() => setPasswordSaved(false), 3000)
+    setTimeout(() => setPasswordSaved(false), 5000)
   }
 
   if (!user) return <p className="text-slate-500">Cargando perfil...</p>
+
+  const verifiedAt = getStoredApiAuth()?.user?.prestadorVerifiedAt
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
@@ -192,25 +255,86 @@ export function ProfilePage() {
           <p className="mt-1 text-sm text-slate-500">
             {ROLE_LABELS[user.role]} · {user.email}
           </p>
+          <p className="mt-2 text-xs text-slate-600">
+            El código REPS identifica la sede. Una IPS opera con NIT y razón social (sin ReTHUS). Un
+            profesional independiente se valida con cédula y ReTHUS.
+          </p>
+          {verifiedAt ? (
+            <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+              Prestador verificado. Los datos quedan guardados de forma permanente en la sede REPS.
+            </p>
+          ) : null}
         </div>
+        <fieldset className="space-y-2">
+          <legend className="mb-1 block text-xs font-semibold uppercase text-slate-700">
+            Tipo de prestador
+          </legend>
+          {PROVIDER_TYPES.map((option) => {
+            const selected = form.providerType === option.id
+            return (
+              <label
+                key={option.id}
+                className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2 ${
+                  selected ? 'border-sky-400 bg-sky-50' : 'border-slate-200 bg-white'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="providerType"
+                  className="mt-1"
+                  checked={selected}
+                  onChange={() =>
+                    setForm({
+                      ...form,
+                      providerType: option.id as typeof form.providerType,
+                    })
+                  }
+                />
+                <span>
+                  <span className="block text-sm font-medium text-slate-800">{option.label}</span>
+                  <span className="mt-0.5 block text-xs text-slate-500">{option.hint}</span>
+                </span>
+              </label>
+            )
+          })}
+        </fieldset>
+        {isInstitutionProvider(form.providerType) ? (
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
+              Razón social
+            </label>
+            <input
+              value={form.legalName}
+              onChange={(e) => setForm({ ...form, legalName: e.target.value, clinicName: e.target.value })}
+              autoComplete="organization"
+              required
+              className="input-field"
+              placeholder="Nombre jurídico de la IPS / SAS"
+            />
+          </div>
+        ) : null}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
-              Nombres
+              {isInstitutionProvider(form.providerType) ? 'Nombres del representante' : 'Nombres'}
             </label>
             <input
-              value={form.firstName || user.firstName}
-              onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+              value={form.firstName}
+              onChange={(e) => setForm({ ...form, firstName: cleanPersonNameInput(e.target.value) })}
+              autoComplete="given-name"
+              required
               className="input-field"
             />
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
-              Apellidos
+              {isInstitutionProvider(form.providerType) ? 'Apellidos del representante' : 'Apellidos'}
             </label>
             <input
-              value={form.lastName || user.lastName}
-              onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+              value={form.lastName}
+              onChange={(e) => setForm({ ...form, lastName: cleanPersonNameInput(e.target.value) })}
+              autoComplete="family-name"
+              required
               className="input-field"
             />
           </div>
@@ -221,14 +345,16 @@ export function ProfilePage() {
           </label>
           <input
             type="email"
-            value={form.email || user.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            className="input-field bg-slate-50"
+            value={form.email}
+            readOnly
+            autoComplete="email"
+            className="input-field bg-slate-50 text-slate-600"
           />
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <DocumentIdentityField
             compact
+            required={!isInstitutionProvider(form.providerType)}
             documentType={form.documentType}
             documentNumber={form.documentNumber}
             onChange={(patch) => setForm({ ...form, ...patch })}
@@ -237,18 +363,33 @@ export function ProfilePage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <RethusCodeField
             compact
+            required={!isInstitutionProvider(form.providerType)}
             value={form.rethusNumber}
             onChange={(rethusNumber) => setForm({ ...form, rethusNumber })}
           />
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase text-slate-700">
-              Nombre de la clínica / consultorio
+              {isInstitutionProvider(form.providerType)
+                ? 'Nombre comercial de la sede'
+                : 'Nombre de la clínica / consultorio'}
             </label>
             <input
-              value={form.clinicName || user.clinicName}
+              value={form.clinicName}
               onChange={(e) => setForm({ ...form, clinicName: e.target.value })}
+              autoComplete="organization"
               className="input-field"
+              placeholder={
+                isInstitutionProvider(form.providerType)
+                  ? 'Opcional si coincide con la razón social'
+                  : ''
+              }
             />
+            {isInstitutionProvider(form.providerType) ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Los odontólogos se vinculan en Gestión de usuarios con su ReTHUS individual. Esta
+                cuenta factura y genera RIPS con el REPS y el NIT de la IPS.
+              </p>
+            ) : null}
           </div>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -257,11 +398,18 @@ export function ProfilePage() {
               NIT fiscal (DIAN)
             </label>
             <input
-              value={form.providerNit || user.providerNit || ''}
-              onChange={(e) => setForm({ ...form, providerNit: e.target.value })}
+              value={form.providerNit}
+              onChange={(e) => setForm({ ...form, providerNit: formatNitInput(e.target.value) })}
               className="input-field font-mono"
               placeholder="NIT con dígito de verificación"
+              inputMode="numeric"
+              autoComplete="off"
             />
+            {extractNitDigits(form.providerNit).length === 9 ? (
+              <p className="mt-1 text-xs text-slate-500">
+                DV esperado: {computeNitDv(form.providerNit)}
+              </p>
+            ) : null}
           </div>
           <RepsHabilitationField
             compact
@@ -285,10 +433,14 @@ export function ProfilePage() {
         {saveError ? (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{saveError}</p>
         ) : null}
-        <button type="submit" className="btn-primary w-full py-2.5">
-          Guardar cambios
+        {saved ? (
+          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+            Cambios guardados. La identidad de la sede REPS quedó persistida.
+          </p>
+        ) : null}
+        <button type="submit" disabled={saving} className="btn-primary w-full py-2.5 disabled:opacity-60">
+          {saving ? 'Verificando identidad...' : 'Guardar cambios'}
         </button>
-        {saved && <p className="text-sm text-green-600">Perfil actualizado.</p>}
       </form>
 
       <form onSubmit={handlePasswordChange} className="card space-y-4">

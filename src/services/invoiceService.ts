@@ -302,7 +302,10 @@ export function buildInvoiceDraftFromClinicalRecord(input: InvoiceDraftInput): E
     issueDate,
     status: 'draft',
     issuerNit: normalizeNit(professional.providerNit ?? ''),
-    issuerBusinessName: professional.clinicName || `${professional.firstName} ${professional.lastName}`,
+    issuerBusinessName:
+      professional.legalName ||
+      professional.clinicName ||
+      `${professional.firstName} ${professional.lastName}`,
     buyerDocumentType: DOCUMENT_TYPE_RIPS[patient.documentType] ?? 'CC',
     buyerDocumentNumber: patient.documentNumber.trim(),
     buyerName: `${patient.firstName} ${patient.lastName}`.trim(),

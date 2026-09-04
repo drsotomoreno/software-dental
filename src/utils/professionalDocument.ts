@@ -14,12 +14,22 @@ export function professionalDocumentNumber(
   return user?.documentNumber?.trim() ?? ''
 }
 
+export function sanitizeDocumentNumber(
+  documentNumber: string | null | undefined,
+  documentType = 'CC',
+): string {
+  const raw = String(documentNumber ?? '')
+  if (documentType === 'PA') {
+    return raw.toUpperCase().replace(/[^A-Z0-9]/g, '')
+  }
+  return raw.replace(/\D/g, '')
+}
+
 export function validateProfessionalDocumentNumber(
   documentNumber: string | null | undefined,
+  documentType = 'CC',
 ): { valid: boolean; message?: string; normalized?: string } {
-  const normalized = String(documentNumber ?? '')
-    .trim()
-    .replace(/[.\s-]/g, '')
+  const normalized = sanitizeDocumentNumber(documentNumber, documentType)
   if (!normalized) {
     return {
       valid: false,
@@ -27,10 +37,16 @@ export function validateProfessionalDocumentNumber(
         'El número de documento (cédula) es obligatorio. Es la llave de consulta en ReTHUS y el sistema nacional de salud.',
     }
   }
-  if (normalized.length < 5 || normalized.length > 20) {
+  if (documentType === 'PA') {
+    if (normalized.length < 5 || normalized.length > 20) {
+      return { valid: false, message: 'Ingrese un pasaporte válido.' }
+    }
+    return { valid: true, normalized }
+  }
+  if (normalized.length < 6 || normalized.length > 12) {
     return {
       valid: false,
-      message: 'Ingrese un número de documento válido (cédula / ReTHUS).',
+      message: 'La cédula debe tener entre 6 y 12 dígitos. No se admiten letras.',
     }
   }
   return { valid: true, normalized }

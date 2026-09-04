@@ -57,6 +57,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const fallbackUser = {
         id: 'superadmin-session',
         nombre: 'Dr. Mauricio Soto',
+        firstName: 'Mauricio',
+        lastName: 'Soto',
         email: SUPERADMIN_EMAIL,
         rol: 'superadmin' as const,
         estado_pago: 'exento' as const,

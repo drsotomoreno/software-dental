@@ -61,6 +61,17 @@ export async function updateOwnProfile(patch: Record<string, unknown>) {
   return { ok: true as const, user: payload.user as ApiSubscriptionUser }
 }
 
+export async function changeOwnPassword(input: { currentPassword: string; newPassword: string }) {
+  const { response, payload } = await authFetch('/api/profile/password', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+  if (!response.ok) {
+    return { ok: false as const, error: String(payload.error || 'No se pudo actualizar la contraseña.') }
+  }
+  return { ok: true as const }
+}
+
 export async function activatePaidPlan(planId: string) {
   const { response, payload } = await authFetch('/api/subscription/plan', {
     method: 'POST',

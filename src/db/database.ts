@@ -591,6 +591,29 @@ export class DentalDatabase extends Dexie {
       await stripLicense('users')
       await stripLicense('professionals')
     })
+
+    this.version(22).upgrade(async (tx) => {
+      const users = await tx.table('users').toArray()
+      for (const user of users) {
+        if (!user?.id) continue
+        const patch: Record<string, unknown> = {}
+        if (!user.providerType) {
+          const hasReps = Boolean(String(user.repsCode ?? '').replace(/\D/g, ''))
+          const hasNit = Boolean(String(user.providerNit ?? '').replace(/\D/g, ''))
+          const hasRethus = Boolean(String(user.rethusNumber ?? '').replace(/\D/g, ''))
+          patch.providerType =
+            hasReps && hasNit && !hasRethus ? 'institucion' : 'profesional_independiente'
+        }
+        if (!user.legalName) {
+          patch.legalName =
+            String(user.clinicName ?? '').trim() ||
+            `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim()
+        }
+        if (Object.keys(patch).length > 0) {
+          await tx.table('users').update(user.id, patch)
+        }
+      }
+    })
   }
 }
 

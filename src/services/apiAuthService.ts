@@ -5,6 +5,7 @@ import {
   type Permission,
 } from '@/utils/permissions'
 import type { UserRole } from '@/types/user'
+import { splitPersonName } from '@/utils/personName'
 
 export const API_AUTH_TOKEN_KEY = 'doctorSEO_token'
 export const API_AUTH_USER_KEY = 'doctorSEO_user'
@@ -33,6 +34,9 @@ export interface ApiSubscriptionUser {
   repsEnabledSpecialties?: string[]
   providerNit?: string
   clinicName?: string
+  legalName?: string
+  providerType?: 'institucion' | 'profesional_independiente'
+  prestadorVerifiedAt?: string | null
   trialLimited?: boolean
   trialLimits?: { maxPatients: number; maxVoiceNotesPerField: number } | null
   createdAt?: string
@@ -58,9 +62,12 @@ export function isApiSuperAdmin(user: ApiSubscriptionUser | null | undefined): b
 
 export function grantMasterLocalSession(token?: string): { token: string; user: ApiSubscriptionUser } {
   const sessionToken = token || `superadmin-local-${Date.now()}`
+  const names = splitPersonName({ nombre: 'Dr. Mauricio Soto' })
   const user: ApiSubscriptionUser = {
     id: 'superadmin-session',
-    nombre: 'Dr. Mauricio Soto',
+    nombre: [names.firstName, names.lastName].filter(Boolean).join(' '),
+    firstName: names.firstName,
+    lastName: names.lastName,
     email: SUPERADMIN_EMAIL,
     rol: 'superadmin',
     estado_pago: 'exento',
@@ -180,9 +187,13 @@ export function mapApiUserToAuthUser(
   user: ApiSubscriptionUser,
   token: string,
 ): import('@/types/auth').AuthUser {
-  const nameParts = (user.nombre || user.email).trim().split(/\s+/)
-  const firstName = user.firstName?.trim() || nameParts[0] || user.email
-  const lastName = user.lastName?.trim() || nameParts.slice(1).join(' ') || 'Usuario'
+  const names = splitPersonName({
+    nombre: user.nombre,
+    firstName: user.firstName,
+    lastName: user.lastName,
+  })
+  const firstName = names.firstName
+  const lastName = names.lastName
 
   return {
     id: user.id,
@@ -192,7 +203,9 @@ export function mapApiUserToAuthUser(
     documentType: user.documentType || 'CC',
     documentNumber: user.documentNumber || '',
     role: mapApiRoleToUserRole(user.rol),
-    clinicName: user.clinicName || '',
+    clinicName: user.clinicName || user.legalName || '',
+    legalName: user.legalName || user.clinicName || '',
+    providerType: user.providerType === 'institucion' ? 'institucion' : 'profesional_independiente',
     sessionId: token,
     providerNit: user.providerNit,
     repsCode: user.repsCode,

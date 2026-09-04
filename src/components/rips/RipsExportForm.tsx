@@ -237,7 +237,8 @@ export function RipsExportForm({
       },
       invoice: {
         nitEmisor: metadata.numDocumentoIdObligado,
-        razonSocialEmisor: professional.clinicName ?? 'Prestador odontológico',
+        razonSocialEmisor:
+          professional.legalName ?? professional.clinicName ?? 'Prestador odontológico',
         nitAdquiriente: firstPatient?.documentNumber ?? '222222222222',
         razonSocialAdquiriente: firstPatient
           ? `${firstPatient.firstName} ${firstPatient.lastName}`

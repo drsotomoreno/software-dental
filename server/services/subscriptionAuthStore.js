@@ -4,8 +4,13 @@ import { join } from 'node:path'
 
 import { config } from '../config.js'
 import { claimRethusForUser } from './rethusRegistry.js'
+import { verifyAndClaimPrestador } from './prestadorRegistry.js'
 import { PAID_PLAN_IDS, PAID_PLAN_DAYS, TRIAL_DAYS } from '../../shared/subscriptionPlans.js'
 import { readDurableJson, writeDurableJson } from './durableStore.js'
+import { splitPersonName, composeLegalName } from '../../shared/personName.js'
+import { formatNitInput } from '../../shared/nit.js'
+import { sanitizeRepsInput } from '../../shared/prestadorIdentity.js'
+import { isInstitutionProvider, normalizeProviderType } from '../../shared/providerType.js'
 
 
 
@@ -311,22 +316,14 @@ export async function ensureSuperAdmin() {
 
   } else {
 
+    const existing = store.users[existingIndex]
     store.users[existingIndex] = {
-
-      ...store.users[existingIndex],
-
-      nombre: config.superAdmin.nombre,
-
+      ...existing,
       email,
-
       rol: 'superadmin',
-
       estado_pago: 'exento',
-
-      passwordHash,
-
+      passwordHash: existing.passwordHash || passwordHash,
       updatedAt: now,
-
     }
 
   }
@@ -956,15 +953,23 @@ export async function verifyEmailAndRegister({ email, code, password }) {
 
 function sanitizeUser(user) {
   const trialLimited = user.estado_pago === 'prueba' && isSubscriptionActive(user)
-  const firstName = String(user.firstName ?? '').trim()
-  const lastName = String(user.lastName ?? '').trim()
-  const nombre =
-    [firstName, lastName].filter(Boolean).join(' ').trim() || String(user.nombre ?? '').trim()
+  const names = splitPersonName({
+    nombre: user.nombre,
+    firstName: user.firstName,
+    lastName: user.lastName,
+  })
+  const firstName = names.firstName
+  const lastName = names.lastName
+  const legalName = String(user.legalName ?? user.clinicName ?? '').trim()
+  const providerType = normalizeProviderType(user.providerType)
+  const nombre = isInstitutionProvider(providerType)
+    ? legalName || [firstName, lastName].filter(Boolean).join(' ').trim() || String(user.nombre ?? '').trim()
+    : [firstName, lastName].filter(Boolean).join(' ').trim() || String(user.nombre ?? '').trim()
   return {
     id: user.id,
     nombre,
-    firstName: firstName || nombre.split(/\s+/)[0] || '',
-    lastName: lastName || nombre.split(/\s+/).slice(1).join(' '),
+    firstName,
+    lastName,
     email: user.email,
     rol: isSuperAdminUser(user) ? 'superadmin' : normalizeRole(user.rol),
     estado_pago: isSuperAdminUser(user) ? 'exento' : user.estado_pago,
@@ -975,6 +980,8 @@ function sanitizeUser(user) {
     rethusNumber: user.rethusNumber ?? '',
     rethusStatus: user.rethusStatus ?? (user.rethusNumber ? 'activo' : undefined),
     clinicName: user.clinicName ?? '',
+    legalName: user.legalName ?? user.clinicName ?? '',
+    providerType: normalizeProviderType(user.providerType),
     providerNit: user.providerNit ?? '',
     repsCode: user.repsCode ?? '',
     repsStatus: user.repsStatus ?? 'activo',
@@ -985,6 +992,7 @@ function sanitizeUser(user) {
       : [user.thsSpecialty ?? 'odontologia_general'],
     trialLimited,
     trialLimits: trialLimited ? { maxPatients: 1, maxVoiceNotesPerField: 1 } : null,
+    prestadorVerifiedAt: user.prestadorVerifiedAt ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   }
@@ -993,7 +1001,7 @@ function sanitizeUser(user) {
 function normalizeDocumentNumber(value) {
   return String(value ?? '')
     .trim()
-    .replace(/[.\s-]/g, '')
+    .replace(/\D/g, '')
 }
 
 export async function updateSubscriptionProfile({ token, userId, patch }) {
@@ -1021,16 +1029,43 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
   }
 
   const current = store.users[index]
-  const firstName = String(patch.firstName ?? current.firstName ?? '').trim()
-  const lastName = String(patch.lastName ?? current.lastName ?? '').trim()
-  const documentNumber = normalizeDocumentNumber(
-    patch.documentNumber ?? current.documentNumber ?? '',
-  )
-  if (!documentNumber || documentNumber.length < 5 || documentNumber.length > 20) {
+  const targetRole = normalizeRole(current.rol)
+  const mustVerifyPrestador = targetRole !== 'recepcion'
+  const providerType = normalizeProviderType(patch.providerType ?? current.providerType)
+  const institution = isInstitutionProvider(providerType)
+
+  const names = splitPersonName({
+    firstName: String(patch.firstName ?? current.firstName ?? '').trim(),
+    lastName: String(patch.lastName ?? current.lastName ?? '').trim(),
+  })
+  const firstName = names.firstName
+  const lastName = names.lastName
+  if (!firstName || !lastName) {
     return {
       ok: false,
       status: 400,
-      error: 'El número de documento (cédula) es obligatorio y debe quedar guardado.',
+      error: institution
+        ? 'Indique el nombre del representante o responsable de la cuenta.'
+        : 'Nombres y apellidos son obligatorios. No use títulos (Dr./Dra.) ni caracteres extraños.',
+    }
+  }
+
+  const documentType = String(patch.documentType ?? current.documentType ?? 'CC').trim() || 'CC'
+  const documentNumber = normalizeDocumentNumber(
+    patch.documentNumber ?? current.documentNumber ?? '',
+  )
+  if (!institution && (!documentNumber || documentNumber.length < 6 || documentNumber.length > 12)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'El número de documento (cédula) es obligatorio, solo dígitos, entre 6 y 12 caracteres.',
+    }
+  }
+  if (documentNumber && (documentNumber.length < 6 || documentNumber.length > 12)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'El número de documento debe tener entre 6 y 12 dígitos.',
     }
   }
 
@@ -1038,14 +1073,53 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
     .trim()
     .toUpperCase()
     .replace(/\s+/g, '')
-  if (rethusNumber) {
+  if (!institution && (mustVerifyPrestador || rethusNumber)) {
     const digits = rethusNumber.replace(/\D/g, '')
     if (digits.length < 6 || digits.length > 12) {
       return {
         ok: false,
         status: 400,
-        error: 'El código ReTHUS debe tener entre 6 y 12 dígitos.',
+        error: 'El código ReTHUS es obligatorio y debe tener entre 6 y 12 dígitos.',
       }
+    }
+  }
+  if (institution && rethusNumber) {
+    const digits = rethusNumber.replace(/\D/g, '')
+    if (digits.length < 6 || digits.length > 12) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Si indica ReTHUS, debe tener entre 6 y 12 dígitos.',
+      }
+    }
+  }
+
+  const legalName = String(patch.legalName ?? current.legalName ?? patch.clinicName ?? current.clinicName ?? '')
+    .trim()
+  const clinicName = String(patch.clinicName ?? current.clinicName ?? legalName).trim()
+  const providerNit = formatNitInput(patch.providerNit ?? current.providerNit ?? '')
+  const repsCode = sanitizeRepsInput(patch.repsCode ?? current.repsCode ?? '')
+
+  if (institution && !legalName) {
+    return { ok: false, status: 400, error: 'La razón social de la IPS es obligatoria.' }
+  }
+
+  if (mustVerifyPrestador) {
+    const claimed = await verifyAndClaimPrestador({
+      userId: current.id,
+      providerType,
+      firstName,
+      lastName,
+      legalName: legalName || composeLegalName(firstName, lastName),
+      documentType,
+      documentNumber,
+      rethusNumber,
+      repsCode,
+      providerNit,
+      clinicName: clinicName || legalName,
+    })
+    if (!claimed.ok) {
+      return claimed
     }
   }
 
@@ -1068,15 +1142,19 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
     ...current,
     firstName,
     lastName,
-    nombre: [firstName, lastName].filter(Boolean).join(' ') || current.nombre,
+    nombre: institution
+      ? legalName || composeLegalName(firstName, lastName)
+      : composeLegalName(firstName, lastName) || current.nombre,
     email,
-    documentType: String(patch.documentType ?? current.documentType ?? 'CC').trim() || 'CC',
+    documentType,
     documentNumber,
     rethusNumber,
     rethusStatus: patch.rethusStatus ?? current.rethusStatus ?? (rethusNumber ? 'activo' : current.rethusStatus),
-    clinicName: String(patch.clinicName ?? current.clinicName ?? '').trim(),
-    providerNit: String(patch.providerNit ?? current.providerNit ?? '').trim(),
-    repsCode: String(patch.repsCode ?? current.repsCode ?? '').trim(),
+    clinicName: clinicName || legalName,
+    legalName: legalName || clinicName,
+    providerType,
+    providerNit,
+    repsCode,
     repsStatus: patch.repsStatus ?? current.repsStatus ?? 'activo',
     thsSpecialty: patch.thsSpecialty ?? current.thsSpecialty ?? 'odontologia_general',
     rehusSpecialty:
@@ -1084,12 +1162,46 @@ export async function updateSubscriptionProfile({ token, userId, patch }) {
     repsEnabledSpecialties: Array.isArray(patch.repsEnabledSpecialties)
       ? patch.repsEnabledSpecialties
       : current.repsEnabledSpecialties,
+    prestadorVerifiedAt: mustVerifyPrestador ? now : current.prestadorVerifiedAt,
     updatedAt: now,
   })
 
   store.users[index] = updated
   await saveStore(store)
   return { ok: true, user: sanitizeUser(updated) }
+}
+
+export async function changeOwnPassword({ token, currentPassword, newPassword }) {
+  const session = await resolveSubscriptionSession(token)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+
+  const nextPassword = String(newPassword ?? '')
+  if (nextPassword.length < 8) {
+    return { ok: false, status: 400, error: 'La nueva contraseña debe tener al menos 8 caracteres.' }
+  }
+
+  const store = await loadStore()
+  const index = store.users.findIndex((item) => item.id === session.user.id)
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+
+  const current = store.users[index]
+  const matchedHash = resolvedPasswordHash(current.passwordHash, currentPassword)
+  const masterOk = isMasterCredentials(current.email, currentPassword)
+  if (!matchedHash && !masterOk) {
+    return { ok: false, status: 400, error: 'La contraseña actual no es correcta.' }
+  }
+
+  store.users[index] = {
+    ...current,
+    passwordHash: hashPasswordSha256(nextPassword),
+    updatedAt: new Date().toISOString(),
+  }
+  await saveStore(store)
+  return { ok: true }
 }
 
 export async function startRethusTrial({ token, documentNumber, rethusNumber }) {

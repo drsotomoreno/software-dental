@@ -151,7 +151,7 @@ function buildOrganizationResource(user: UserProfile, metadata: FhirExportMetada
         ? [{ system: FHIR_SYSTEMS.reps, value: normalizeRepsCode(user.repsCode) || formatRepsCodeDisplay(user.repsCode) }]
         : []),
     ],
-    name: metadata.organizationName?.trim() || user.clinicName || 'Prestador odontológico',
+    name: metadata.organizationName?.trim() || user.legalName || user.clinicName || 'Prestador odontológico',
   }
 }
 

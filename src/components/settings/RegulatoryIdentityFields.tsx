@@ -5,6 +5,7 @@ import { parseRepsCodeWithDane, VERIFIED_REPS_EXAMPLE_DISPLAY } from '@/utils/re
 import {
   PROFESSIONAL_DOCUMENT_LABEL,
   PROFESSIONAL_DOCUMENT_TYPES,
+  sanitizeDocumentNumber,
   validateProfessionalDocumentNumber,
 } from '@/utils/professionalDocument'
 import type { RepsHabilitationStatus } from '@/utils/repsCode'
@@ -13,6 +14,7 @@ import {
   VERIFIED_RETHUS_EXAMPLE,
   type RethusStatus,
 } from '@/utils/rethusNumber'
+import { sanitizeRepsInput, sanitizeRethusInput } from '@/utils/prestadorIdentity'
 
 export interface RegulatoryIdentityValues {
   repsCode: string
@@ -64,7 +66,9 @@ export function DocumentIdentityField({
   compact?: boolean
   required?: boolean
 }) {
-  const format = documentNumber.trim() ? validateProfessionalDocumentNumber(documentNumber) : null
+  const format = documentNumber.trim()
+    ? validateProfessionalDocumentNumber(documentNumber, documentType)
+    : null
 
   return (
     <>
@@ -75,7 +79,7 @@ export function DocumentIdentityField({
         <select
           required={required}
           value={documentType || 'CC'}
-          onChange={(e) => onChange({ documentType: e.target.value })}
+          onChange={(e) => onChange({ documentType: e.target.value, documentNumber: sanitizeDocumentNumber(documentNumber, e.target.value) })}
           className="input-field bg-white"
         >
           {PROFESSIONAL_DOCUMENT_TYPES.map((item) => (
@@ -99,8 +103,10 @@ export function DocumentIdentityField({
         </div>
         <input
           required={required}
-          value={documentNumber}
-          onChange={(e) => onChange({ documentNumber: e.target.value })}
+          value={sanitizeDocumentNumber(documentNumber, documentType)}
+          onChange={(e) =>
+            onChange({ documentNumber: sanitizeDocumentNumber(e.target.value, documentType) })
+          }
           className="input-field font-mono"
           placeholder="Ej: 1234567890"
           inputMode="numeric"
@@ -123,10 +129,12 @@ export function RethusCodeField({
   value,
   onChange,
   compact = false,
+  required = false,
 }: {
   value: string
   onChange: (value: string) => void
   compact?: boolean
+  required?: boolean
 }) {
   const format = value.trim() ? validateRethusNumberFormat(value) : null
 
@@ -144,12 +152,13 @@ export function RethusCodeField({
         )}
       </div>
       <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={sanitizeRethusInput(value)}
+        onChange={(e) => onChange(sanitizeRethusInput(e.target.value))}
         className="input-field font-mono"
         placeholder={`Ej: ${VERIFIED_RETHUS_EXAMPLE}`}
         inputMode="numeric"
         autoComplete="off"
+        required={required}
       />
       {format && !format.valid ? (
         <p className="mt-1 text-xs text-red-600">{format.message}</p>
@@ -188,8 +197,8 @@ export function RepsHabilitationField({
         )}
       </div>
       <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={sanitizeRepsInput(value)}
+        onChange={(e) => onChange(sanitizeRepsInput(e.target.value))}
         className="input-field font-mono"
         placeholder={`Ej: ${VERIFIED_REPS_EXAMPLE_DISPLAY}`}
         autoComplete="off"

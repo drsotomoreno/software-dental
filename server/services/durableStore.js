@@ -32,7 +32,7 @@ async function ensureTable(client) {
   `)
 }
 
-export async function readDurableJson(filePath, fallback) {
+export async function readDurableJson(filePath, fallback, storeKey = STORE_KEY) {
   const db = getPool()
   if (db) {
     try {
@@ -40,7 +40,7 @@ export async function readDurableJson(filePath, fallback) {
       try {
         await ensureTable(client)
         const { rows } = await client.query('SELECT value FROM app_json_store WHERE key = $1', [
-          STORE_KEY,
+          storeKey,
         ])
         if (rows[0]?.value && typeof rows[0].value === 'object') {
           return rows[0].value
@@ -63,7 +63,7 @@ export async function readDurableJson(filePath, fallback) {
   }
 }
 
-export async function writeDurableJson(filePath, value) {
+export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
   await mkdir(dirname(filePath), { recursive: true })
   await writeFile(filePath, JSON.stringify(value, null, 2), 'utf8')
 
@@ -77,7 +77,7 @@ export async function writeDurableJson(filePath, value) {
         `INSERT INTO app_json_store (key, value, updated_at)
          VALUES ($1, $2::jsonb, now())
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-        [STORE_KEY, JSON.stringify(value)],
+        [storeKey, JSON.stringify(value)],
       )
     } finally {
       client.release()

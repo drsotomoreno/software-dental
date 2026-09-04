@@ -17,6 +17,10 @@ export interface UserProfile {
   documentNumber: string
   role: UserRole
   clinicName: string
+  /** Razón social (IPS) o nombre legal del profesional independiente. */
+  legalName?: string
+  /** Tipo de prestador: IPS / persona jurídica vs consultorio unipersonal. */
+  providerType?: 'institucion' | 'profesional_independiente'
   /** NIT prestador — RIPS */
   providerNit?: string
   /** Código REPS de habilitación de la sede (12 dígitos, ej. 6800103898-01) */

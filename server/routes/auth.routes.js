@@ -10,6 +10,7 @@ import {
   requestRethusTrial,
 } from '../controllers/subscription.controller.js'
 import {
+  changeOwnPassword,
   confirmSubscriptionPayment,
   ensureSuperAdmin,
   isMasterCredentials,
@@ -241,6 +242,30 @@ router.get('/admin/users', async (req, res) => {
   } catch (error) {
     console.error('[Auth] Error en GET /admin/users:', error)
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo listar los usuarios.' })
+  }
+})
+
+router.put('/profile/password', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const result = await changeOwnPassword({
+      token,
+      currentPassword: body.currentPassword,
+      newPassword: body.newPassword,
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true })
+  } catch (error) {
+    console.error('[Auth] Error en PUT /profile/password:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo actualizar la contraseña.',
+    })
   }
 })
 

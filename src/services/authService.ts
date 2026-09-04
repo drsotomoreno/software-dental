@@ -229,6 +229,8 @@ export async function createAppUser(
     documentNumber: data.documentNumber.trim(),
     role: roleResult.role,
     clinicName: data.clinicName.trim(),
+    legalName: data.legalName?.trim() || data.clinicName.trim(),
+    providerType: data.providerType ?? 'profesional_independiente',
     providerNit: data.providerNit?.trim() || undefined,
     repsCode: data.repsCode?.trim() || undefined,
     repsStatus: data.repsStatus ?? 'activo',
