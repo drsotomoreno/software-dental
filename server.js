@@ -30,7 +30,13 @@ app.use(
       callback(null, allowed)
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept',
+      'X-Client-Email',
+      'X-Client-User-Id',
+    ],
   }),
 )
 app.use(express.json({ limit: '5mb' }))
@@ -55,9 +61,18 @@ if (isProduction) {
       '[RIPS API] Falta dist/index.html. En Render el Build Command debe ser: npm run build',
     )
   }
-  app.use(express.static(distDir))
+  app.use(
+    express.static(distDir, {
+      setHeaders(res, filePath) {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+        }
+      },
+    }),
+  )
   app.get('/{*splat}', (req, res, next) => {
     if (req.path.startsWith('/api')) return next()
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
     res.sendFile(distIndex)
   })
 } else {

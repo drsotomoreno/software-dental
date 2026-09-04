@@ -1,7 +1,9 @@
 import {
   getStoredApiAuth,
+  isApiSuperAdmin,
   restoreMasterApiSession,
   setStoredApiAuth,
+  SUPERADMIN_EMAIL,
   type ApiSubscriptionUser,
 } from '@/services/apiAuthService'
 import { PAID_PLANS, TRIAL_DAYS } from '../../shared/subscriptionPlans.js'
@@ -72,19 +74,32 @@ async function putOwnProfile(patch: Record<string, unknown>) {
     method: 'PUT',
     body: JSON.stringify({
       ...patch,
-      clientUserId: auth?.user?.id,
-      clientEmail: auth?.user?.email,
+      clientUserId: auth?.user?.id || patch.clientUserId,
+      clientEmail: auth?.user?.email || patch.clientEmail,
     }),
   })
 }
 
+function shouldRestoreMasterSession(email?: string) {
+  const stored = getStoredApiAuth()
+  const value = String(email || stored?.user?.email || '')
+    .trim()
+    .toLowerCase()
+  return value === SUPERADMIN_EMAIL || isApiSuperAdmin(stored?.user)
+}
+
 export async function updateOwnProfile(patch: Record<string, unknown>) {
+  const email = String(patch.clientEmail || getStoredApiAuth()?.user?.email || '')
+  if (shouldRestoreMasterSession(email)) {
+    await restoreMasterApiSession(email)
+  }
   let { response, payload } = await putOwnProfile(patch)
   if (response.status === 401 || isSessionLostError(String(payload.error ?? ''))) {
-    const restored = await restoreMasterApiSession()
-    if (restored) {
-      ;({ response, payload } = await putOwnProfile(patch))
-    }
+    await restoreMasterApiSession(email)
+    ;({ response, payload } = await putOwnProfile(patch))
+  }
+  if (response.status === 401 || isSessionLostError(String(payload.error ?? ''))) {
+    return { ok: false as const, error: 'SESSION_UNAVAILABLE' }
   }
   if (!response.ok) {
     return { ok: false as const, error: String(payload.error || 'No se pudo guardar el perfil.') }

@@ -751,13 +751,11 @@ export async function resolveSubscriptionSession(token, hint = {}) {
     let user = hint.userId
       ? store.users.find((item) => item.id === hint.userId)
       : null
-    if (!user && isPlaceholderUserId(hint.userId)) {
-      user = findSuperAdminUser(store)
-    }
-    if (!user && normalizeEmail(hint.email) === MASTER_EMAIL) {
-      user = findSuperAdminUser(store)
-    }
-    if (!user && isRestorableMasterToken(token)) {
+    if (!user && (isPlaceholderUserId(hint.userId) || normalizeEmail(hint.email) === MASTER_EMAIL || isRestorableMasterToken(token))) {
+      await ensureSuperAdmin()
+      const refreshed = await loadStore()
+      store.users = refreshed.users
+      store.sessions = refreshed.sessions
       user = findSuperAdminUser(store)
     }
     if (user) {
@@ -1134,6 +1132,7 @@ function normalizeDocumentNumber(value) {
 }
 
 export async function updateSubscriptionProfile({ token, userId, patch, hint }) {
+  await ensureSuperAdmin()
   const incoming = patch && typeof patch === 'object' ? { ...patch } : {}
   const sessionHint = {
     userId: hint?.userId || incoming.clientUserId,

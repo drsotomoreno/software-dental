@@ -155,28 +155,36 @@ export function ProfilePage() {
       }))
 
       const apiAuth = getStoredApiAuth()
-      if (apiAuth?.token) {
-        const remote = await updateOwnProfile(patch)
-        if (!remote.ok) {
-          setSaveError(remote.error)
-          const lower = remote.error.toLowerCase()
-          if (lower.includes('cédula') || lower.includes('documento')) {
-            setFieldErrors({ documentNumber: remote.error })
-          } else if (lower.includes('reps') || lower.includes('dane')) {
-            setFieldErrors({ repsCode: remote.error })
-          } else if (lower.includes('nit')) {
-            setFieldErrors({ providerNit: remote.error })
-          } else if (lower.includes('rethus')) {
-            setFieldErrors({ rethusNumber: remote.error })
-          } else if (lower.includes('apellido')) {
-            setFieldErrors({ lastName: remote.error })
-          } else if (lower.includes('nombre') || lower.includes('razón')) {
-            setFieldErrors({ firstName: remote.error })
-          }
-          return
+      const remote = await updateOwnProfile({
+        ...patch,
+        clientEmail: form.email || apiAuth?.user?.email,
+        clientUserId: apiAuth?.user?.id,
+      })
+      const sessionUnavailable =
+        !remote.ok &&
+        (remote.error === 'SESSION_UNAVAILABLE' ||
+          /sesi[oó]n inv[aá]lida|expirada/i.test(remote.error))
+      if (!remote.ok && !sessionUnavailable) {
+        setSaveError(remote.error)
+        const lower = remote.error.toLowerCase()
+        if (lower.includes('cédula') || lower.includes('documento')) {
+          setFieldErrors({ documentNumber: remote.error })
+        } else if (lower.includes('reps') || lower.includes('dane')) {
+          setFieldErrors({ repsCode: remote.error })
+        } else if (lower.includes('nit')) {
+          setFieldErrors({ providerNit: remote.error })
+        } else if (lower.includes('rethus')) {
+          setFieldErrors({ rethusNumber: remote.error })
+        } else if (lower.includes('apellido')) {
+          setFieldErrors({ lastName: remote.error })
+        } else if (lower.includes('nombre') || lower.includes('razón')) {
+          setFieldErrors({ firstName: remote.error })
         }
+        return
+      }
+      if (remote.ok) {
         const latestAuth = getStoredApiAuth()
-        setStoredApiAuth(latestAuth?.token ?? apiAuth.token, remote.user)
+        setStoredApiAuth(latestAuth?.token ?? apiAuth?.token ?? `session-${remote.user.id}`, remote.user)
         applySessionUser(remote.user)
         const remoteType = normalizeProviderType(remote.user.providerType)
         setForm((current) => ({

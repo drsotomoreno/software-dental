@@ -88,9 +88,18 @@ export function grantMasterLocalSession(token?: string): { token: string; user: 
   return { token: sessionToken, user }
 }
 
-export async function restoreMasterApiSession(): Promise<{ token: string; user: ApiSubscriptionUser } | null> {
+export async function restoreMasterApiSession(
+  emailHint?: string,
+): Promise<{ token: string; user: ApiSubscriptionUser } | null> {
   const stored = getStoredApiAuth()
-  if (!stored || !isApiSuperAdmin(stored.user)) return null
+  const email = String(emailHint || stored?.user?.email || '')
+    .trim()
+    .toLowerCase()
+  const master =
+    email === SUPERADMIN_EMAIL ||
+    (stored ? isApiSuperAdmin(stored.user) : false) ||
+    (typeof localStorage !== 'undefined' && localStorage.getItem(API_ROLE_KEY) === 'superadmin')
+  if (!master) return null
 
   try {
     const response = await fetch('/api/login', {
@@ -101,7 +110,7 @@ export async function restoreMasterApiSession(): Promise<{ token: string; user: 
     const payload = await response.json().catch(() => ({}))
     if (response.ok && payload.token && payload.user) {
       const user: ApiSubscriptionUser = {
-        ...stored.user,
+        ...(stored?.user ?? {}),
         ...payload.user,
         rol: 'superadmin',
         estado_pago: 'exento',
@@ -114,9 +123,9 @@ export async function restoreMasterApiSession(): Promise<{ token: string; user: 
     // El servidor puede estar reiniciando; se intenta reatar el token local.
   }
 
-  const granted = grantMasterLocalSession(stored.token?.startsWith('superadmin-local-')
-    ? stored.token
-    : undefined)
+  const granted = grantMasterLocalSession(
+    stored?.token?.startsWith('superadmin-local-') ? stored.token : undefined,
+  )
   try {
     const response = await fetch('/api/sesion', {
       headers: {
