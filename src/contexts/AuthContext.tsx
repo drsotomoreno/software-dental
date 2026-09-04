@@ -18,18 +18,26 @@ import {
   setStoredApiAuth,
   SUPERADMIN_EMAIL,
   validateApiSession,
+  type ApiSubscriptionUser,
 } from '@/services/apiAuthService'
 import { logAuditEvent } from '@/services/auditService'
 import type { AuthUser } from '@/types/auth'
 import type { Permission } from '@/utils/permissions'
 import { normalizeRole } from '@/utils/permissions'
 import type { UserRole } from '@/types/user'
+import { userHasTrialLimits, userNeedsWelcome } from '@/utils/subscriptionAccess'
 
 interface AuthContextValue {
   user: AuthUser | null
   isLoading: boolean
-  login: (email: string, password: string) => Promise<{ ok: true } | { ok: false; error: string }>
+  needsWelcome: boolean
+  isTrialLimited: boolean
+  login: (
+    email: string,
+    password: string,
+  ) => Promise<{ ok: true; requiresSubscription?: boolean } | { ok: false; error: string }>
   logout: () => Promise<void>
+  refreshSessionUser: () => Promise<void>
   can: (permission: Permission) => boolean
   hasRole: (role: UserRole) => boolean
 }
@@ -76,9 +84,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       if (validation.requiresPayment && validation.user) {
         setStoredApiAuth(apiAuth.token, validation.user)
-      } else {
-        clearStoredApiAuth()
+        setUser(mapApiUserToAuthUser(validation.user, apiAuth.token))
+        setIsLoading(false)
+        return
       }
+      clearStoredApiAuth()
     }
 
     const token = await getStoredSessionToken()
@@ -103,7 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const passwordValue = password.trim()
     const masterLogin = isMasterCredentials(normalizedEmail, passwordValue)
 
-    const completeApiLogin = async (token: string, sessionUser: import('@/services/apiAuthService').ApiSubscriptionUser) => {
+    const completeApiLogin = async (token: string, sessionUser: ApiSubscriptionUser) => {
       setStoredApiAuth(token, sessionUser)
       const authUser = mapApiUserToAuthUser(sessionUser, token)
       setUser(authUser)
@@ -114,7 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         resourceId: token,
         user: authUser,
       })
-      return { ok: true as const }
+      return { ok: true as const, requiresSubscription: userNeedsWelcome(sessionUser) }
     }
 
     if (masterLogin) {
@@ -147,26 +157,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return completeApiLogin(payload.token, payload.user)
       }
 
-      // Password was correct; the API still blocks unpaid accounts with 402.
-      if (response.status === 402 && payload.user) {
-        const payResponse = await fetch('/api/confirmar-pago', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ email: normalizedEmail }),
-        })
-        const payPayload = await payResponse.json().catch(() => ({}))
-        if (payResponse.ok && payPayload.token && payPayload.user) {
-          return completeApiLogin(payPayload.token, payPayload.user)
-        }
+      if (response.status === 402 && payload.user && payload.token) {
+        return completeApiLogin(payload.token, payload.user)
+      }
 
-        const retry = await fetch('/api/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ email: normalizedEmail, password: passwordValue }),
-        })
-        const retryPayload = await retry.json().catch(() => ({}))
-        if (retry.ok && retryPayload.token && retryPayload.user) {
-          return completeApiLogin(retryPayload.token, retryPayload.user)
+      if (response.status === 402 && payload.user) {
+        return {
+          ok: false as const,
+          error: 'Su cuenta no tiene un plan activo. Inicie sesión de nuevo para elegir un plan o la prueba de 7 días.',
         }
       }
 
@@ -227,6 +225,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { ok: true as const }
   }, [])
 
+  const refreshSessionUser = useCallback(async () => {
+    await loadSession()
+  }, [loadSession])
+
   const logout = useCallback(async () => {
     if (user) {
       await logAuditEvent({
@@ -255,8 +257,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       user,
       isLoading,
+      needsWelcome: userNeedsWelcome(getStoredApiAuth()?.user),
+      isTrialLimited: userHasTrialLimits(getStoredApiAuth()?.user),
       login,
       logout,
+      refreshSessionUser,
       can: (permission) => {
         if (typeof localStorage !== 'undefined' && localStorage.getItem('doctorSEO_rol') === 'superadmin') {
           return true
@@ -268,7 +273,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return effective ? normalizeRole(effective) === normalizeRole(role) : false
       },
     }),
-    [user, isLoading, login, logout],
+    [user, isLoading, login, logout, refreshSessionUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

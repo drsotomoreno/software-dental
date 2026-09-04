@@ -6,7 +6,7 @@ import type { Patient } from '@/types/patient'
 import type { UserProfile } from '@/types/user'
 import { buildHealthElectronicInvoiceDocument } from '@/utils/buildHealthElectronicInvoiceDocument'
 import { formatCurrency, formatDate } from '@/utils/crypto'
-import { getDesktopBridge } from '@/types/desktopBridge'
+import { formatRepsCodeDisplay } from '@/utils/repsCode'
 import thermalCss from '@/styles/thermal-80mm.css?inline'
 
 /** Datos normalizados para ticket térmico 80 mm */
@@ -280,7 +280,7 @@ function renderThermalLineRows(lines: ThermalInvoiceLine[]): string {
 
 export function buildThermalInvoiceHtml(data: ThermalInvoiceReceiptData, qrDataUrl?: string | null): string {
   const providerLines = [
-    `NIT ${escapeHtml(data.provider.nitWithDv)} · REPS ${escapeHtml(data.provider.repsCode)}`,
+    `NIT ${escapeHtml(data.provider.nitWithDv)} · REPS ${escapeHtml(formatRepsCodeDisplay(data.provider.repsCode))}`,
     [data.provider.address, data.provider.phone, data.provider.city].filter(Boolean).join(' · '),
   ]
     .filter(Boolean)

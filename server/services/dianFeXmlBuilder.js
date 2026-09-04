@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { parseRepsCode } from '../../shared/repsCode.js'
 import { config } from '../config.js'
 import {
   DIAN_IVA_TRIBUTO_CODIGO,
@@ -57,7 +57,7 @@ ${indent}</cac:TaxTotal>`
  * @param {string} params.razonSocialAdquiriente
  * @param {string} params.issueDate
  * @param {number} params.payableAmount
- * @param {Array<{description:string,quantity:number,unitPrice:number,cupsCode?:string}>} params.lines
+ * @param {string} [params.codPrestadorReps]
  */
 export function buildDianHealthInvoiceXml({
   cuv,
@@ -69,6 +69,7 @@ export function buildDianHealthInvoiceXml({
   issueDate,
   payableAmount,
   lines = [],
+  codPrestadorReps,
 }) {
   if (!cuv?.trim()) {
     throw new Error('El CUV es obligatorio para generar la FEV-Salud ante la DIAN.')
@@ -76,6 +77,11 @@ export function buildDianHealthInvoiceXml({
 
   const uuid = randomUUID()
   const iva = buildExcludedIvaBreakdown(payableAmount)
+  const reps = parseRepsCode(codPrestadorReps)
+  const repsXml = reps.valid
+    ? `
+          <salud:CodigoPrestadorREPS>${escapeXml(reps.digits)}</salud:CodigoPrestadorREPS>`
+    : ''
 
   const lineXml = lines
     .map((line, index) => {
@@ -115,7 +121,7 @@ ${excludedIvaTaxTotalXml(lineExtension, '      ')}
           </sts:SoftwareProvider>
         </sts:DianExtensions>
         <salud:SectorSalud>
-          <salud:CodigoUnicoValidacion>${escapeXml(cuv)}</salud:CodigoUnicoValidacion>
+          <salud:CodigoUnicoValidacion>${escapeXml(cuv)}</salud:CodigoUnicoValidacion>${repsXml}
           <salud:NumeroFacturaVinculada>${escapeXml(numFactura)}</salud:NumeroFacturaVinculada>
           <salud:ResolucionAplicable>Resolución 2275 de 2023</salud:ResolucionAplicable>
         </salud:SectorSalud>

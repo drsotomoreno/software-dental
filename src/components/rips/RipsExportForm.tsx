@@ -372,11 +372,11 @@ export function RipsExportForm({
           <input
             value={metadata.codPrestador}
             onChange={(e) => update({ codPrestador: e.target.value })}
-            placeholder="500000000001"
+            placeholder="6800103898-01"
             className="input-field font-mono"
           />
           <p className="mt-1 text-[10px] text-slate-500">
-            Exactamente 12 dígitos — código REPS de la sede.
+            12 dígitos REPS de la sede (ej. 6800103898-01 → 680010389801 en el JSON).
           </p>
         </div>
         <div>

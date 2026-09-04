@@ -132,7 +132,8 @@ export function validateRipsCodPrestador(codPrestador) {
   if (/\D/.test(value)) {
     return {
       valid: false,
-      message: 'codPrestador debe ser una cadena de exactamente 12 dígitos (código REPS de la sede).',
+      message:
+        'codPrestador debe ser una cadena de exactamente 12 dígitos (código REPS de la sede, ej. 6800103898-01 → 680010389801).',
     }
   }
 

@@ -4,6 +4,7 @@ import {
   type VoiceDictationController,
   type VoiceDictationState,
 } from '@/utils/voiceDictation'
+import { assertTrialVoiceAllowed, recordTrialVoiceIfNeeded } from '@/utils/trialLimits'
 
 export interface VoiceTargetHandlers {
   getValue?: () => string
@@ -62,7 +63,10 @@ function getOrCreateController(
 
   const controller = activarDictadoVoz(targetId, onState, {
     getValue: () => handlers?.getValue?.() ?? '',
-    onValueChange: (value) => handlers?.onValueChange?.(value),
+    onValueChange: (value) => {
+      handlers?.onValueChange?.(value)
+      recordTrialVoiceIfNeeded(targetId)
+    },
   })
 
   if (!controller) return null
@@ -81,6 +85,13 @@ export function initVoiceDictationBridge(): void {
     const targetId =
       button.getAttribute('data-target') ?? button.getAttribute('data-voice-target')
     if (!targetId) return
+
+    const allowed = assertTrialVoiceAllowed(targetId)
+    if (!allowed.ok) {
+      const status = button.parentElement?.querySelector('[data-voice-status]')
+      if (status) status.textContent = allowed.error
+      return
+    }
 
     const controller = getOrCreateController(targetId, button)
     controller?.toggle()

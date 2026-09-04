@@ -25,6 +25,7 @@ interface EmitPayload {
   amount: number
   buyerName?: string
   buyerDocument?: string
+  cuv?: string
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
@@ -118,7 +119,9 @@ async function buildLocalSignedEmission(
   const cufe = await computeContentHash(
     `${settings.tenantApiKey}|${payload.invoiceNumber}|${payload.issueDate}|${payload.amount}`,
   )
-  const cuv = await computeContentHash(`cuv|${payload.invoiceNumber}|${payload.issueDate}`)
+  const cuv =
+    payload.cuv?.trim() ||
+    (await computeContentHash(`cuv|${payload.invoiceNumber}|${payload.issueDate}`)).toUpperCase().slice(0, 32)
   const cufeToken = cufe.toUpperCase().slice(0, 96)
   return {
     ok: true,

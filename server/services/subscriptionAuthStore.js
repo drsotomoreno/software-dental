@@ -5,6 +5,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { config } from '../config.js'
+import { claimRethusForUser } from './rethusRegistry.js'
+import { PAID_PLAN_IDS, PAID_PLAN_DAYS, TRIAL_DAYS } from '../../shared/subscriptionPlans.js'
 
 
 
@@ -220,7 +222,7 @@ function isSubscriptionActive(user) {
 
   if (isPaymentExempt(user)) return true
 
-  if (user.estado_pago !== 'activo') return false
+  if (user.estado_pago !== 'activo' && user.estado_pago !== 'prueba') return false
 
   if (!user.fecha_vencimiento) return false
 
@@ -234,7 +236,7 @@ function refreshPaymentStatus(user) {
 
   if (isPaymentExempt(user)) return user
 
-  if (user.estado_pago === 'activo' && user.fecha_vencimiento) {
+  if ((user.estado_pago === 'activo' || user.estado_pago === 'prueba') && user.fecha_vencimiento) {
 
     if (new Date(user.fecha_vencimiento).getTime() <= Date.now()) {
 
@@ -494,16 +496,6 @@ export async function loginSubscriptionUser({ email, password }) {
     store.users[userIndex] = currentUser
   }
 
-  if (!masterLogin && !isPaymentExempt(currentUser) && currentUser.estado_pago === 'pendiente') {
-    currentUser = {
-      ...currentUser,
-      estado_pago: 'activo',
-      fecha_vencimiento: addDays(new Date(), 30),
-      updatedAt: new Date().toISOString(),
-    }
-    store.users[userIndex] = currentUser
-  }
-
   if (masterLogin) {
     const masterUser = {
       ...currentUser,
@@ -528,33 +520,7 @@ export async function loginSubscriptionUser({ email, password }) {
   const superAdminAccess =
     normalizedEmail === SUPERADMIN_EMAIL || isPaymentExempt(currentUser)
 
-  if (!superAdminAccess && !isSubscriptionActive(currentUser)) {
-
-    await saveStore(store)
-
-    return {
-
-      ok: false,
-
-      status: 402,
-
-      error: 'Debe realizar el pago de la suscripción para acceder al sistema.',
-
-      estado_pago: currentUser.estado_pago,
-
-      requiresPayment: true,
-
-      user: sanitizeUser(currentUser),
-
-    }
-
-  }
-
-
-
   const { token, session } = createSessionForUser(currentUser)
-
-
 
   store.sessions = store.sessions.filter((item) => item.userId !== currentUser.id)
 
@@ -562,7 +528,7 @@ export async function loginSubscriptionUser({ email, password }) {
 
   await saveStore(store)
 
-
+  const active = superAdminAccess || isSubscriptionActive(currentUser)
 
   return {
 
@@ -575,6 +541,8 @@ export async function loginSubscriptionUser({ email, password }) {
     expiresAt: session.expiresAt,
 
     unlimitedAccess: isPaymentExempt(currentUser),
+
+    requiresSubscription: !active,
 
   }
 
@@ -728,7 +696,17 @@ export async function resolveSubscriptionSession(token) {
 
       active: false,
 
+      requiresSubscription: true,
+
       estado_pago: user.estado_pago,
+
+      token,
+
+      rol: user.rol ?? session.rol ?? 'odontologo',
+
+      expiresAt: exempt ? null : session.expiresAt,
+
+      unlimitedAccess: false,
 
     }
 
@@ -946,9 +924,10 @@ export async function verifyEmailAndRegister({ email, code, password }) {
   }
 
   const createdAt = new Date().toISOString()
-  const trial = {
-    estado_pago: 'activo',
-    fecha_vencimiento: addDays(new Date(), 30),
+  const pendingAccount = {
+    estado_pago: 'pendiente',
+    fecha_vencimiento: null,
+    plan: null,
   }
 
   if (existing) {
@@ -956,7 +935,7 @@ export async function verifyEmailAndRegister({ email, code, password }) {
       ...existing,
       nombre: pending.nombre || existing.nombre,
       passwordHash,
-      ...trial,
+      ...pendingAccount,
       emailVerifiedAt: existing.emailVerifiedAt ?? createdAt,
       updatedAt: createdAt,
     }
@@ -972,7 +951,7 @@ export async function verifyEmailAndRegister({ email, code, password }) {
     email: normalizedEmail,
     passwordHash,
     rol: 'odontologo',
-    ...trial,
+    ...pendingAccount,
     emailVerifiedAt: createdAt,
     createdAt,
     updatedAt: createdAt,
@@ -985,27 +964,119 @@ export async function verifyEmailAndRegister({ email, code, password }) {
 }
 
 function sanitizeUser(user) {
-
+  const trialLimited = user.estado_pago === 'prueba' && isSubscriptionActive(user)
   return {
-
     id: user.id,
-
     nombre: user.nombre,
-
     email: user.email,
-
     rol: isSuperAdminUser(user) ? 'superadmin' : normalizeRole(user.rol),
-
     estado_pago: isSuperAdminUser(user) ? 'exento' : user.estado_pago,
-
     fecha_vencimiento: user.fecha_vencimiento,
-
+    plan: isSuperAdminUser(user) ? 'exento' : user.plan ?? null,
+    documentNumber: user.documentNumber ?? '',
+    rethusNumber: user.rethusNumber ?? '',
+    trialLimited,
+    trialLimits: trialLimited ? { maxPatients: 1, maxVoiceNotesPerField: 1 } : null,
     createdAt: user.createdAt,
-
     updatedAt: user.updatedAt,
+  }
+}
 
+export async function startRethusTrial({ token, documentNumber, rethusNumber }) {
+  const session = await resolveSubscriptionSession(token)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+  if (isPaymentExempt(session.user)) {
+    return { ok: false, status: 400, error: 'Esta cuenta no requiere prueba gratuita.' }
   }
 
+  const store = await loadStore()
+  const index = store.users.findIndex((item) => item.id === session.user.id)
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+
+  const current = refreshPaymentStatus(store.users[index])
+  if (current.estado_pago === 'activo' && isSubscriptionActive(current)) {
+    return { ok: false, status: 400, error: 'Ya tiene una suscripción de pago activa.' }
+  }
+  if (current.estado_pago === 'prueba' && isSubscriptionActive(current)) {
+    return { ok: false, status: 400, error: 'Ya tiene una prueba gratuita activa.' }
+  }
+  if (current.trialUsedAt) {
+    return { ok: false, status: 400, error: 'La prueba gratuita ya fue utilizada. Elija un plan de pago.' }
+  }
+
+  const claimed = await claimRethusForUser({
+    documentNumber,
+    rethusNumber,
+    userId: current.id,
+  })
+  if (!claimed.ok) return claimed
+
+  const now = new Date().toISOString()
+  const updated = {
+    ...current,
+    documentNumber: claimed.document,
+    rethusNumber: claimed.rethus,
+    plan: 'prueba',
+    estado_pago: 'prueba',
+    fecha_vencimiento: addDays(new Date(), TRIAL_DAYS),
+    trialUsedAt: now,
+    trialStartedAt: now,
+    updatedAt: now,
+  }
+  store.users[index] = updated
+  await saveStore(store)
+  return { ok: true, user: sanitizeUser(updated) }
+}
+
+export async function listAllSubscriptionUsers() {
+  const store = await loadStore()
+  return store.users.map((user) => {
+    const refreshed = refreshPaymentStatus(user)
+    return {
+      ...sanitizeUser(refreshed),
+      trialStartedAt: refreshed.trialStartedAt ?? null,
+      trialUsedAt: refreshed.trialUsedAt ?? null,
+      emailVerifiedAt: refreshed.emailVerifiedAt ?? null,
+    }
+  })
+}
+
+export async function selectPaidPlan({ token, planId }) {
+  const session = await resolveSubscriptionSession(token)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+  const plan = String(planId ?? '').trim().toLowerCase()
+  if (!PAID_PLAN_IDS.includes(plan)) {
+    return { ok: false, status: 400, error: 'Seleccione un plan de suscripción válido.' }
+  }
+
+  const store = await loadStore()
+  const index = store.users.findIndex((item) => item.id === session.user.id)
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+
+  const current = store.users[index]
+  if (isPaymentExempt(current)) {
+    return { ok: false, status: 400, error: 'Esta cuenta no requiere un plan de pago.' }
+  }
+
+  const now = new Date().toISOString()
+  const updated = {
+    ...current,
+    plan,
+    estado_pago: 'activo',
+    fecha_vencimiento: addDays(new Date(), PAID_PLAN_DAYS),
+    updatedAt: now,
+  }
+  store.users[index] = updated
+  await saveStore(store)
+  return { ok: true, user: sanitizeUser(updated) }
 }
 
 

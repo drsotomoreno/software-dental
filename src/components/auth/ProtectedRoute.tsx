@@ -6,6 +6,7 @@ import { LandingPage } from '@/pages/LandingPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 import { clearStoredApiAuth, getStoredApiAuth, isApiSuperAdmin } from '@/services/apiAuthService'
+import { userNeedsWelcome } from '@/utils/subscriptionAccess'
 
 function normalizePath(pathname: string) {
   return pathname.replace(/\/+$/, '') || '/'
@@ -53,6 +54,11 @@ export function ProtectedRoute() {
 
   if (!hasAccess) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  }
+
+  const welcomePath = path === '/welcome-trial' || path === '/subscription-plans'
+  if (userNeedsWelcome(apiAuth?.user) && !welcomePath && !isApiSuperAdmin(apiAuth?.user) && !hasSuperAdminRole) {
+    return <Navigate to="/welcome-trial" replace />
   }
 
   return <Outlet />

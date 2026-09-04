@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
+import { parseRepsCode } from '../../shared/repsCode.js'
 
 const router = Router()
 
@@ -38,6 +39,11 @@ router.post('/validate-document', (req, res) => {
   }
   if (!document.salud?.codPrestadorReps?.trim()) {
     issues.push({ field: 'salud.codPrestadorReps', message: 'Código REPS obligatorio.' })
+  } else {
+    const reps = parseRepsCode(document.salud.codPrestadorReps)
+    if (!reps.valid) {
+      issues.push({ field: 'salud.codPrestadorReps', message: reps.message })
+    }
   }
   if (!document.salud?.procedures?.length) {
     issues.push({ field: 'salud.procedures', message: 'Debe incluir al menos un procedimiento CUPS.' })
