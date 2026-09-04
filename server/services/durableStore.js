@@ -1,20 +1,38 @@
-import pg from 'pg'
+import { createRequire } from 'node:module'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 const STORE_KEY = 'subscription-users'
+const require = createRequire(import.meta.url)
 
 let pool = undefined
+let PoolCtor
+
+function loadPgPool() {
+  if (PoolCtor !== undefined) return PoolCtor
+  try {
+    const pg = require('pg')
+    PoolCtor = pg.Pool
+  } catch (error) {
+    console.error(
+      '[store] No se encontró el paquete pg. Instálelo con npm install pg. Se usará archivo local.',
+      error instanceof Error ? error.message : error,
+    )
+    PoolCtor = null
+  }
+  return PoolCtor
+}
 
 function getPool() {
   if (pool !== undefined) return pool
+  const Pool = loadPgPool()
   const url = process.env.DATABASE_URL
-  if (!url) {
+  if (!Pool || !url) {
     pool = null
     return null
   }
   const local = /localhost|127\.0\.0\.1/.test(url)
-  pool = new pg.Pool({
+  pool = new Pool({
     connectionString: url,
     max: 2,
     ssl: local ? false : { rejectUnauthorized: false },
