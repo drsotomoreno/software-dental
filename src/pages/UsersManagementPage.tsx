@@ -12,6 +12,7 @@ import {
   updateAppUser,
 } from '@/services/authService'
 import { fetchClinicUsers, type ClinicSeatSnapshot } from '@/services/subscriptionService'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { UserProfile, UserRole } from '@/types/user'
 import {
   ASSIGNABLE_ROLES,
@@ -57,6 +58,7 @@ function emptyUserForm(defaults?: {
     rethusStatus: 'activo',
     thsSpecialty: 'odontologia_general',
     repsEnabledSpecialties: ['odontologia_general'],
+    phone: '',
     password: '',
   }
 }
@@ -140,7 +142,9 @@ export function UsersManagementPage() {
       showErr(result.error)
       return
     }
-    await upsertProfessionalFromUser(result.user)
+    if (result.user.role !== 'recepcion') {
+      await upsertProfessionalFromUser(result.user)
+    }
     await audit({
       action: 'CREATE_USER',
       resourceType: 'user',
@@ -171,6 +175,7 @@ export function UsersManagementPage() {
       rethusNumber: u.rethusNumber?.trim() || '',
       rethusStatus: u.rethusStatus ?? 'activo',
       thsSpecialty: u.thsSpecialty ?? 'odontologia_general',
+      phone: u.phone ?? '',
       repsEnabledSpecialties:
         u.repsEnabledSpecialties?.length
           ? u.repsEnabledSpecialties
@@ -195,7 +200,7 @@ export function UsersManagementPage() {
       return
     }
     const updated = await db.users.get(editingUser.id)
-    if (updated) await upsertProfessionalFromUser(updated)
+    if (updated && updated.role !== 'recepcion') await upsertProfessionalFromUser(updated)
     await audit({
       action: 'UPDATE_USER',
       resourceType: 'user',
@@ -233,7 +238,9 @@ export function UsersManagementPage() {
 
   const handleDelete = async (u: UserProfile) => {
     if (!currentUser || !canManage) return
-    if (!window.confirm(`¿Eliminar el usuario ${userLabel(u)}? Esta acción no se puede deshacer.`)) {
+    if (!window.confirm(
+      `¿Eliminar el acceso de ${userLabel(u)}? Se cancelará su contraseña y no podrá ingresar hasta que se le asigne una nueva.`,
+    )) {
       return
     }
     const result = await deleteAppUser(u.id, currentUser.id)
@@ -245,14 +252,15 @@ export function UsersManagementPage() {
       action: 'DELETE_USER',
       resourceType: 'user',
       resourceId: u.id,
-      details: `Usuario eliminado: ${userLabel(u)}`,
+      details: `Acceso cancelado: ${userLabel(u)}`,
     })
     await reloadUsers()
-    showMsg('Usuario eliminado.')
+    showMsg('Acceso eliminado. El usuario no podrá ingresar hasta que se le asigne una nueva contraseña.')
   }
 
   const handleRoleChange = async (u: UserProfile, role: UserRole) => {
     if (!canManage) return
+    if (u.isClinicOwner) return
     if (assignableRoleValue(u.role) === role) return
     const result = await updateAppUser(u.id, { role })
     if (!result.ok) {
@@ -283,8 +291,9 @@ export function UsersManagementPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Gestión de Usuarios</h1>
             <p className="mt-1 text-sm text-slate-600">
-              El administrador de esta clínica crea colaboradores con cédula y una contraseña
-              temporal. El correo no es obligatorio.
+              El titular de la cuenta es administrador. Los colaboradores pueden tener otro rol.
+              Para un auxiliar (personal administrativo) solo se piden cédula, correo y teléfono:
+              no tienen ReTHUS ni código REPS. El acceso es por cédula y contraseña.
             </p>
           </div>
           {canManage && (
@@ -347,14 +356,15 @@ export function UsersManagementPage() {
                   <tr>
                     <th className="px-3 py-2 font-medium text-slate-600">Nombre</th>
                     <th className="px-3 py-2 font-medium text-slate-600">Documento</th>
-                    <th className="px-3 py-2 font-medium text-slate-600">Correo (opcional)</th>
+                    <th className="px-3 py-2 font-medium text-slate-600">Correo</th>
+                    <th className="px-3 py-2 font-medium text-slate-600">Teléfono</th>
                     <th className="px-3 py-2 font-medium text-slate-600">Rol</th>
                     <th className="px-3 py-2 font-medium text-slate-600">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {users.map((u) => (
-                    <tr key={u.id}>
+                    <tr key={u.id} className={u.accessEnabled === false ? 'bg-slate-50 opacity-80' : undefined}>
                       <td className="px-3 py-2 font-medium text-slate-800">
                         {u.firstName} {u.lastName}
                       </td>
@@ -365,12 +375,18 @@ export function UsersManagementPage() {
                             Titular
                           </span>
                         ) : null}
+                        {u.accessEnabled === false ? (
+                          <span className="ml-2 rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-red-700">
+                            Sin acceso
+                          </span>
+                        ) : null}
                       </td>
                       <td className="px-3 py-2 text-slate-600">{u.email || '—'}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-slate-600">{u.phone || '—'}</td>
                       <td className="px-3 py-2">
                         <select
-                          value={assignableRoleValue(u.role)}
-                          disabled={!canManage}
+                          value={u.isClinicOwner ? 'admin' : assignableRoleValue(u.role)}
+                          disabled={!canManage || u.isClinicOwner}
                           onChange={(event) =>
                             handleRoleChange(u, event.target.value as UserRole)
                           }
@@ -404,13 +420,16 @@ export function UsersManagementPage() {
                           >
                             Restablecer clave
                           </button>
-                          {u.id !== currentUser?.id && !u.isClinicOwner && (
+                          {u.id !== currentUser?.id && !u.isClinicOwner && u.accessEnabled === false && (
+                            <span className="text-xs text-slate-400">Acceso cancelado</span>
+                          )}
+                          {u.id !== currentUser?.id && !u.isClinicOwner && u.accessEnabled !== false && (
                             <button
                               type="button"
                               onClick={() => handleDelete(u)}
                               className="text-xs font-medium text-red-600 hover:underline"
                             >
-                              Eliminar
+                              Eliminar usuario
                             </button>
                           )}
                         </div>
@@ -451,7 +470,11 @@ export function UsersManagementPage() {
         {editingUser && (
           <Modal title={`Editar: ${userLabel(editingUser)}`} onClose={() => setEditingUser(null)}>
             <form onSubmit={handleUpdate} className="space-y-4">
-              <UserFields values={editForm} onChange={(patch) => setEditForm({ ...editForm, ...patch })} />
+              <UserFields
+                values={editForm}
+                onChange={(patch) => setEditForm({ ...editForm, ...patch })}
+                lockOwnerRole={Boolean(editingUser.isClinicOwner)}
+              />
               <div className="flex gap-2">
                 <button type="submit" className="btn-primary">
                   Guardar cambios
@@ -474,17 +497,16 @@ export function UsersManagementPage() {
           >
             <form onSubmit={handleResetPassword} className="space-y-4">
               <p className="text-sm text-slate-600">
-                Ingrese la nueva contraseña para el usuario seleccionado (mínimo 8 caracteres).
+                Ingrese la nueva contraseña para el usuario seleccionado (mínimo 8 caracteres). Si
+                su acceso estaba cancelado, esta clave lo rehabilita.
               </p>
               <div>
                 <label className="label-field">Nueva contraseña</label>
-                <input
-                  type="password"
+                <PasswordInput
                   required
                   minLength={8}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="input-field"
                 />
               </div>
               <div className="flex gap-2">
@@ -516,71 +538,26 @@ function UserFields({
   includePassword,
   password,
   onPasswordChange,
+  lockOwnerRole,
 }: {
   values: Partial<UserProfile>
   onChange: (patch: Partial<UserProfile>) => void
   includePassword?: boolean
   password?: string
   onPasswordChange?: (password: string) => void
+  lockOwnerRole?: boolean
 }) {
+  const isAuxiliar = !lockOwnerRole && assignableRoleValue(values.role) === 'recepcion'
+
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      <div>
-        <label className="label-field">Nombres</label>
-        <input
-          required
-          value={values.firstName ?? ''}
-          onChange={(e) => onChange({ firstName: e.target.value })}
-          className="input-field"
-        />
-      </div>
-      <div>
-        <label className="label-field">Apellidos</label>
-        <input
-          required
-          value={values.lastName ?? ''}
-          onChange={(e) => onChange({ lastName: e.target.value })}
-          className="input-field"
-        />
-      </div>
-      <div className="sm:col-span-2">
-        <label className="label-field">Correo electrónico (opcional)</label>
-        <input
-          type="email"
-          value={values.email ?? ''}
-          onChange={(e) => onChange({ email: e.target.value })}
-          className="input-field"
-          placeholder="No es necesario para ingresar"
-        />
-        <p className="mt-1 text-xs text-slate-500">
-          El colaborador inicia sesión con su cédula y la contraseña que usted asigne. El correo no
-          se verifica ni es obligatorio.
-        </p>
-      </div>
-      <DocumentIdentityField
-        compact
-        documentType={values.documentType ?? 'CC'}
-        documentNumber={values.documentNumber ?? ''}
-        onChange={onChange}
-      />
-      <div>
-        <RethusCodeField
-          compact
-          required={false}
-          value={values.rethusNumber ?? ''}
-          onChange={(rethusNumber) => onChange({ rethusNumber })}
-        />
-        <p className="mt-1 text-xs text-slate-500">
-          Cada odontólogo se identifica con su ReTHUS. El REPS y el NIT de la sede se heredan de la
-          IPS o del consultorio.
-        </p>
-      </div>
-      <div>
+      <div className={isAuxiliar ? 'sm:col-span-2' : undefined}>
         <label className="label-field">Rol</label>
         <select
-          value={assignableRoleValue(values.role)}
+          value={lockOwnerRole ? 'admin' : assignableRoleValue(values.role)}
+          disabled={lockOwnerRole}
           onChange={(e) => onChange({ role: e.target.value as UserRole })}
-          className="input-field"
+          className="input-field disabled:cursor-not-allowed disabled:bg-slate-100"
         >
           {ASSIGNABLE_ROLES.map((role) => (
             <option key={role} value={role}>
@@ -588,83 +565,195 @@ function UserFields({
             </option>
           ))}
         </select>
+        {lockOwnerRole ? (
+          <p className="mt-1 text-xs text-slate-500">
+            El titular de la membresía es administrador por defecto.
+          </p>
+        ) : isAuxiliar ? (
+          <p className="mt-1 text-xs text-slate-500">
+            Personal administrativo: no se solicita ReTHUS ni código REPS.
+          </p>
+        ) : null}
       </div>
-      <div>
-        <label className="label-field">Razón social / nombre legal</label>
-        <input
-          value={values.legalName ?? values.clinicName ?? ''}
-          onChange={(e) => onChange({ legalName: e.target.value })}
-          className="input-field"
-        />
-      </div>
-      <div>
-        <label className="label-field">Nombre de la clínica / consultorio</label>
-        <input
-          required={false}
-          value={values.clinicName ?? ''}
-          onChange={(e) => onChange({ clinicName: e.target.value })}
-          className="input-field"
-        />
-      </div>
-      <div>
-        <label className="label-field">NIT fiscal (DIAN)</label>
-        <input
-          value={values.providerNit ?? ''}
-          onChange={(e) => onChange({ providerNit: e.target.value })}
-          className="input-field font-mono"
-          placeholder="NIT con dígito de verificación"
-        />
-      </div>
-      <div className="sm:col-span-2">
-        <RepsHabilitationField
-          value={values.repsCode ?? ''}
-          onChange={(repsCode) => onChange({ repsCode })}
-        />
-      </div>
-      <div className="sm:col-span-2">
-        <RethusSpecialtyField
-          value={(values.thsSpecialty ?? 'odontologia_general') as OdontologyThsSpecialtyId}
-          onChange={(thsSpecialty) =>
-            onChange({
-              thsSpecialty,
-              rehusSpecialty: thsSpecialty,
-              repsEnabledSpecialties: ensureSpecialtyInRepsPortfolio(
-                thsSpecialty,
-                values.repsEnabledSpecialties ?? [],
-              ),
-            })
-          }
-        />
-      </div>
-      <RegulatoryIdentityAdminExtras
-        values={{
-          repsCode: values.repsCode ?? '',
-          repsStatus: values.repsStatus ?? 'activo',
-          rethusNumber: values.rethusNumber ?? '',
-          rethusStatus: values.rethusStatus ?? 'activo',
-          thsSpecialty: (values.thsSpecialty ?? 'odontologia_general') as OdontologyThsSpecialtyId,
-          repsEnabledSpecialties:
-            values.repsEnabledSpecialties?.length
-              ? values.repsEnabledSpecialties
-              : [values.thsSpecialty ?? 'odontologia_general'],
-        }}
-        onChange={(patch) =>
-          onChange({
-            ...patch,
-            rehusSpecialty: patch.thsSpecialty ?? values.thsSpecialty,
-          })
-        }
-      />
+
+      {isAuxiliar ? (
+        <>
+          <div>
+            <label className="label-field">Nombres (opcional)</label>
+            <input
+              value={values.firstName ?? ''}
+              onChange={(e) => onChange({ firstName: e.target.value })}
+              className="input-field"
+              placeholder="Si lo deja vacío se usará Auxiliar Administrativo"
+            />
+          </div>
+          <div>
+            <label className="label-field">Apellidos (opcional)</label>
+            <input
+              value={values.lastName ?? ''}
+              onChange={(e) => onChange({ lastName: e.target.value })}
+              className="input-field"
+            />
+          </div>
+          <DocumentIdentityField
+            compact
+            documentType={values.documentType ?? 'CC'}
+            documentNumber={values.documentNumber ?? ''}
+            onChange={onChange}
+          />
+          <div className="sm:col-span-2">
+            <label className="label-field">Correo electrónico</label>
+            <input
+              type="email"
+              required
+              value={values.email ?? ''}
+              onChange={(e) => onChange({ email: e.target.value })}
+              className="input-field"
+              placeholder="correo@ejemplo.com"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="label-field">Teléfono</label>
+            <input
+              type="tel"
+              required
+              inputMode="numeric"
+              value={values.phone ?? ''}
+              onChange={(e) => onChange({ phone: e.target.value.replace(/[^\d+\s()-]/g, '') })}
+              className="input-field"
+              placeholder="3001234567"
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <div>
+            <label className="label-field">Nombres</label>
+            <input
+              required
+              value={values.firstName ?? ''}
+              onChange={(e) => onChange({ firstName: e.target.value })}
+              className="input-field"
+            />
+          </div>
+          <div>
+            <label className="label-field">Apellidos</label>
+            <input
+              required
+              value={values.lastName ?? ''}
+              onChange={(e) => onChange({ lastName: e.target.value })}
+              className="input-field"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="label-field">Correo electrónico (opcional)</label>
+            <input
+              type="email"
+              value={values.email ?? ''}
+              onChange={(e) => onChange({ email: e.target.value })}
+              className="input-field"
+              placeholder="No es necesario para ingresar"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              El colaborador inicia sesión con su cédula y la contraseña que usted asigne. El correo
+              no se verifica ni es obligatorio.
+            </p>
+          </div>
+          <DocumentIdentityField
+            compact
+            documentType={values.documentType ?? 'CC'}
+            documentNumber={values.documentNumber ?? ''}
+            onChange={onChange}
+          />
+          <div>
+            <RethusCodeField
+              compact
+              required={false}
+              value={values.rethusNumber ?? ''}
+              onChange={(rethusNumber) => onChange({ rethusNumber })}
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Cada odontólogo se identifica con su ReTHUS. El REPS y el NIT de la sede se heredan de
+              la IPS o del consultorio.
+            </p>
+          </div>
+          <div>
+            <label className="label-field">Razón social / nombre legal</label>
+            <input
+              value={values.legalName ?? values.clinicName ?? ''}
+              onChange={(e) => onChange({ legalName: e.target.value })}
+              className="input-field"
+            />
+          </div>
+          <div>
+            <label className="label-field">Nombre de la clínica / consultorio</label>
+            <input
+              required={false}
+              value={values.clinicName ?? ''}
+              onChange={(e) => onChange({ clinicName: e.target.value })}
+              className="input-field"
+            />
+          </div>
+          <div>
+            <label className="label-field">NIT fiscal (DIAN)</label>
+            <input
+              value={values.providerNit ?? ''}
+              onChange={(e) => onChange({ providerNit: e.target.value })}
+              className="input-field font-mono"
+              placeholder="NIT con dígito de verificación"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <RepsHabilitationField
+              value={values.repsCode ?? ''}
+              onChange={(repsCode) => onChange({ repsCode })}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <RethusSpecialtyField
+              value={(values.thsSpecialty ?? 'odontologia_general') as OdontologyThsSpecialtyId}
+              onChange={(thsSpecialty) =>
+                onChange({
+                  thsSpecialty,
+                  rehusSpecialty: thsSpecialty,
+                  repsEnabledSpecialties: ensureSpecialtyInRepsPortfolio(
+                    thsSpecialty,
+                    values.repsEnabledSpecialties ?? [],
+                  ),
+                })
+              }
+            />
+          </div>
+          <RegulatoryIdentityAdminExtras
+            values={{
+              repsCode: values.repsCode ?? '',
+              repsStatus: values.repsStatus ?? 'activo',
+              rethusNumber: values.rethusNumber ?? '',
+              rethusStatus: values.rethusStatus ?? 'activo',
+              thsSpecialty: (values.thsSpecialty ?? 'odontologia_general') as OdontologyThsSpecialtyId,
+              repsEnabledSpecialties:
+                values.repsEnabledSpecialties?.length
+                  ? values.repsEnabledSpecialties
+                  : [values.thsSpecialty ?? 'odontologia_general'],
+            }}
+            onChange={(patch) =>
+              onChange({
+                ...patch,
+                rehusSpecialty: patch.thsSpecialty ?? values.thsSpecialty,
+              })
+            }
+          />
+        </>
+      )}
+
       {includePassword && (
         <div className="sm:col-span-2">
           <label className="label-field">Contraseña temporal</label>
-          <input
-            type="password"
+          <PasswordInput
             required
             minLength={8}
             value={password ?? ''}
             onChange={(e) => onPasswordChange?.(e.target.value)}
-            className="input-field"
           />
           <p className="mt-1 text-xs text-slate-500">
             El administrador de la clínica asigna esta clave. El colaborador la usa junto con su

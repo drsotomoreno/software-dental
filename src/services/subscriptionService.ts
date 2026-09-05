@@ -152,8 +152,10 @@ export function mapClinicMemberToProfile(
   return {
     ...profile,
     email: user.email || '',
+    phone: user.phone || profile.phone || '',
     clinicId: user.clinicId || user.id,
     isClinicOwner: user.isClinicOwner === true || String(user.clinicId || user.id) === String(user.id),
+    accessEnabled: user.accessEnabled !== false,
   }
 }
 

@@ -22,6 +22,8 @@ export interface UserProfile {
   clinicId?: string
   /** Titular de la suscripción / clínica. */
   isClinicOwner?: boolean
+  /** `false` = acceso cancelado (sin contraseña vigente). */
+  accessEnabled?: boolean
   /** Razón social (IPS) o nombre legal del profesional independiente. */
   legalName?: string
   /** Tipo de prestador: IPS / persona jurídica vs consultorio unipersonal. */
@@ -49,6 +51,8 @@ export interface UserProfile {
    */
   rehusSpecialty?: OdontologyThsSpecialtyId
   avatarUrl?: string
+  /** Teléfono de contacto — obligatorio en auxiliares administrativos. */
+  phone?: string
 }
 
 export interface PriceItem {

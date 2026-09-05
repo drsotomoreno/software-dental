@@ -19,6 +19,14 @@ const USERS_FILE = join(config.dataDir, 'subscription-users.json')
 
 const VALID_ROLES = new Set(['superadmin', 'admin', 'odontologo', 'recepcion'])
 
+function normalizeStaffPhone(value) {
+  return String(value ?? '').replace(/\D/g, '').slice(0, 12)
+}
+
+function isLikelyEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value ?? '').trim())
+}
+
 export const SUPERADMIN_EMAIL = config.superAdmin.email
 export const MASTER_EMAIL = 'doctormauriciosoto@gmail.com'
 export const MASTER_PASSWORD = 'Dragon1976%'
@@ -446,7 +454,7 @@ export async function registerSubscriptionUser({ nombre, email, password }) {
 
     passwordHash: hashPasswordSha256(password),
 
-    rol: 'odontologo',
+    rol: 'admin',
 
     estado_pago: 'pendiente',
 
@@ -458,8 +466,7 @@ export async function registerSubscriptionUser({ nombre, email, password }) {
 
   }
   user.clinicId = user.id
-
-
+  user.accessEnabled = true
 
   store.users.push(user)
 
@@ -544,8 +551,16 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
   let currentUser = refreshPaymentStatus(store.users[userIndex])
   store.users[userIndex] = currentUser
 
+  if (!masterLogin && currentUser.accessEnabled === false) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Su acceso fue cancelado. Solicite una nueva contraseña al administrador de la clínica.',
+    }
+  }
+
   const matchedHash = resolvedPasswordHash(currentUser.passwordHash, password)
-  if (!masterLogin && !matchedHash) {
+  if (!masterLogin && (!currentUser.passwordHash || !matchedHash)) {
     await saveStore(store)
     return { ok: false, status: 401, error: 'Documento o contraseña incorrectos.' }
   }
@@ -557,6 +572,11 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
 
   if (!currentUser.clinicId) {
     currentUser = { ...currentUser, clinicId: currentUser.id, updatedAt: new Date().toISOString() }
+    store.users[userIndex] = currentUser
+  }
+
+  if (!masterLogin && String(currentUser.clinicId || currentUser.id) === String(currentUser.id) && !isSuperAdminUser(currentUser)) {
+    currentUser = { ...currentUser, rol: 'admin', accessEnabled: true, updatedAt: new Date().toISOString() }
     store.users[userIndex] = currentUser
   }
 
@@ -1087,6 +1107,9 @@ export async function verifyEmailAndRegister({ email, code, password }) {
       nombre: pending.nombre || existing.nombre,
       passwordHash,
       ...pendingAccount,
+      rol: isSuperAdminUser(existing) ? existing.rol : 'admin',
+      clinicId: existing.clinicId || existing.id,
+      accessEnabled: true,
       emailVerifiedAt: existing.emailVerifiedAt ?? createdAt,
       updatedAt: createdAt,
     }
@@ -1101,12 +1124,15 @@ export async function verifyEmailAndRegister({ email, code, password }) {
     nombre: pending.nombre,
     email: normalizedEmail,
     passwordHash,
-    rol: 'odontologo',
+    rol: 'admin',
+    clinicId: null,
+    accessEnabled: true,
     ...pendingAccount,
     emailVerifiedAt: createdAt,
     createdAt,
     updatedAt: createdAt,
   }
+  user.clinicId = user.id
   store.users.push(user)
   store.emailVerifications.splice(index, 1)
   await saveStore(store)
@@ -1135,7 +1161,7 @@ function sanitizeUser(user) {
     firstName,
     lastName,
     email: user.email,
-    rol: isSuperAdminUser(user) ? 'superadmin' : normalizeRole(user.rol),
+    rol: isSuperAdminUser(user) ? 'superadmin' : isClinicOwner(user) ? 'admin' : normalizeRole(user.rol),
     estado_pago: isSuperAdminUser(user) ? 'exento' : user.estado_pago,
     fecha_vencimiento: user.fecha_vencimiento,
     plan: isSuperAdminUser(user) ? 'exento' : user.plan ?? null,
@@ -1148,6 +1174,8 @@ function sanitizeUser(user) {
     providerType: normalizeProviderType(user.providerType),
     clinicId: user.clinicId || user.id,
     isClinicOwner: String(user.clinicId || user.id) === String(user.id),
+    accessEnabled: user.accessEnabled !== false && Boolean(user.passwordHash),
+    phone: user.phone ?? '',
     providerNit: user.providerNit ?? '',
     repsCode: user.repsCode ?? '',
     repsStatus: user.repsStatus ?? 'activo',
@@ -1502,9 +1530,13 @@ function usersInClinic(store, clinicId) {
   return store.users.filter((item) => clinicIdOf(item) === id)
 }
 
+function hasClinicAccess(user) {
+  return user?.accessEnabled !== false && Boolean(user?.passwordHash)
+}
+
 function clinicSeatSnapshot(store, clinicId) {
   const owner = store.users.find((item) => item.id === clinicId) || null
-  const members = usersInClinic(store, clinicId)
+  const members = usersInClinic(store, clinicId).filter(hasClinicAccess)
   const maxSeats = owner ? seatLimitForAccount(owner) : seatLimitForAccount({})
   return {
     clinicId,
@@ -1540,6 +1572,20 @@ export async function listClinicUsers({ token, hint }) {
   }
   const store = await loadStore()
   const clinicId = clinicIdOf(session.user)
+  const ownerIndex = store.users.findIndex((item) => item.id === clinicId)
+  if (
+    ownerIndex !== -1 &&
+    !isSuperAdminUser(store.users[ownerIndex]) &&
+    normalizeRole(store.users[ownerIndex].rol) !== 'admin'
+  ) {
+    store.users[ownerIndex] = {
+      ...store.users[ownerIndex],
+      rol: 'admin',
+      clinicId,
+      updatedAt: new Date().toISOString(),
+    }
+    await saveStore(store)
+  }
   const seats = clinicSeatSnapshot(store, clinicId)
   const users = usersInClinic(store, clinicId).map(publicClinicUser)
   return { ok: true, users, seats }
@@ -1563,12 +1609,6 @@ export async function createClinicUser({ token, hint, member }) {
     return { ok: false, status: 400, error: 'La contraseña debe tener al menos 8 caracteres.' }
   }
 
-  const firstName = String(member?.firstName ?? '').trim()
-  const lastName = String(member?.lastName ?? '').trim()
-  if (!firstName || !lastName) {
-    return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
-  }
-
   const documentType = String(member?.documentType ?? 'CC').trim() || 'CC'
   const documentNumber = String(member?.documentNumber ?? '').replace(/\D/g, '')
   if (documentNumber.length < 6 || documentNumber.length > 12) {
@@ -1583,6 +1623,24 @@ export async function createClinicUser({ token, hint, member }) {
   const role = requestedRole === 'superadmin' ? 'odontologo' : requestedRole
   if (!VALID_ROLES.has(role) || role === 'superadmin') {
     return { ok: false, status: 400, error: 'El rol indicado no está permitido.' }
+  }
+
+  const isAuxiliar = role === 'recepcion'
+  let firstName = String(member?.firstName ?? '').trim()
+  let lastName = String(member?.lastName ?? '').trim()
+  const email = String(member?.email ?? '').trim().toLowerCase()
+  const phone = normalizeStaffPhone(member?.phone)
+  if (isAuxiliar) {
+    if (!isLikelyEmail(email)) {
+      return { ok: false, status: 400, error: 'El correo electrónico es obligatorio para auxiliares.' }
+    }
+    if (phone.length < 7 || phone.length > 12) {
+      return { ok: false, status: 400, error: 'El teléfono es obligatorio para auxiliares (7 a 12 dígitos).' }
+    }
+    if (!firstName) firstName = 'Auxiliar'
+    if (!lastName) lastName = 'Administrativo'
+  } else if (!firstName || !lastName) {
+    return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
   }
 
   const store = await loadStore()
@@ -1609,7 +1667,6 @@ export async function createClinicUser({ token, hint, member }) {
     return { ok: false, status: 409, error: 'Ya existe un usuario con esta cédula.' }
   }
 
-  const email = String(member?.email ?? '').trim().toLowerCase()
   if (email) {
     if (store.users.some((item) => normalizeEmail(item.email) === email)) {
       return { ok: false, status: 409, error: 'Ya existe un usuario con este correo.' }
@@ -1623,11 +1680,12 @@ export async function createClinicUser({ token, hint, member }) {
     lastName,
     nombre: [firstName, lastName].filter(Boolean).join(' '),
     email: email || '',
+    phone,
     passwordHash: hashPasswordSha256(password),
     rol: role,
     documentType,
     documentNumber,
-    rethusNumber: String(member?.rethusNumber ?? '').trim(),
+    rethusNumber: isAuxiliar ? '' : String(member?.rethusNumber ?? '').trim(),
     clinicId,
     clinicName: owner.clinicName || member?.clinicName || '',
     legalName: owner.legalName || '',
@@ -1639,6 +1697,7 @@ export async function createClinicUser({ token, hint, member }) {
     plan: owner.plan || null,
     estado_pago: owner.estado_pago === 'exento' ? 'activo' : owner.estado_pago,
     fecha_vencimiento: owner.fecha_vencimiento || null,
+    accessEnabled: true,
     createdAt: now,
     updatedAt: now,
   }
@@ -1671,14 +1730,11 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
   }
 
   const incoming = patch && typeof patch === 'object' ? { ...patch } : {}
-  const firstName = String(incoming.firstName ?? current.firstName ?? '').trim()
-  const lastName = String(incoming.lastName ?? current.lastName ?? '').trim()
+  let firstName = String(incoming.firstName ?? current.firstName ?? '').trim()
+  let lastName = String(incoming.lastName ?? current.lastName ?? '').trim()
   const documentNumber = incoming.documentNumber !== undefined
     ? String(incoming.documentNumber).replace(/\D/g, '')
     : normalizeDocumentNumber(current.documentNumber)
-  if (!firstName || !lastName) {
-    return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
-  }
   if (documentNumber && (documentNumber.length < 6 || documentNumber.length > 12)) {
     return { ok: false, status: 400, error: 'La cédula debe tener entre 6 y 12 dígitos.' }
   }
@@ -1692,7 +1748,9 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
   }
 
   let role = current.rol
-  if (incoming.role !== undefined || incoming.rol !== undefined) {
+  if (isClinicOwner(current) && !isSuperAdminUser(current)) {
+    role = 'admin'
+  } else if (incoming.role !== undefined || incoming.rol !== undefined) {
     const requested = normalizeRole(incoming.role ?? incoming.rol)
     if (requested === 'superadmin' && !isSuperAdminUser(session.user)) {
       return { ok: false, status: 403, error: 'No puede asignar el rol de superadministrador.' }
@@ -1700,13 +1758,31 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     role = requested === 'superadmin' ? current.rol : requested
   }
 
+  const isAuxiliar = role === 'recepcion'
   const email = incoming.email !== undefined ? String(incoming.email ?? '').trim().toLowerCase() : current.email
+  const phone = incoming.phone !== undefined
+    ? normalizeStaffPhone(incoming.phone)
+    : normalizeStaffPhone(current.phone)
+  if (isAuxiliar) {
+    if (!isLikelyEmail(email)) {
+      return { ok: false, status: 400, error: 'El correo electrónico es obligatorio para auxiliares.' }
+    }
+    if (phone.length < 7 || phone.length > 12) {
+      return { ok: false, status: 400, error: 'El teléfono es obligatorio para auxiliares (7 a 12 dígitos).' }
+    }
+    if (!firstName) firstName = current.firstName || 'Auxiliar'
+    if (!lastName) lastName = current.lastName || 'Administrativo'
+  } else if (!firstName || !lastName) {
+    return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
+  }
+
   store.users[index] = {
     ...current,
     firstName,
     lastName,
     nombre: [firstName, lastName].filter(Boolean).join(' '),
     email: email || '',
+    phone,
     documentType: incoming.documentType ?? current.documentType ?? 'CC',
     documentNumber: documentNumber || current.documentNumber,
     rethusNumber: incoming.rethusNumber !== undefined ? String(incoming.rethusNumber).trim() : current.rethusNumber,
@@ -1742,6 +1818,7 @@ export async function resetClinicUserPassword({ token, hint, userId, newPassword
   store.users[index] = {
     ...store.users[index],
     passwordHash: hashPasswordSha256(password),
+    accessEnabled: true,
     updatedAt: new Date().toISOString(),
   }
   await saveStore(store)
@@ -1772,10 +1849,15 @@ export async function deleteClinicUser({ token, hint, userId }) {
   if (isClinicOwner(target)) {
     return { ok: false, status: 400, error: 'No puede eliminar al titular de la clínica.' }
   }
-  store.users.splice(index, 1)
+  store.users[index] = {
+    ...target,
+    passwordHash: '',
+    accessEnabled: false,
+    updatedAt: new Date().toISOString(),
+  }
   store.sessions = store.sessions.filter((item) => item.userId !== userId)
   await saveStore(store)
-  return { ok: true, seats: clinicSeatSnapshot(store, clinicId) }
+  return { ok: true, user: publicClinicUser(store.users[index]), seats: clinicSeatSnapshot(store, clinicId) }
 }
 
 export async function selectPaidPlan({ token, planId, hint }) {

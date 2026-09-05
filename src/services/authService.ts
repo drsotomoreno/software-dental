@@ -71,6 +71,8 @@ export async function authenticateUser(
   }
   if (!user) return null
 
+  if (user.accessEnabled === false) return null
+
   const credentials = await db.userCredentials.get(user.id)
   if (!credentials) return null
 
@@ -236,6 +238,14 @@ function localSeatError(used: number, max: number | null, planName: string): str
   return null
 }
 
+function staffPhoneDigits(value: string | undefined): string {
+  return String(value ?? '').replace(/\D/g, '').slice(0, 12)
+}
+
+function isLikelyEmail(value: string | undefined): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value ?? '').trim())
+}
+
 function sanitizeAssignableRole(
   role: UserRole | string | undefined,
   actorRole: CanonicalRole,
@@ -254,12 +264,15 @@ function sanitizeAssignableRole(
 }
 
 async function ensureRemainingUserManager(excludeUserId?: string): Promise<string | null> {
+  const { clinicId } = currentClinicScope()
   const allUsers = await db.users.toArray()
-  const remaining = allUsers.filter(
-    (user) => user.id !== excludeUserId && canManageUsers(user.role),
-  )
+  const remaining = allUsers.filter((user) => {
+    if (user.id === excludeUserId) return false
+    if (clinicId && String(user.clinicId || user.id) !== String(clinicId)) return false
+    return user.isClinicOwner === true || canManageUsers(user.role)
+  })
   if (remaining.length > 0) return null
-  return 'Debe existir al menos un administrador o superadministrador en el sistema.'
+  return 'Debe existir el titular administrador de esta clínica.'
 }
 
 export async function listAppUsers(): Promise<UserProfile[]> {
@@ -295,12 +308,6 @@ export async function createAppUser(
   if (passwordError) return { ok: false, error: passwordError }
 
   const email = String(data.email ?? '').trim().toLowerCase()
-  const firstName = data.firstName.trim()
-  const lastName = data.lastName.trim()
-  if (!firstName || !lastName) {
-    return { ok: false, error: 'Nombres y apellidos son obligatorios.' }
-  }
-
   const documentCheck = validateProfessionalDocumentNumber(data.documentNumber)
   if (!documentCheck.valid) {
     return { ok: false, error: documentCheck.message ?? 'La cédula es obligatoria (6 a 12 dígitos).' }
@@ -310,15 +317,33 @@ export async function createAppUser(
   const roleResult = sanitizeAssignableRole(data.role, gate.actorRole)
   if (!roleResult.ok) return roleResult
 
+  const isAuxiliar = roleResult.role === 'recepcion'
+  let firstName = String(data.firstName ?? '').trim()
+  let lastName = String(data.lastName ?? '').trim()
+  const phone = staffPhoneDigits(data.phone)
+  if (isAuxiliar) {
+    if (!isLikelyEmail(email)) {
+      return { ok: false, error: 'El correo electrónico es obligatorio para auxiliares.' }
+    }
+    if (phone.length < 7 || phone.length > 12) {
+      return { ok: false, error: 'El teléfono es obligatorio para auxiliares (7 a 12 dígitos).' }
+    }
+    if (!firstName) firstName = 'Auxiliar'
+    if (!lastName) lastName = 'Administrativo'
+  } else if (!firstName || !lastName) {
+    return { ok: false, error: 'Nombres y apellidos son obligatorios.' }
+  }
+
   const api = await createClinicMember({
     firstName,
     lastName,
     email,
+    phone,
     documentType: data.documentType || 'CC',
     documentNumber,
     rol: roleResult.role,
     role: roleResult.role,
-    rethusNumber: data.rethusNumber?.trim() || '',
+    rethusNumber: isAuxiliar ? '' : data.rethusNumber?.trim() || '',
     thsSpecialty: data.thsSpecialty,
     password,
   })
@@ -367,12 +392,13 @@ export async function createAppUser(
     providerNit: data.providerNit?.trim() || apiAuth?.user?.providerNit || undefined,
     repsCode: data.repsCode?.trim() || apiAuth?.user?.repsCode || undefined,
     repsStatus: data.repsStatus ?? 'activo',
-    rethusNumber: data.rethusNumber?.trim() || undefined,
+    rethusNumber: isAuxiliar ? undefined : data.rethusNumber?.trim() || undefined,
     rethusStatus: data.rethusStatus ?? 'activo',
     thsSpecialty: data.thsSpecialty,
     rehusSpecialty: data.rehusSpecialty ?? data.thsSpecialty,
     repsEnabledSpecialties: data.repsEnabledSpecialties,
     avatarUrl: data.avatarUrl,
+    phone: phone || undefined,
     clinicId: clinicId || undefined,
     isClinicOwner: false,
   }
@@ -393,13 +419,17 @@ export async function updateAppUser(
   const nextPatch: Partial<UserProfile> = { ...patch }
 
   if (nextPatch.role !== undefined) {
-    const roleResult = sanitizeAssignableRole(nextPatch.role, gate.actorRole)
-    if (!roleResult.ok) return roleResult
-    nextPatch.role = roleResult.role
+    if (current?.isClinicOwner) {
+      nextPatch.role = 'admin'
+    } else {
+      const roleResult = sanitizeAssignableRole(nextPatch.role, gate.actorRole)
+      if (!roleResult.ok) return roleResult
+      nextPatch.role = roleResult.role
 
-    if (current && canManageUsers(current.role) && !canManageUsers(roleResult.role)) {
-      const remainingError = await ensureRemainingUserManager(userId)
-      if (remainingError) return { ok: false, error: remainingError }
+      if (current && canManageUsers(current.role) && !canManageUsers(roleResult.role)) {
+        const remainingError = await ensureRemainingUserManager(userId)
+        if (remainingError) return { ok: false, error: remainingError }
+      }
     }
   }
 
@@ -422,10 +452,27 @@ export async function updateAppUser(
     nextPatch.documentNumber = documentCheck.normalized ?? nextPatch.documentNumber.trim()
   }
 
+  const nextRole = nextPatch.role ?? current?.role
+  if (nextRole === 'recepcion') {
+    const email = String(nextPatch.email ?? current?.email ?? '').trim().toLowerCase()
+    const phone = staffPhoneDigits(nextPatch.phone ?? current?.phone)
+    if (!isLikelyEmail(email)) {
+      return { ok: false, error: 'El correo electrónico es obligatorio para auxiliares.' }
+    }
+    if (phone.length < 7 || phone.length > 12) {
+      return { ok: false, error: 'El teléfono es obligatorio para auxiliares (7 a 12 dígitos).' }
+    }
+    nextPatch.email = email
+    nextPatch.phone = phone
+  } else if (nextPatch.phone !== undefined) {
+    nextPatch.phone = staffPhoneDigits(nextPatch.phone)
+  }
+
   const api = await updateClinicMember(userId, {
     firstName: nextPatch.firstName,
     lastName: nextPatch.lastName,
     email: nextPatch.email,
+    phone: nextPatch.phone,
     documentType: nextPatch.documentType,
     documentNumber: nextPatch.documentNumber,
     rol: nextPatch.role,
@@ -459,6 +506,7 @@ export async function resetAppUserPassword(
   const api = await resetClinicMemberPassword(userId, newPassword)
   if (api.ok) {
     await seedUserCredentials(userId, newPassword)
+    await db.users.update(userId, { accessEnabled: true })
     return { ok: true }
   }
   if (getStoredApiAuth()?.token) {
@@ -469,6 +517,7 @@ export async function resetAppUserPassword(
   if (!user) return { ok: false, error: 'Usuario no encontrado.' }
 
   await seedUserCredentials(userId, newPassword)
+  await db.users.update(userId, { accessEnabled: true })
   return { ok: true }
 }
 
@@ -488,7 +537,7 @@ export async function deleteAppUser(
     await db.userCredentials.delete(userId)
     const sessions = await db.sessions.where('userId').equals(userId).toArray()
     await Promise.all(sessions.map((s) => db.sessions.delete(s.id)))
-    await db.users.delete(userId)
+    await db.users.update(userId, { accessEnabled: false })
     return { ok: true }
   }
   if (getStoredApiAuth()?.token) {
@@ -497,16 +546,14 @@ export async function deleteAppUser(
 
   const user = await db.users.get(userId)
   if (!user) return { ok: false, error: 'Usuario no encontrado.' }
-
-  if (canManageUsers(user.role)) {
-    const remainingError = await ensureRemainingUserManager(userId)
-    if (remainingError) return { ok: false, error: remainingError }
+  if (user.isClinicOwner) {
+    return { ok: false, error: 'No puede eliminar al titular de la clínica.' }
   }
 
   await db.userCredentials.delete(userId)
   const sessions = await db.sessions.where('userId').equals(userId).toArray()
   await Promise.all(sessions.map((s) => db.sessions.delete(s.id)))
-  await db.users.delete(userId)
+  await db.users.update(userId, { accessEnabled: false })
   return { ok: true }
 }
 
