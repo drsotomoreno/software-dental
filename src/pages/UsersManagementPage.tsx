@@ -18,6 +18,7 @@ import {
   ROLE_LABELS,
   USERS_MANAGE_DENIED,
   canManageClinicTeam,
+  isStaffWithoutRegulatoryId,
 } from '@/utils/permissions'
 import {
   DocumentIdentityField,
@@ -57,6 +58,7 @@ function emptyUserForm(defaults?: {
     rethusStatus: 'activo',
     thsSpecialty: 'odontologia_general',
     repsEnabledSpecialties: ['odontologia_general'],
+    phone: '',
     password: '',
   }
 }
@@ -140,7 +142,9 @@ export function UsersManagementPage() {
       showErr(result.error)
       return
     }
-    await upsertProfessionalFromUser(result.user)
+    if (result.user.role === 'odontologo') {
+      await upsertProfessionalFromUser(result.user)
+    }
     await audit({
       action: 'CREATE_USER',
       resourceType: 'user',
@@ -171,6 +175,7 @@ export function UsersManagementPage() {
       rethusNumber: u.rethusNumber?.trim() || '',
       rethusStatus: u.rethusStatus ?? 'activo',
       thsSpecialty: u.thsSpecialty ?? 'odontologia_general',
+      phone: u.phone ?? '',
       repsEnabledSpecialties:
         u.repsEnabledSpecialties?.length
           ? u.repsEnabledSpecialties
@@ -195,7 +200,7 @@ export function UsersManagementPage() {
       return
     }
     const updated = await db.users.get(editingUser.id)
-    if (updated) await upsertProfessionalFromUser(updated)
+    if (updated && updated.role === 'odontologo') await upsertProfessionalFromUser(updated)
     await audit({
       action: 'UPDATE_USER',
       resourceType: 'user',
@@ -253,6 +258,7 @@ export function UsersManagementPage() {
 
   const handleRoleChange = async (u: UserProfile, role: UserRole) => {
     if (!canManage) return
+    if (u.isClinicOwner) return
     if (assignableRoleValue(u.role) === role) return
     const result = await updateAppUser(u.id, { role })
     if (!result.ok) {
@@ -283,8 +289,10 @@ export function UsersManagementPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Gestión de Usuarios</h1>
             <p className="mt-1 text-sm text-slate-600">
-              El administrador de esta clínica crea colaboradores con cédula y una contraseña
-              temporal. El correo no es obligatorio.
+              El titular de la cuenta es administrador. Los colaboradores pueden ser Administrador
+              Adjunto, Odontólogo o Recepción. Para adjunto y recepción solo se piden cédula, correo
+              y teléfono: no tienen ReTHUS ni código REPS. ReTHUS y REPS aplican solo a odontólogos.
+              El acceso es por cédula y contraseña.
             </p>
           </div>
           {canManage && (
@@ -347,7 +355,8 @@ export function UsersManagementPage() {
                   <tr>
                     <th className="px-3 py-2 font-medium text-slate-600">Nombre</th>
                     <th className="px-3 py-2 font-medium text-slate-600">Documento</th>
-                    <th className="px-3 py-2 font-medium text-slate-600">Correo (opcional)</th>
+                    <th className="px-3 py-2 font-medium text-slate-600">Correo</th>
+                    <th className="px-3 py-2 font-medium text-slate-600">Teléfono</th>
                     <th className="px-3 py-2 font-medium text-slate-600">Rol</th>
                     <th className="px-3 py-2 font-medium text-slate-600">Acciones</th>
                   </tr>
@@ -367,10 +376,11 @@ export function UsersManagementPage() {
                         ) : null}
                       </td>
                       <td className="px-3 py-2 text-slate-600">{u.email || '—'}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-slate-600">{u.phone || '—'}</td>
                       <td className="px-3 py-2">
                         <select
-                          value={assignableRoleValue(u.role)}
-                          disabled={!canManage}
+                          value={u.isClinicOwner ? 'admin' : assignableRoleValue(u.role)}
+                          disabled={!canManage || u.isClinicOwner}
                           onChange={(event) =>
                             handleRoleChange(u, event.target.value as UserRole)
                           }
@@ -451,7 +461,11 @@ export function UsersManagementPage() {
         {editingUser && (
           <Modal title={`Editar: ${userLabel(editingUser)}`} onClose={() => setEditingUser(null)}>
             <form onSubmit={handleUpdate} className="space-y-4">
-              <UserFields values={editForm} onChange={(patch) => setEditForm({ ...editForm, ...patch })} />
+              <UserFields
+                values={editForm}
+                onChange={(patch) => setEditForm({ ...editForm, ...patch })}
+                lockOwnerRole={Boolean(editingUser.isClinicOwner)}
+              />
               <div className="flex gap-2">
                 <button type="submit" className="btn-primary">
                   Guardar cambios
@@ -516,145 +530,237 @@ function UserFields({
   includePassword,
   password,
   onPasswordChange,
+  lockOwnerRole,
 }: {
   values: Partial<UserProfile>
   onChange: (patch: Partial<UserProfile>) => void
   includePassword?: boolean
   password?: string
   onPasswordChange?: (password: string) => void
+  lockOwnerRole?: boolean
 }) {
+  const selectedRole = lockOwnerRole ? 'admin' : assignableRoleValue(values.role)
+  const isStaff = isStaffWithoutRegulatoryId(selectedRole, { isClinicOwner: lockOwnerRole })
+
+  const handleRoleTab = (role: UserRole) => {
+    if (role === 'odontologo') {
+      onChange({ role })
+      return
+    }
+    onChange({
+      role,
+      rethusNumber: '',
+      repsCode: '',
+    })
+  }
+
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      <div>
-        <label className="label-field">Nombres</label>
-        <input
-          required
-          value={values.firstName ?? ''}
-          onChange={(e) => onChange({ firstName: e.target.value })}
-          className="input-field"
-        />
-      </div>
-      <div>
-        <label className="label-field">Apellidos</label>
-        <input
-          required
-          value={values.lastName ?? ''}
-          onChange={(e) => onChange({ lastName: e.target.value })}
-          className="input-field"
-        />
-      </div>
       <div className="sm:col-span-2">
-        <label className="label-field">Correo electrónico (opcional)</label>
-        <input
-          type="email"
-          value={values.email ?? ''}
-          onChange={(e) => onChange({ email: e.target.value })}
-          className="input-field"
-          placeholder="No es necesario para ingresar"
-        />
-        <p className="mt-1 text-xs text-slate-500">
-          El colaborador inicia sesión con su cédula y la contraseña que usted asigne. El correo no
-          se verifica ni es obligatorio.
-        </p>
+        {lockOwnerRole ? (
+          <>
+            <label className="label-field">Rol</label>
+            <input
+              disabled
+              value={ROLE_LABELS.admin}
+              className="input-field disabled:cursor-not-allowed disabled:bg-slate-100"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              El titular de la membresía es administrador por defecto.
+            </p>
+          </>
+        ) : (
+          <>
+            <div
+              className="flex flex-wrap rounded-lg border border-slate-200 bg-slate-50 p-1"
+              role="tablist"
+              aria-label="Tipo de usuario"
+            >
+              {ASSIGNABLE_ROLES.map((role) => (
+                <button
+                  key={role}
+                  type="button"
+                  role="tab"
+                  aria-selected={selectedRole === role}
+                  onClick={() => handleRoleTab(role)}
+                  className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition ${
+                    selectedRole === role
+                      ? 'bg-dental-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-white hover:text-slate-800'
+                  }`}
+                >
+                  {ROLE_LABELS[role]}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              {isStaff
+                ? 'Cédula, correo y teléfono. No se solicita ReTHUS ni código REPS.'
+                : 'ReTHUS y REPS aplican solo a odontólogos.'}
+            </p>
+          </>
+        )}
       </div>
-      <DocumentIdentityField
-        compact
-        documentType={values.documentType ?? 'CC'}
-        documentNumber={values.documentNumber ?? ''}
-        onChange={onChange}
-      />
-      <div>
-        <RethusCodeField
-          compact
-          required={false}
-          value={values.rethusNumber ?? ''}
-          onChange={(rethusNumber) => onChange({ rethusNumber })}
-        />
-        <p className="mt-1 text-xs text-slate-500">
-          Cada odontólogo se identifica con su ReTHUS. El REPS y el NIT de la sede se heredan de la
-          IPS o del consultorio.
-        </p>
-      </div>
-      <div>
-        <label className="label-field">Rol</label>
-        <select
-          value={assignableRoleValue(values.role)}
-          onChange={(e) => onChange({ role: e.target.value as UserRole })}
-          className="input-field"
-        >
-          {ASSIGNABLE_ROLES.map((role) => (
-            <option key={role} value={role}>
-              {ROLE_LABELS[role]}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className="label-field">Razón social / nombre legal</label>
-        <input
-          value={values.legalName ?? values.clinicName ?? ''}
-          onChange={(e) => onChange({ legalName: e.target.value })}
-          className="input-field"
-        />
-      </div>
-      <div>
-        <label className="label-field">Nombre de la clínica / consultorio</label>
-        <input
-          required={false}
-          value={values.clinicName ?? ''}
-          onChange={(e) => onChange({ clinicName: e.target.value })}
-          className="input-field"
-        />
-      </div>
-      <div>
-        <label className="label-field">NIT fiscal (DIAN)</label>
-        <input
-          value={values.providerNit ?? ''}
-          onChange={(e) => onChange({ providerNit: e.target.value })}
-          className="input-field font-mono"
-          placeholder="NIT con dígito de verificación"
-        />
-      </div>
-      <div className="sm:col-span-2">
-        <RepsHabilitationField
-          value={values.repsCode ?? ''}
-          onChange={(repsCode) => onChange({ repsCode })}
-        />
-      </div>
-      <div className="sm:col-span-2">
-        <RethusSpecialtyField
-          value={(values.thsSpecialty ?? 'odontologia_general') as OdontologyThsSpecialtyId}
-          onChange={(thsSpecialty) =>
-            onChange({
-              thsSpecialty,
-              rehusSpecialty: thsSpecialty,
-              repsEnabledSpecialties: ensureSpecialtyInRepsPortfolio(
-                thsSpecialty,
-                values.repsEnabledSpecialties ?? [],
-              ),
-            })
-          }
-        />
-      </div>
-      <RegulatoryIdentityAdminExtras
-        values={{
-          repsCode: values.repsCode ?? '',
-          repsStatus: values.repsStatus ?? 'activo',
-          rethusNumber: values.rethusNumber ?? '',
-          rethusStatus: values.rethusStatus ?? 'activo',
-          thsSpecialty: (values.thsSpecialty ?? 'odontologia_general') as OdontologyThsSpecialtyId,
-          repsEnabledSpecialties:
-            values.repsEnabledSpecialties?.length
-              ? values.repsEnabledSpecialties
-              : [values.thsSpecialty ?? 'odontologia_general'],
-        }}
-        onChange={(patch) =>
-          onChange({
-            ...patch,
-            rehusSpecialty: patch.thsSpecialty ?? values.thsSpecialty,
-          })
-        }
-      />
+
+      {isStaff ? (
+        <>
+          <DocumentIdentityField
+            compact
+            documentType={values.documentType ?? 'CC'}
+            documentNumber={values.documentNumber ?? ''}
+            onChange={onChange}
+          />
+          <div className="sm:col-span-2">
+            <label className="label-field">Correo electrónico</label>
+            <input
+              type="email"
+              required
+              value={values.email ?? ''}
+              onChange={(e) => onChange({ email: e.target.value })}
+              className="input-field"
+              placeholder="correo@ejemplo.com"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="label-field">Teléfono</label>
+            <input
+              type="tel"
+              required
+              inputMode="numeric"
+              value={values.phone ?? ''}
+              onChange={(e) => onChange({ phone: e.target.value.replace(/[^\d+\s()-]/g, '') })}
+              className="input-field"
+              placeholder="3001234567"
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <div>
+            <label className="label-field">Nombres</label>
+            <input
+              required
+              value={values.firstName ?? ''}
+              onChange={(e) => onChange({ firstName: e.target.value })}
+              className="input-field"
+            />
+          </div>
+          <div>
+            <label className="label-field">Apellidos</label>
+            <input
+              required
+              value={values.lastName ?? ''}
+              onChange={(e) => onChange({ lastName: e.target.value })}
+              className="input-field"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="label-field">Correo electrónico (opcional)</label>
+            <input
+              type="email"
+              value={values.email ?? ''}
+              onChange={(e) => onChange({ email: e.target.value })}
+              className="input-field"
+              placeholder="No es necesario para ingresar"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              El colaborador inicia sesión con su cédula y la contraseña que usted asigne. El correo
+              no se verifica ni es obligatorio.
+            </p>
+          </div>
+          <DocumentIdentityField
+            compact
+            documentType={values.documentType ?? 'CC'}
+            documentNumber={values.documentNumber ?? ''}
+            onChange={onChange}
+          />
+          <div>
+            <RethusCodeField
+              compact
+              required={false}
+              value={values.rethusNumber ?? ''}
+              onChange={(rethusNumber) => onChange({ rethusNumber })}
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Cada odontólogo se identifica con su ReTHUS. El REPS de la sede se hereda de la IPS o
+              del consultorio.
+            </p>
+          </div>
+          {lockOwnerRole ? (
+            <>
+              <div>
+                <label className="label-field">Razón social / nombre legal</label>
+                <input
+                  value={values.legalName ?? values.clinicName ?? ''}
+                  onChange={(e) => onChange({ legalName: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+              <div>
+                <label className="label-field">Nombre de la clínica / consultorio</label>
+                <input
+                  required={false}
+                  value={values.clinicName ?? ''}
+                  onChange={(e) => onChange({ clinicName: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+              <div>
+                <label className="label-field">NIT fiscal (DIAN)</label>
+                <input
+                  value={values.providerNit ?? ''}
+                  onChange={(e) => onChange({ providerNit: e.target.value })}
+                  className="input-field font-mono"
+                  placeholder="NIT con dígito de verificación"
+                />
+              </div>
+            </>
+          ) : null}
+          <div className="sm:col-span-2">
+            <RepsHabilitationField
+              value={values.repsCode ?? ''}
+              onChange={(repsCode) => onChange({ repsCode })}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <RethusSpecialtyField
+              value={(values.thsSpecialty ?? 'odontologia_general') as OdontologyThsSpecialtyId}
+              onChange={(thsSpecialty) =>
+                onChange({
+                  thsSpecialty,
+                  rehusSpecialty: thsSpecialty,
+                  repsEnabledSpecialties: ensureSpecialtyInRepsPortfolio(
+                    thsSpecialty,
+                    values.repsEnabledSpecialties ?? [],
+                  ),
+                })
+              }
+            />
+          </div>
+          {lockOwnerRole ? (
+            <RegulatoryIdentityAdminExtras
+              values={{
+                repsCode: values.repsCode ?? '',
+                repsStatus: values.repsStatus ?? 'activo',
+                rethusNumber: values.rethusNumber ?? '',
+                rethusStatus: values.rethusStatus ?? 'activo',
+                thsSpecialty: (values.thsSpecialty ?? 'odontologia_general') as OdontologyThsSpecialtyId,
+                repsEnabledSpecialties:
+                  values.repsEnabledSpecialties?.length
+                    ? values.repsEnabledSpecialties
+                    : [values.thsSpecialty ?? 'odontologia_general'],
+              }}
+              onChange={(patch) =>
+                onChange({
+                  ...patch,
+                  rehusSpecialty: patch.thsSpecialty ?? values.thsSpecialty,
+                })
+              }
+            />
+          ) : null}
+        </>
+      )}
+
       {includePassword && (
         <div className="sm:col-span-2">
           <label className="label-field">Contraseña temporal</label>

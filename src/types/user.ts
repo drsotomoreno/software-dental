@@ -49,6 +49,8 @@ export interface UserProfile {
    */
   rehusSpecialty?: OdontologyThsSpecialtyId
   avatarUrl?: string
+  /** Teléfono de contacto — obligatorio en administrador adjunto y recepción. */
+  phone?: string
 }
 
 export interface PriceItem {

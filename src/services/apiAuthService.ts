@@ -28,6 +28,7 @@ export interface ApiSubscriptionUser {
   rethusStatus?: 'activo' | 'inactivo' | 'pendiente'
   firstName?: string
   lastName?: string
+  phone?: string
   repsCode?: string
   repsStatus?: 'activo' | 'inactivo'
   thsSpecialty?: string
@@ -288,5 +289,6 @@ export function mapApiUserToAuthUser(
     repsEnabledSpecialties: user.repsEnabledSpecialties as
       | import('@/constants/ripsThsSpecialty').OdontologyThsSpecialtyId[]
       | undefined,
+    phone: user.phone || undefined,
   }
 }
