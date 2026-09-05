@@ -13,12 +13,7 @@ import {
 } from '@/services/authService'
 import { fetchClinicUsers, type ClinicSeatSnapshot } from '@/services/subscriptionService'
 import type { UserProfile, UserRole } from '@/types/user'
-import {
-  ASSIGNABLE_ROLES,
-  ROLE_LABELS,
-  USERS_MANAGE_DENIED,
-  canManageClinicTeam,
-} from '@/utils/permissions'
+import { ASSIGNABLE_ROLES, ROLE_LABELS, USERS_MANAGE_DENIED } from '@/utils/permissions'
 import {
   DocumentIdentityField,
   RegulatoryIdentityAdminExtras,
@@ -78,7 +73,7 @@ function userLabel(user: Pick<UserProfile, 'firstName' | 'lastName' | 'documentN
 }
 
 export function UsersManagementPage() {
-  const { user: currentUser } = useAuth()
+  const { user: currentUser, can } = useAuth()
   const { audit } = useAudit()
   const [users, setUsers] = useState<UserProfile[] | null>(null)
   const [seats, setSeats] = useState<ClinicSeatSnapshot | null>(null)
@@ -94,7 +89,7 @@ export function UsersManagementPage() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
-  const canManage = canManageClinicTeam(currentUser)
+  const canManage = can('users.manage')
   const seatsExhausted = Boolean(seats && seats.max != null && seats.used >= seats.max)
 
   const reloadUsers = useCallback(async () => {
@@ -283,8 +278,8 @@ export function UsersManagementPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Gestión de Usuarios</h1>
             <p className="mt-1 text-sm text-slate-600">
-              El administrador de esta clínica crea colaboradores con cédula y una contraseña
-              temporal. El correo no es obligatorio.
+              El administrador titular de esta clínica crea colaboradores con cédula y una
+              contraseña temporal. El correo no es obligatorio.
             </p>
           </div>
           {canManage && (
@@ -667,8 +662,8 @@ function UserFields({
             className="input-field"
           />
           <p className="mt-1 text-xs text-slate-500">
-            El administrador de la clínica asigna esta clave. El colaborador la usa junto con su
-            cédula, sin verificación externa.
+            El administrador titular de la clínica asigna esta clave. El colaborador la usa junto
+            con su cédula, sin verificación externa.
           </p>
         </div>
       )}

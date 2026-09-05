@@ -1493,8 +1493,7 @@ function isClinicOwner(user) {
 function canManageClinicTeam(user) {
   if (!user) return false
   if (isSuperAdminUser(user)) return true
-  if (isClinicOwner(user)) return true
-  return normalizeRole(user.rol) === 'admin'
+  return isClinicOwner(user)
 }
 
 function usersInClinic(store, clinicId) {
@@ -1535,7 +1534,7 @@ export async function listClinicUsers({ token, hint }) {
     return {
       ok: false,
       status: 403,
-      error: 'Solo el administrador de la clínica puede gestionar el equipo.',
+      error: 'Solo el administrador titular de esta clínica puede gestionar el equipo.',
     }
   }
   const store = await loadStore()
@@ -1554,7 +1553,7 @@ export async function createClinicUser({ token, hint, member }) {
     return {
       ok: false,
       status: 403,
-      error: 'Solo el administrador de la clínica puede crear colaboradores.',
+      error: 'Solo el administrador titular de esta clínica puede crear colaboradores.',
     }
   }
 
@@ -1657,7 +1656,7 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
   }
   if (!canManageClinicTeam(session.user)) {
-    return { ok: false, status: 403, error: 'Solo el administrador de la clínica puede editar colaboradores.' }
+    return { ok: false, status: 403, error: 'Solo el administrador titular de esta clínica puede editar colaboradores.' }
   }
   const store = await loadStore()
   const clinicId = clinicIdOf(session.user)
@@ -1724,7 +1723,7 @@ export async function resetClinicUserPassword({ token, hint, userId, newPassword
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
   }
   if (!canManageClinicTeam(session.user)) {
-    return { ok: false, status: 403, error: 'Solo el administrador de la clínica puede asignar contraseñas.' }
+    return { ok: false, status: 403, error: 'Solo el administrador titular de esta clínica puede asignar contraseñas.' }
   }
   const password = String(newPassword ?? '')
   if (password.length < 8) {
@@ -1754,7 +1753,7 @@ export async function deleteClinicUser({ token, hint, userId }) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
   }
   if (!canManageClinicTeam(session.user)) {
-    return { ok: false, status: 403, error: 'Solo el administrador de la clínica puede eliminar colaboradores.' }
+    return { ok: false, status: 403, error: 'Solo el administrador titular de esta clínica puede eliminar colaboradores.' }
   }
   if (String(userId) === String(session.user.id)) {
     return { ok: false, status: 400, error: 'No puede eliminar su propio usuario.' }
