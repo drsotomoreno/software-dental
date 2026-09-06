@@ -105,6 +105,12 @@ import { createDigitalSignature, validateSignatureCapture } from '@/services/sig
 import { getProfessionalSignBlocker } from '@/utils/professionalSignGate'
 import type { ClinicalHistoryExportFormat } from '@/types/portability'
 import { EXPORT_FORMAT_LABELS } from '@/types/portability'
+import {
+  DelegatedConsentModal,
+  ExternalRdaPanel,
+  RequestExternalHistoryButton,
+} from '@/components/ihce'
+import { useExternalHistoryRequest } from '@/hooks/useExternalHistoryRequest'
 
 
 
@@ -156,6 +162,10 @@ export function PatientDetailPage() {
   const { user, can } = useAuth()
   const { audit } = useAudit()
   const canViewClinical = can('clinical.read')
+  const canRequestExternalHistory = can('export.portability')
+
+  const [ihceModalOpen, setIhceModalOpen] = useState(false)
+  const openIhceModal = useCallback(() => setIhceModalOpen(true), [])
 
   const [odontogram, setOdontogram] = useState<OdontogramData | null>(null)
 
@@ -256,6 +266,8 @@ export function PatientDetailPage() {
   const professionalLicense = user?.documentNumber ?? ''
 
   const patientForeignKey = id ? toPatientForeignKey(id) : ''
+
+  useExternalHistoryRequest(id, patient?.id, openIhceModal, canRequestExternalHistory)
 
   const clinicalEncounterId = viewingRecord?.id
     ? String(viewingRecord.id)
@@ -1572,11 +1584,19 @@ export function PatientDetailPage() {
 
           )}
 
+          {canRequestExternalHistory && (
+            <RequestExternalHistoryButton onClick={openIhceModal} />
+          )}
+
         </div>
 
       </div>
 
 
+
+      {canRequestExternalHistory && patient.id != null && (
+        <ExternalRdaPanel patientId={patient.id} compact />
+      )}
 
       {canViewClinical && !showRapidValuation && (
         <ClinicalRecordList patientId={patientForeignKey} onSelectRecord={handleViewRecord} />
@@ -2040,6 +2060,15 @@ export function PatientDetailPage() {
         onConfirm={executeSignAndLock}
         onCancel={() => setShowSignConfirm(false)}
       />
+
+      {canRequestExternalHistory && (
+        <DelegatedConsentModal
+          open={ihceModalOpen}
+          onClose={() => setIhceModalOpen(false)}
+          patient={patient}
+          user={user}
+        />
+      )}
 
     </div>
 

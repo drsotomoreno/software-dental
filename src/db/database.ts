@@ -29,6 +29,7 @@ import type { RehusSpecialtyId } from '@/constants/rehusSpecialties'
 import type { ElectronicInvoice } from '@/types/invoice'
 import type { ElectronicCreditNote } from '@/types/creditNote'
 import type { ClinicBillingSettingsRecord } from '@/types/billingModality'
+import type { IhceDelegatedConsent, IhceRdaRecord } from '@/types/ihce'
 import { CREDIT_NOTE_IMMUTABILITY_MESSAGE } from '@/types/creditNote'
 import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
@@ -63,6 +64,8 @@ export class DentalDatabase extends Dexie {
   evolutionNoteAddendums!: EntityTable<EvolutionNoteAddendum, 'id'>
   syncOutbox!: EntityTable<SyncOutboxEntry, 'id'>
   clinicBillingSettings!: EntityTable<ClinicBillingSettingsRecord, 'id'>
+  ihceConsents!: EntityTable<IhceDelegatedConsent, 'id'>
+  ihceRdaRecords!: EntityTable<IhceRdaRecord, 'id'>
 
   constructor() {
     super('DentalEMR')
@@ -628,6 +631,11 @@ export class DentalDatabase extends Dexie {
           }
         }
       })
+
+    this.version(24).stores({
+      ihceConsents: 'id, patientId, documentNumber, status, requestedAt, expiresAt',
+      ihceRdaRecords: 'id, patientId, documentNumber, downloadedAt, consentId',
+    })
   }
 }
 

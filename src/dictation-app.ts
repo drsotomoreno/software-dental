@@ -7,6 +7,7 @@ import { activarAsistenteVozClinico } from './utils/clinicalVoiceAssistant'
 import { processClinicalVoiceTranscript } from './utils/clinicalVoiceExecutor'
 import { activarDictadoVoz } from './utils/voiceDictation'
 import { parseClinicalVoiceCommand } from './utils/voiceCommandParser'
+import { requestExternalHistory } from './utils/requestExternalHistory'
 
 setupVoiceDictationGlobal()
 
@@ -16,9 +17,11 @@ if (typeof window !== 'undefined') {
     activarAsistenteVozClinico?: typeof activarAsistenteVozClinico
     parseComandoVozClinico?: typeof parseClinicalVoiceCommand
     ejecutarComandoVozClinico?: typeof processClinicalVoiceTranscript
+    requestExternalHistory?: typeof requestExternalHistory
   }
   win.activarDictadoVoz = activarDictadoVoz
   win.activarAsistenteVozClinico = activarAsistenteVozClinico
   win.parseComandoVozClinico = parseClinicalVoiceCommand
   win.ejecutarComandoVozClinico = processClinicalVoiceTranscript
+  win.requestExternalHistory = requestExternalHistory
 }
