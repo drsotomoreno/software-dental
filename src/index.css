@@ -3,8 +3,52 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --color-dental-50: #f0f9ff;
+    --color-dental-100: #e0f2fe;
+    --color-dental-200: #bae6fd;
+    --color-dental-300: #7dd3fc;
+    --color-dental-400: #38bdf8;
+    --color-dental-500: #0ea5e9;
+    --color-dental-600: #0284c7;
+    --color-dental-700: #0369a1;
+    --color-dental-800: #075985;
+    --color-dental-900: #0c4a6e;
+    --tw-dental-50: 240 249 255;
+    --tw-dental-100: 224 242 254;
+    --tw-dental-200: 186 230 253;
+    --tw-dental-300: 125 211 252;
+    --tw-dental-400: 56 189 248;
+    --tw-dental-500: 14 165 233;
+    --tw-dental-600: 2 132 199;
+    --tw-dental-700: 3 105 161;
+    --tw-dental-800: 7 89 133;
+    --tw-dental-900: 12 74 110;
+    --color-surface: #f8fafc;
+    --color-text: #0f172a;
+    --color-nav-inactive-bg: #fff7ed;
+    --color-nav-inactive-text: #7c2d12;
+    --color-nav-inactive-border: #fed7aa;
+    --color-nav-inactive-hover: #ffedd5;
+    --tw-surface: 248 250 252;
+    --tw-text: 15 23 42;
+    --tw-nav-inactive-bg: 255 247 237;
+    --tw-nav-inactive-text: 124 45 18;
+    --tw-nav-inactive-border: 254 215 170;
+    --tw-nav-inactive-hover: 255 237 213;
+    --radius: 0.75rem;
+    --font-sans: Inter, system-ui, sans-serif;
+    --home-grid-cols: 4;
+  }
+
+  html {
+    font-family: var(--font-sans);
+  }
+
   body {
-    @apply bg-slate-50 text-slate-900 antialiased;
+    @apply antialiased;
+    background-color: var(--color-surface);
+    color: var(--color-text);
   }
 }
 
@@ -54,7 +98,26 @@
   }
 
   .card {
-    @apply rounded-xl border border-slate-200 bg-white p-6 shadow-sm;
+    @apply border border-slate-200 bg-white p-6 shadow-sm;
+    border-radius: var(--radius, 0.75rem);
+  }
+
+  .home-module-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @media (min-width: 640px) {
+    .home-module-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .home-module-grid {
+      grid-template-columns: repeat(var(--home-grid-cols, 4), minmax(0, 1fr));
+    }
   }
 
   .clinical-history-shell {
@@ -89,20 +152,34 @@
     @apply min-h-[2.5rem];
   }
 
-  .nav-pill-top.nav-pill-inactive {
-    @apply border-orange-200 bg-orange-50 text-orange-900 hover:bg-orange-100;
+  .nav-pill-top.nav-pill-inactive,
+  .nav-pill-inactive {
+    border-color: var(--color-nav-inactive-border);
+    background-color: var(--color-nav-inactive-bg);
+    color: var(--color-nav-inactive-text);
+  }
+
+  .nav-pill-top.nav-pill-inactive:hover,
+  .nav-pill-inactive:hover {
+    background-color: var(--color-nav-inactive-hover);
   }
 
   .nav-pill-top.nav-pill-active {
     @apply border-dental-600 bg-dental-600 text-white;
   }
 
-  .nav-pill-sm {
-    @apply rounded-full border px-3 py-1 text-xs font-medium transition;
+  .top-nav-brand-idle {
+    border-color: var(--color-nav-inactive-border);
+    background-color: var(--color-nav-inactive-bg);
+    color: var(--color-nav-inactive-text);
   }
 
-  .nav-pill-inactive {
-    @apply border-orange-200 bg-orange-50 text-orange-900 hover:bg-orange-100;
+  .top-nav-brand-idle:hover {
+    background-color: var(--color-nav-inactive-hover);
+  }
+
+  .nav-pill-sm {
+    @apply rounded-full border px-3 py-1 text-xs font-medium transition;
   }
 
   .nav-pill-active {
