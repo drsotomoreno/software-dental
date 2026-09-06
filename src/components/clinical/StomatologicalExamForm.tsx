@@ -30,6 +30,7 @@ import { getClinicalPrecautionAlert } from '@/utils/clinicalPrecautionAlerts'
 import { PeriodontiumExamSection } from './PeriodontiumExamSection'
 import { TodoNormalButton } from './TodoNormalControl'
 import { VitalSignsExamSection } from './VitalSignsExamSection'
+import { SectionVoiceButton } from '@/components/voice'
 
 interface StomatologicalExamFormProps {
   data: StomatologicalExam
@@ -294,7 +295,10 @@ export function StomatologicalExamForm({
               <h4 className="clinical-label-raw text-sm font-semibold text-slate-700">
                 ATM (Articulación Temporomandibular)
               </h4>
-              {!disabled && <TodoNormalButton onClick={markAtmNormal} />}
+              <div className="flex items-center gap-2">
+                {!disabled && <SectionVoiceButton scope="atm" />}
+                {!disabled && <TodoNormalButton onClick={markAtmNormal} />}
+              </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -362,6 +366,8 @@ export function StomatologicalExamForm({
           <div>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-sm font-semibold text-slate-700">Oclusión</h4>
+              <div className="flex items-center gap-2">
+                {!disabled && <SectionVoiceButton scope="occlusion" />}
               <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
                 <input
                   type="checkbox"
@@ -393,6 +399,7 @@ export function StomatologicalExamForm({
                 />
                 Normal
               </label>
+              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {ANGLE_OCCLUSION_FIELD_LABELS.map(({ key, label }) => (

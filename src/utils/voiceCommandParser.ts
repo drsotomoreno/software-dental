@@ -1,6 +1,14 @@
 import type { TreatmentPhase } from '@/types/clinicalRecord'
 import type { ToothFace, ToothFaceState, ToothGlobalState } from '@/types/odontogram'
 import { getAllToothFaces } from './odontogramMutations'
+import {
+  describeExamAnamnesisVoiceCommand,
+  parseExamAnamnesisVoiceCommand,
+  type ClinicalVoiceScope,
+  type ExamAnamnesisVoiceCommand,
+} from './examAnamnesisVoiceParser'
+
+export type { ClinicalVoiceScope, ExamAnamnesisVoiceCommand } from './examAnamnesisVoiceParser'
 
 const VALID_TOOTH_PATTERN =
   /\b(1[1-8]|2[1-8]|3[1-8]|4[1-8]|5[1-5]|6[1-5]|7[1-5]|8[1-5])\b/g
@@ -162,6 +170,7 @@ export type ClinicalVoiceCommand =
   | BudgetAddCommand
   | DiagnosisToothCommand
   | DiagnosisAdditionalCommand
+  | ExamAnamnesisVoiceCommand
 
 export function normalizeVoiceText(text: string): string {
   return text
@@ -292,7 +301,10 @@ function resolveTargetFaces(text: string, detected: ToothFace[]): ToothFace[] {
  * Parser básico de comandos de voz clínicos (regex).
  * Ej: "Pieza 16 caries en oclusal", "diente 24 ausente", "agregar resina pieza 36 al presupuesto".
  */
-export function parseClinicalVoiceCommand(raw: string): ClinicalVoiceCommand | null {
+export function parseClinicalVoiceCommand(
+  raw: string,
+  scope?: ClinicalVoiceScope,
+): ClinicalVoiceCommand | null {
   const text = normalizeVoiceText(raw)
   if (!text) return null
 
@@ -323,8 +335,10 @@ export function parseClinicalVoiceCommand(raw: string): ClinicalVoiceCommand | n
     }
   }
 
+  const skipOdontogram = scope != null && scope !== 'odontogram'
+
   const globalState = detectGlobalState(text)
-  if (globalState && globalState !== 'presente' && toothNumbers.length > 0) {
+  if (!skipOdontogram && globalState && globalState !== 'presente' && toothNumbers.length > 0) {
     return {
       type: 'odontogram_global',
       toothNumber: toothNumbers[0],
@@ -335,7 +349,7 @@ export function parseClinicalVoiceCommand(raw: string): ClinicalVoiceCommand | n
   }
 
   const faceState = detectFaceState(text)
-  if (faceState && toothNumbers.length > 0) {
+  if (!skipOdontogram && faceState && toothNumbers.length > 0) {
     const faces = resolveTargetFaces(text, extractFaces(text))
     const shouldSuggestPlan =
       addToPlan || faceState === 'caries' || faceState === 'sellante'
@@ -352,7 +366,7 @@ export function parseClinicalVoiceCommand(raw: string): ClinicalVoiceCommand | n
     }
   }
 
-  return null
+  return parseExamAnamnesisVoiceCommand(raw, scope)
 }
 
 export function describeClinicalVoiceCommand(command: ClinicalVoiceCommand): string {
@@ -369,6 +383,15 @@ export function describeClinicalVoiceCommand(command: ClinicalVoiceCommand): str
       return `Diagnóstico pieza ${command.toothNumber}: ${command.searchQuery}`
     case 'diagnosis_additional':
       return `Diagnóstico adicional: ${command.searchQuery}`
+    case 'anamnesis_allergies':
+    case 'anamnesis_diseases':
+    case 'anamnesis_critical_meds':
+    case 'exam_atm':
+    case 'exam_occlusion':
+    case 'exam_plaque_calculus':
+    case 'exam_inflammation':
+    case 'exam_mobility':
+      return describeExamAnamnesisVoiceCommand(command)
     default:
       return 'Comando reconocido'
   }

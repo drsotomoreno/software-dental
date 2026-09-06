@@ -16,7 +16,7 @@ import {
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
 
-import { FieldVoiceHeader } from '@/components/voice'
+import { FieldVoiceHeader, SectionVoiceButton } from '@/components/voice'
 import { ClinicalPrecautionAlertBanner } from './ClinicalPrecautionAlertBanner'
 import { getBloodPressurePrecautionReasons, getClinicalPrecautionAlert } from '@/utils/clinicalPrecautionAlerts'
 import { VitalSignsExamSection } from './VitalSignsExamSection'
@@ -99,7 +99,10 @@ export function VitalAlertsSection({
       />
 
       <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-        <h4 className="mb-2 text-sm font-semibold text-slate-700">Antecedentes — Alergias</h4>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold text-slate-700">Antecedentes — Alergias</h4>
+          {!disabled && <SectionVoiceButton scope="allergies" />}
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <FieldVoiceHeader
@@ -183,9 +186,12 @@ export function VitalAlertsSection({
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-        <h4 className="mb-2 text-sm font-semibold text-slate-700">
-          Antecedentes — Enfermedades Sistémicas
-        </h4>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold text-slate-700">
+            Antecedentes — Enfermedades Sistémicas
+          </h4>
+          {!disabled && <SectionVoiceButton scope="diseases" />}
+        </div>
         {safeAnamnesis.systemicDiseasesNoReporta ? (
           <p className="text-sm text-green-700">No reporta</p>
         ) : (
@@ -251,7 +257,10 @@ export function VitalAlertsSection({
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-        <h4 className="mb-2 text-sm font-semibold text-slate-700">Medicaciones críticas</h4>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold text-slate-700">Medicaciones críticas</h4>
+          {!disabled && <SectionVoiceButton scope="critical_meds" />}
+        </div>
         <div className="grid gap-2 sm:grid-cols-1 lg:grid-cols-2">
           {CRITICAL_MEDICATION_OPTIONS.map((medication) => (
             <label key={medication} className="flex items-start gap-2 text-sm">

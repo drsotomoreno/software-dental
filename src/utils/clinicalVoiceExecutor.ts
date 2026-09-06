@@ -13,11 +13,23 @@ import {
 import { applyFaceStates, applyGlobalState } from './odontogramMutations'
 import { mergeSuggestedTreatments, suggestTreatmentFromOdontogram } from './odontogramTreatmentPlan'
 import { getDefaultCie10SearchEngine } from '@/services/Cie10SearchEngine'
+import { normalizeAnamnesis } from '@/types/anamnesis'
 import {
   describeClinicalVoiceCommand,
   parseClinicalVoiceCommand,
   type ClinicalVoiceCommand,
+  type ClinicalVoiceScope,
 } from './voiceCommandParser'
+import type {
+  AllergiesVoiceCommand,
+  AtmVoiceCommand,
+  CriticalMedicationsVoiceCommand,
+  InflammationBleedingVoiceCommand,
+  MobilityVoiceCommand,
+  OcclusionVoiceCommand,
+  PlaqueCalculusVoiceCommand,
+  SystemicDiseasesVoiceCommand,
+} from './examAnamnesisVoiceParser'
 
 export interface ClinicalVoiceExecutionResult {
   ok: boolean
@@ -121,6 +133,259 @@ function resolveCie10FromVoiceQuery(query: string): { code: string; description:
   const engine = getDefaultCie10SearchEngine()
   const results = engine.search(query, 1)
   return results[0] ?? null
+}
+
+function appendVoiceText(current: string, addition: string | undefined): string {
+  const extra = addition?.trim() ?? ''
+  if (!extra) return current
+  if (!current.trim()) return extra
+  if (current.toLowerCase().includes(extra.toLowerCase())) return current
+  return `${current.trim()}; ${extra}`
+}
+
+function applyAllergiesCommand(
+  clinical: ClinicalRecordFormData,
+  command: AllergiesVoiceCommand,
+): ClinicalRecordFormData {
+  const anamnesis = normalizeAnamnesis(clinical.anamnesis)
+  if (command.noReporta) {
+    return {
+      ...clinical,
+      anamnesis: {
+        ...anamnesis,
+        allergiesNoReporta: true,
+        allergies: { medications: '', anesthesia: '', other: '' },
+      },
+    }
+  }
+
+  const field = command.field ?? 'medications'
+  return {
+    ...clinical,
+    anamnesis: {
+      ...anamnesis,
+      allergiesNoReporta: false,
+      allergies: {
+        ...anamnesis.allergies,
+        [field]: appendVoiceText(anamnesis.allergies[field], command.value),
+      },
+    },
+  }
+}
+
+function applyDiseasesCommand(
+  clinical: ClinicalRecordFormData,
+  command: SystemicDiseasesVoiceCommand,
+): ClinicalRecordFormData {
+  const anamnesis = normalizeAnamnesis(clinical.anamnesis)
+  if (command.noReporta) {
+    return {
+      ...clinical,
+      anamnesis: {
+        ...anamnesis,
+        systemicDiseasesNoReporta: true,
+        systemicDiseases: [],
+        systemicDiseasesOther: '',
+      },
+    }
+  }
+
+  const diseases = [...anamnesis.systemicDiseases]
+  for (const disease of command.diseases ?? []) {
+    if (!diseases.includes(disease)) diseases.push(disease)
+  }
+
+  return {
+    ...clinical,
+    anamnesis: {
+      ...anamnesis,
+      systemicDiseasesNoReporta: false,
+      systemicDiseases: diseases,
+      systemicDiseasesOther: appendVoiceText(anamnesis.systemicDiseasesOther, command.other),
+    },
+  }
+}
+
+function applyCriticalMedsCommand(
+  clinical: ClinicalRecordFormData,
+  command: CriticalMedicationsVoiceCommand,
+): ClinicalRecordFormData {
+  const anamnesis = normalizeAnamnesis(clinical.anamnesis)
+  const medications = [...anamnesis.criticalMedications]
+  for (const medication of command.medications) {
+    if (!medications.includes(medication)) medications.push(medication)
+  }
+  return {
+    ...clinical,
+    anamnesis: {
+      ...anamnesis,
+      criticalMedications: medications,
+    },
+  }
+}
+
+function applyAtmCommand(
+  clinical: ClinicalRecordFormData,
+  command: AtmVoiceCommand,
+): ClinicalRecordFormData {
+  const exam = clinical.stomatologicalExam
+  if (command.isNormal) {
+    return {
+      ...clinical,
+      stomatologicalExam: {
+        ...exam,
+        atm: { isNormal: true, clicks: '', pain: '', deviation: '', notes: command.notes ?? '' },
+      },
+    }
+  }
+
+  return {
+    ...clinical,
+    stomatologicalExam: {
+      ...exam,
+      atm: {
+        ...exam.atm,
+        isNormal: false,
+        clicks: command.clicks ?? exam.atm.clicks,
+        pain: command.pain ?? exam.atm.pain,
+        deviation: command.deviation ?? exam.atm.deviation,
+        notes: appendVoiceText(exam.atm.notes, command.notes),
+      },
+    },
+  }
+}
+
+function applyOcclusionCommand(
+  clinical: ClinicalRecordFormData,
+  command: OcclusionVoiceCommand,
+): ClinicalRecordFormData {
+  const exam = clinical.stomatologicalExam
+  const current = exam.occlusion
+  if (command.isNormal) {
+    return {
+      ...clinical,
+      stomatologicalExam: {
+        ...exam,
+        occlusion: {
+          ...current,
+          isNormal: true,
+          crossbite: false,
+          crossbiteType: null,
+          openbite: false,
+          deepBite: false,
+          molarRight: 'I',
+          molarLeft: 'I',
+          canineLeft: 'I',
+          canineRight: 'I',
+          notes: current.notes || 'Oclusión normal',
+        },
+      },
+    }
+  }
+
+  return {
+    ...clinical,
+    stomatologicalExam: {
+      ...exam,
+      occlusion: {
+        ...current,
+        isNormal: false,
+        molarRight: command.molarRight ?? current.molarRight,
+        molarLeft: command.molarLeft ?? current.molarLeft,
+        canineLeft: command.canineLeft ?? current.canineLeft,
+        canineRight: command.canineRight ?? current.canineRight,
+        crossbite: command.crossbite ?? current.crossbite,
+        crossbiteType:
+          command.crossbiteType !== undefined ? command.crossbiteType : current.crossbiteType,
+        openbite: command.openbite ?? current.openbite,
+        deepBite: command.deepBite ?? current.deepBite,
+        notes: appendVoiceText(current.notes, command.notes),
+      },
+    },
+  }
+}
+
+function applyPlaqueCalculusCommand(
+  clinical: ClinicalRecordFormData,
+  command: PlaqueCalculusVoiceCommand,
+): ClinicalRecordFormData {
+  const exam = clinical.stomatologicalExam
+  const periodontium = exam.periodontium
+  return {
+    ...clinical,
+    stomatologicalExam: {
+      ...exam,
+      periodontium: {
+        ...periodontium,
+        isNormal: false,
+        plaqueCalculus: {
+          hygiene: command.hygiene ?? periodontium.plaqueCalculus.hygiene,
+          calculusPresent:
+            command.calculusPresent ?? periodontium.plaqueCalculus.calculusPresent,
+        },
+      },
+    },
+  }
+}
+
+function applyInflammationCommand(
+  clinical: ClinicalRecordFormData,
+  command: InflammationBleedingVoiceCommand,
+): ClinicalRecordFormData {
+  const exam = clinical.stomatologicalExam
+  const periodontium = exam.periodontium
+  const gingivitisPresent = command.gingivitisPresent ?? periodontium.gingivitis.present
+  return {
+    ...clinical,
+    stomatologicalExam: {
+      ...exam,
+      periodontium: {
+        ...periodontium,
+        isNormal: false,
+        inflammationBleeding: {
+          bleedingOnBrushing:
+            command.bleedingOnBrushing ?? periodontium.inflammationBleeding.bleedingOnBrushing,
+          bleedingOnProbing:
+            command.bleedingOnProbing ?? periodontium.inflammationBleeding.bleedingOnProbing,
+          erythema: command.erythema ?? periodontium.inflammationBleeding.erythema,
+          edema: command.edema ?? periodontium.inflammationBleeding.edema,
+        },
+        gingivitis: {
+          present: gingivitisPresent,
+          type:
+            gingivitisPresent === 'si'
+              ? command.gingivitisType ?? periodontium.gingivitis.type
+              : '',
+        },
+      },
+    },
+  }
+}
+
+function applyMobilityCommand(
+  clinical: ClinicalRecordFormData,
+  command: MobilityVoiceCommand,
+): ClinicalRecordFormData {
+  const exam = clinical.stomatologicalExam
+  const periodontium = exam.periodontium
+  const present = command.present ?? periodontium.mobility.present
+  return {
+    ...clinical,
+    stomatologicalExam: {
+      ...exam,
+      periodontium: {
+        ...periodontium,
+        isNormal: false,
+        mobility: {
+          present,
+          affectedTeeth:
+            present === 'si'
+              ? appendVoiceText(periodontium.mobility.affectedTeeth, command.affectedTeeth)
+              : '',
+        },
+      },
+    },
+  }
 }
 
 export function executeClinicalVoiceCommand(
@@ -276,6 +541,46 @@ export function executeClinicalVoiceCommand(
       handlers.setClinicalData(updatedClinical)
       break
     }
+
+    case 'anamnesis_allergies':
+      updatedClinical = applyAllergiesCommand(clinical, command)
+      handlers.setClinicalData(updatedClinical)
+      break
+
+    case 'anamnesis_diseases':
+      updatedClinical = applyDiseasesCommand(clinical, command)
+      handlers.setClinicalData(updatedClinical)
+      break
+
+    case 'anamnesis_critical_meds':
+      updatedClinical = applyCriticalMedsCommand(clinical, command)
+      handlers.setClinicalData(updatedClinical)
+      break
+
+    case 'exam_atm':
+      updatedClinical = applyAtmCommand(clinical, command)
+      handlers.setClinicalData(updatedClinical)
+      break
+
+    case 'exam_occlusion':
+      updatedClinical = applyOcclusionCommand(clinical, command)
+      handlers.setClinicalData(updatedClinical)
+      break
+
+    case 'exam_plaque_calculus':
+      updatedClinical = applyPlaqueCalculusCommand(clinical, command)
+      handlers.setClinicalData(updatedClinical)
+      break
+
+    case 'exam_inflammation':
+      updatedClinical = applyInflammationCommand(clinical, command)
+      handlers.setClinicalData(updatedClinical)
+      break
+
+    case 'exam_mobility':
+      updatedClinical = applyMobilityCommand(clinical, command)
+      handlers.setClinicalData(updatedClinical)
+      break
   }
 
   const summary = describeClinicalVoiceCommand(command)
@@ -310,8 +615,9 @@ export function executeClinicalVoiceCommand(
 export function processClinicalVoiceTranscript(
   transcript: string,
   handlers = getClinicalVoiceHandlers(),
+  scope?: ClinicalVoiceScope,
 ): ClinicalVoiceExecutionResult {
-  const command = parseClinicalVoiceCommand(transcript)
+  const command = parseClinicalVoiceCommand(transcript, scope)
   if (!command) {
     return {
       ok: false,

@@ -11,7 +11,8 @@ import {
   CLINICAL_SECTION_TITLE_CLASS,
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
-import { VoiceDictationButton } from '@/components/voice'
+import { VoiceDictationButton, SectionVoiceButton } from '@/components/voice'
+import type { ClinicalVoiceScope } from '@/utils/voiceCommandParser'
 import { ClinicalPrecautionAlertBanner } from './ClinicalPrecautionAlertBanner'
 import { getClinicalPrecautionAlert } from '@/utils/clinicalPrecautionAlerts'
 import { NoReportaCheckbox } from './TodoNormalControl'
@@ -28,6 +29,7 @@ interface SectionHeaderProps {
   noReporta: boolean
   onNoReportaChange: (checked: boolean) => void
   disabled?: boolean
+  voiceScope?: ClinicalVoiceScope
 }
 
 function SectionHeader({
@@ -35,15 +37,19 @@ function SectionHeader({
   noReporta,
   onNoReportaChange,
   disabled = false,
+  voiceScope,
 }: SectionHeaderProps) {
   return (
     <div className="mb-3 flex items-center justify-between gap-2">
       <h4 className="text-sm font-semibold text-slate-700">{title}</h4>
-      <NoReportaCheckbox
-        checked={noReporta}
-        disabled={disabled}
-        onChange={onNoReportaChange}
-      />
+      <div className="flex items-center gap-2">
+        {voiceScope && !disabled && <SectionVoiceButton scope={voiceScope} />}
+        <NoReportaCheckbox
+          checked={noReporta}
+          disabled={disabled}
+          onChange={onNoReportaChange}
+        />
+      </div>
     </div>
   )
 }
@@ -231,14 +237,27 @@ export function AnamnesisForm({
             noReporta={anamnesis.allergiesNoReporta ?? false}
             onNoReportaChange={setAllergiesNoReporta}
             disabled={disabled}
+            voiceScope="allergies"
           />
           {anamnesis.allergiesNoReporta ? (
             <p className="text-sm text-green-700">{NO_REPORTA_LABEL}</p>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <label className="label-field">Medicamentos</label>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <label className="label-field mb-0" htmlFor="anamnesis-allergy-meds">
+                    Medicamentos
+                  </label>
+                  {!disabled && (
+                    <VoiceDictationButton
+                      targetInputId="anamnesis-allergy-meds"
+                      getValue={() => anamnesis.allergies.medications}
+                      onValueChange={(medications) => updateAllergies({ medications })}
+                    />
+                  )}
+                </div>
                 <input
+                  id="anamnesis-allergy-meds"
                   disabled={disabled}
                   value={anamnesis.allergies.medications}
                   onChange={(e) => updateAllergies({ medications: e.target.value })}
@@ -247,8 +266,20 @@ export function AnamnesisForm({
                 />
               </div>
               <div>
-                <label className="label-field">Anestesia</label>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <label className="label-field mb-0" htmlFor="anamnesis-allergy-anesthesia">
+                    Anestesia
+                  </label>
+                  {!disabled && (
+                    <VoiceDictationButton
+                      targetInputId="anamnesis-allergy-anesthesia"
+                      getValue={() => anamnesis.allergies.anesthesia}
+                      onValueChange={(anesthesia) => updateAllergies({ anesthesia })}
+                    />
+                  )}
+                </div>
                 <input
+                  id="anamnesis-allergy-anesthesia"
                   disabled={disabled}
                   value={anamnesis.allergies.anesthesia}
                   onChange={(e) => updateAllergies({ anesthesia: e.target.value })}
@@ -257,8 +288,20 @@ export function AnamnesisForm({
                 />
               </div>
               <div className="sm:col-span-2">
-                <label className="label-field">Otras Alergias</label>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <label className="label-field mb-0" htmlFor="anamnesis-allergy-other">
+                    Otras Alergias
+                  </label>
+                  {!disabled && (
+                    <VoiceDictationButton
+                      targetInputId="anamnesis-allergy-other"
+                      getValue={() => anamnesis.allergies.other}
+                      onValueChange={(other) => updateAllergies({ other })}
+                    />
+                  )}
+                </div>
                 <input
+                  id="anamnesis-allergy-other"
                   disabled={disabled}
                   value={anamnesis.allergies.other}
                   onChange={(e) => updateAllergies({ other: e.target.value })}
@@ -280,6 +323,7 @@ export function AnamnesisForm({
             noReporta={anamnesis.systemicDiseasesNoReporta ?? false}
             onNoReportaChange={setSystemicDiseasesNoReporta}
             disabled={disabled}
+            voiceScope="diseases"
           />
           {anamnesis.systemicDiseasesNoReporta ? (
             <p className="text-sm text-green-700">{NO_REPORTA_LABEL}</p>
@@ -300,8 +344,25 @@ export function AnamnesisForm({
                 ))}
               </div>
               <div className="mt-3">
-                <label className="label-field">Otras Enfermedades</label>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <label className="label-field mb-0" htmlFor="anamnesis-systemic-other">
+                    Otras Enfermedades
+                  </label>
+                  {!disabled && (
+                    <VoiceDictationButton
+                      targetInputId="anamnesis-systemic-other"
+                      getValue={() => anamnesis.systemicDiseasesOther}
+                      onValueChange={(systemicDiseasesOther) =>
+                        update({
+                          systemicDiseasesOther,
+                          systemicDiseasesNoReporta: false,
+                        })
+                      }
+                    />
+                  )}
+                </div>
                 <input
+                  id="anamnesis-systemic-other"
                   disabled={disabled}
                   value={anamnesis.systemicDiseasesOther}
                   onChange={(e) =>
@@ -318,7 +379,10 @@ export function AnamnesisForm({
         </div>
 
         <div className="border-t border-slate-100 pt-6">
-          <h4 className="mb-3 text-sm font-semibold text-slate-700">Medicaciones críticas</h4>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-slate-700">Medicaciones críticas</h4>
+            {!disabled && <SectionVoiceButton scope="critical_meds" />}
+          </div>
           <div className="grid gap-2 sm:grid-cols-1 lg:grid-cols-2">
             {CRITICAL_MEDICATION_OPTIONS.map((medication) => (
               <label key={medication} className="flex items-start gap-2 text-sm">

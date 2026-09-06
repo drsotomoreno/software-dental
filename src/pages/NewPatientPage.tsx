@@ -19,6 +19,8 @@ import {
   recordValuationConsentAudit,
 } from '@/utils/valuationConsent'
 import { savePatientValuationDraft } from '@/utils/patientClinicalDraft'
+import { useClinicalVoiceRegistry } from '@/hooks/useClinicalVoiceRegistry'
+import { VoiceClinicalAssistant } from '@/components/voice'
 
 const initialForm: PatientFormData = {
   documentType: 'CC',
@@ -55,7 +57,7 @@ export function NewPatientPage() {
   const { audit } = useAudit()
 
   const [form, setForm] = useState<PatientFormData>(initialForm)
-  const [odontogram] = useState<OdontogramData>(() =>
+  const [odontogram, setOdontogram] = useState<OdontogramData>(() =>
     createDefaultOdontogram('draft', ALL_TEETH_NUMBERS, 'permanente'),
   )
   const [clinicalData, setClinicalData] = useState<ClinicalRecordFormData | null>(null)
@@ -74,6 +76,14 @@ export function NewPatientPage() {
       setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
     }
   }, [clinicalData, professionalLicense])
+
+  useClinicalVoiceRegistry(
+    odontogram,
+    setOdontogram,
+    clinicalData,
+    setClinicalData,
+    false,
+  )
 
   const resetValuationProgress = () => {
     setBudgetAccepted(false)
@@ -228,13 +238,16 @@ export function NewPatientPage() {
       )}
 
       {clinicalData && (
-        <RapidValuationForm
+        <div className="space-y-4">
+          <VoiceClinicalAssistant context="anamnesis" />
+          <RapidValuationForm
           patientData={form}
           onPatientDataChange={(data) => {
             setForm(data)
             resetValuationProgress()
           }}
           initialData={clinicalData}
+          odontogram={odontogram}
           onChange={(data) => {
             setClinicalData(data)
             resetValuationProgress()
@@ -251,6 +264,7 @@ export function NewPatientPage() {
           onAcceptTreatment={handleAcceptTreatment}
           disabled={false}
         />
+        </div>
       )}
 
       {budgetAccepted && consentMetadata && (
