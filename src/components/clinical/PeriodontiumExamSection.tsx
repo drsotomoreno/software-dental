@@ -17,7 +17,7 @@ import {
   getExamFindingCie10,
 } from '@/types/stomatologicalExam'
 import { ExamFindingInputWithCie10 } from './ExamFindingInputWithCie10'
-import { VoiceDictationButton } from '@/components/voice'
+import { VoiceDictationButton, SectionVoiceButton } from '@/components/voice'
 
 interface PeriodontiumExamSectionProps {
   data: PeriodontiumExam
@@ -156,9 +156,12 @@ export function PeriodontiumExamSection({
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <h5 className="mb-3 text-sm font-semibold text-slate-800">
-          Presencia/Absencia de placa y cálculo
-        </h5>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h5 className="text-sm font-semibold text-slate-800">
+            Presencia/Absencia de placa y cálculo
+          </h5>
+          {!disabled && <SectionVoiceButton scope="plaque_calculus" />}
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <HygieneSelect
             value={data.plaqueCalculus.hygiene}
@@ -175,9 +178,12 @@ export function PeriodontiumExamSection({
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <h5 className="mb-3 text-sm font-semibold text-slate-800">
-          Signos de inflamación y sangrado
-        </h5>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h5 className="text-sm font-semibold text-slate-800">
+            Signos de inflamación y sangrado
+          </h5>
+          {!disabled && <SectionVoiceButton scope="inflammation" />}
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <YesNoSelect
             label="Sangrado al cepillado"
@@ -229,7 +235,10 @@ export function PeriodontiumExamSection({
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <h5 className="mb-3 text-sm font-semibold text-slate-800">Movilidad dental</h5>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h5 className="text-sm font-semibold text-slate-800">Movilidad dental</h5>
+          {!disabled && <SectionVoiceButton scope="mobility" />}
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <YesNoSelect
             label="¿Existe movilidad?"

@@ -193,16 +193,19 @@ export function PatientDetailPage() {
   const skipPatientIdentificationAutoSaveRef = useRef(true)
 
   const clinicalVoiceContext: ClinicalVoiceContext =
-    activeSection === 'examen'
-      ? 'examen'
-      : activeSection === 'odontograma'
-        ? 'odontograma'
-        : activeSection === 'diagnosticos'
-          ? 'diagnosticos'
-          : 'general'
+    activeSection === 'anamnesis'
+      ? 'anamnesis'
+      : activeSection === 'examen'
+        ? 'examen'
+        : activeSection === 'odontograma'
+          ? 'odontograma'
+          : activeSection === 'diagnosticos'
+            ? 'diagnosticos'
+            : 'general'
 
   const showClinicalVoiceAssistant =
     activeSection === 'all' ||
+    activeSection === 'anamnesis' ||
     activeSection === 'examen' ||
     activeSection === 'odontograma' ||
     activeSection === 'diagnosticos'
@@ -1694,8 +1697,11 @@ export function PatientDetailPage() {
 
         <div className="space-y-4">
 
-          {showClinicalVoiceAssistant && !showRapidValuation && (
-            <VoiceClinicalAssistant disabled={livingChartLocked} context={clinicalVoiceContext} />
+          {(showClinicalVoiceAssistant || showRapidValuation) && (
+            <VoiceClinicalAssistant
+              disabled={livingChartLocked}
+              context={showRapidValuation ? 'anamnesis' : clinicalVoiceContext}
+            />
           )}
 
         {showRapidValuation && patientForm ? (

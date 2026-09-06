@@ -4,19 +4,25 @@ import {
   processClinicalVoiceTranscript,
   type ClinicalVoiceExecutionResult,
 } from './clinicalVoiceExecutor'
+import type { ClinicalVoiceScope } from './voiceCommandParser'
 
 function getSpeechRecognitionCtor(): SpeechRecognitionConstructor | null {
   if (typeof window === 'undefined') return null
   return window.SpeechRecognition ?? window.webkitSpeechRecognition ?? null
 }
 
+export interface ClinicalVoiceAssistantOptions {
+  scope?: ClinicalVoiceScope
+}
+
 /**
  * Asistente de voz clínico: escucha frases estructuradas y ejecuta comandos
- * (odontograma, plan de tratamiento, presupuesto).
+ * (anamnesis, examen, odontograma, plan de tratamiento, presupuesto).
  */
 export function activarAsistenteVozClinico(
   onResult: (result: ClinicalVoiceExecutionResult) => void,
   onState?: VoiceDictationCallback,
+  options?: ClinicalVoiceAssistantOptions,
 ): VoiceDictationController | null {
   const Ctor = getSpeechRecognitionCtor()
   if (!Ctor) {
@@ -51,7 +57,11 @@ export function activarAsistenteVozClinico(
       const text = result[0]?.transcript ?? ''
       if (result.isFinal) {
         pendingFinal = `${pendingFinal} ${text}`.trim()
-        const execution = processClinicalVoiceTranscript(pendingFinal)
+        const execution = processClinicalVoiceTranscript(
+          pendingFinal,
+          undefined,
+          options?.scope,
+        )
         onResult(execution)
         pendingFinal = ''
         interim = ''

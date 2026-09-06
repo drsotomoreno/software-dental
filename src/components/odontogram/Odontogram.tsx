@@ -40,6 +40,7 @@ import {
 } from '@/constants/clinicalHistorySections'
 import { OdontogramArch } from './OdontogramArch'
 import { OdontogramSupplementaryFindingsForm } from './OdontogramSupplementaryFindings'
+import { SectionVoiceButton } from '@/components/voice'
 
 interface OdontogramProps {
   data: OdontogramData
@@ -114,16 +115,19 @@ export function Odontogram({ data, onChange, disabled = false }: OdontogramProps
   return (
     <div className="card">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className={CLINICAL_SECTION_TITLE_CLASS}>
-            {clinicalSectionTitle(
-              CLINICAL_HISTORY_SECTION_NUMBERS.odontograma,
-              'Odontograma (Sistema FDI / ISO 3950)',
-            )}
-          </h3>
-          <p className="text-sm text-slate-500">
-            Seleccione herramienta de color y haga clic en la superficie (V, M, O/I, D, L)
-          </p>
+        <div className="flex flex-wrap items-start gap-3">
+          <div>
+            <h3 className={CLINICAL_SECTION_TITLE_CLASS}>
+              {clinicalSectionTitle(
+                CLINICAL_HISTORY_SECTION_NUMBERS.odontograma,
+                'Odontograma (Sistema FDI / ISO 3950)',
+              )}
+            </h3>
+            <p className="text-sm text-slate-500">
+              Seleccione herramienta de color y haga clic en la superficie (V, M, O/I, D, L)
+            </p>
+          </div>
+          {!disabled && <SectionVoiceButton scope="odontogram" />}
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
