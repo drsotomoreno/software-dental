@@ -89,8 +89,8 @@ export function DiagnosticAidOpenMenu({
         </div>
 
         <p className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-500">
-          Los visores online abren en una pestaña nueva. La descarga permite usar software local
-          (Medit, exocad, RadiAnt, Romexis, etc.).
+          Los visores in-app funcionan sin conexión. Los visores online y la descarga
+          siguen disponibles como alternativa (Medit, exocad, RadiAnt, Romexis, etc.).
         </p>
       </div>
     </div>

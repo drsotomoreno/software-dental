@@ -10,4 +10,7 @@ contextBridge.exposeInMainWorld('desktopBridge', {
   openPathWithProgram: (filePath, programPath) =>
     ipcRenderer.invoke('diagnostic:open-with-program', filePath, programPath),
   printThermalHtml: (html) => ipcRenderer.invoke('thermal:print-html', html),
+  readDiagnosticFile: (filePath) => ipcRenderer.invoke('imaging:read-file', filePath),
+  convertStlToGlb: (filePath) => ipcRenderer.invoke('imaging:convert-stl', filePath),
+  extractDicomFile: (filePath) => ipcRenderer.invoke('imaging:extract-dicom', filePath),
 })

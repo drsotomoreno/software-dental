@@ -4,6 +4,7 @@ import {
   deleteDiagnosticAidBlob,
   saveDiagnosticAidBlob,
 } from '@/services/diagnosticAidBlobStore'
+import { deleteDerivativesForAid } from '@/services/diagnosticAidDerivativeStore'
 import type { UserProfile } from '@/types/user'
 import type { DiagnosticAid, DiagnosticAidFileType } from '@/types/diagnosticAid'
 import { getDesktopBridge, isDesktopApp } from '@/types/desktopBridge'
@@ -11,6 +12,7 @@ import { generateId } from '@/utils/crypto'
 import {
   hasLocalDiskPath,
   inferDiagnosticAidFileTypeFromName,
+  inferStudyKindFromFileName,
   isBrowserStoredDiagnosticAid,
 } from '@/utils/diagnosticAidWebClassification'
 import {
@@ -134,20 +136,28 @@ export async function registerDiagnosticAid(
   input: RegisterDiagnosticAidInput,
 ): Promise<DiagnosticAid> {
   const fileHash = await generateFileHash(input.absolutePath)
+  const fileType = input.fileType ?? inferDiagnosticAidFileType(input.fileName)
+  const studyKind = inferStudyKindFromFileName(input.fileName)
   const entry: DiagnosticAid = {
     id: generateId(),
     patientId: input.patientId,
     encounterId: input.encounterId,
-    fileType: input.fileType ?? inferDiagnosticAidFileType(input.fileName),
+    fileType,
     fileName: input.fileName,
     absolutePath: input.absolutePath,
     fileHash,
     createdAt: new Date().toISOString(),
     receivedAt: input.receivedAt?.trim() || new Date().toISOString(),
     comments: input.comments?.trim() ?? '',
+    studyKind,
+    viewerStatus: 'processing',
+    viewerError: '',
   }
 
   await db.diagnosticAids.add(entry)
+  void import('@/imaging/derivativeJobs').then(({ enqueueDerivativeJobForEntry }) =>
+    enqueueDerivativeJobForEntry(entry),
+  )
 
   await logAuditEvent({
     action: 'UPLOAD_DIAGNOSTIC_AID',
@@ -185,11 +195,14 @@ export async function registerDiagnosticAidFromBrowserFile(
     bridge?.isElectron && fileWithPath.path ? fileWithPath.path : file,
   )
 
+  const fileType = input.fileType ?? inferDiagnosticAidFileType(file.name)
+  const studyKind = inferStudyKindFromFileName(file.name)
+
   const entry: DiagnosticAid = {
     id: entryId,
     patientId: input.patientId,
     encounterId: input.encounterId,
-    fileType: input.fileType ?? inferDiagnosticAidFileType(file.name),
+    fileType,
     fileName: file.name,
     absolutePath,
     blobId,
@@ -197,9 +210,15 @@ export async function registerDiagnosticAidFromBrowserFile(
     createdAt: new Date().toISOString(),
     receivedAt: input.receivedAt?.trim() || new Date().toISOString(),
     comments: input.comments?.trim() ?? '',
+    studyKind,
+    viewerStatus: 'processing',
+    viewerError: '',
   }
 
   await db.diagnosticAids.add(entry)
+  void import('@/imaging/derivativeJobs').then(({ enqueueDerivativeJobForEntry }) =>
+    enqueueDerivativeJobForEntry(entry),
+  )
 
   await logAuditEvent({
     action: 'UPLOAD_DIAGNOSTIC_AID',
@@ -372,6 +391,7 @@ export async function deleteDiagnosticAid(id: string, user?: UserProfile | null)
   const entry = await db.diagnosticAids.get(id)
   if (!entry) return
   await deleteDiagnosticAidBlob(id)
+  await deleteDerivativesForAid(id)
   await db.diagnosticAids.delete(id)
   await logAuditEvent({
     action: 'DELETE_DIAGNOSTIC_AID',

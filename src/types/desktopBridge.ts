@@ -23,6 +23,10 @@ export interface DesktopBridge {
   openPathWithProgram(filePath: string, programPath: string): Promise<string>
   /** Imprime HTML de ticket térmico 80 mm (diálogo nativo de impresión). */
   printThermalHtml(html: string): Promise<void>
+  /** Lee un archivo de disco para generar derivados del visor in-app. */
+  readDiagnosticFile(filePath: string): Promise<ArrayBuffer>
+  convertStlToGlb(filePath: string): Promise<ArrayBuffer>
+  extractDicomFile(filePath: string): Promise<ArrayBuffer>
 }
 
 declare global {

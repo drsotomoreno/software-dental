@@ -26,12 +26,16 @@ export type ParsedBackupInput =
   | { kind: 'encrypted'; file: EncryptedBackupFile }
   | { kind: 'plain'; payload: BackupPayload }
 
-interface SerializedDiagnosticAidBlob {
+interface SerializedBinaryRow {
   id: string
   aidId: string
-  fileName: string
+  fileName?: string
+  kind?: string
+  plane?: string
+  index?: number
   mimeType: string
   dataBase64: string
+  bytes?: number
   createdAt: string
 }
 
@@ -54,7 +58,7 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return bytes.buffer
 }
 
-function serializeDiagnosticAidBlobs(rows: unknown[]): SerializedDiagnosticAidBlob[] {
+function serializeDiagnosticAidBlobs(rows: unknown[]): SerializedBinaryRow[] {
   return rows.map((row) => {
     const blob = row as {
       id: string
@@ -82,7 +86,7 @@ function serializeDiagnosticAidBlobs(rows: unknown[]): SerializedDiagnosticAidBl
 function deserializeDiagnosticAidBlobs(rows: unknown[] | undefined): unknown[] {
   if (!rows?.length) return []
   return rows.map((row) => {
-    const blob = row as SerializedDiagnosticAidBlob & { data?: ArrayBuffer }
+    const blob = row as SerializedBinaryRow & { data?: ArrayBuffer; fileName?: string }
     if (blob.data instanceof ArrayBuffer) return blob
     if (typeof blob.dataBase64 === 'string' && blob.dataBase64.length > 0) {
       return {
@@ -95,6 +99,60 @@ function deserializeDiagnosticAidBlobs(rows: unknown[] | undefined): unknown[] {
       }
     }
     return blob
+  })
+}
+
+function serializeDiagnosticAidDerivatives(rows: unknown[]): SerializedBinaryRow[] {
+  return rows.map((row) => {
+    const item = row as {
+      id: string
+      aidId: string
+      kind: string
+      plane?: string
+      index?: number
+      mimeType: string
+      data?: ArrayBuffer
+      dataBase64?: string
+      bytes?: number
+      createdAt: string
+    }
+    const dataBase64 =
+      item.dataBase64 ??
+      (item.data instanceof ArrayBuffer ? arrayBufferToBase64(item.data) : '')
+    return {
+      id: item.id,
+      aidId: item.aidId,
+      kind: item.kind,
+      plane: item.plane,
+      index: item.index,
+      mimeType: item.mimeType,
+      dataBase64,
+      bytes: item.bytes ?? (item.data instanceof ArrayBuffer ? item.data.byteLength : 0),
+      createdAt: item.createdAt,
+    }
+  })
+}
+
+function deserializeDiagnosticAidDerivatives(rows: unknown[] | undefined): unknown[] {
+  if (!rows?.length) return []
+  return rows.map((row) => {
+    const item = row as SerializedBinaryRow & { data?: ArrayBuffer }
+    if (item.data instanceof ArrayBuffer) return item
+    if (typeof item.dataBase64 === 'string' && item.dataBase64.length > 0) {
+      const data = base64ToArrayBuffer(item.dataBase64)
+      return {
+        id: item.id,
+        aidId: item.aidId,
+        kind: item.kind,
+        plane: item.plane,
+        index: item.index,
+        mimeType: item.mimeType,
+        data,
+        bytes: item.bytes ?? data.byteLength,
+        createdAt: item.createdAt,
+      }
+    }
+    return item
   })
 }
 
@@ -212,6 +270,7 @@ export async function collectBackupPayload(exportedBy: string | null): Promise<B
     catalogItems,
     diagnosticAids,
     diagnosticAidBlobs,
+    diagnosticAidDerivatives,
     dentalServices,
     dentalServiceSpecialties,
     professionals,
@@ -239,6 +298,7 @@ export async function collectBackupPayload(exportedBy: string | null): Promise<B
     db.catalogItems.toArray(),
     db.diagnosticAids.toArray(),
     db.diagnosticAidBlobs.toArray(),
+    db.diagnosticAidDerivatives.toArray(),
     db.dentalServices.toArray(),
     db.dentalServiceSpecialties.toArray(),
     db.professionals.toArray(),
@@ -274,6 +334,7 @@ export async function collectBackupPayload(exportedBy: string | null): Promise<B
       catalogItems,
       diagnosticAids,
       diagnosticAidBlobs: serializeDiagnosticAidBlobs(diagnosticAidBlobs),
+      diagnosticAidDerivatives: serializeDiagnosticAidDerivatives(diagnosticAidDerivatives),
       dentalServices,
       dentalServiceSpecialties,
       professionals,
@@ -426,6 +487,7 @@ export async function restoreBackupPayload(payload: BackupPayload): Promise<void
     db.catalogItems,
     db.diagnosticAids,
     db.diagnosticAidBlobs,
+    db.diagnosticAidDerivatives,
     db.dentalServices,
     db.dentalServiceSpecialties,
     db.professionals,
@@ -463,6 +525,10 @@ export async function restoreBackupPayload(payload: BackupPayload): Promise<void
           db.diagnosticAidBlobs,
           deserializeDiagnosticAidBlobs(asRows(data.diagnosticAidBlobs)),
         ),
+        bulkPutIfAny(
+          db.diagnosticAidDerivatives,
+          deserializeDiagnosticAidDerivatives(asRows(data.diagnosticAidDerivatives)),
+        ),
         bulkPutIfAny(db.dentalServices, data.dentalServices),
         bulkPutIfAny(db.dentalServiceSpecialties, data.dentalServiceSpecialties),
         bulkPutIfAny(db.professionals, data.professionals),
@@ -479,7 +545,9 @@ export async function restoreBackupPayload(payload: BackupPayload): Promise<void
 
   const billing = await db.clinicBillingSettings.get(CLINIC_BILLING_SETTINGS_ID)
   if (billing) {
-    const { id: _id, updatedAt: _updatedAt, ...settings } = billing
+    const { id, updatedAt, ...settings } = billing
+    void id
+    void updatedAt
     saveBillingModalitySettings(settings)
   }
 }

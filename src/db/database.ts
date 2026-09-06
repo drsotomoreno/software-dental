@@ -13,7 +13,11 @@ import type { EvolutionNoteAddendum } from '@/types/evolutionNoteAddendum'
 import type { SyncOutboxEntry } from '@/types/syncOutbox'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import type { CatalogItem, CatalogMeta } from '@/types/catalog'
-import type { DiagnosticAid, DiagnosticAidBlobRecord } from '@/types/diagnosticAid'
+import type {
+  DiagnosticAid,
+  DiagnosticAidBlobRecord,
+  DiagnosticAidDerivative,
+} from '@/types/diagnosticAid'
 import type {
   DentalService,
   DentalServiceAuthorizedSpecialty,
@@ -54,6 +58,7 @@ export class DentalDatabase extends Dexie {
   catalogItems!: EntityTable<CatalogItem, 'id'>
   diagnosticAids!: EntityTable<DiagnosticAid, 'id'>
   diagnosticAidBlobs!: EntityTable<DiagnosticAidBlobRecord, 'id'>
+  diagnosticAidDerivatives!: EntityTable<DiagnosticAidDerivative, 'id'>
   dentalServices!: EntityTable<DentalService, 'id'>
   dentalServiceSpecialties!: EntityTable<DentalServiceAuthorizedSpecialty, 'id'>
   professionals!: EntityTable<Professional, 'id'>
@@ -628,6 +633,10 @@ export class DentalDatabase extends Dexie {
           }
         }
       })
+
+    this.version(24).stores({
+      diagnosticAidDerivatives: 'id, aidId, kind, [aidId+kind]',
+    })
   }
 }
 

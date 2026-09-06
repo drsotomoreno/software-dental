@@ -29,6 +29,9 @@ export default defineConfig({
     host: true,
     allowedHosts,
   },
+  worker: {
+    format: 'es',
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

@@ -27,6 +27,8 @@ function registerIpcHandlers() {
             'dcm',
             'dicom',
             'stl',
+            'ply',
+            'obj',
             'jpg',
             'jpeg',
             'png',
@@ -178,6 +180,38 @@ function registerIpcHandlers() {
       return error instanceof Error ? error.message : 'No se pudo iniciar el programa seleccionado.'
     }
   })
+
+  ipcMain.handle('imaging:read-file', async (_event, filePath) => {
+    return readDiagnosticFileBuffer(filePath)
+  })
+
+  ipcMain.handle('imaging:extract-dicom', async (_event, filePath) => {
+    return readDiagnosticFileBuffer(filePath)
+  })
+
+  ipcMain.handle('imaging:convert-stl', async (_event, filePath) => {
+    if (!filePath || typeof filePath !== 'string') {
+      throw new Error('Ruta de archivo inválida.')
+    }
+    const buf = await fs.promises.readFile(filePath)
+    if (buf.byteLength > 250 * 1024 * 1024) {
+      throw new Error('El archivo supera 250 MB y no se puede convertir en esta versión.')
+    }
+    const { convertMeshToGlb } = await import('../shared/imaging/stlToGlb.js')
+    return convertMeshToGlb(buf, path.basename(filePath))
+  })
+}
+
+async function readDiagnosticFileBuffer(filePath) {
+  if (!filePath || typeof filePath !== 'string') {
+    throw new Error('Ruta de archivo inválida.')
+  }
+  const stat = await fs.promises.stat(filePath)
+  if (stat.size > 250 * 1024 * 1024) {
+    throw new Error('El archivo supera 250 MB y no se puede abrir en el visor in-app.')
+  }
+  const buf = await fs.promises.readFile(filePath)
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
 }
 
 function createWindow() {

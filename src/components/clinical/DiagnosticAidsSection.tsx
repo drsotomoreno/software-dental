@@ -1,22 +1,20 @@
-import { useCallback, useRef, useState } from "react";
-
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-
 import {
   ChevronDown,
+  Eye,
   ExternalLink,
   FileUp,
   Loader2,
   Settings2,
   Trash2,
 } from "lucide-react";
-
+import { db } from "@/db/database";
 import {
   CLINICAL_HISTORY_SECTION_NUMBERS,
   CLINICAL_SECTION_TITLE_CLASS,
   clinicalSectionTitle,
 } from "@/constants/clinicalHistorySections";
-
 import {
   deleteDiagnosticAid,
   listDiagnosticAidsForPatient,
@@ -26,33 +24,30 @@ import {
   registerDiagnosticAidFromBrowserFile,
   shouldOpenDiagnosticAidWithWebMenu,
   updateDiagnosticAidComments,
-  updateDiagnosticAidReceivedAt,
 } from "@/services/diagnosticAidService";
-
 import {
   executeDiagnosticAidWebAction,
   type DiagnosticAidWebAction,
 } from "@/services/diagnosticAidWebOpenService";
-
 import {
   DIAGNOSTIC_AID_ACCEPT,
   DIAGNOSTIC_AID_FILE_TYPE_LABELS,
   type DiagnosticAid,
   type DiagnosticAidFileType,
 } from "@/types/diagnosticAid";
-
 import { getDesktopBridge, isDesktopApp } from "@/types/desktopBridge";
-
 import type { UserProfile } from "@/types/user";
-
 import {
   loadDiagnosticAidOpenerPreferences,
   saveDiagnosticAidOpenerPreference,
   type DiagnosticAidOpenerMap,
 } from "@/utils/diagnosticAidOpenerPreferences";
-
-import { isBrowserStoredDiagnosticAid } from "@/utils/diagnosticAidWebClassification";
-
+import {
+  isBrowserStoredDiagnosticAid,
+  isInAppViewable,
+  resolveStudyKind,
+} from "@/utils/diagnosticAidWebClassification";
+import { DiagnosticViewerHost } from "@/viewers/DiagnosticViewerHost";
 import {
   DiagnosticAidOpenMenu,
   DiagnosticAidPreviewModal,
@@ -221,160 +216,150 @@ function DiagnosticAidOpenerSettings({
 
 function DiagnosticAidCard({
   item,
-
   disabled,
-
   openingId,
-
+  thumbUrl,
+  onView,
   onOpenNative,
-
   onOpenWebMenu,
-
   onOpenWithPicker,
-
   onDelete,
-
   onCommentsChange,
-
   preferredProgramName,
 }: {
-  item: DiagnosticAid;
-
-  disabled?: boolean;
-
-  openingId: string | null;
-
-  onOpenNative: (id: string) => void;
-
-  onOpenWebMenu: (item: DiagnosticAid) => void;
-
-  onOpenWithPicker: (id: string) => void;
-
-  onDelete: (id: string) => void;
-
-  onCommentsChange: (id: string, comments: string) => void;
-
-  preferredProgramName?: string | null;
+  item: DiagnosticAid
+  disabled?: boolean
+  openingId: string | null
+  thumbUrl?: string
+  onView: (item: DiagnosticAid) => void
+  onOpenNative: (id: string) => void
+  onOpenWebMenu: (item: DiagnosticAid) => void
+  onOpenWithPicker: (id: string) => void
+  onDelete: (id: string) => void
+  onCommentsChange: (id: string, comments: string) => void
+  preferredProgramName?: string | null
 }) {
-  const isOpening = openingId === item.id;
-
-  const useWebMenu = shouldOpenDiagnosticAidWithWebMenu(item);
-
-  const browserStored = isBrowserStoredDiagnosticAid(item);
+  const isOpening = openingId === item.id
+  const useWebMenu = shouldOpenDiagnosticAidWithWebMenu(item)
+  const browserStored = isBrowserStoredDiagnosticAid(item)
+  const kind = resolveStudyKind(item)
+  const viewable = isInAppViewable(kind)
+  const processing = item.viewerStatus === 'processing'
+  const failed = item.viewerStatus === 'failed'
 
   return (
     <article className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p
-            className="truncate text-sm font-semibold text-slate-800"
-            title={item.fileName}
-          >
-            {item.fileName}
-          </p>
-
-          <p className="mt-1 text-xs text-slate-500">
-            Recepción: {formatDate(item.receivedAt ?? item.createdAt)}
-          </p>
-
-          <p className="mt-1 text-xs text-slate-500">
-            Alta: {formatDate(item.createdAt)}
-          </p>
+        <div className="flex min-w-0 items-start gap-3">
+          {thumbUrl ? (
+            <button
+              type="button"
+              onClick={() => onView(item)}
+              className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-100"
+              aria-label={`Ver ${item.fileName}`}
+            >
+              <img src={thumbUrl} alt="" className="h-full w-full object-cover" />
+            </button>
+          ) : null}
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-800" title={item.fileName}>
+              {item.fileName}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Recepción: {formatDate(item.receivedAt ?? item.createdAt)}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">Alta: {formatDate(item.createdAt)}</p>
+            {processing ? (
+              <p className="mt-1 text-[11px] font-medium text-sky-700">Optimizando para móvil…</p>
+            ) : null}
+            {failed ? (
+              <p className="mt-1 text-[11px] font-medium text-red-700">
+                {item.viewerError || 'No se pudo optimizar el visor.'}
+              </p>
+            ) : null}
+            {item.sliceCount ? (
+              <p className="mt-1 text-[11px] text-slate-500">{item.sliceCount} cortes</p>
+            ) : null}
+          </div>
         </div>
-
         <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
           {DIAGNOSTIC_AID_FILE_TYPE_LABELS[item.fileType]}
         </span>
       </div>
 
-      <p
-        className="truncate font-mono text-[10px] text-slate-400"
-        title={item.absolutePath}
-      >
-        {browserStored ? "Almacenado en este navegador" : item.absolutePath}
+      <p className="truncate font-mono text-[10px] text-slate-400" title={item.absolutePath}>
+        {browserStored ? 'Almacenado en este navegador' : item.absolutePath}
       </p>
-
       <p className="font-mono text-[10px] text-slate-400" title={item.fileHash}>
         SHA-256: {item.fileHash.slice(0, 16)}…
       </p>
-
-      {preferredProgramName && !useWebMenu && (
+      {preferredProgramName && !useWebMenu ? (
         <p className="text-[10px] text-dental-700">
-          Programa asignado:{" "}
-          <span className="font-medium">{preferredProgramName}</span>
+          Programa asignado: <span className="font-medium">{preferredProgramName}</span>
         </p>
-      )}
+      ) : null}
 
-      {!disabled && (
+      {!disabled ? (
         <textarea
           rows={2}
-
           value={item.comments}
-
           onChange={(event) => onCommentsChange(item.id, event.target.value)}
-
           onBlur={(event) => onCommentsChange(item.id, event.target.value)}
-
           placeholder="Comentarios clínicos (opcional)…"
-
           className="input-field resize-y text-xs"
         />
-      )}
-
-      {disabled && item.comments && (
-        <p className="text-xs text-slate-600">{item.comments}</p>
-      )}
+      ) : null}
+      {disabled && item.comments ? <p className="text-xs text-slate-600">{item.comments}</p> : null}
 
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-
-          disabled={disabled || isOpening}
-
-          onClick={() =>
-            useWebMenu ? onOpenWebMenu(item) : onOpenNative(item.id)
-          }
-
-          className="inline-flex items-center gap-1.5 rounded-lg bg-dental-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-dental-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isOpening ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <ExternalLink className="h-3.5 w-3.5" />
-          )}
-          Abrir
-        </button>
-
-        {isDesktopApp() && !useWebMenu && (
+        {viewable ? (
           <button
             type="button"
-
             disabled={disabled || isOpening}
-
+            onClick={() => onView(item)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-dental-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-dental-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isOpening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
+            Ver
+          </button>
+        ) : null}
+        <button
+          type="button"
+          disabled={disabled || isOpening}
+          onClick={() => (useWebMenu ? onOpenWebMenu(item) : onOpenNative(item.id))}
+          className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
+            viewable
+              ? 'border border-dental-200 text-dental-800 hover:bg-dental-50'
+              : 'bg-dental-600 text-white hover:bg-dental-700'
+          }`}
+        >
+          {isOpening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
+          Abrir
+        </button>
+        {isDesktopApp() && !useWebMenu ? (
+          <button
+            type="button"
+            disabled={disabled || isOpening}
             onClick={() => onOpenWithPicker(item.id)}
-
             className="inline-flex items-center gap-1.5 rounded-lg border border-dental-200 px-3 py-1.5 text-xs font-medium text-dental-800 hover:bg-dental-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <ChevronDown className="h-3.5 w-3.5" />
             Elegir programa…
           </button>
-        )}
-
-        {!disabled && (
+        ) : null}
+        {!disabled ? (
           <button
             type="button"
-
             onClick={() => onDelete(item.id)}
-
             className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
           >
             <Trash2 className="h-3.5 w-3.5" />
             Quitar
           </button>
-        )}
+        ) : null}
       </div>
     </article>
-  );
+  )
 }
 
 export function DiagnosticAidsSection({
@@ -393,6 +378,7 @@ export function DiagnosticAidsSection({
   const [openingId, setOpeningId] = useState<string | null>(null);
 
   const [webMenuItem, setWebMenuItem] = useState<DiagnosticAid | null>(null);
+  const [viewerItem, setViewerItem] = useState<DiagnosticAid | null>(null);
 
   const [preview, setPreview] = useState<{
     fileName: string;
@@ -421,11 +407,41 @@ export function DiagnosticAidsSection({
 
   const items = useLiveQuery(
     () => listDiagnosticAidsForPatient(patientId),
-
     [patientId],
-
     [] as DiagnosticAid[],
   );
+
+  const thumbRows = useLiveQuery(
+    () => db.diagnosticAidDerivatives.where('kind').equals('thumb').toArray(),
+    [],
+  );
+
+  const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!thumbRows) return
+    const created: string[] = []
+    const next: Record<string, string> = {}
+    for (const row of thumbRows) {
+      const url = URL.createObjectURL(new Blob([row.data], { type: row.mimeType }))
+      created.push(url)
+      next[row.aidId] = url
+    }
+    setThumbUrls(next)
+    return () => {
+      for (const url of created) URL.revokeObjectURL(url)
+    }
+  }, [thumbRows]);
+
+  const liveViewerItem = viewerItem
+    ? (items.find((entry) => entry.id === viewerItem.id) ?? viewerItem)
+    : null;
+
+  useEffect(() => {
+    void import('@/imaging/derivativeJobs').then(({ resumePendingDerivativeJobs }) =>
+      resumePendingDerivativeJobs(patientId),
+    )
+  }, [patientId]);
 
   const handleUploadElectron = useCallback(async () => {
     const bridge = getDesktopBridge();
@@ -558,6 +574,11 @@ export function DiagnosticAidsSection({
           action,
           user,
         );
+
+        if (result.openInApp) {
+          setViewerItem(webMenuItem);
+          setWebMenuItem(null);
+        }
 
         if (result.previewUrl && result.previewKind) {
           setPreview({
@@ -738,23 +759,16 @@ export function DiagnosticAidsSection({
           {items.map((item) => (
             <DiagnosticAidCard
               key={item.id}
-
               item={item}
-
               disabled={disabled}
-
               openingId={openingId}
-
+              thumbUrl={thumbUrls[item.id]}
+              onView={setViewerItem}
               onOpenNative={(id) => void handleOpenNative(id)}
-
               onOpenWebMenu={setWebMenuItem}
-
               onOpenWithPicker={(id) => void handleOpenNative(id, true)}
-
               onDelete={handleDelete}
-
               onCommentsChange={handleCommentsChange}
-
               preferredProgramName={
                 openerPreferences[item.fileType]?.programName
               }
@@ -775,15 +789,18 @@ export function DiagnosticAidsSection({
 
       <DiagnosticAidPreviewModal
         open={preview != null}
-
         fileName={preview?.fileName ?? ""}
-
         previewUrl={preview?.url ?? null}
-
         previewKind={preview?.kind ?? "image"}
-
         onClose={closePreview}
       />
+      {liveViewerItem ? (
+        <DiagnosticViewerHost
+          item={liveViewerItem}
+          encounterItems={items}
+          onClose={() => setViewerItem(null)}
+        />
+      ) : null}
     </section>
   );
 }
