@@ -66,6 +66,7 @@ interface Window {
   ) => import('@/utils/voiceDictation').VoiceDictationController | null
   parseComandoVozClinico?: typeof import('@/utils/voiceCommandParser').parseClinicalVoiceCommand
   ejecutarComandoVozClinico?: typeof import('@/utils/clinicalVoiceExecutor').processClinicalVoiceTranscript
+  requestExternalHistory?: typeof import('@/utils/requestExternalHistory').requestExternalHistory
   eliminarCita?: (idOrIndex: string | number) => Promise<boolean>
   reasignarCita?: (idOrIndex: string | number) => void
   renderCitas?: () => void

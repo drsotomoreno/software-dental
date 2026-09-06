@@ -210,6 +210,7 @@ export {
 } from './clinicalVoiceExecutor'
 export type { ClinicalVoiceExecutionResult } from './clinicalVoiceExecutor'
 export { activarAsistenteVozClinico } from './clinicalVoiceAssistant'
+export { requestExternalHistory } from './requestExternalHistory'
 export {
   applyEdentulismScope,
   applyFaceState,

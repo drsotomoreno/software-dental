@@ -46,6 +46,8 @@ export interface BackupDataTables {
   evolutionNoteAddendums?: unknown[]
   syncOutbox?: unknown[]
   clinicBillingSettings?: unknown[]
+  ihceConsents?: unknown[]
+  ihceRdaRecords?: unknown[]
 }
 
 export interface BackupPayload {

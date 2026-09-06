@@ -36,6 +36,10 @@ export type AuditAction =
   | 'CREATE_EVOLUTION_NOTE'
   | 'CREATE_EVOLUTION_ADDENDUM'
   | 'BLOCK_EVOLUTION_MUTATION'
+  | 'IHCE_OTP_REQUESTED'
+  | 'IHCE_OTP_VERIFIED'
+  | 'IHCE_OTP_FAILED'
+  | 'IHCE_RDA_DOWNLOADED'
 
 export type AuditResourceType =
   | 'session'
@@ -54,6 +58,7 @@ export type AuditResourceType =
   | 'invoice_ledger'
   | 'route'
   | 'diagnostic_aid'
+  | 'ihce'
 
 export interface AuditLogEntry {
   id: string
@@ -108,4 +113,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   CREATE_EVOLUTION_NOTE: 'Creación nota de evolución clínica',
   CREATE_EVOLUTION_ADDENDUM: 'Creación nota aclaratoria de evolución',
   BLOCK_EVOLUTION_MUTATION: 'Bloqueo edición/eliminación evolución (Res. 1995/1999)',
+  IHCE_OTP_REQUESTED: 'Solicitud OTP historial externo IHCE (RDA)',
+  IHCE_OTP_VERIFIED: 'Validación OTP consentimiento delegado IHCE',
+  IHCE_OTP_FAILED: 'Fallo validación OTP IHCE',
+  IHCE_RDA_DOWNLOADED: 'Descarga Resumen Digital de Atención (RDA)',
 }

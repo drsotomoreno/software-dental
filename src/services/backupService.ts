@@ -222,6 +222,8 @@ export async function collectBackupPayload(exportedBy: string | null): Promise<B
     evolutionNoteAddendums,
     syncOutbox,
     clinicBillingSettings,
+    ihceConsents,
+    ihceRdaRecords,
   ] = await Promise.all([
     db.patients.toArray(),
     db.odontograms.toArray(),
@@ -249,6 +251,8 @@ export async function collectBackupPayload(exportedBy: string | null): Promise<B
     db.evolutionNoteAddendums.toArray(),
     db.syncOutbox.toArray(),
     db.clinicBillingSettings.toArray(),
+    db.ihceConsents.toArray(),
+    db.ihceRdaRecords.toArray(),
   ])
 
   return {
@@ -284,6 +288,8 @@ export async function collectBackupPayload(exportedBy: string | null): Promise<B
       evolutionNoteAddendums,
       syncOutbox,
       clinicBillingSettings,
+      ihceConsents,
+      ihceRdaRecords,
     },
   }
 }
@@ -436,6 +442,8 @@ export async function restoreBackupPayload(payload: BackupPayload): Promise<void
     db.evolutionNoteAddendums,
     db.syncOutbox,
     db.clinicBillingSettings,
+    db.ihceConsents,
+    db.ihceRdaRecords,
   ] as const
 
   await withBackupRestoreUnlock(async () => {
@@ -473,6 +481,8 @@ export async function restoreBackupPayload(payload: BackupPayload): Promise<void
         bulkPutIfAny(db.evolutionNoteAddendums, data.evolutionNoteAddendums),
         bulkPutIfAny(db.syncOutbox, data.syncOutbox),
         bulkPutIfAny(db.clinicBillingSettings, data.clinicBillingSettings),
+        bulkPutIfAny(db.ihceConsents, data.ihceConsents),
+        bulkPutIfAny(db.ihceRdaRecords, data.ihceRdaRecords),
       ])
     })
   })
