@@ -1,10 +1,15 @@
-import type { DiagnosticAid, DiagnosticAidFileType } from '@/types/diagnosticAid'
+import type {
+  DiagnosticAid,
+  DiagnosticAidFileType,
+  DiagnosticAidStudyKind,
+} from '@/types/diagnosticAid'
 
 export type DiagnosticAidWebCategory = 'mesh3d' | 'dicom' | 'media' | 'other'
 
 const MESH3D_EXTENSIONS = new Set(['stl', 'ply', 'obj'])
 const DICOM_EXTENSIONS = new Set(['dcm', 'dicom'])
-const MEDIA_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'pdf', 'gif', 'webp', 'bmp', 'tif', 'tiff'])
+const PHOTO_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff'])
+const MEDIA_EXTENSIONS = new Set([...PHOTO_EXTENSIONS, 'pdf'])
 
 export function getFileExtension(fileName: string): string {
   const parts = fileName.trim().toLowerCase().split('.')
@@ -17,6 +22,27 @@ export function classifyDiagnosticAidForWeb(fileName: string): DiagnosticAidWebC
   if (DICOM_EXTENSIONS.has(extension) || extension === 'zip') return 'dicom'
   if (MEDIA_EXTENSIONS.has(extension)) return 'media'
   return 'other'
+}
+
+export function inferStudyKindFromFileName(fileName: string): DiagnosticAidStudyKind {
+  const extension = getFileExtension(fileName)
+  if (MESH3D_EXTENSIONS.has(extension)) return 'mesh3d'
+  if (extension === 'zip') return 'dicomSeries'
+  if (DICOM_EXTENSIONS.has(extension)) return 'dicom2d'
+  if (PHOTO_EXTENSIONS.has(extension)) return 'photo'
+  return 'other'
+}
+
+export function resolveStudyKind(entry: Pick<DiagnosticAid, 'fileName' | 'studyKind'>): DiagnosticAidStudyKind {
+  return entry.studyKind ?? inferStudyKindFromFileName(entry.fileName)
+}
+
+export function isInAppViewable(kind: DiagnosticAidStudyKind): boolean {
+  return kind === 'photo' || kind === 'dicom2d' || kind === 'dicomSeries' || kind === 'mesh3d'
+}
+
+export function needsDerivativeProcessing(kind: DiagnosticAidStudyKind): boolean {
+  return kind === 'mesh3d' || kind === 'dicom2d' || kind === 'dicomSeries' || kind === 'photo'
 }
 
 export function isBrowserStoredDiagnosticAid(entry: Pick<DiagnosticAid, 'absolutePath' | 'blobId'>): boolean {
@@ -48,6 +74,8 @@ export function mimeTypeForDiagnosticFile(fileName: string): string {
     stl: 'model/stl',
     ply: 'application/ply',
     obj: 'model/obj',
+    glb: 'model/gltf-binary',
+    gltf: 'model/gltf+json',
     dcm: 'application/dicom',
     dicom: 'application/dicom',
     png: 'image/png',

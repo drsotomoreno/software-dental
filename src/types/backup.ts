@@ -36,6 +36,8 @@ export interface BackupDataTables {
   diagnosticAids?: unknown[]
   /** Blobs serializados con `dataBase64` (ArrayBuffer no cabe en JSON). */
   diagnosticAidBlobs?: unknown[]
+  /** Derivados de visor (GLB, cortes WebP, miniaturas) serializados con `dataBase64`. */
+  diagnosticAidDerivatives?: unknown[]
   dentalServices?: unknown[]
   dentalServiceSpecialties?: unknown[]
   professionals?: unknown[]

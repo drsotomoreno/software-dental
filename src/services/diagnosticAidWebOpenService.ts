@@ -14,6 +14,7 @@ export const EXOCAD_WEBVIEW_URL = 'https://webview.dental/'
 export const DICOM_VIEWER_ONLINE_URL = 'https://dicomviewer.net/'
 
 export type DiagnosticAidWebAction =
+  | 'view_in_app'
   | 'open_exocad_webview'
   | 'download_mesh'
   | 'open_dicom_viewer'
@@ -26,6 +27,7 @@ export interface DiagnosticAidWebActionResult {
   message: string
   previewUrl?: string
   previewKind?: 'image' | 'pdf'
+  openInApp?: boolean
 }
 
 async function auditWebOpen(
@@ -64,9 +66,15 @@ export function getWebOpenActions(entry: DiagnosticAid): Array<{
 }> {
   const category = classifyDiagnosticAidForWeb(entry.fileName)
   const hasBlob = Boolean(entry.blobId)
+  const viewAction = {
+    id: 'view_in_app' as const,
+    label: 'Ver en la app',
+    icon: 'eye' as const,
+  }
 
   if (category === 'mesh3d') {
     return [
+      viewAction,
       { id: 'open_exocad_webview', label: 'Abrir en exocad webview', icon: 'globe' },
       {
         id: 'download_mesh',
@@ -79,6 +87,7 @@ export function getWebOpenActions(entry: DiagnosticAid): Array<{
 
   if (category === 'dicom') {
     return [
+      viewAction,
       { id: 'open_dicom_viewer', label: 'Abrir en Visor DICOM Online', icon: 'globe' },
       {
         id: 'download_dicom',
@@ -93,6 +102,7 @@ export function getWebOpenActions(entry: DiagnosticAid): Array<{
     const extension = getFileExtension(entry.fileName)
     const isPdf = extension === 'pdf'
     return [
+      ...(isPdf ? [] : [viewAction]),
       {
         id: 'preview_media',
         label: isPdf ? 'Vista previa rápida (PDF)' : 'Vista previa rápida',
@@ -125,6 +135,11 @@ export async function executeDiagnosticAidWebAction(
 ): Promise<DiagnosticAidWebActionResult> {
   try {
     switch (action) {
+      case 'view_in_app': {
+        await auditWebOpen(entry, action, true, `Visor in-app: ${entry.fileName}`, user)
+        return { ok: true, message: 'Abriendo visor…', openInApp: true }
+      }
+
       case 'open_exocad_webview': {
         const blobUrl = entry.blobId ? await getDiagnosticAidBlobUrl(entry.id) : null
         if (blobUrl) {

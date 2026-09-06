@@ -21,3 +21,17 @@ CREATE INDEX IF NOT EXISTS idx_diagnostic_aids_encounter
 
 CREATE INDEX IF NOT EXISTS idx_diagnostic_aids_created
   ON diagnostic_aids (created_at);
+
+CREATE TABLE IF NOT EXISTS diagnostic_aid_derivatives (
+  id         TEXT PRIMARY KEY NOT NULL,
+  aid_id     TEXT NOT NULL,
+  kind       TEXT NOT NULL CHECK (kind IN ('thumb', 'glb', 'dicom2d', 'slice')),
+  plane      TEXT,
+  slice_index INTEGER,
+  mime_type  TEXT NOT NULL,
+  bytes      INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_diagnostic_aid_derivatives_aid
+  ON diagnostic_aid_derivatives (aid_id);

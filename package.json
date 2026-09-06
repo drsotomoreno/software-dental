@@ -15,9 +15,12 @@
     "electron:dev": "electron .",
     "build": "npm install pg@^8.23.0 --no-save && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "imaging:stl-to-glb": "node server/imaging/convertStlToGlb.mjs",
+    "imaging:dicom-slices": "node server/imaging/extractDicomSlices.mjs"
   },
   "dependencies": {
+    "@google/model-viewer": "^4.3.1",
     "@tanstack/react-virtual": "^3.14.10",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
@@ -25,8 +28,10 @@
     "date-fns": "^4.1.0",
     "dexie": "^4.0.11",
     "dexie-react-hooks": "^1.1.7",
+    "dicom-parser": "^1.8.21",
     "dotenv": "^16.6.1",
     "express": "^5.2.1",
+    "jszip": "^3.10.1",
     "lucide-react": "^1.31.0",
     "nodemailer": "^9.1.0",
     "pg": "^8.23.0",
