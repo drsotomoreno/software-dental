@@ -107,18 +107,20 @@ export function RapidValuationForm({
             onChange={onPatientDataChange}
             disabled={disabled}
             sectionTitle="1. Datos de Identificación del Paciente"
+            afterContactFields={
+              patient ? (
+                <ExternalHistoryRdaPanel
+                  patient={{
+                    ...patient,
+                    documentType: patientData.documentType,
+                    documentNumber: patientData.documentNumber,
+                    phone: patientData.phone,
+                  }}
+                  canRequest={!disabled}
+                />
+              ) : null
+            }
           />
-          {patient && (
-            <ExternalHistoryRdaPanel
-              patient={{
-                ...patient,
-                documentType: patientData.documentType,
-                documentNumber: patientData.documentNumber,
-                phone: patientData.phone,
-              }}
-              canRequest={!disabled}
-            />
-          )}
         </div>
       )}
 

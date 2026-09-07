@@ -11,6 +11,8 @@ interface PatientRegistrationSectionProps {
   sectionTitle?: string
   description?: string
   headerExtra?: ReactNode
+  /** Bloque junto a documento y teléfono (p. ej. RDA). */
+  afterContactFields?: ReactNode
 }
 
 export function PatientRegistrationSection({
@@ -20,6 +22,7 @@ export function PatientRegistrationSection({
   sectionTitle = 'Datos del Paciente',
   description,
   headerExtra,
+  afterContactFields,
 }: PatientRegistrationSectionProps) {
   const update = (patch: Partial<PatientFormData>) => onChange({ ...value, ...patch })
 
@@ -151,6 +154,9 @@ export function PatientRegistrationSection({
             disabled={disabled}
           />
         </div>
+        {afterContactFields ? (
+          <div className="sm:col-span-2">{afterContactFields}</div>
+        ) : null}
         <div>
           <label className="label-field" htmlFor="patient-insurer">
             EPS / Aseguradora

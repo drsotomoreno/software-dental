@@ -21,11 +21,14 @@ import { formatDate } from '@/utils/crypto'
 interface ExternalHistoryRdaPanelProps {
   patient: Patient
   canRequest?: boolean
+  /** compact: solo el botón, para la cabecera de la ficha. */
+  variant?: 'full' | 'compact'
 }
 
 export function ExternalHistoryRdaPanel({
   patient,
   canRequest = false,
+  variant = 'full',
 }: ExternalHistoryRdaPanelProps) {
   const { user } = useAuth()
   const [expanded, setExpanded] = useState(true)
@@ -129,6 +132,126 @@ export function ExternalHistoryRdaPanel({
     }
   }
 
+  const requestButton = (
+    <button
+      type="button"
+      className="btn-primary shrink-0"
+      onClick={() => void handleRequestClick()}
+      disabled={!canRequest || requesting}
+      title={
+        canRequest
+          ? 'Solicitar historial clínico externo (RDA)'
+          : 'Requiere permiso para actualizar datos del paciente'
+      }
+    >
+      <Search className="mr-2 h-4 w-4" aria-hidden />
+      {requesting ? 'Solicitando…' : 'Solicitar Historial Externo (RDA)'}
+    </button>
+  )
+
+  const otpModal = modalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`rda-otp-title-${variant}`}
+          >
+            <h3 id={`rda-otp-title-${variant}`} className="text-lg font-semibold text-slate-900">
+              Validación OTP Minsalud
+            </h3>
+            <div
+              className="mt-3 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900"
+              role="status"
+            >
+              Código enviado al celular del paciente ({maskedPhone}).
+            </div>
+            <p className="mt-3 text-sm text-slate-600">
+              Ingrese el PIN de 6 dígitos para autorizar la descarga del Resumen Digital de Atención.
+            </p>
+
+            <label className="label-field mt-4" htmlFor={`rda-otp-pin-${variant}`}>
+              Código de 6 dígitos
+            </label>
+            <input
+              id={`rda-otp-pin-${variant}`}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={RDA_OTP_LENGTH}
+              value={pin}
+              onChange={(event) => {
+                setPin(event.target.value.replace(/\D/g, '').slice(0, RDA_OTP_LENGTH))
+                setPinError('')
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  void handleValidatePin()
+                }
+              }}
+              className="input-field tracking-[0.4em] text-center text-lg font-semibold"
+              placeholder="------"
+              autoFocus
+            />
+
+            {pinError && (
+              <p className="mt-2 text-sm text-red-600" role="alert">
+                {pinError}
+              </p>
+            )}
+
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                className="btn-secondary text-sm"
+                onClick={() => void handleResend()}
+                disabled={!canResend}
+              >
+                {canResend
+                  ? 'Reenviar código'
+                  : `Reintentar en ${formatRetryCountdown(retryRemainingMs)}`}
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setModalOpen(false)
+                    setPin('')
+                    setPinError('')
+                  }}
+                  disabled={validating}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => void handleValidatePin()}
+                  disabled={validating || pin.length !== RDA_OTP_LENGTH}
+                >
+                  {validating ? 'Validando…' : 'Validar Código'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+  ) : null
+
+  if (variant === 'compact') {
+    return (
+      <div className="flex flex-wrap items-center gap-2" data-testid="external-history-rda-button">
+        {requestButton}
+        {panelError && (
+          <span className="text-sm text-red-700" role="alert">
+            {panelError}
+          </span>
+        )}
+        {otpModal}
+      </div>
+    )
+  }
+
   return (
     <section className="card border-dental-200 bg-white" data-testid="external-history-rda-panel">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -150,20 +273,7 @@ export function ExternalHistoryRdaPanel({
             aria-hidden
           />
         </button>
-        <button
-          type="button"
-          className="btn-primary shrink-0"
-          onClick={() => void handleRequestClick()}
-          disabled={!canRequest || requesting}
-          title={
-            canRequest
-              ? 'Solicitar historial clínico externo (RDA)'
-              : 'Requiere permiso para actualizar datos del paciente'
-          }
-        >
-          <Search className="mr-2 h-4 w-4" aria-hidden />
-          {requesting ? 'Solicitando…' : 'Solicitar Historial Externo (RDA)'}
-        </button>
+        {requestButton}
       </div>
 
       {panelError && (
@@ -251,94 +361,7 @@ export function ExternalHistoryRdaPanel({
         </div>
       )}
 
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div
-            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="rda-otp-title"
-          >
-            <h3 id="rda-otp-title" className="text-lg font-semibold text-slate-900">
-              Validación OTP Minsalud
-            </h3>
-            <div
-              className="mt-3 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900"
-              role="status"
-            >
-              Código enviado al celular del paciente ({maskedPhone}).
-            </div>
-            <p className="mt-3 text-sm text-slate-600">
-              Ingrese el PIN de 6 dígitos para autorizar la descarga del Resumen Digital de Atención.
-            </p>
-
-            <label className="label-field mt-4" htmlFor="rda-otp-pin">
-              Código de 6 dígitos
-            </label>
-            <input
-              id="rda-otp-pin"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={RDA_OTP_LENGTH}
-              value={pin}
-              onChange={(event) => {
-                setPin(event.target.value.replace(/\D/g, '').slice(0, RDA_OTP_LENGTH))
-                setPinError('')
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  void handleValidatePin()
-                }
-              }}
-              className="input-field tracking-[0.4em] text-center text-lg font-semibold"
-              placeholder="------"
-              autoFocus
-            />
-
-            {pinError && (
-              <p className="mt-2 text-sm text-red-600" role="alert">
-                {pinError}
-              </p>
-            )}
-
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
-              <button
-                type="button"
-                className="btn-secondary text-sm"
-                onClick={() => void handleResend()}
-                disabled={!canResend}
-              >
-                {canResend
-                  ? 'Reenviar código'
-                  : `Reintentar en ${formatRetryCountdown(retryRemainingMs)}`}
-              </button>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => {
-                    setModalOpen(false)
-                    setPin('')
-                    setPinError('')
-                  }}
-                  disabled={validating}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={() => void handleValidatePin()}
-                  disabled={validating || pin.length !== RDA_OTP_LENGTH}
-                >
-                  {validating ? 'Validando…' : 'Validar Código'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {otpModal}
     </section>
   )
 }
