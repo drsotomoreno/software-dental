@@ -4,6 +4,7 @@ import { differenceInYears } from 'date-fns'
 import { REGIME_TYPES } from '@/constants/dental'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 import { PatientRegistrationSection } from './PatientRegistrationSection'
+import { ExternalHistoryRdaPanel } from './ExternalHistoryRdaPanel'
 
 interface PatientIdentificationSummaryProps {
   patient: Patient
@@ -91,6 +92,15 @@ export function PatientIdentificationSummary({
             </button>
           </div>
         )}
+        <ExternalHistoryRdaPanel
+          patient={{
+            ...patient,
+            documentType: form.documentType,
+            documentNumber: form.documentNumber,
+            phone: form.phone,
+          }}
+          canRequest={canEdit && !disabled}
+        />
       </div>
     )
   }
@@ -115,19 +125,22 @@ export function PatientIdentificationSummary({
   ]
 
   return (
-    <section className="card">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h3 className={CLINICAL_SECTION_TITLE_CLASS}>Datos de Identificación del Paciente</h3>
-        <PhaseBadge patient={patient} />
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {fields.map(({ label, value }) => (
-          <div key={label}>
-            <span className="text-xs font-medium uppercase text-slate-500">{label}</span>
-            <p className="text-sm text-slate-800">{value}</p>
-          </div>
-        ))}
-      </div>
-    </section>
+    <div className="space-y-3">
+      <section className="card">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h3 className={CLINICAL_SECTION_TITLE_CLASS}>Datos de Identificación del Paciente</h3>
+          <PhaseBadge patient={patient} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {fields.map(({ label, value }) => (
+            <div key={label}>
+              <span className="text-xs font-medium uppercase text-slate-500">{label}</span>
+              <p className="text-sm text-slate-800">{value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+      <ExternalHistoryRdaPanel patient={patient} canRequest={canEdit && !disabled} />
+    </div>
   )
 }

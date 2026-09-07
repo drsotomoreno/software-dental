@@ -14,6 +14,12 @@ export type {
   TreatmentPlanItem,
   BudgetSummary,
 } from './clinicalRecord'
+export type {
+  RdaCryptographicConsent,
+  RdaExternalHistory,
+  RdaDiagnosis,
+  RdaProcedure,
+} from './rdaExternalHistory'
 export type { DigitalSignature, SignatureMetadata } from './signature'
 export type {
   Appointment,

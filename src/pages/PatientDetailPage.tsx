@@ -1707,6 +1707,7 @@ export function PatientDetailPage() {
               setConsentMetadata(null)
               setConsentAccepted(false)
             }}
+            patient={patient}
             initialData={clinicalData}
             odontogram={odontogram}
             onChange={setClinicalData}
