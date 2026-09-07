@@ -12,6 +12,7 @@ import {
   getLatestRdaConsentForPatient,
   getLatestRdaHistoryForPatient,
   persistSimulatedRdaHistory,
+  rdaPatientStorageKey,
   requestRdaOtp,
   validateRdaPin,
 } from '@/services/rdaExternalHistoryService'
@@ -44,15 +45,17 @@ export function ExternalHistoryRdaPanel({
   const [retryUntil, setRetryUntil] = useState(0)
   const [now, setNow] = useState(() => Date.now())
 
+  const storageKey = rdaPatientStorageKey(patient)
+
   const history = useLiveQuery(async () => {
-    if (patient.id == null) return undefined
-    return getLatestRdaHistoryForPatient(patient.id)
-  }, [patient.id])
+    if (!storageKey) return undefined
+    return getLatestRdaHistoryForPatient(storageKey)
+  }, [storageKey])
 
   const consent = useLiveQuery(async () => {
-    if (patient.id == null) return undefined
-    return getLatestRdaConsentForPatient(patient.id)
-  }, [patient.id])
+    if (!storageKey) return undefined
+    return getLatestRdaConsentForPatient(storageKey)
+  }, [storageKey])
 
   useEffect(() => {
     if (history) setAntecedentesOpen(true)

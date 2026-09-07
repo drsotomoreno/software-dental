@@ -139,6 +139,42 @@ export function validateRdaPin(pin: string): RdaPinValidationResult {
   return { ok: true }
 }
 
+export function rdaPatientStorageKey(
+  patient: Pick<Patient, 'id' | 'documentType' | 'documentNumber'>,
+): string | null {
+  if (patient.id != null && String(patient.id).trim() !== '') {
+    return toPatientForeignKey(patient.id)
+  }
+  const document = validatePatientDocumentForRda(patient)
+  if (!document.valid) return null
+  return `pending-rda:${patient.documentType}:${document.normalized}`
+}
+
+export async function reassignPendingRdaToPatient(
+  documentType: Patient['documentType'],
+  documentNumber: string,
+  patientId: string | number,
+): Promise<void> {
+  const from = rdaPatientStorageKey({ documentType, documentNumber })
+  const to = toPatientForeignKey(patientId)
+  if (!from || from === to) return
+
+  const [consents, histories] = await Promise.all([
+    db.rdaConsents.where('patientId').equals(from).toArray(),
+    db.rdaExternalHistories.where('patientId').equals(from).toArray(),
+  ])
+  if (consents.length === 0 && histories.length === 0) return
+
+  await db.transaction('rw', db.rdaConsents, db.rdaExternalHistories, async () => {
+    for (const row of consents) {
+      await db.rdaConsents.update(row.id, { patientId: to })
+    }
+    for (const row of histories) {
+      await db.rdaExternalHistories.update(row.id, { patientId: to })
+    }
+  })
+}
+
 export async function getLatestRdaHistoryForPatient(
   patientId: string | number,
 ): Promise<RdaExternalHistory | undefined> {
@@ -161,16 +197,18 @@ export async function persistSimulatedRdaHistory(input: {
   user?: Pick<AuthUser, 'id' | 'email' | 'firstName' | 'lastName' | 'role'> | null
 }): Promise<RdaExternalHistory> {
   const { patient, maskedPhone, user } = input
-  if (patient.id == null) {
-    throw new Error('El paciente no tiene un identificador persistido.')
-  }
-
   const document = validatePatientDocumentForRda(patient)
   if (!document.valid) {
     throw new Error(document.error)
   }
 
-  const patientId = toPatientForeignKey(patient.id)
+  const patientId = rdaPatientStorageKey({
+    ...patient,
+    documentNumber: document.normalized,
+  })
+  if (!patientId) {
+    throw new Error('No se pudo identificar al paciente para guardar el RDA.')
+  }
   const consentedAt = new Date().toISOString()
   const consentId = generateId()
   const historyId = generateId()

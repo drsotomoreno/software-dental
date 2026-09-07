@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
-import type { PatientFormData } from '@/types/patient'
+import type { Patient, PatientFormData } from '@/types/patient'
 import { DOCUMENT_TYPES, REGIME_TYPES } from '@/constants/dental'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 import { DaneMunicipalityFields } from '@/components/clinical/DaneMunicipalityFields'
+import { ExternalHistoryRdaPanel } from './ExternalHistoryRdaPanel'
 
 interface PatientRegistrationSectionProps {
   value: PatientFormData
@@ -11,7 +12,11 @@ interface PatientRegistrationSectionProps {
   sectionTitle?: string
   description?: string
   headerExtra?: ReactNode
-  /** Bloque junto a documento y teléfono (p. ej. RDA). */
+  /** Paciente persistido (ficha). En alta nueva puede omitirse. */
+  patientRecord?: Patient | null
+  showExternalHistoryRda?: boolean
+  canRequestExternalHistory?: boolean
+  /** Bloque extra junto a documento y teléfono. */
   afterContactFields?: ReactNode
 }
 
@@ -22,6 +27,9 @@ export function PatientRegistrationSection({
   sectionTitle = 'Datos del Paciente',
   description,
   headerExtra,
+  patientRecord = null,
+  showExternalHistoryRda = true,
+  canRequestExternalHistory,
   afterContactFields,
 }: PatientRegistrationSectionProps) {
   const update = (patch: Partial<PatientFormData>) => onChange({ ...value, ...patch })
@@ -154,6 +162,24 @@ export function PatientRegistrationSection({
             disabled={disabled}
           />
         </div>
+        {showExternalHistoryRda ? (
+          <div className="sm:col-span-2">
+            <ExternalHistoryRdaPanel
+              patient={{
+                ...value,
+                id: patientRecord?.id,
+                createdAt: patientRecord?.createdAt ?? '',
+                updatedAt: patientRecord?.updatedAt ?? '',
+                phase: patientRecord?.phase,
+                valuationConsent: patientRecord?.valuationConsent,
+                valuationOnly: patientRecord?.valuationOnly,
+                treatmentCompleted: patientRecord?.treatmentCompleted,
+                ownerUserId: patientRecord?.ownerUserId,
+              }}
+              canRequest={canRequestExternalHistory ?? !disabled}
+            />
+          </div>
+        ) : null}
         {afterContactFields ? (
           <div className="sm:col-span-2">{afterContactFields}</div>
         ) : null}

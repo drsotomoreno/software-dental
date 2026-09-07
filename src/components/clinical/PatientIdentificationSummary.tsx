@@ -79,17 +79,8 @@ export function PatientIdentificationSummary({
               <PhaseBadge patient={patient} />
             </div>
           }
-          afterContactFields={
-            <ExternalHistoryRdaPanel
-              patient={{
-                ...patient,
-                documentType: form.documentType,
-                documentNumber: form.documentNumber,
-                phone: form.phone,
-              }}
-              canRequest={canEdit && !disabled}
-            />
-          }
+          patientRecord={patient}
+          canRequestExternalHistory={canEdit && !disabled}
         />
         {onSave && !disabled && (
           <div className="flex justify-end">
