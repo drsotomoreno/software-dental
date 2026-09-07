@@ -16,6 +16,8 @@ import {
 
   RapidValuationForm,
 
+  ExternalHistoryRdaPanel,
+
   createEmptyClinicalForm,
 
 } from '@/components/clinical'
@@ -1535,6 +1537,19 @@ export function PatientDetailPage() {
             {patient.insurer && ` · ${patient.insurer}`}
 
           </p>
+
+          <div className="mt-3">
+            <ExternalHistoryRdaPanel
+              variant="compact"
+              patient={{
+                ...patient,
+                documentType: patientForm?.documentType ?? patient.documentType,
+                documentNumber: patientForm?.documentNumber ?? patient.documentNumber,
+                phone: patientForm?.phone ?? patient.phone,
+              }}
+              canRequest={can('patients.write') && !isArchiveView}
+            />
+          </div>
 
         </div>
 

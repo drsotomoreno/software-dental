@@ -79,6 +79,17 @@ export function PatientIdentificationSummary({
               <PhaseBadge patient={patient} />
             </div>
           }
+          afterContactFields={
+            <ExternalHistoryRdaPanel
+              patient={{
+                ...patient,
+                documentType: form.documentType,
+                documentNumber: form.documentNumber,
+                phone: form.phone,
+              }}
+              canRequest={canEdit && !disabled}
+            />
+          }
         />
         {onSave && !disabled && (
           <div className="flex justify-end">
@@ -92,15 +103,6 @@ export function PatientIdentificationSummary({
             </button>
           </div>
         )}
-        <ExternalHistoryRdaPanel
-          patient={{
-            ...patient,
-            documentType: form.documentType,
-            documentNumber: form.documentNumber,
-            phone: form.phone,
-          }}
-          canRequest={canEdit && !disabled}
-        />
       </div>
     )
   }
@@ -132,7 +134,18 @@ export function PatientIdentificationSummary({
           <PhaseBadge patient={patient} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {fields.map(({ label, value }) => (
+          {fields.slice(0, 4).map(({ label, value }) => (
+            <div key={label}>
+              <span className="text-xs font-medium uppercase text-slate-500">{label}</span>
+              <p className="text-sm text-slate-800">{value}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4">
+          <ExternalHistoryRdaPanel patient={patient} canRequest={canEdit && !disabled} />
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {fields.slice(4).map(({ label, value }) => (
             <div key={label}>
               <span className="text-xs font-medium uppercase text-slate-500">{label}</span>
               <p className="text-sm text-slate-800">{value}</p>
@@ -140,7 +153,6 @@ export function PatientIdentificationSummary({
           ))}
         </div>
       </section>
-      <ExternalHistoryRdaPanel patient={patient} canRequest={canEdit && !disabled} />
     </div>
   )
 }
