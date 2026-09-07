@@ -19,6 +19,7 @@ import {
   recordValuationConsentAudit,
 } from '@/utils/valuationConsent'
 import { savePatientValuationDraft } from '@/utils/patientClinicalDraft'
+import { reassignPendingRdaToPatient } from '@/services/rdaExternalHistoryService'
 
 const initialForm: PatientFormData = {
   documentType: 'CC',
@@ -113,6 +114,8 @@ export function NewPatientPage() {
     })
 
     const patientRouteId = String(id)
+
+    await reassignPendingRdaToPatient(form.documentType, form.documentNumber, id)
 
     await audit({
       action: 'CREATE_PATIENT',

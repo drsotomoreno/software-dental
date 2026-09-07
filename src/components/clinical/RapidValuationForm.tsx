@@ -10,7 +10,6 @@ import { PatientRegistrationSection } from './PatientRegistrationSection'
 import { ConsentimientoValoracionSection } from './ConsentimientoValoracionSection'
 import { TreatmentPlanForm } from './TreatmentPlanForm'
 import { BudgetForm } from './BudgetForm'
-import { ExternalHistoryRdaPanel } from './ExternalHistoryRdaPanel'
 import type { OdontogramData } from '@/types/odontogram'
 
 interface RapidValuationFormProps {
@@ -107,19 +106,8 @@ export function RapidValuationForm({
             onChange={onPatientDataChange}
             disabled={disabled}
             sectionTitle="1. Datos de Identificación del Paciente"
-            afterContactFields={
-              patient ? (
-                <ExternalHistoryRdaPanel
-                  patient={{
-                    ...patient,
-                    documentType: patientData.documentType,
-                    documentNumber: patientData.documentNumber,
-                    phone: patientData.phone,
-                  }}
-                  canRequest={!disabled}
-                />
-              ) : null
-            }
+            patientRecord={patient}
+            canRequestExternalHistory={!disabled}
           />
         </div>
       )}
