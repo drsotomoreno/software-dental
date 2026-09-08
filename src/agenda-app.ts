@@ -7,6 +7,7 @@ import {
   syncCitasToLocalStorage,
 } from './utils/agendaStorage'
 import { setupAgendaClipboardGlobals } from './utils/agendaClipboard'
+import { runClinicalSyncCycle } from './services/clinicalSyncService'
 
 setupAgendaAppGlobals()
 setupAgendaClipboardGlobals()
@@ -14,3 +15,9 @@ setupAgendaClipboardGlobals()
 syncCitasToLocalStorage().catch(() => {
   // IndexedDB puede no estar listo al arranque; React sincronizará después.
 })
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('focus', () => {
+    void runClinicalSyncCycle()
+  })
+}

@@ -13,6 +13,7 @@ import healthRoutes from './server/routes/health.routes.js'
 import ripsRoutes from './server/routes/rips.routes.js'
 import invoicesRoutes from './server/routes/invoices.routes.js'
 import authRoutes from './server/routes/auth.routes.js'
+import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
 import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
 
@@ -45,6 +46,7 @@ app.use(express.json({ limit: '5mb' }))
 app.use('/api/health', healthRoutes)
 app.use('/api/rips', ripsRoutes)
 app.use('/api/invoices', invoicesRoutes)
+app.use('/api/sync', clinicalSyncRoutes)
 app.use('/api', authRoutes)
 
 const distDir = path.join(__dirname, 'dist')

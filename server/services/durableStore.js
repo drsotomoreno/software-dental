@@ -182,3 +182,54 @@ export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
     )
   }
 }
+
+/** Lectura con fusionador propio (no usar mergeDurableStores de usuarios/sesiones). */
+export async function readDurableJsonWithMerge(filePath, fallback, storeKey, mergeFn) {
+  const fileValue = await readJsonFile(filePath)
+  const pgValue = await readPostgresJson(storeKey)
+  const base = fallback && typeof fallback === 'object' ? fallback : {}
+
+  if (pgValue && fileValue && typeof mergeFn === 'function') {
+    return mergeFn(fileValue, pgValue)
+  }
+  if (pgValue) return typeof mergeFn === 'function' ? mergeFn(base, pgValue) : pgValue
+  if (fileValue) return typeof mergeFn === 'function' ? mergeFn(base, fileValue) : fileValue
+  return fallback
+}
+
+/**
+ * Persistencia para almacenes que no son el de usuarios.
+ * El fusionador opcional combina el valor nuevo con el JSON actual en Postgres.
+ */
+export async function writeDurableJsonWithMerge(filePath, value, storeKey, mergeFn) {
+  await mkdir(dirname(filePath), { recursive: true })
+  await writeFile(filePath, JSON.stringify(value, null, 2), 'utf8')
+
+  const db = getPool()
+  if (!db) return
+  try {
+    const client = await db.connect()
+    try {
+      await ensureTable(client)
+      const { rows } = await client.query('SELECT value FROM app_json_store WHERE key = $1', [
+        storeKey,
+      ])
+      const current = rows[0]?.value && typeof rows[0].value === 'object' ? rows[0].value : null
+      const toWrite =
+        current && typeof mergeFn === 'function' ? mergeFn(value, current) : value
+      await client.query(
+        `INSERT INTO app_json_store (key, value, updated_at)
+         VALUES ($1, $2::jsonb, now())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+        [storeKey, JSON.stringify(toWrite)],
+      )
+    } finally {
+      client.release()
+    }
+  } catch (error) {
+    console.error(
+      '[store] No se pudo persistir el almacén en PostgreSQL; se conserva el archivo local:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+}

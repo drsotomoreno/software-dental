@@ -27,6 +27,7 @@ import type { Permission } from '@/utils/permissions'
 import { canManageClinicTeam, normalizeRole } from '@/utils/permissions'
 import type { UserRole } from '@/types/user'
 import { userHasTrialLimits, userNeedsWelcome } from '@/utils/subscriptionAccess'
+import { useClinicalPullSync } from '@/hooks/useClinicalPullSync'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -49,6 +50,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  useClinicalPullSync(Boolean(user) && !isLoading)
 
   const loadSession = useCallback(async () => {
     const storedRole = localStorage.getItem('doctorSEO_rol')

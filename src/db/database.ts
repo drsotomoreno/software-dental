@@ -24,6 +24,13 @@ import { DEMO_DEFAULT_PASSWORD } from '@/types/auth'
 import { seedUserCredentials } from '@/services/authService'
 import { seedCatalogsIfEmpty } from '@/services/catalogService'
 import { generateId } from '@/utils'
+import {
+  getCurrentClinicId,
+  isApplyingRemotePull,
+  isClinicalSyncSuppressed,
+  notifyClinicalRecordDirty,
+  withClinicalSyncSuppressed,
+} from '@/services/clinicalSyncState'
 import { dentalServiceSpecialtyId, normalizeOrganizationId } from '@/utils/organizationId'
 import type { RehusSpecialtyId } from '@/constants/rehusSpecialties'
 import type { ElectronicInvoice } from '@/types/invoice'
@@ -636,6 +643,23 @@ export class DentalDatabase extends Dexie {
       rdaConsents: 'id, patientId, createdAt',
       rdaExternalHistories: 'id, patientId, receivedAt',
     })
+
+    this.version(25)
+      .stores({
+        patients:
+          '++id, documentNumber, lastName, createdAt, phase, ownerUserId, syncId, clinicId, pendingSync',
+        appointments:
+          '++id, columnId, startTime, status, procedureType, syncId, clinicId, pendingSync',
+      })
+      .upgrade(async (tx) => {
+        for (const tableName of ['patients', 'appointments'] as const) {
+          const rows = await tx.table(tableName).toArray()
+          for (const row of rows) {
+            if (!row?.id || row.syncId) continue
+            await tx.table(tableName).update(row.id, { syncId: generateId() })
+          }
+        }
+      })
   }
 }
 
@@ -705,6 +729,64 @@ db.syncOutbox.hook('updating', (_mods, _primKey, obj, transaction) => {
     transaction.abort()
     throw new Error('La cola de sincronización solo admite inserciones (CREATE) de facturación.')
   }
+})
+
+function dexieLookupKey(id: string | number): number | string {
+  const value = String(id)
+  if (/^\d+$/.test(value)) return Number.parseInt(value, 10)
+  return value
+}
+
+function stampClinicalSyncOnCreate(obj: {
+  syncId?: string
+  clinicId?: string
+  pendingSync?: boolean
+}): void {
+  if (!obj.syncId) obj.syncId = generateId()
+  if (backupRestoreUnlock || isApplyingRemotePull() || isClinicalSyncSuppressed()) return
+  const clinicId = getCurrentClinicId()
+  if (!clinicId) return
+  obj.pendingSync = true
+  if (!obj.clinicId) obj.clinicId = clinicId
+  notifyClinicalRecordDirty()
+}
+
+function stampClinicalSyncOnUpdate(
+  mods: Record<string, unknown>,
+  obj: { syncId?: string; clinicId?: string },
+): void {
+  if (!obj.syncId && mods.syncId == null) mods.syncId = generateId()
+  if (backupRestoreUnlock || isApplyingRemotePull() || isClinicalSyncSuppressed()) return
+  const clinicId = getCurrentClinicId()
+  if (!clinicId) return
+  if (!('pendingSync' in mods)) mods.pendingSync = true
+  if (!obj.clinicId && mods.clinicId == null) mods.clinicId = clinicId
+  if (mods.pendingSync === true) notifyClinicalRecordDirty()
+}
+
+db.patients.hook('creating', (_primKey, obj) => {
+  stampClinicalSyncOnCreate(obj as Patient)
+})
+
+db.patients.hook('updating', (mods, _primKey, obj) => {
+  stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as Patient)
+})
+
+db.appointments.hook('creating', (_primKey, obj) => {
+  stampClinicalSyncOnCreate(obj as Appointment)
+})
+
+db.appointments.hook('updating', (mods, _primKey, obj) => {
+  const appointment = obj as Appointment
+  const next = mods as Partial<Appointment> & Record<string, unknown>
+  stampClinicalSyncOnUpdate(next, appointment)
+  const patientId = (next.patientId as string | undefined) ?? appointment.patientId
+  if (patientId && !next.patientSyncId && !appointment.patientSyncId) {
+    return db.patients.get(dexieLookupKey(patientId)).then((patient) => {
+      if (patient?.syncId) next.patientSyncId = patient.syncId
+    })
+  }
+  return undefined
 })
 
 async function seedDefaultColumns(): Promise<void> {
@@ -807,7 +889,7 @@ export async function seedDemoData(): Promise<void> {
     const patientCount = await db.patients.count()
     if (patientCount > 0) return
     const { seedTestClinicalAndBillingData } = await import('./seed-test-data')
-    await seedTestClinicalAndBillingData()
+    await withClinicalSyncSuppressed(() => seedTestClinicalAndBillingData())
   } catch (error) {
     console.error('No se pudo cargar datos de prueba clínicos/facturación:', error)
   }

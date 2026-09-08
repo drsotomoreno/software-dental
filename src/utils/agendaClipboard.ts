@@ -1,7 +1,7 @@
 import { db } from '@/db/database'
 import type { Appointment, CreateAppointmentInput } from '@/types/appointment'
 import { minutesToTime, timeToMinutes } from '@/constants/procedures'
-import { renderCitas, syncCitasToLocalStorage } from './agendaStorage'
+import { renderCitas, syncCitasToLocalStorage, tombstoneAppointment } from './agendaStorage'
 
 export const AGENDA_CLIPBOARD_EVENT = 'agenda:clipboard-change'
 
@@ -72,7 +72,7 @@ export async function cortarCita(appointment: Appointment): Promise<boolean> {
     storedAt: new Date().toISOString(),
   }
 
-  await db.appointments.delete(appointment.id)
+  await tombstoneAppointment(appointment.id)
   await syncCitasToLocalStorage()
   notifyClipboardChange()
   renderCitas()

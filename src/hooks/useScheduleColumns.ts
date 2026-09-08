@@ -31,6 +31,7 @@ export function useScheduleColumns() {
     const appointmentsInColumn = await db.appointments
       .where('columnId')
       .equals(id)
+      .filter((apt) => !apt.deletedAt)
       .count()
     if (appointmentsInColumn > 0) {
       throw new Error('No se puede eliminar una silla con citas programadas.')
