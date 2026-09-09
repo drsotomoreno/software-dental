@@ -64,7 +64,7 @@ function toSyncRecord(
   clinicId: string,
 ): ClinicalSyncRecord | null {
   const syncId = String(entity.syncId || '').trim()
-  const recordClinicId = String(entity.clinicId || clinicId || '').trim()
+  const recordClinicId = clinicId
   if (!syncId || !recordClinicId) return null
   return {
     syncId,
@@ -198,7 +198,7 @@ async function adoptLocalRecords(clinicId: string): Promise<void> {
       if (row.id == null) continue
       const patch: Partial<Patient> = {}
       if (!row.syncId) patch.syncId = generateId()
-      if (!row.clinicId) patch.clinicId = clinicId
+      if (row.clinicId !== clinicId) patch.clinicId = clinicId
       if (Object.keys(patch).length > 0) await db.patients.update(row.id, patch)
     }
     const appointments = await db.appointments.toArray()
@@ -206,7 +206,7 @@ async function adoptLocalRecords(clinicId: string): Promise<void> {
       if (row.id == null) continue
       const patch: Partial<Appointment> = {}
       if (!row.syncId) patch.syncId = generateId()
-      if (!row.clinicId) patch.clinicId = clinicId
+      if (row.clinicId !== clinicId) patch.clinicId = clinicId
       if (Object.keys(patch).length > 0) await db.appointments.update(row.id, patch)
     }
   })
@@ -217,11 +217,11 @@ async function pushAllLocal(clinicId: string): Promise<boolean> {
   const [patients, appointments] = await Promise.all([db.patients.toArray(), db.appointments.toArray()])
 
   const patientRecords = patients
-    .map((row) => toSyncRecord({ ...row, clinicId: row.clinicId || clinicId }, clinicId))
+    .map((row) => toSyncRecord({ ...row, clinicId }, clinicId))
     .filter((row): row is ClinicalSyncRecord => row != null)
 
   const appointmentRecords = (
-    await Promise.all(appointments.map((row) => withPatientSyncId({ ...row, clinicId: row.clinicId || clinicId })))
+    await Promise.all(appointments.map((row) => withPatientSyncId({ ...row, clinicId })))
   )
     .map((row) => toSyncRecord(row, clinicId))
     .filter((row): row is ClinicalSyncRecord => row != null)
@@ -238,14 +238,14 @@ async function pushAllLocal(clinicId: string): Promise<boolean> {
   await withRemotePullLock(async () => {
     for (const row of patients) {
       if (row.id == null) continue
-      await db.patients.update(row.id, { pendingSync: false, lastSyncedAt: now, clinicId: row.clinicId || clinicId })
+      await db.patients.update(row.id, { pendingSync: false, lastSyncedAt: now, clinicId })
     }
     for (const row of appointments) {
       if (row.id == null) continue
       await db.appointments.update(row.id, {
         pendingSync: false,
         lastSyncedAt: now,
-        clinicId: row.clinicId || clinicId,
+        clinicId,
       })
     }
   })

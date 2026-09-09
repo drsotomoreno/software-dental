@@ -747,7 +747,7 @@ function stampClinicalSyncOnCreate(obj: {
   const clinicId = getCurrentClinicId()
   if (!clinicId) return
   obj.pendingSync = true
-  if (!obj.clinicId) obj.clinicId = clinicId
+  obj.clinicId = clinicId
   notifyClinicalRecordDirty()
 }
 
@@ -760,7 +760,7 @@ function stampClinicalSyncOnUpdate(
   const clinicId = getCurrentClinicId()
   if (!clinicId) return
   if (!('pendingSync' in mods)) mods.pendingSync = true
-  if (!obj.clinicId && mods.clinicId == null) mods.clinicId = clinicId
+  if (mods.clinicId == null) mods.clinicId = clinicId
   if (mods.pendingSync === true) notifyClinicalRecordDirty()
 }
 

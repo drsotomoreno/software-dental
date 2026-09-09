@@ -179,9 +179,14 @@ export async function pushClinicalRecords(clinicId, patients = [], appointments 
     }
 
     store.clinics[canonical] = clinic
-    for (const alias of aliasIds) {
-      const id = String(alias || '').trim()
-      if (id && id !== canonical) delete store.clinics[id]
+    for (const key of scopeIds(canonical, aliasIds)) {
+      if (key === canonical) continue
+      // Replica el snapshot en alias legacy para que dueño, colaborador
+      // y clientes viejos (UUID crudo) lean el mismo conjunto.
+      store.clinics[key] = {
+        patients: { ...clinic.patients },
+        appointments: { ...clinic.appointments },
+      }
     }
     await saveStore(store)
     return {
