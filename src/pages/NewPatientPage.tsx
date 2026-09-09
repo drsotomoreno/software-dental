@@ -13,6 +13,7 @@ import { RapidValuationForm, createEmptyClinicalForm } from '@/components/clinic
 import { createDefaultOdontogram } from '@/types/odontogram'
 import { useToast } from '@/hooks/useToast'
 import { Toast } from '@/components/ui/Toast'
+import { HABEAS_DATA_CHECKBOX_LABEL, HABEAS_DATA_REQUIRED_MESSAGE } from '@/constants/habeasData'
 import { validateAcceptTreatment } from '@/utils/patientPhase'
 import {
   buildValuationConsentMetadata,
@@ -63,9 +64,10 @@ export function NewPatientPage() {
   const [consentAccepted, setConsentAccepted] = useState(false)
   const [consentMetadata, setConsentMetadata] = useState<ValuationConsentMetadata | null>(null)
   const [budgetAccepted, setBudgetAccepted] = useState(false)
+  const [habeasDataAceptado, setHabeasDataAceptado] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const { toastMessage, showToast, clearToast } = useToast()
+  const { toastMessage, toastVariant, showToast, clearToast } = useToast()
 
   const professionalLicense = user?.documentNumber ?? ''
   const patientFormError = validatePatientForm(form)
@@ -97,6 +99,12 @@ export function NewPatientPage() {
       return null
     }
 
+    if (!habeasDataAceptado) {
+      setError(HABEAS_DATA_REQUIRED_MESSAGE)
+      showToast(HABEAS_DATA_REQUIRED_MESSAGE, 'error')
+      return null
+    }
+
     const existing = await db.patients.where('documentNumber').equals(form.documentNumber).first()
     if (existing) {
       setError('Ya existe un paciente con este número de documento.')
@@ -109,6 +117,8 @@ export function NewPatientPage() {
       phase: withHistory && budgetAccepted ? 'TRATAMIENTO_ACEPTADO' : DEFAULT_PATIENT_PHASE,
       valuationOnly: !withHistory,
       valuationConsent: consentMetadata ?? undefined,
+      habeas_data_aceptado: true,
+      fecha_aceptacion_habeas_data: now,
       createdAt: now,
       updatedAt: now,
     })
@@ -122,6 +132,13 @@ export function NewPatientPage() {
       resourceType: 'patient',
       resourceId: patientRouteId,
       details: `${form.documentType} ${form.documentNumber} — ${form.firstName} ${form.lastName}`,
+    })
+
+    await audit({
+      action: 'ACCEPT_HABEAS_DATA',
+      resourceType: 'patient',
+      resourceId: patientRouteId,
+      details: `Ley 1581 de 2012 · ${now}`,
     })
 
     if (consentMetadata) {
@@ -166,6 +183,11 @@ export function NewPatientPage() {
 
   const handleSubmitWithHistory = async () => {
     setError('')
+    if (!habeasDataAceptado) {
+      setError(HABEAS_DATA_REQUIRED_MESSAGE)
+      showToast(HABEAS_DATA_REQUIRED_MESSAGE, 'error')
+      return
+    }
     setSaving(true)
     try {
       ensureClinicalData()
@@ -179,6 +201,11 @@ export function NewPatientPage() {
 
   const handleSubmitDatosOnly = async () => {
     setError('')
+    if (!habeasDataAceptado) {
+      setError(HABEAS_DATA_REQUIRED_MESSAGE)
+      showToast(HABEAS_DATA_REQUIRED_MESSAGE, 'error')
+      return
+    }
     setSaving(true)
     try {
       await registerPatient(false)
@@ -262,29 +289,48 @@ export function NewPatientPage() {
         </div>
       )}
 
-      <div className="sticky bottom-4 mt-6 flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
-        <button
-          type="button"
-          onClick={handleSubmitWithHistory}
-          disabled={saving}
-          className="btn-primary"
-        >
-          {saving ? 'Guardando...' : 'Pasar a Historia Completa'}
-        </button>
-        <button
-          type="button"
-          onClick={handleSubmitDatosOnly}
-          disabled={saving}
-          className="btn-secondary"
-        >
-          {saving ? 'Guardando...' : 'Solo Valoración (Registrar Solo Datos)'}
-        </button>
-        <button type="button" onClick={() => navigate('/pacientes')} className="btn-secondary">
-          Cancelar
-        </button>
+      <div className="sticky bottom-4 mt-6 space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
+        <label htmlFor="habeas-data-aceptado" className="flex cursor-pointer items-start gap-3">
+          <input
+            id="habeas-data-aceptado"
+            name="habeas_data_aceptado"
+            type="checkbox"
+            checked={habeasDataAceptado}
+            onChange={(event) => setHabeasDataAceptado(event.target.checked)}
+            required
+            className="mt-1 rounded border-slate-300 text-dental-600 focus:ring-dental-500"
+          />
+          <span className="text-sm text-slate-700">
+            {HABEAS_DATA_CHECKBOX_LABEL}
+            <span className="text-red-600"> *</span>
+          </span>
+        </label>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={handleSubmitWithHistory}
+            disabled={saving || !habeasDataAceptado}
+            title={!habeasDataAceptado ? HABEAS_DATA_REQUIRED_MESSAGE : undefined}
+            className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? 'Guardando...' : 'Pasar a Historia Completa'}
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmitDatosOnly}
+            disabled={saving || !habeasDataAceptado}
+            title={!habeasDataAceptado ? HABEAS_DATA_REQUIRED_MESSAGE : undefined}
+            className="btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? 'Guardando...' : 'Solo Valoración (Registrar Solo Datos)'}
+          </button>
+          <button type="button" onClick={() => navigate('/pacientes')} className="btn-secondary">
+            Cancelar
+          </button>
+        </div>
       </div>
 
-      <Toast message={toastMessage} onDismiss={clearToast} />
+      <Toast message={toastMessage} variant={toastVariant} onDismiss={clearToast} />
     </div>
   )
 }
