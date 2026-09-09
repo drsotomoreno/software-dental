@@ -7,7 +7,7 @@ import {
   syncCitasToLocalStorage,
 } from './utils/agendaStorage'
 import { setupAgendaClipboardGlobals } from './utils/agendaClipboard'
-import { runClinicalSyncCycle } from './services/clinicalSyncService'
+import { forzarSincronizacionLocal, runClinicalSyncCycle } from './services/clinicalSyncService'
 
 setupAgendaAppGlobals()
 setupAgendaClipboardGlobals()
@@ -20,4 +20,9 @@ if (typeof window !== 'undefined') {
   window.addEventListener('focus', () => {
     void runClinicalSyncCycle()
   })
+
+  const win = window as Window & {
+    forzarSincronizacionLocal?: typeof forzarSincronizacionLocal
+  }
+  win.forzarSincronizacionLocal = forzarSincronizacionLocal
 }

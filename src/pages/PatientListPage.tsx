@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
@@ -7,11 +7,14 @@ import { useAudit } from '@/hooks/useAudit'
 
 import { isActivePatient } from '@/types/patient'
 import { SeedTestDataPanel } from '@/components/dev/SeedTestDataPanel'
+import { forzarSincronizacionLocal } from '@/services/clinicalSyncService'
 
 export function PatientListPage() {
   const { can } = useAuth()
   const { audit } = useAudit()
   const loggedRef = useRef(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState('')
 
   const patients = useLiveQuery(async () => {
     const all = await db.patients.orderBy('lastName').reverse().toArray()
@@ -28,16 +31,42 @@ export function PatientListPage() {
     })
   }, [audit])
 
+  const handleForceSync = async () => {
+    setSyncing(true)
+    setSyncMessage('')
+    const result = await forzarSincronizacionLocal()
+    setSyncing(false)
+    if (result.ok) {
+      setSyncMessage(
+        `Sincronizados ${result.patients} pacientes y ${result.appointments} citas (${result.clinicId}).`,
+      )
+    } else {
+      setSyncMessage(result.error || 'No se pudo forzar la sincronización.')
+    }
+  }
+
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-slate-900">Pacientes Activos</h1>
-        {can('patients.write') && (
-          <Link to="/pacientes/nuevo" className="btn-primary">
-            + Nuevo Paciente
-          </Link>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => void handleForceSync()}
+            disabled={syncing}
+          >
+            {syncing ? 'Sincronizando…' : 'Forzar Sincronización Local'}
+          </button>
+          {can('patients.write') && (
+            <Link to="/pacientes/nuevo" className="btn-primary">
+              + Nuevo Paciente
+            </Link>
+          )}
+        </div>
       </div>
+
+      {syncMessage ? <p className="mb-4 text-sm text-slate-600">{syncMessage}</p> : null}
 
       {can('patients.write') && <SeedTestDataPanel />}
 

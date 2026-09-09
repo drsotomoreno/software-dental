@@ -318,3 +318,55 @@ export function scheduleClinicalSync(delayMs = DIRTY_DEBOUNCE_MS): void {
 setClinicalSyncDirtyListener(() => {
   scheduleClinicalSync()
 })
+
+export type ForzarSincronizacionResult = {
+  ok: boolean
+  patients: number
+  appointments: number
+  clinicId?: string
+  error?: string
+}
+
+/** Sube IndexedDB completo a /api/sync/clinical y baja el snapshot. Usar desde UI o consola. */
+export async function forzarSincronizacionLocal(): Promise<ForzarSincronizacionResult> {
+  const auth = getStoredApiAuth()
+  const clinicId = getCurrentClinicId()
+  if (!auth?.token || !clinicId) {
+    return {
+      ok: false,
+      patients: 0,
+      appointments: 0,
+      error: 'Inicie sesión para forzar la sincronización.',
+    }
+  }
+
+  const [patientCount, appointmentCount] = await Promise.all([
+    db.patients.count(),
+    db.appointments.count(),
+  ])
+
+  try {
+    const pushed = await pushAllLocal(clinicId)
+    if (!pushed) {
+      return {
+        ok: false,
+        patients: patientCount,
+        appointments: appointmentCount,
+        clinicId,
+        error: 'El servidor rechazó el POST /api/sync/clinical.',
+      }
+    }
+    await pullAndMerge()
+    await syncCitasToLocalStorage()
+    renderCitas()
+    return { ok: true, patients: patientCount, appointments: appointmentCount, clinicId }
+  } catch (error) {
+    return {
+      ok: false,
+      patients: patientCount,
+      appointments: appointmentCount,
+      clinicId,
+      error: error instanceof Error ? error.message : 'No se pudo sincronizar.',
+    }
+  }
+}
