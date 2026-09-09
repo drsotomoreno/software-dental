@@ -7,6 +7,8 @@ import {
   USERS_MANAGE_DENIED,
   canManageClinicTeam,
   canManageUsers,
+  defaultStaffNames,
+  isStaffWithoutRegulatoryId,
   normalizeRole,
   type CanonicalRole,
 } from '@/utils/permissions'
@@ -236,6 +238,14 @@ function localSeatError(used: number, max: number | null, planName: string): str
   return null
 }
 
+function staffPhoneDigits(value: string | undefined): string {
+  return String(value ?? '').replace(/\D/g, '').slice(0, 12)
+}
+
+function isLikelyEmail(value: string | undefined): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value ?? '').trim())
+}
+
 function sanitizeAssignableRole(
   role: UserRole | string | undefined,
   actorRole: CanonicalRole,
@@ -295,12 +305,6 @@ export async function createAppUser(
   if (passwordError) return { ok: false, error: passwordError }
 
   const email = String(data.email ?? '').trim().toLowerCase()
-  const firstName = data.firstName.trim()
-  const lastName = data.lastName.trim()
-  if (!firstName || !lastName) {
-    return { ok: false, error: 'Nombres y apellidos son obligatorios.' }
-  }
-
   const documentCheck = validateProfessionalDocumentNumber(data.documentNumber)
   if (!documentCheck.valid) {
     return { ok: false, error: documentCheck.message ?? 'La cédula es obligatoria (6 a 12 dígitos).' }
@@ -310,15 +314,34 @@ export async function createAppUser(
   const roleResult = sanitizeAssignableRole(data.role, gate.actorRole)
   if (!roleResult.ok) return roleResult
 
+  const isStaff = isStaffWithoutRegulatoryId(roleResult.role)
+  let firstName = String(data.firstName ?? '').trim()
+  let lastName = String(data.lastName ?? '').trim()
+  const phone = staffPhoneDigits(data.phone)
+  if (isStaff) {
+    if (!isLikelyEmail(email)) {
+      return { ok: false, error: 'El correo electrónico es obligatorio para este tipo de usuario.' }
+    }
+    if (phone.length < 7 || phone.length > 12) {
+      return { ok: false, error: 'El teléfono es obligatorio (7 a 12 dígitos).' }
+    }
+    const defaults = defaultStaffNames(roleResult.role)
+    if (!firstName) firstName = defaults.firstName
+    if (!lastName) lastName = defaults.lastName
+  } else if (!firstName || !lastName) {
+    return { ok: false, error: 'Nombres y apellidos son obligatorios.' }
+  }
+
   const api = await createClinicMember({
     firstName,
     lastName,
     email,
+    phone,
     documentType: data.documentType || 'CC',
     documentNumber,
     rol: roleResult.role,
     role: roleResult.role,
-    rethusNumber: data.rethusNumber?.trim() || '',
+    rethusNumber: isStaff ? '' : data.rethusNumber?.trim() || '',
     thsSpecialty: data.thsSpecialty,
     password,
   })
@@ -367,12 +390,13 @@ export async function createAppUser(
     providerNit: data.providerNit?.trim() || apiAuth?.user?.providerNit || undefined,
     repsCode: data.repsCode?.trim() || apiAuth?.user?.repsCode || undefined,
     repsStatus: data.repsStatus ?? 'activo',
-    rethusNumber: data.rethusNumber?.trim() || undefined,
+    rethusNumber: isStaff ? undefined : data.rethusNumber?.trim() || undefined,
     rethusStatus: data.rethusStatus ?? 'activo',
     thsSpecialty: data.thsSpecialty,
     rehusSpecialty: data.rehusSpecialty ?? data.thsSpecialty,
     repsEnabledSpecialties: data.repsEnabledSpecialties,
     avatarUrl: data.avatarUrl,
+    phone: phone || undefined,
     clinicId: clinicId || undefined,
     isClinicOwner: false,
   }
@@ -393,13 +417,17 @@ export async function updateAppUser(
   const nextPatch: Partial<UserProfile> = { ...patch }
 
   if (nextPatch.role !== undefined) {
-    const roleResult = sanitizeAssignableRole(nextPatch.role, gate.actorRole)
-    if (!roleResult.ok) return roleResult
-    nextPatch.role = roleResult.role
+    if (current?.isClinicOwner) {
+      nextPatch.role = 'admin'
+    } else {
+      const roleResult = sanitizeAssignableRole(nextPatch.role, gate.actorRole)
+      if (!roleResult.ok) return roleResult
+      nextPatch.role = roleResult.role
 
-    if (current && canManageUsers(current.role) && !canManageUsers(roleResult.role)) {
-      const remainingError = await ensureRemainingUserManager(userId)
-      if (remainingError) return { ok: false, error: remainingError }
+      if (current && canManageUsers(current.role) && !canManageUsers(roleResult.role)) {
+        const remainingError = await ensureRemainingUserManager(userId)
+        if (remainingError) return { ok: false, error: remainingError }
+      }
     }
   }
 
@@ -422,10 +450,36 @@ export async function updateAppUser(
     nextPatch.documentNumber = documentCheck.normalized ?? nextPatch.documentNumber.trim()
   }
 
+  const nextRole = nextPatch.role ?? current?.role
+  const isStaff = isStaffWithoutRegulatoryId(nextRole, { isClinicOwner: current?.isClinicOwner })
+  if (isStaff) {
+    const email = String(nextPatch.email ?? current?.email ?? '').trim().toLowerCase()
+    const phone = staffPhoneDigits(nextPatch.phone ?? current?.phone)
+    if (!isLikelyEmail(email)) {
+      return { ok: false, error: 'El correo electrónico es obligatorio para este tipo de usuario.' }
+    }
+    if (phone.length < 7 || phone.length > 12) {
+      return { ok: false, error: 'El teléfono es obligatorio (7 a 12 dígitos).' }
+    }
+    nextPatch.email = email
+    nextPatch.phone = phone
+    nextPatch.rethusNumber = ''
+    const defaults = defaultStaffNames(nextRole)
+    if (!String(nextPatch.firstName ?? current?.firstName ?? '').trim()) {
+      nextPatch.firstName = current?.firstName || defaults.firstName
+    }
+    if (!String(nextPatch.lastName ?? current?.lastName ?? '').trim()) {
+      nextPatch.lastName = current?.lastName || defaults.lastName
+    }
+  } else if (nextPatch.phone !== undefined) {
+    nextPatch.phone = staffPhoneDigits(nextPatch.phone)
+  }
+
   const api = await updateClinicMember(userId, {
     firstName: nextPatch.firstName,
     lastName: nextPatch.lastName,
     email: nextPatch.email,
+    phone: nextPatch.phone,
     documentType: nextPatch.documentType,
     documentNumber: nextPatch.documentNumber,
     rol: nextPatch.role,

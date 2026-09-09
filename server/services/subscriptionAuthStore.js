@@ -137,6 +137,27 @@ function normalizeRole(rol) {
 
 }
 
+function isStaffWithoutRegulatoryId(role, isClinicOwner) {
+  if (isClinicOwner) return false
+  const canonical = normalizeRole(role)
+  return canonical === 'admin' || canonical === 'recepcion'
+}
+
+function defaultStaffNames(role) {
+  if (normalizeRole(role) === 'admin') {
+    return { firstName: 'Administrador', lastName: 'Adjunto' }
+  }
+  return { firstName: 'Auxiliar', lastName: 'Administrativo' }
+}
+
+function normalizeStaffPhone(value) {
+  return String(value ?? '').replace(/\D/g, '').slice(0, 12)
+}
+
+function isLikelyEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value ?? '').trim())
+}
+
 
 
 export function isSuperAdminUser(user) {
@@ -1135,6 +1156,7 @@ function sanitizeUser(user) {
     firstName,
     lastName,
     email: user.email,
+    phone: user.phone ?? '',
     rol: isSuperAdminUser(user) ? 'superadmin' : normalizeRole(user.rol),
     estado_pago: isSuperAdminUser(user) ? 'exento' : user.estado_pago,
     fecha_vencimiento: user.fecha_vencimiento,
@@ -1563,12 +1585,6 @@ export async function createClinicUser({ token, hint, member }) {
     return { ok: false, status: 400, error: 'La contraseña debe tener al menos 8 caracteres.' }
   }
 
-  const firstName = String(member?.firstName ?? '').trim()
-  const lastName = String(member?.lastName ?? '').trim()
-  if (!firstName || !lastName) {
-    return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
-  }
-
   const documentType = String(member?.documentType ?? 'CC').trim() || 'CC'
   const documentNumber = String(member?.documentNumber ?? '').replace(/\D/g, '')
   if (documentNumber.length < 6 || documentNumber.length > 12) {
@@ -1583,6 +1599,25 @@ export async function createClinicUser({ token, hint, member }) {
   const role = requestedRole === 'superadmin' ? 'odontologo' : requestedRole
   if (!VALID_ROLES.has(role) || role === 'superadmin') {
     return { ok: false, status: 400, error: 'El rol indicado no está permitido.' }
+  }
+
+  const isStaff = isStaffWithoutRegulatoryId(role, false)
+  let firstName = String(member?.firstName ?? '').trim()
+  let lastName = String(member?.lastName ?? '').trim()
+  const email = String(member?.email ?? '').trim().toLowerCase()
+  const phone = normalizeStaffPhone(member?.phone)
+  if (isStaff) {
+    if (!isLikelyEmail(email)) {
+      return { ok: false, status: 400, error: 'El correo electrónico es obligatorio para este tipo de usuario.' }
+    }
+    if (phone.length < 7 || phone.length > 12) {
+      return { ok: false, status: 400, error: 'El teléfono es obligatorio (7 a 12 dígitos).' }
+    }
+    const defaults = defaultStaffNames(role)
+    if (!firstName) firstName = defaults.firstName
+    if (!lastName) lastName = defaults.lastName
+  } else if (!firstName || !lastName) {
+    return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
   }
 
   const store = await loadStore()
@@ -1609,7 +1644,6 @@ export async function createClinicUser({ token, hint, member }) {
     return { ok: false, status: 409, error: 'Ya existe un usuario con esta cédula.' }
   }
 
-  const email = String(member?.email ?? '').trim().toLowerCase()
   if (email) {
     if (store.users.some((item) => normalizeEmail(item.email) === email)) {
       return { ok: false, status: 409, error: 'Ya existe un usuario con este correo.' }
@@ -1623,11 +1657,12 @@ export async function createClinicUser({ token, hint, member }) {
     lastName,
     nombre: [firstName, lastName].filter(Boolean).join(' '),
     email: email || '',
+    phone,
     passwordHash: hashPasswordSha256(password),
     rol: role,
     documentType,
     documentNumber,
-    rethusNumber: String(member?.rethusNumber ?? '').trim(),
+    rethusNumber: isStaff ? '' : String(member?.rethusNumber ?? '').trim(),
     clinicId,
     clinicName: owner.clinicName || member?.clinicName || '',
     legalName: owner.legalName || '',
@@ -1671,14 +1706,11 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
   }
 
   const incoming = patch && typeof patch === 'object' ? { ...patch } : {}
-  const firstName = String(incoming.firstName ?? current.firstName ?? '').trim()
-  const lastName = String(incoming.lastName ?? current.lastName ?? '').trim()
+  let firstName = String(incoming.firstName ?? current.firstName ?? '').trim()
+  let lastName = String(incoming.lastName ?? current.lastName ?? '').trim()
   const documentNumber = incoming.documentNumber !== undefined
     ? String(incoming.documentNumber).replace(/\D/g, '')
     : normalizeDocumentNumber(current.documentNumber)
-  if (!firstName || !lastName) {
-    return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
-  }
   if (documentNumber && (documentNumber.length < 6 || documentNumber.length > 12)) {
     return { ok: false, status: 400, error: 'La cédula debe tener entre 6 y 12 dígitos.' }
   }
@@ -1692,7 +1724,9 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
   }
 
   let role = current.rol
-  if (incoming.role !== undefined || incoming.rol !== undefined) {
+  if (isClinicOwner(current) && !isSuperAdminUser(current)) {
+    role = 'admin'
+  } else if (incoming.role !== undefined || incoming.rol !== undefined) {
     const requested = normalizeRole(incoming.role ?? incoming.rol)
     if (requested === 'superadmin' && !isSuperAdminUser(session.user)) {
       return { ok: false, status: 403, error: 'No puede asignar el rol de superadministrador.' }
@@ -1700,16 +1734,39 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     role = requested === 'superadmin' ? current.rol : requested
   }
 
+  const isStaff = isStaffWithoutRegulatoryId(role, isClinicOwner(current))
   const email = incoming.email !== undefined ? String(incoming.email ?? '').trim().toLowerCase() : current.email
+  const phone = incoming.phone !== undefined
+    ? normalizeStaffPhone(incoming.phone)
+    : normalizeStaffPhone(current.phone)
+  if (isStaff) {
+    if (!isLikelyEmail(email)) {
+      return { ok: false, status: 400, error: 'El correo electrónico es obligatorio para este tipo de usuario.' }
+    }
+    if (phone.length < 7 || phone.length > 12) {
+      return { ok: false, status: 400, error: 'El teléfono es obligatorio (7 a 12 dígitos).' }
+    }
+    const defaults = defaultStaffNames(role)
+    if (!firstName) firstName = current.firstName || defaults.firstName
+    if (!lastName) lastName = current.lastName || defaults.lastName
+  } else if (!firstName || !lastName) {
+    return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
+  }
+
   store.users[index] = {
     ...current,
     firstName,
     lastName,
     nombre: [firstName, lastName].filter(Boolean).join(' '),
     email: email || '',
+    phone,
     documentType: incoming.documentType ?? current.documentType ?? 'CC',
     documentNumber: documentNumber || current.documentNumber,
-    rethusNumber: incoming.rethusNumber !== undefined ? String(incoming.rethusNumber).trim() : current.rethusNumber,
+    rethusNumber: isStaff
+      ? ''
+      : incoming.rethusNumber !== undefined
+        ? String(incoming.rethusNumber).trim()
+        : current.rethusNumber,
     rol: role,
     thsSpecialty: incoming.thsSpecialty ?? current.thsSpecialty,
     updatedAt: new Date().toISOString(),

@@ -90,7 +90,7 @@ const ROLE_PERMISSIONS: Record<CanonicalRole, Permission[]> = {
 
 export const ROLE_LABELS: Record<CanonicalRole, string> = {
   superadmin: 'Super Administrador',
-  admin: 'Administración',
+  admin: 'Administrador Adjunto',
   odontologo: 'Odontólogo',
   recepcion: 'Recepción',
 }
@@ -103,7 +103,7 @@ export const USERS_MANAGE_DENIED =
 
 /**
  * Gestión de Usuarios: el titular de la clínica y quienes tienen rol
- * Administración pueden crear, editar y asignar accesos de su propio tenant.
+ * Administrador Adjunto pueden crear, editar y asignar accesos de su propio tenant.
  */
 export function canManageUsers(role: UserRole | string | null | undefined): boolean {
   if (!role) return false
@@ -152,6 +152,26 @@ export function normalizeRole(role: UserRole | string | undefined): CanonicalRol
 export function mapApiRoleToUserRole(rol: string | undefined): UserRole {
   const normalized = normalizeRole(rol)
   return normalized
+}
+
+/** Colaborador admin o recepción: sin ReTHUS ni REPS propios. El titular no aplica. */
+export function isStaffWithoutRegulatoryId(
+  role: UserRole | string | null | undefined,
+  options?: { isClinicOwner?: boolean },
+): boolean {
+  if (options?.isClinicOwner) return false
+  const canonical = normalizeRole(role ?? undefined)
+  return canonical === 'admin' || canonical === 'recepcion'
+}
+
+export function defaultStaffNames(role: UserRole | string | null | undefined): {
+  firstName: string
+  lastName: string
+} {
+  if (normalizeRole(role ?? undefined) === 'admin') {
+    return { firstName: 'Administrador', lastName: 'Adjunto' }
+  }
+  return { firstName: 'Auxiliar', lastName: 'Administrativo' }
 }
 
 export function resolveEffectiveRole(

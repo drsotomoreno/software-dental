@@ -173,7 +173,7 @@ export async function upsertProfessionalFromUser(user: UserProfile): Promise<voi
     return
   }
 
-  if (user.role !== 'odontologo' && user.role !== 'admin' && user.role !== 'superadmin') {
+  if (user.role !== 'odontologo' && user.role !== 'superadmin' && !(user.role === 'admin' && user.isClinicOwner)) {
     return
   }
 
