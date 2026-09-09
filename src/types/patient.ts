@@ -81,4 +81,4 @@ export interface Patient {
   lastSyncedAt?: string
 }
 
-export interface PatientFormData extends Omit<Patient, 'id' | 'createdAt' | 'updatedAt'> {}
+export type PatientFormData = Omit<Patient, 'id' | 'createdAt' | 'updatedAt'>

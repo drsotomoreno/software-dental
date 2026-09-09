@@ -70,7 +70,6 @@ export function NewPatientPage() {
   const { toastMessage, toastVariant, showToast, clearToast } = useToast()
 
   const professionalLicense = user?.documentNumber ?? ''
-  const patientFormError = validatePatientForm(form)
 
   useEffect(() => {
     if (!clinicalData) {
