@@ -3,6 +3,7 @@ import {
   resolveSubscriptionSession,
   sessionHintFromRequest,
 } from '../services/subscriptionAuthStore.js'
+import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
 import { pullClinicalRecords, pushClinicalRecords } from '../services/clinicalSyncStore.js'
 
 const router = Router()
@@ -12,22 +13,18 @@ function bearerToken(req) {
   return authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
 }
 
-function clinicIdOf(user) {
-  return String(user?.clinicId || user?.id || '').trim()
-}
-
 async function requireClinicSession(req, res) {
   const session = await resolveSubscriptionSession(bearerToken(req), sessionHintFromRequest(req))
   if (!session?.user) {
     res.status(401).json({ success: false, ok: false, error: 'Sesión inválida o expirada.' })
     return null
   }
-  const clinicId = clinicIdOf(session.user)
-  if (!clinicId) {
+  const scope = clinicSyncAliasIds(session.user)
+  if (!scope.canonical) {
     res.status(400).json({ success: false, ok: false, error: 'La sesión no tiene clínica asociada.' })
     return null
   }
-  return { session, clinicId }
+  return { session, ...scope }
 }
 
 router.get('/clinical', async (req, res) => {
@@ -35,12 +32,11 @@ router.get('/clinical', async (req, res) => {
     const auth = await requireClinicSession(req, res)
     if (!auth) return
 
-    const since = typeof req.query?.since === 'string' ? req.query.since : ''
-    const result = await pullClinicalRecords(auth.clinicId, since)
+    const result = await pullClinicalRecords(auth.canonical, '', auth.aliases)
     return res.json({
       success: true,
       ok: true,
-      clinicId: auth.clinicId,
+      clinicId: auth.canonical,
       patients: result.patients,
       appointments: result.appointments,
       serverTime: result.serverTime,
@@ -57,11 +53,16 @@ router.post('/clinical', async (req, res) => {
     if (!auth) return
 
     const body = req.body && typeof req.body === 'object' ? req.body : {}
-    const result = await pushClinicalRecords(auth.clinicId, body.patients, body.appointments)
+    const result = await pushClinicalRecords(
+      auth.canonical,
+      body.patients,
+      body.appointments,
+      auth.aliases,
+    )
     return res.json({
       success: true,
       ok: true,
-      clinicId: auth.clinicId,
+      clinicId: auth.canonical,
       accepted: result.accepted,
       serverTime: result.serverTime,
     })

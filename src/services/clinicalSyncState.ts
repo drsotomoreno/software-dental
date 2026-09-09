@@ -1,4 +1,5 @@
 import { getStoredApiAuth } from '@/services/apiAuthService'
+import { resolveClinicSyncId } from '../../shared/clinicalSyncScope.js'
 
 let applyingRemotePull = 0
 let suppressClinicalSyncStamp = 0
@@ -33,7 +34,7 @@ export async function withClinicalSyncSuppressed<T>(fn: () => Promise<T>): Promi
 export function getCurrentClinicId(): string {
   try {
     const auth = getStoredApiAuth()
-    return String(auth?.user?.clinicId || auth?.user?.id || '').trim()
+    return resolveClinicSyncId(auth?.user)
   } catch {
     return ''
   }

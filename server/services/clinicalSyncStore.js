@@ -36,10 +36,26 @@ function clinicBucket(store, clinicId) {
   const bucket = clinics[clinicId]
   if (!bucket || typeof bucket !== 'object') return emptyClinic()
   return {
-    patients: bucket.patients && typeof bucket.patients === 'object' ? bucket.patients : {},
+    patients: bucket.patients && typeof bucket.patients === 'object' ? { ...bucket.patients } : {},
     appointments:
-      bucket.appointments && typeof bucket.appointments === 'object' ? bucket.appointments : {},
+      bucket.appointments && typeof bucket.appointments === 'object' ? { ...bucket.appointments } : {},
   }
+}
+
+function mergeClinicBuckets(store, clinicIds) {
+  const merged = emptyClinic()
+  for (const clinicId of clinicIds) {
+    if (!clinicId) continue
+    const bucket = clinicBucket(store, clinicId)
+    merged.patients = mergeRecordMaps(merged.patients, bucket.patients)
+    merged.appointments = mergeRecordMaps(merged.appointments, bucket.appointments)
+  }
+  return merged
+}
+
+function scopeIds(clinicId, aliasIds = []) {
+  const canonical = String(clinicId || '').trim()
+  return [...new Set([canonical, ...aliasIds.map((id) => String(id || '').trim())].filter(Boolean))]
 }
 
 /** Fusiona almacenes clínicos por clinicId y LWW por syncId. */
@@ -70,10 +86,12 @@ function normalizeRecord(raw, clinicId) {
     raw.payload && typeof raw.payload === 'object' && !Array.isArray(raw.payload) ? raw.payload : {}
   const updatedAt = String(raw.updatedAt || payload.updatedAt || new Date().toISOString())
   const deletedAt = raw.deletedAt || payload.deletedAt || null
+  const now = new Date().toISOString()
   return {
     syncId,
     clinicId,
     updatedAt,
+    serverUpdatedAt: now,
     deletedAt: deletedAt ? String(deletedAt) : null,
     payload,
   }
@@ -111,56 +129,47 @@ async function saveStore(store) {
   await writeDurableJsonWithMerge(STORE_FILE, store, STORE_KEY, mergeClinicalStores)
 }
 
-function listSince(map, sinceMs) {
-  return Object.values(map).filter((record) => {
-    if (!record) return false
-    if (!Number.isFinite(sinceMs) || sinceMs <= 0) return true
-    return stamp(record) > sinceMs
-  })
-}
-
-export async function pullClinicalRecords(clinicId, since) {
-  const id = String(clinicId || '').trim()
-  if (!id) {
+/** Snapshot completo del cubo canónico más alias legacy (UUID, superadmin-session). */
+export async function pullClinicalRecords(clinicId, _since, aliasIds = []) {
+  const ids = scopeIds(clinicId, aliasIds)
+  if (ids.length === 0) {
     return { patients: [], appointments: [], serverTime: new Date().toISOString() }
   }
   const store = await loadStore()
-  const clinic = clinicBucket(store, id)
-  const sinceMs = since ? Date.parse(String(since)) : 0
-  const serverTime = new Date().toISOString()
+  const clinic = mergeClinicBuckets(store, ids)
   return {
-    patients: listSince(clinic.patients, sinceMs),
-    appointments: listSince(clinic.appointments, sinceMs),
-    serverTime,
+    patients: Object.values(clinic.patients).filter(Boolean),
+    appointments: Object.values(clinic.appointments).filter(Boolean),
+    serverTime: new Date().toISOString(),
   }
 }
 
-export async function pushClinicalRecords(clinicId, patients = [], appointments = []) {
-  const id = String(clinicId || '').trim()
-  if (!id) {
+export async function pushClinicalRecords(clinicId, patients = [], appointments = [], aliasIds = []) {
+  const canonical = String(clinicId || '').trim()
+  if (!canonical) {
     return { accepted: { patients: 0, appointments: 0 }, serverTime: new Date().toISOString() }
   }
 
   return enqueueWrite(async () => {
     const store = await loadStore()
-    const clinic = clinicBucket(store, id)
+    const clinic = mergeClinicBuckets(store, scopeIds(canonical, aliasIds))
     let acceptedPatients = 0
     let acceptedAppointments = 0
 
     for (const raw of Array.isArray(patients) ? patients : []) {
-      const record = normalizeRecord(raw, id)
+      const record = normalizeRecord(raw, canonical)
       if (!record) continue
       const key = findPatientKey(clinic.patients, record)
-      const canonical = key === record.syncId ? record : { ...record, syncId: key }
+      const canonicalRecord = key === record.syncId ? record : { ...record, syncId: key }
       const prev = clinic.patients[key]
-      if (!prev || stamp(canonical) >= stamp(prev)) {
-        clinic.patients[key] = canonical
+      if (!prev || stamp(canonicalRecord) >= stamp(prev)) {
+        clinic.patients[key] = canonicalRecord
         acceptedPatients += 1
       }
     }
 
     for (const raw of Array.isArray(appointments) ? appointments : []) {
-      const record = normalizeRecord(raw, id)
+      const record = normalizeRecord(raw, canonical)
       if (!record) continue
       const prev = clinic.appointments[record.syncId]
       if (!prev || stamp(record) >= stamp(prev)) {
@@ -169,7 +178,11 @@ export async function pushClinicalRecords(clinicId, patients = [], appointments 
       }
     }
 
-    store.clinics[id] = clinic
+    store.clinics[canonical] = clinic
+    for (const alias of aliasIds) {
+      const id = String(alias || '').trim()
+      if (id && id !== canonical) delete store.clinics[id]
+    }
     await saveStore(store)
     return {
       accepted: { patients: acceptedPatients, appointments: acceptedAppointments },

@@ -8,11 +8,11 @@ import {
 import type { Appointment } from '@/types/appointment'
 import type { ClinicalSyncRecord } from '@/types/clinicalSync'
 import type { Patient } from '@/types/patient'
+import { generateId } from '@/utils'
 import { renderCitas, syncCitasToLocalStorage } from '@/utils/agendaStorage'
 
-const PULL_SINCE_PREFIX = 'doctorSEO_clinical_sync_since:'
-const POLL_MS = 10_000
-const DIRTY_DEBOUNCE_MS = 400
+const POLL_MS = 2_000
+const DIRTY_DEBOUNCE_MS = 200
 
 const LOCAL_ONLY_KEYS = new Set(['id', 'pendingSync', 'lastSyncedAt'])
 
@@ -22,20 +22,6 @@ function stampOf(value: { updatedAt?: string; deletedAt?: string | null } | Clin
   const deleted = Date.parse('deletedAt' in value ? String(value.deletedAt || '') : '') || 0
   const updated = Date.parse(String(value.updatedAt || '')) || 0
   return Math.max(deleted, updated)
-}
-
-function sinceStorageKey(clinicId: string): string {
-  return `${PULL_SINCE_PREFIX}${clinicId}`
-}
-
-function readSince(clinicId: string): string {
-  if (typeof localStorage === 'undefined') return ''
-  return localStorage.getItem(sinceStorageKey(clinicId)) || ''
-}
-
-function writeSince(clinicId: string, serverTime: string): void {
-  if (typeof localStorage === 'undefined' || !serverTime) return
-  localStorage.setItem(sinceStorageKey(clinicId), serverTime)
 }
 
 function identityHeaders() {
@@ -146,7 +132,7 @@ async function mergePatients(records: ClinicalSyncRecord[]): Promise<boolean> {
       continue
     }
     if (local) {
-      if (stampOf(remote) < stampOf(local)) continue
+      if (stampOf(remote) <= stampOf(local)) continue
       if (local.id == null) continue
       const next = applyPayload<Patient>(remote)
       delete next.id
@@ -180,7 +166,7 @@ async function mergeAppointments(records: ClinicalSyncRecord[]): Promise<boolean
     })
     delete next.id
     if (local) {
-      if (stampOf(remote) < stampOf(local)) continue
+      if (stampOf(remote) <= stampOf(local)) continue
       if (local.id == null) continue
       await db.appointments.update(local.id, next)
       changed = true
@@ -204,28 +190,43 @@ async function withPatientSyncId(row: Appointment): Promise<Appointment> {
   return { ...row, patientSyncId: patient.syncId }
 }
 
-async function pushDirty(clinicId: string): Promise<boolean> {
-  const [patients, appointments] = await Promise.all([
-    db.patients.filter((row) => row.pendingSync === true).toArray(),
-    db.appointments.filter((row) => row.pendingSync === true).toArray(),
-  ])
+/** Asigna syncId/clinicId a lo local sin marcarlo pending (el snapshot sube todo). */
+async function adoptLocalRecords(clinicId: string): Promise<void> {
+  await withRemotePullLock(async () => {
+    const patients = await db.patients.toArray()
+    for (const row of patients) {
+      if (row.id == null) continue
+      const patch: Partial<Patient> = {}
+      if (!row.syncId) patch.syncId = generateId()
+      if (!row.clinicId) patch.clinicId = clinicId
+      if (Object.keys(patch).length > 0) await db.patients.update(row.id, patch)
+    }
+    const appointments = await db.appointments.toArray()
+    for (const row of appointments) {
+      if (row.id == null) continue
+      const patch: Partial<Appointment> = {}
+      if (!row.syncId) patch.syncId = generateId()
+      if (!row.clinicId) patch.clinicId = clinicId
+      if (Object.keys(patch).length > 0) await db.appointments.update(row.id, patch)
+    }
+  })
+}
+
+async function pushAllLocal(clinicId: string): Promise<boolean> {
+  await adoptLocalRecords(clinicId)
+  const [patients, appointments] = await Promise.all([db.patients.toArray(), db.appointments.toArray()])
 
   const patientRecords = patients
-    .filter((row) => Boolean(String(row.clinicId || '').trim()))
-    .map((row) => toSyncRecord(row, clinicId))
+    .map((row) => toSyncRecord({ ...row, clinicId: row.clinicId || clinicId }, clinicId))
     .filter((row): row is ClinicalSyncRecord => row != null)
 
   const appointmentRecords = (
-    await Promise.all(
-      appointments
-        .filter((row) => Boolean(String(row.clinicId || '').trim()))
-        .map((row) => withPatientSyncId(row)),
-    )
+    await Promise.all(appointments.map((row) => withPatientSyncId({ ...row, clinicId: row.clinicId || clinicId })))
   )
     .map((row) => toSyncRecord(row, clinicId))
     .filter((row): row is ClinicalSyncRecord => row != null)
 
-  if (patientRecords.length === 0 && appointmentRecords.length === 0) return false
+  if (patientRecords.length === 0 && appointmentRecords.length === 0) return true
 
   const { response } = await syncFetch('/api/sync/clinical', {
     method: 'POST',
@@ -236,11 +237,11 @@ async function pushDirty(clinicId: string): Promise<boolean> {
   const now = new Date().toISOString()
   await withRemotePullLock(async () => {
     for (const row of patients) {
-      if (row.id == null || !patientRecords.some((item) => item.syncId === row.syncId)) continue
+      if (row.id == null) continue
       await db.patients.update(row.id, { pendingSync: false, lastSyncedAt: now, clinicId: row.clinicId || clinicId })
     }
     for (const row of appointments) {
-      if (row.id == null || !appointmentRecords.some((item) => item.syncId === row.syncId)) continue
+      if (row.id == null) continue
       await db.appointments.update(row.id, {
         pendingSync: false,
         lastSyncedAt: now,
@@ -251,17 +252,14 @@ async function pushDirty(clinicId: string): Promise<boolean> {
   return true
 }
 
-async function pullAndMerge(clinicId: string): Promise<boolean> {
-  const since = readSince(clinicId)
-  const query = since ? `?since=${encodeURIComponent(since)}` : ''
-  const { response, payload } = await syncFetch(`/api/sync/clinical${query}`)
+async function pullAndMerge(): Promise<boolean> {
+  const { response, payload } = await syncFetch('/api/sync/clinical')
   if (!response.ok) return false
 
   const patients = Array.isArray(payload.patients) ? (payload.patients as ClinicalSyncRecord[]) : []
   const appointments = Array.isArray(payload.appointments)
     ? (payload.appointments as ClinicalSyncRecord[])
     : []
-  const serverTime = String(payload.serverTime || new Date().toISOString())
 
   let changed = false
   await withRemotePullLock(async () => {
@@ -269,12 +267,11 @@ async function pullAndMerge(clinicId: string): Promise<boolean> {
     const appointmentsChanged = await mergeAppointments(appointments)
     changed = patientsChanged || appointmentsChanged
   })
-
-  writeSince(clinicId, serverTime)
   return changed
 }
 
 let inFlight: Promise<boolean> | null = null
+let queued = false
 let dirtyTimer: number | null = null
 
 async function performClinicalSyncCycle(): Promise<boolean> {
@@ -283,23 +280,28 @@ async function performClinicalSyncCycle(): Promise<boolean> {
   if (!auth?.token || !clinicId) return false
 
   try {
-    await pushDirty(clinicId)
-    const changed = await pullAndMerge(clinicId)
-    if (changed) {
-      await syncCitasToLocalStorage()
-      renderCitas()
-    }
-    return changed
+    await pushAllLocal(clinicId).catch(() => false)
+    const changed = await pullAndMerge().catch(() => false)
+    await syncCitasToLocalStorage()
+    renderCitas()
+    return Boolean(changed)
   } catch {
     return false
   }
 }
 
-/** Ciclo silencioso push + pull. No lanza; respeta un mutex para no solapar. */
+/** Ciclo silencioso: sube TODO lo local y baja el snapshot completo de la clínica. */
 export function runClinicalSyncCycle(): Promise<boolean> {
-  if (inFlight) return inFlight
+  if (inFlight) {
+    queued = true
+    return inFlight
+  }
   inFlight = performClinicalSyncCycle().finally(() => {
     inFlight = null
+    if (queued) {
+      queued = false
+      void runClinicalSyncCycle()
+    }
   })
   return inFlight
 }

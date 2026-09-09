@@ -41,7 +41,7 @@ app.use(
     ],
   }),
 )
-app.use(express.json({ limit: '5mb' }))
+app.use(express.json({ limit: '10mb' }))
 
 app.use('/api/health', healthRoutes)
 app.use('/api/rips', ripsRoutes)

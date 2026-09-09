@@ -5,7 +5,7 @@ import {
 } from '@/services/clinicalSyncService'
 
 /**
- * Pull silencioso al recuperar el foco, al volver online y cada 10s.
+ * Pull silencioso al recuperar el foco, al volver online y cada 2s.
  * Solo corre con sesión autenticada.
  */
 export function useClinicalPullSync(enabled: boolean): void {
