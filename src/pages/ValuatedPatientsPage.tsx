@@ -4,7 +4,9 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
+import { usePatientListFilter } from '@/hooks/usePatientsList'
 import { isValuatedOnlyPatient } from '@/types/patient'
+import { PatientListNoMatches, PatientListSearch } from '@/components/patients/PatientListSearch'
 
 export function ValuatedPatientsPage() {
   const { can } = useAuth()
@@ -15,6 +17,7 @@ export function ValuatedPatientsPage() {
     const all = await db.patients.orderBy('lastName').reverse().toArray()
     return all.filter(isValuatedOnlyPatient)
   })
+  const { query, setQuery, debouncedQuery, filteredPatients } = usePatientListFilter(patients)
 
   useEffect(() => {
     if (loggedRef.current) return
@@ -43,7 +46,7 @@ export function ValuatedPatientsPage() {
         )}
       </div>
 
-      {!patients ? (
+      {!patients || !filteredPatients ? (
         <p className="text-slate-500">Cargando...</p>
       ) : patients.length === 0 ? (
         <div className="card text-center">
@@ -55,48 +58,55 @@ export function ValuatedPatientsPage() {
           )}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-amber-100 bg-amber-50">
-              <tr>
-                <th className="px-4 py-3 font-medium text-slate-600">Documento</th>
-                <th className="px-4 py-3 font-medium text-slate-600">Nombre</th>
-                <th className="px-4 py-3 font-medium text-slate-600">Teléfono</th>
-                <th className="px-4 py-3 font-medium text-slate-600">EPS</th>
-                <th className="px-4 py-3 font-medium text-slate-600">Estado</th>
-                <th className="px-4 py-3 font-medium text-slate-600">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {patients.map((patient) => (
-                <tr key={patient.id} className="hover:bg-amber-50/40">
-                  <td className="px-4 py-3 font-mono text-xs">
-                    {patient.documentType} {patient.documentNumber}
-                  </td>
-                  <td className="px-4 py-3 font-medium">
-                    {patient.firstName} {patient.lastName}
-                  </td>
-                  <td className="px-4 py-3">{patient.phone}</td>
-                  <td className="px-4 py-3">{patient.insurer ?? '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900">
-                      Solo valoración
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link
-                      to={`/pacientes/${patient.id}`}
-                      state={{ resetHistoryView: true }}
-                      className="text-dental-600 hover:underline"
-                    >
-                      Ver valoración
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <PatientListSearch value={query} onChange={setQuery} />
+          {filteredPatients.length === 0 ? (
+            <PatientListNoMatches query={debouncedQuery} />
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-amber-100 bg-amber-50">
+                  <tr>
+                    <th className="px-4 py-3 font-medium text-slate-600">Documento</th>
+                    <th className="px-4 py-3 font-medium text-slate-600">Nombre</th>
+                    <th className="px-4 py-3 font-medium text-slate-600">Teléfono</th>
+                    <th className="px-4 py-3 font-medium text-slate-600">EPS</th>
+                    <th className="px-4 py-3 font-medium text-slate-600">Estado</th>
+                    <th className="px-4 py-3 font-medium text-slate-600">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredPatients.map((patient) => (
+                    <tr key={patient.id} className="hover:bg-amber-50/40">
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {patient.documentType} {patient.documentNumber}
+                      </td>
+                      <td className="px-4 py-3 font-medium">
+                        {patient.firstName} {patient.lastName}
+                      </td>
+                      <td className="px-4 py-3">{patient.phone}</td>
+                      <td className="px-4 py-3">{patient.insurer ?? '—'}</td>
+                      <td className="px-4 py-3">
+                        <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900">
+                          Solo valoración
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Link
+                          to={`/pacientes/${patient.id}`}
+                          state={{ resetHistoryView: true }}
+                          className="text-dental-600 hover:underline"
+                        >
+                          Ver valoración
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

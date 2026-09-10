@@ -660,6 +660,11 @@ export class DentalDatabase extends Dexie {
           }
         }
       })
+
+    this.version(26).stores({
+      patients:
+        '++id, documentNumber, firstName, lastName, createdAt, phase, ownerUserId, syncId, clinicId, pendingSync',
+    })
   }
 }
 
