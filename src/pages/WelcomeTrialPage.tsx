@@ -2,19 +2,28 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { APP_INITIALS, APP_NAME } from '@/constants/branding'
 import { useAuth } from '@/contexts/AuthContext'
+import { FiscalProfileSelector } from '@/components/onboarding'
+import { persistClinicPerfilFiscal } from '@/services/fiscalProfileService'
 import { getStoredApiAuth } from '@/services/apiAuthService'
+import { getBillingModalitySettings } from '@/services/billingModalityService'
 import { activatePaidPlan, activateRethusTrial, PAID_PLANS, TRIAL_DAYS } from '@/services/subscriptionService'
 import { userHasTrialLimits, userNeedsWelcome } from '@/utils/subscriptionAccess'
+import { normalizePerfilFiscal, type FiscalProfile } from '@/utils/fiscalProfile'
 
 export function WelcomeTrialPage() {
   const navigate = useNavigate()
-  const { refreshSessionUser } = useAuth()
+  const { user, applySessionUser, refreshSessionUser } = useAuth()
   const stored = getStoredApiAuth()
   const alreadyLimited = userHasTrialLimits(stored?.user)
   const needsPlan = userNeedsWelcome(stored?.user)
 
   const [documentNumber, setDocumentNumber] = useState(stored?.user?.documentNumber ?? '')
   const [rethusNumber, setRethusNumber] = useState(stored?.user?.rethusNumber ?? '')
+  const [perfilFiscal, setPerfilFiscal] = useState<FiscalProfile>(() =>
+    normalizePerfilFiscal(
+      stored?.user?.perfilFiscal ?? getBillingModalitySettings().perfilFiscal,
+    ),
+  )
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
   const [submitting, setSubmitting] = useState<'trial' | string | null>(null)
@@ -22,6 +31,18 @@ export function WelcomeTrialPage() {
   const goApp = async () => {
     await refreshSessionUser()
     navigate('/app', { replace: true })
+  }
+
+  const savePerfilFiscal = async (next: FiscalProfile) => {
+    await persistClinicPerfilFiscal(next, {
+      user: user ?? undefined,
+      applySessionUser,
+    })
+  }
+
+  const handlePerfilFiscal = async (next: FiscalProfile) => {
+    setPerfilFiscal(next)
+    await savePerfilFiscal(next)
   }
 
   const handleTrial = async (e: React.FormEvent) => {
@@ -36,6 +57,7 @@ export function WelcomeTrialPage() {
       return
     }
     setInfo(result.message)
+    await savePerfilFiscal(perfilFiscal)
     await goApp()
   }
 
@@ -49,6 +71,7 @@ export function WelcomeTrialPage() {
       setError(result.error)
       return
     }
+    await savePerfilFiscal(perfilFiscal)
     await goApp()
   }
 
@@ -64,6 +87,19 @@ export function WelcomeTrialPage() {
             <h1 className="text-2xl font-bold text-slate-900">Bienvenido. Active su acceso</h1>
           </div>
         </div>
+
+        <section className="mb-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-dental-700">
+            Onboarding del odontólogo
+          </p>
+          <FiscalProfileSelector
+            value={perfilFiscal}
+            onChange={(next) => void handlePerfilFiscal(next)}
+            disabled={Boolean(submitting)}
+            title="Perfil fiscal"
+            description="Elija cómo reportará RIPS y facturación. Si es profesional independiente por debajo de 3.500 UVT, no emite FEV."
+          />
+        </section>
 
         {alreadyLimited && !needsPlan && (
           <p className="mb-6 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900">

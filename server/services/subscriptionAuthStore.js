@@ -13,6 +13,7 @@ import { sanitizeRepsInput } from '../../shared/prestadorIdentity.js'
 import { isInstitutionProvider, normalizeProviderType } from '../../shared/providerType.js'
 import {
   DEFAULT_PERFIL_FISCAL,
+  isNoObligadoFev,
   normalizePerfilFiscal,
 } from '../../shared/fiscalProfile.js'
 import { parseRepsCodeWithDane } from './repsDane.js'
@@ -1220,6 +1221,46 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
   }
 
   const current = store.users[index]
+  const fiscalOnlyKeys = Object.keys(patch).filter((key) => patch[key] !== undefined)
+  const isFiscalProfileOnlyPatch =
+    fiscalOnlyKeys.length > 0 &&
+    fiscalOnlyKeys.every((key) => key === 'perfilFiscal' || key === 'providerType') &&
+    patch.perfilFiscal !== undefined
+
+  if (isFiscalProfileOnlyPatch) {
+    if (!(isClinicOwner(current) || canManageClinicTeam(actor))) {
+      return {
+        ok: false,
+        status: 403,
+        error: 'Solo el titular o el administrador de la clínica puede cambiar el perfil fiscal.',
+      }
+    }
+    const nextPerfil = normalizePerfilFiscal(patch.perfilFiscal)
+    const nextProviderType = isNoObligadoFev(nextPerfil)
+      ? 'profesional_independiente'
+      : normalizeProviderType(patch.providerType ?? current.providerType)
+    const now = new Date().toISOString()
+    const clinicId = clinicIdOf(current)
+    const updated = {
+      ...current,
+      perfilFiscal: nextPerfil,
+      providerType: nextProviderType,
+      updatedAt: now,
+    }
+    store.users[index] = updated
+    for (let i = 0; i < store.users.length; i++) {
+      if (clinicIdOf(store.users[i]) !== clinicId) continue
+      if (store.users[i].id === current.id) continue
+      store.users[i] = {
+        ...store.users[i],
+        perfilFiscal: nextPerfil,
+        updatedAt: now,
+      }
+    }
+    await saveStore(store)
+    return { ok: true, user: sanitizeUser(updated) }
+  }
+
   const targetRole = normalizeRole(current.rol)
   const mustVerifyPrestador = targetRole !== 'recepcion'
   const providerType = normalizeProviderType(patch.providerType ?? current.providerType)

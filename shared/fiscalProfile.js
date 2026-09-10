@@ -12,16 +12,20 @@ export const PERFIL_FISCAL_VALUES = [PERFIL_FISCAL_OBLIGADO_FEV, PERFIL_FISCAL_N
 
 export const DEFAULT_PERFIL_FISCAL = PERFIL_FISCAL_OBLIGADO_FEV
 
+export const PERFIL_FISCAL_NO_OBLIGADO_NOTICE =
+  'Sus RIPS se enviarán mensualmente sin factura.'
+
 export const PERFIL_FISCAL_OPTIONS = [
   {
     id: PERFIL_FISCAL_OBLIGADO_FEV,
     label: 'Obligado a factura electrónica (FEV)',
-    hint: 'El RIPS definitivo debe llevar numFactura igual a la FEV reportada ante la DIAN.',
+    hint: 'IPS o profesional con ingresos iguales o superiores a 3.500 UVT. El RIPS lleva el número de la FEV DIAN.',
   },
   {
     id: PERFIL_FISCAL_NO_OBLIGADO,
-    label: 'No obligado a facturar electrónicamente',
-    hint: 'Los RIPS temporales se almacenan y radican con numFactura en null (Res. 2275).',
+    label: 'Profesional Independiente < 3.500 UVT',
+    hint: 'No obligado a facturar electrónicamente. Los RIPS se reportan al Ministerio sin número de factura.',
+    notice: PERFIL_FISCAL_NO_OBLIGADO_NOTICE,
   },
 ]
 
@@ -37,11 +41,14 @@ export function normalizePerfilFiscal(value) {
     .trim()
     .replace(/[\s-]+/g, '_')
 
+  const lowered = raw.toLowerCase()
   if (
     raw === PERFIL_FISCAL_NO_OBLIGADO ||
-    raw.toLowerCase() === 'no_obligado' ||
-    raw.toLowerCase() === 'false' ||
-    raw === '0'
+    lowered === 'no_obligado' ||
+    lowered === 'false' ||
+    raw === '0' ||
+    lowered.includes('3.500') ||
+    lowered.includes('3500')
   ) {
     return PERFIL_FISCAL_NO_OBLIGADO
   }
