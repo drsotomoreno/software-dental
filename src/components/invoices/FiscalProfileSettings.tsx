@@ -1,18 +1,13 @@
 import { useEffect, useState } from 'react'
-import { FileJson, Landmark } from 'lucide-react'
+import { FileJson } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { canManageClinicTeam } from '@/utils/permissions'
-import {
-  PERFIL_FISCAL_OPTIONS,
-  isNoObligadoFev,
-  normalizePerfilFiscal,
-  type FiscalProfile,
-} from '@/utils/fiscalProfile'
+import { FiscalProfileSelector } from '@/components/onboarding'
+import { persistClinicPerfilFiscal } from '@/services/fiscalProfileService'
+import { normalizePerfilFiscal, type FiscalProfile } from '@/utils/fiscalProfile'
 import type { BillingModalitySettings } from '@/types/billingModality'
-import { updateOwnProfile } from '@/services/subscriptionService'
-import { getStoredApiAuth, setStoredApiAuth } from '@/services/apiAuthService'
 import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
 
 const STATUS_LABELS: Record<TemporaryRipsRecord['status'], string> = {
@@ -35,77 +30,21 @@ export function FiscalProfileSettings({ settings, onPersist }: FiscalProfileSett
   const selectProfile = async (perfilFiscal: FiscalProfile) => {
     if (!canEdit || perfilFiscal === current) return
     onPersist({ ...settings, perfilFiscal })
-    if (user?.id) {
-      try {
-        await db.users.update(user.id, { perfilFiscal })
-      } catch {
-        /* sesión API sin fila local en IndexedDB */
-      }
-      const remote = await updateOwnProfile({
-        firstName: user.firstName,
-        lastName: user.lastName,
-        legalName: user.legalName,
-        documentType: user.documentType,
-        documentNumber: user.documentNumber,
-        clinicName: user.clinicName,
-        providerNit: user.providerNit,
-        repsCode: user.repsCode,
-        providerType: user.providerType,
-        rethusNumber: user.rethusNumber,
-        perfilFiscal,
-        clientEmail: getStoredApiAuth()?.user?.email,
-        clientUserId: getStoredApiAuth()?.user?.id,
-      })
-      if (remote.ok) {
-        const latestAuth = getStoredApiAuth()
-        setStoredApiAuth(latestAuth?.token ?? `session-${remote.user.id}`, remote.user)
-        applySessionUser(remote.user)
-      }
-    }
+    await persistClinicPerfilFiscal(perfilFiscal, {
+      user,
+      applySessionUser,
+    })
   }
 
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
-      <div className="flex items-start gap-3">
-        <Landmark className="mt-0.5 h-5 w-5 text-dental-700" aria-hidden />
-        <div>
-          <h3 className="text-base font-semibold text-slate-900">Perfil fiscal de la clínica</h3>
-          <p className="mt-1 text-sm text-slate-600">
-            Define si el prestador está obligado a factura electrónica de venta. Los no obligados
-            almacenan RIPS temporales con <span className="font-mono">numFactura</span> en null
-            (Res. 2275).
-          </p>
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        {PERFIL_FISCAL_OPTIONS.map((option) => {
-          const selected = current === option.id
-          return (
-            <button
-              key={option.id}
-              type="button"
-              disabled={!canEdit}
-              onClick={() => void selectProfile(option.id)}
-              className={`rounded-2xl border p-4 text-left transition ${
-                selected
-                  ? 'border-dental-500 bg-dental-50 ring-2 ring-dental-200'
-                  : 'border-slate-200 bg-white hover:border-dental-200'
-              } ${canEdit ? '' : 'cursor-not-allowed opacity-80'}`}
-            >
-              <p className="text-sm font-semibold text-slate-900">{option.label}</p>
-              <p className="mt-1 text-xs leading-relaxed text-slate-600">{option.hint}</p>
-            </button>
-          )
-        })}
-      </div>
-
-      {isNoObligadoFev(current) && (
-        <p className="text-sm text-amber-900">
-          Esta clínica no emite FEV DIAN. Los RIPS de atención se guardan como registros temporales
-          con numFactura nulo.
-        </p>
-      )}
+      <FiscalProfileSelector
+        value={current}
+        onChange={(next) => void selectProfile(next)}
+        disabled={!canEdit}
+        title="Perfil fiscal de la clínica"
+        description="Define si el prestador está obligado a factura electrónica de venta. Un profesional independiente por debajo de 3.500 UVT reporta RIPS sin FEV."
+      />
     </div>
   )
 }

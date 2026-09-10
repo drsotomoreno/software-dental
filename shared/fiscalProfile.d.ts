@@ -3,10 +3,12 @@ export const PERFIL_FISCAL_NO_OBLIGADO: 'No_Obligado'
 export type FiscalProfile = 'Obligado_FEV' | 'No_Obligado'
 export const PERFIL_FISCAL_VALUES: FiscalProfile[]
 export const DEFAULT_PERFIL_FISCAL: FiscalProfile
+export const PERFIL_FISCAL_NO_OBLIGADO_NOTICE: string
 export const PERFIL_FISCAL_OPTIONS: Array<{
   id: FiscalProfile
   label: string
   hint: string
+  notice?: string
 }>
 export function normalizePerfilFiscal(value?: unknown): FiscalProfile
 export function isNoObligadoFev(value?: unknown): boolean
