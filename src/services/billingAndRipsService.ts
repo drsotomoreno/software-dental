@@ -318,7 +318,7 @@ export async function processClinicalSession(
       numDocumentoIdObligado: ripsPayload.numDocumentoIdObligado,
       numFactura: null,
       perfilFiscal,
-      status: pendingWithoutInvoice ? 'ready' : 'draft',
+      status: pendingWithoutInvoice ? 'pendiente' : 'draft',
       ripsJson: { ...ripsPayload, numFactura: null },
       submittedAt: null,
     })

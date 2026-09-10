@@ -9,6 +9,7 @@ import {
   getTemporaryRipsRecord,
 } from '../services/ripsTemporalStore.js'
 import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.controller.js'
+import { getMonthlyRipsStatus, runMonthlyRipsJob } from '../controllers/monthlyRips.controller.js'
 
 const router = Router()
 
@@ -17,6 +18,18 @@ const router = Router()
  * Motor de dictado terminó: valida perfil fiscal y enruta FEV+RIPS o RIPS pendiente.
  */
 router.post('/evolucion-dictada', processDictatedEvolution)
+
+/**
+ * GET /api/rips/mensual/estado
+ * Estado del cron de envío mensual (día 1, 02:00 America/Bogota).
+ */
+router.get('/mensual/estado', getMonthlyRipsStatus)
+
+/**
+ * POST /api/rips/mensual/enviar
+ * Disparo manual (superadmin). Body: { dryRun?: true }
+ */
+router.post('/mensual/enviar', runMonthlyRipsJob)
 
 /**
  * POST /api/rips/validate

@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS rips_temporales (
   perfil_fiscal TEXT NOT NULL DEFAULT 'Obligado_FEV'
     CHECK (perfil_fiscal IN ('Obligado_FEV', 'No_Obligado')),
   status TEXT NOT NULL DEFAULT 'draft'
-    CHECK (status IN ('draft', 'ready', 'submitted', 'linked_to_invoice')),
+    CHECK (status IN ('draft', 'ready', 'pendiente', 'submitted', 'linked_to_invoice')),
   rips_json TEXT NOT NULL,
   invoice_id TEXT,
   created_at TEXT NOT NULL,

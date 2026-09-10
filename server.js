@@ -16,6 +16,7 @@ import authRoutes from './server/routes/auth.routes.js'
 import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
 import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
+import { startMonthlyRipsCron } from './server/jobs/monthlyRipsCron.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -131,4 +132,5 @@ app.listen(config.port, '0.0.0.0', () => {
   console.log(
     `[RIPS API] Modo MinSalud: ${config.minsalud.sandbox ? 'SANDBOX (local)' : 'PRODUCCIÓN'}`,
   )
+  void startMonthlyRipsCron()
 })

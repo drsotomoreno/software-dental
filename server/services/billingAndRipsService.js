@@ -209,7 +209,7 @@ export async function guardarRIPS_Pendiente({ rips, metadatos = {}, user }) {
     numDocumentoIdObligado: payload.numDocumentoIdObligado,
     numFactura: null,
     perfilFiscal,
-    status: 'ready',
+    status: 'pendiente',
     ripsJson: payload,
   })
 

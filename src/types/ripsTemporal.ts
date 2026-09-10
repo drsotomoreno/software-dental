@@ -2,7 +2,7 @@ import type { FiscalProfile } from '@/utils/fiscalProfile'
 import type { RipsTransaction } from './rips'
 
 /** Ciclo de vida de un RIPS temporal (pre-FEV o prestador no obligado). */
-export type TemporaryRipsStatus = 'draft' | 'ready' | 'submitted' | 'linked_to_invoice'
+export type TemporaryRipsStatus = 'draft' | 'ready' | 'pendiente' | 'submitted' | 'linked_to_invoice'
 
 /**
  * Registro RIPS temporal persistido en IndexedDB (`ripsTemporales`) y en

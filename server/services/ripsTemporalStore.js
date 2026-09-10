@@ -13,7 +13,9 @@ import {
 
 const STORE_FILE = join(config.dataDir, 'rips-temporales.json')
 
-const STATUSES = new Set(['draft', 'ready', 'submitted', 'linked_to_invoice'])
+const STATUSES = new Set(['draft', 'ready', 'pendiente', 'pending', 'submitted', 'linked_to_invoice'])
+
+const PENDING_STATUSES = new Set(['ready', 'pendiente', 'pending'])
 
 async function ensureStore() {
   await mkdir(config.dataDir, { recursive: true })
@@ -48,7 +50,8 @@ function normalizeRecord(entry = {}, previous = null) {
   const numFactura = normalizeRipsNumFactura(
     entry.numFactura !== undefined ? entry.numFactura : ripsJson.numFactura,
   )
-  const status = STATUSES.has(entry.status) ? entry.status : previous?.status ?? 'draft'
+  const rawStatus = STATUSES.has(entry.status) ? entry.status : previous?.status ?? 'draft'
+  const status = rawStatus === 'pending' ? 'pendiente' : rawStatus
   const perfilFiscal = normalizePerfilFiscal(entry.perfilFiscal ?? previous?.perfilFiscal)
 
   return {
@@ -96,6 +99,40 @@ export async function listTemporaryRipsRecords({ clinicId, limit = 100 } = {}) {
     : records
   return filtered.slice(0, limit)
 }
+
+export function isPendingRipsWithoutInvoice(record) {
+  const status = String(record?.status ?? '').toLowerCase()
+  if (!PENDING_STATUSES.has(status)) return false
+  return normalizeRipsNumFactura(record.numFactura ?? record.ripsJson?.numFactura) == null
+}
+
+export async function listPendingRipsWithoutInvoice() {
+  const records = await readAll()
+  return records.filter(isPendingRipsWithoutInvoice)
+}
+
+export async function markTemporaryRipsSubmitted(ids, extra = {}) {
+  const idSet = new Set((ids ?? []).map(String))
+  if (idSet.size === 0) return []
+  const records = await readAll()
+  const now = extra.submittedAt || new Date().toISOString()
+  const updated = []
+  for (let i = 0; i < records.length; i++) {
+    if (!idSet.has(String(records[i].id))) continue
+    records[i] = {
+      ...records[i],
+      status: 'submitted',
+      submittedAt: now,
+      updatedAt: now,
+      cuv: extra.cuv ?? records[i].cuv ?? null,
+    }
+    updated.push(records[i])
+  }
+  await writeAll(records)
+  return updated
+}
+
+export { PENDING_STATUSES }
 
 export async function getTemporaryRipsRecord(id) {
   const records = await readAll()

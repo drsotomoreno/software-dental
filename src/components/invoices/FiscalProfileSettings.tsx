@@ -12,7 +12,8 @@ import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
 
 const STATUS_LABELS: Record<TemporaryRipsRecord['status'], string> = {
   draft: 'Borrador',
-  ready: 'Listo',
+  ready: 'Pendiente',
+  pendiente: 'Pendiente',
   submitted: 'Radicado',
   linked_to_invoice: 'Vinculado a FEV',
 }
