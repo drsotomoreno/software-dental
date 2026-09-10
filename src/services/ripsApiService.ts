@@ -5,8 +5,22 @@ import type {
   RipsCuvStoredRecord,
 } from '@/types/ripsCuv'
 import type { RipsTransaction } from '@/types/rips'
+import { getStoredApiAuth } from '@/services/apiAuthService'
+import type { FiscalProfile } from '@/utils/fiscalProfile'
 
 const API_BASE = import.meta.env.VITE_RIPS_API_URL ?? '/api/rips'
+
+function identityHeaders() {
+  const auth = getStoredApiAuth()
+  return {
+    ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
+    ...(auth?.user?.email ? { 'X-Client-Email': String(auth.user.email) } : {}),
+    ...(auth?.user?.id ? { 'X-Client-User-Id': String(auth.user.id) } : {}),
+    ...(auth?.user?.documentNumber
+      ? { 'X-Client-Document': String(auth.user.documentNumber) }
+      : {}),
+  }
+}
 
 async function parseJson<T>(response: Response): Promise<T> {
   const data = await response.json()
@@ -38,7 +52,7 @@ export async function validateRipsWithMinistry(
 ): Promise<RipsValidateResponse> {
   const response = await fetch(`${API_BASE}/validate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...identityHeaders() },
     body: JSON.stringify({
       rips,
       metadatos: options?.metadatos,
@@ -47,6 +61,49 @@ export async function validateRipsWithMinistry(
   })
 
   return parseJson<RipsValidateResponse>(response)
+}
+
+export type FiscalBillingRoute = 'generarFEV_y_RIPS' | 'guardarRIPS_Pendiente'
+
+export interface DictatedEvolutionBillingResult {
+  ok: boolean
+  success: boolean
+  route?: FiscalBillingRoute
+  perfilFiscal?: FiscalProfile
+  numFactura?: string | null
+  cuv?: string | null
+  cuvRecordId?: string
+  dianXml?: string | null
+  pendingRips?: { id: string; numFactura: string | null; status: string }
+  message?: string
+  error?: string
+  codes?: { cie10: string[]; cups: string[] }
+  localIssues?: Array<{ level: string; field?: string; message: string }>
+  ministryErrors?: Array<{ message: string }>
+}
+
+/**
+ * Tras extraer CIE-10 y CUPS, el backend valida el perfil fiscal:
+ * Obligado → generarFEV_y_RIPS(); No obligado → guardarRIPS_Pendiente(numFactura: null).
+ */
+export async function routeDictatedEvolutionByFiscalProfile(input: {
+  rips: RipsTransaction
+  invoice?: DianInvoicePayload
+  metadatos?: RipsValidateRequestMetadatos
+  cie10?: Array<string | null | undefined>
+  cups?: Array<string | null | undefined>
+  clinicalItems?: Array<{ cie10Code?: string | null; cupsCode?: string | null }>
+}): Promise<DictatedEvolutionBillingResult> {
+  const response = await fetch(`${API_BASE}/evolucion-dictada`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...identityHeaders(),
+    },
+    body: JSON.stringify(input),
+  })
+  return parseJson<DictatedEvolutionBillingResult>(response)
 }
 
 /** Descarga XML FEV-Salud con CUV inyectado para transmisión DIAN. */
@@ -64,7 +121,9 @@ export function downloadDianXml(xml: string, numFactura: string | null | undefin
 }
 
 export async function fetchCuvHistory(): Promise<RipsCuvStoredRecord[]> {
-  const response = await fetch(`${API_BASE}/cuv/history`)
+  const response = await fetch(`${API_BASE}/cuv/history`, {
+    headers: identityHeaders(),
+  })
   const data = await parseJson<{ success: boolean; records: RipsCuvStoredRecord[] }>(response)
   return data.records ?? []
 }

@@ -8,8 +8,15 @@ import {
   listTemporaryRipsRecords,
   getTemporaryRipsRecord,
 } from '../services/ripsTemporalStore.js'
+import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.controller.js'
 
 const router = Router()
+
+/**
+ * POST /api/rips/evolucion-dictada
+ * Motor de dictado terminó: valida perfil fiscal y enruta FEV+RIPS o RIPS pendiente.
+ */
+router.post('/evolucion-dictada', processDictatedEvolution)
 
 /**
  * POST /api/rips/validate

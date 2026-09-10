@@ -7,7 +7,7 @@ import type {
 import type { ElectronicInvoice } from '@/types/invoice'
 import type { Patient } from '@/types/patient'
 import { DOCUMENT_TYPE_RIPS, REGIME_TO_TIPO_USUARIO } from '@/constants/rips'
-import { validateRipsWithMinistry } from '@/services/ripsApiService'
+import { validateRipsWithMinistry, routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
 import {
   buildDianProviderPayload,
   buildInvoiceDraftFromClinicalRecord,
@@ -228,34 +228,79 @@ export async function processClinicalSession(
   let ministryResponse: ProcessClinicalSessionResult['ministryResponse']
   let cuv: string | null = null
   const cufe: string | null = null
+  const extractedCie10 = clinicalItems.map((item) => item.cie10Code).filter(Boolean)
+  const extractedCups = clinicalItems.map((item) => item.cupsCode).filter(Boolean)
+  const metadatos = {
+    patientUuid: String(patient.id),
+    clinicalRecordIds: [String(record.id ?? sessionId)],
+    patientDocument: patient.documentNumber,
+    perfilFiscal,
+    esRipsTemporal,
+  }
+  const dianInvoice = needsDian && invoice ? buildDianProviderPayload(invoice) : undefined
+  let pendingWithoutInvoice = noObligado
 
-  if (submitToMinistry && !hasBlockingBillingIssues(validationIssues)) {
-    ministryResponse = await validateRipsWithMinistry(ripsPayload, {
-      metadatos: {
-        patientUuid: String(patient.id),
-        clinicalRecordIds: [String(record.id ?? sessionId)],
-        patientDocument: patient.documentNumber,
-        perfilFiscal,
-        esRipsTemporal,
-      },
-      invoice: needsDian && invoice ? buildDianProviderPayload(invoice) : undefined,
-    })
-
-    if (ministryResponse.success && ministryResponse.approved) {
-      cuv = ministryResponse.cuv
-      if (invoice) {
-        const saved: ElectronicInvoice = {
-          ...invoice,
-          ripsJson: ripsWithRules,
-          cuv,
-          cuvRecordId: ministryResponse.cuvRecordId,
-          status: 'cuv_approved',
-          updatedAt: new Date().toISOString(),
-          submittedAt: new Date().toISOString(),
+  if (extractedCie10.length && extractedCups.length && !hasBlockingBillingIssues(validationIssues)) {
+    try {
+      const routed = await routeDictatedEvolutionByFiscalProfile({
+        rips: ripsPayload,
+        invoice: dianInvoice,
+        metadatos,
+        cie10: extractedCie10,
+        cups: extractedCups,
+        clinicalItems,
+      })
+      if (routed.ok && routed.route === 'generarFEV_y_RIPS' && routed.cuv && routed.cuvRecordId) {
+        cuv = routed.cuv
+        pendingWithoutInvoice = false
+        ministryResponse = {
+          success: true,
+          approved: true,
+          cuv: routed.cuv,
+          cuvRecordId: routed.cuvRecordId,
+          dianXml: routed.dianXml ?? undefined,
+          source: 'sandbox',
         }
-        await saveElectronicInvoice(saved)
+      } else if (routed.ok && routed.route === 'guardarRIPS_Pendiente') {
+        pendingWithoutInvoice = true
+      } else if (!routed.ok) {
+        validationIssues.push({
+          level: 'warning',
+          field: 'perfilFiscal',
+          message: routed.error || 'No se pudo enrutar FEV/RIPS según el perfil fiscal.',
+        })
+      }
+    } catch {
+      if (submitToMinistry) {
+        ministryResponse = await validateRipsWithMinistry(ripsPayload, {
+          metadatos,
+          invoice: dianInvoice,
+        })
+        if (ministryResponse.success && ministryResponse.approved) {
+          cuv = ministryResponse.cuv
+        }
       }
     }
+  } else if (submitToMinistry && !hasBlockingBillingIssues(validationIssues)) {
+    ministryResponse = await validateRipsWithMinistry(ripsPayload, {
+      metadatos,
+      invoice: dianInvoice,
+    })
+    if (ministryResponse.success && ministryResponse.approved) {
+      cuv = ministryResponse.cuv
+    }
+  }
+
+  if (ministryResponse?.success && ministryResponse.approved && invoice) {
+    await saveElectronicInvoice({
+      ...invoice,
+      ripsJson: ripsWithRules,
+      cuv,
+      cuvRecordId: ministryResponse.cuvRecordId,
+      status: 'cuv_approved',
+      updatedAt: new Date().toISOString(),
+      submittedAt: new Date().toISOString(),
+    })
   } else if (invoice) {
     await saveElectronicInvoice({
       ...invoice,
@@ -264,7 +309,7 @@ export async function processClinicalSession(
     })
   }
 
-  if (esRipsTemporal) {
+  if (esRipsTemporal || pendingWithoutInvoice) {
     await saveTemporaryRips({
       clinicId: professional.clinicId || professional.id,
       patientId: String(patient.id),
@@ -273,12 +318,9 @@ export async function processClinicalSession(
       numDocumentoIdObligado: ripsPayload.numDocumentoIdObligado,
       numFactura: null,
       perfilFiscal,
-      status: ministryResponse?.success && ministryResponse.approved ? 'submitted' : 'draft',
-      ripsJson: ripsPayload,
-      submittedAt:
-        ministryResponse?.success && ministryResponse.approved
-          ? new Date().toISOString()
-          : null,
+      status: pendingWithoutInvoice ? 'ready' : 'draft',
+      ripsJson: { ...ripsPayload, numFactura: null },
+      submittedAt: null,
     })
   }
 
