@@ -20,9 +20,14 @@
       "description": "Código REPS de la sede — exactamente 12 dígitos"
     },
     "numFactura": {
-      "type": "string",
-      "pattern": "^[A-Za-z][A-Za-z0-9]{0,3}\\d{1,20}$",
-      "description": "Prefijo alfanumérico (1–4) + número consecutivo. Debe coincidir 1:1 con la FEV DIAN."
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9]{0,3}\\d{1,20}$"
+        }
+      ],
+      "description": "Prefijo + consecutivo FEV, o null en RIPS temporales / prestador No_Obligado (Res. 2275). Si hay valor, debe coincidir 1:1 con la FEV DIAN."
     },
     "numNota": {
       "type": "string",

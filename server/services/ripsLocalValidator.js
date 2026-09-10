@@ -35,6 +35,9 @@ export function validateRipsPackageLocally(rips, context = {}) {
     convenioFechaInicio: context.convenioFechaInicio,
     fevReferencia: context.fevReferencia ?? rips?.numFactura,
     codPrestador: context.codPrestador,
+    perfilFiscal: context.perfilFiscal,
+    allowNullNumFactura: context.allowNullNumFactura,
+    esRipsTemporal: context.esRipsTemporal,
   })
   errors.push(...structureIssues)
 

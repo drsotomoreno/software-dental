@@ -177,6 +177,7 @@ function withSeedBillingDefaults(user: UserProfile): UserProfile {
       user.documentNumber && user.documentNumber !== '0000000000'
         ? user.documentNumber
         : '1234567890',
+    perfilFiscal: user.perfilFiscal ?? 'Obligado_FEV',
   }
 }
 

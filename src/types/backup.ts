@@ -48,6 +48,7 @@ export interface BackupDataTables {
   clinicBillingSettings?: unknown[]
   rdaConsents?: unknown[]
   rdaExternalHistories?: unknown[]
+  ripsTemporales?: unknown[]
 }
 
 export interface BackupPayload {

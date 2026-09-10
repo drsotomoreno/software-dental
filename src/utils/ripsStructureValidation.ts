@@ -1,12 +1,8 @@
 import type { RipsExportMetadata, RipsTransaction, RipsValidationIssue } from '@/types/rips'
+import { allowsNullNumFactura } from '@/utils/fiscalProfile'
 import {
-  RIPS_COD_PRESTADOR_PATTERN,
-  RIPS_DATETIME_PATTERN,
-  RIPS_FEV_NUMERO_PATTERN,
-  validateRipsAttentionDateTime,
   validateRipsCodPrestador,
   validateRipsFevNumero,
-  validateRipsIdentificationDocument,
   validateRipsStructureSyntax,
 } from '../../shared/ripsStructureValidation.js'
 
@@ -33,9 +29,14 @@ export interface RipsStructureValidationContext {
   /** Inicio de vigencia del convenio (límite inferior de fecConsumo / fechaInicio). */
   convenioFechaInicio?: Date | string
   /** Número FEV de referencia para validación 1:1 con numFactura. */
-  fevReferencia?: string
+  fevReferencia?: string | null
   /** Código REPS desde metadata de exportación. */
   codPrestador?: string
+  /** Perfil fiscal del prestador (clínica). */
+  perfilFiscal?: import('@/utils/fiscalProfile').FiscalProfile | string | boolean | null
+  /** Permite numFactura null (RIPS temporal o No_Obligado). */
+  allowNullNumFactura?: boolean
+  esRipsTemporal?: boolean
 }
 
 /**
@@ -54,8 +55,15 @@ export function validateRipsMetadataStructure(
   context: Omit<RipsStructureValidationContext, 'codPrestador' | 'fevReferencia'> = {},
 ): RipsValidationIssue[] {
   const issues: RipsValidationIssue[] = []
+  const allowNull = allowsNullNumFactura(context.perfilFiscal ?? metadata.perfilFiscal, {
+    allowNullNumFactura: context.allowNullNumFactura,
+    esRipsTemporal: context.esRipsTemporal,
+  })
 
-  const facturaCheck = validateRipsFevNumero(metadata.numFactura, { label: 'numFactura' })
+  const facturaCheck = validateRipsFevNumero(metadata.numFactura, {
+    label: 'numFactura',
+    allowNull,
+  })
   if (!facturaCheck.valid) {
     issues.push({ level: 'error', field: 'numFactura', message: facturaCheck.message! })
   }
@@ -85,12 +93,20 @@ export function validateRipsMetadataStructure(
 
 export function buildStructureValidationContext(
   metadata: RipsExportMetadata,
-  options: { fechaGeneracion?: Date } = {},
+  options: {
+    fechaGeneracion?: Date
+    perfilFiscal?: RipsStructureValidationContext['perfilFiscal']
+    allowNullNumFactura?: boolean
+    esRipsTemporal?: boolean
+  } = {},
 ): RipsStructureValidationContext {
   return {
     fechaGeneracion: options.fechaGeneracion ?? new Date(),
     convenioFechaInicio: metadata.convenioFechaInicio,
     fevReferencia: metadata.fevReferencia ?? metadata.numFactura,
     codPrestador: metadata.codPrestador,
+    perfilFiscal: metadata.perfilFiscal ?? options.perfilFiscal,
+    allowNullNumFactura: options.allowNullNumFactura,
+    esRipsTemporal: options.esRipsTemporal,
   }
 }

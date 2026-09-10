@@ -1,3 +1,6 @@
+import type { FiscalProfile } from '@/utils/fiscalProfile'
+import { DEFAULT_PERFIL_FISCAL } from '@/utils/fiscalProfile'
+
 export type BillingModality = 'automatic' | 'manual'
 
 export type FolioPaymentGateway = 'wompi' | 'mercadopago' | 'nequi'
@@ -45,6 +48,8 @@ export interface BillingModalitySettings {
   foliosAvailable: number
   welcomeFolios: number
   hasPurchasedPack: boolean
+  /** Perfil fiscal de la clínica (Mis Cuentas y Facturas). */
+  perfilFiscal: FiscalProfile
 }
 
 export const BILLING_MODALITY_STORAGE_KEY = 'dental_emr_billing_modality'
@@ -68,4 +73,5 @@ export const DEFAULT_BILLING_MODALITY_SETTINGS: BillingModalitySettings = {
   foliosAvailable: WELCOME_FOLIO_GRANT,
   welcomeFolios: WELCOME_FOLIO_GRANT,
   hasPurchasedPack: false,
+  perfilFiscal: DEFAULT_PERFIL_FISCAL,
 }

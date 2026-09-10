@@ -1,7 +1,4 @@
-/**
- * Validación de estructura y sintaxis RIPS JSON (Res. 2275 / MUV).
- * Módulo compartido cliente (Vite) y servidor (Node).
- */
+import { allowsNullNumFactura, normalizeRipsNumFactura } from './fiscalProfile.js'
 
 /** @typedef {'error' | 'warning'} RipsValidationLevel */
 
@@ -148,17 +145,20 @@ export function validateRipsCodPrestador(codPrestador) {
 }
 
 /**
- * @param {string} numero
- * @param {{ label?: string }} [options]
+ * @param {string | null | undefined} numero
+ * @param {{ label?: string, allowNull?: boolean }} [options]
  * @returns {{ valid: boolean, message?: string }}
  */
 export function validateRipsFevNumero(numero, options = {}) {
   const label = options.label ?? 'numFactura'
-  const value = String(numero ?? '').trim()
+  const normalized = normalizeRipsNumFactura(numero)
 
-  if (!value) {
+  if (normalized == null) {
+    if (options.allowNull === true) return { valid: true }
     return { valid: false, message: `${label} es obligatorio (FEV DIAN).` }
   }
+
+  const value = normalized
 
   if (/\s/.test(value) || /[-./_]/.test(value) || /[^A-Za-z0-9]/.test(value)) {
     return {
@@ -326,18 +326,23 @@ export function validateRipsStructureSyntax(rips, context = {}) {
 
   const fechaGeneracion = context.fechaGeneracion ?? new Date()
   const convenioFechaInicio = context.convenioFechaInicio
-  const fevReferencia = context.fevReferencia ?? rips?.numFactura
+  const numFactura = normalizeRipsNumFactura(rips?.numFactura)
+  const allowNullNumFactura = allowsNullNumFactura(context.perfilFiscal, {
+    allowNullNumFactura: context.allowNullNumFactura,
+    esRipsTemporal: context.esRipsTemporal,
+  })
+  const fevReferencia = normalizeRipsNumFactura(context.fevReferencia) ?? numFactura
 
-  const facturaCheck = validateRipsFevNumero(rips?.numFactura, { label: 'numFactura' })
+  const facturaCheck = validateRipsFevNumero(numFactura, {
+    label: 'numFactura',
+    allowNull: allowNullNumFactura,
+  })
   if (!facturaCheck.valid) {
     pushError('numFactura', facturaCheck.message)
-  } else if (
-    fevReferencia &&
-    String(rips.numFactura).trim() !== String(fevReferencia).trim()
-  ) {
+  } else if (numFactura && fevReferencia && numFactura !== fevReferencia) {
     pushError(
       'numFactura',
-      `numFactura («${rips.numFactura}») debe coincidir 1:1 con la FEV reportada ante la DIAN («${fevReferencia}»).`,
+      `numFactura («${numFactura}») debe coincidir 1:1 con la FEV reportada ante la DIAN («${fevReferencia}»).`,
     )
   }
 

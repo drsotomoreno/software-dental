@@ -9,6 +9,7 @@ import {
   BILLING_SETTINGS_CHANGED_EVENT,
 } from '@/services/billingModalityService'
 import { FolioRechargeModal } from './FolioRechargeModal'
+import { FiscalProfileSettings } from './FiscalProfileSettings'
 
 export function BillingModalitySettingsPanel() {
   const [settings, setSettings] = useState<BillingModalitySettings>(() => getBillingModalitySettings())
@@ -198,6 +199,8 @@ export function BillingModalitySettingsPanel() {
 
         {saved && <p className="text-sm text-green-700">Configuración guardada en este equipo.</p>}
       </div>
+
+      <FiscalProfileSettings settings={settings} onPersist={persist} />
 
       <FolioRechargeModal
         open={rechargeOpen}

@@ -97,6 +97,17 @@ export {
   resolveEvolutionNoteRipsCups,
 } from './rips'
 export {
+  PERFIL_FISCAL_OBLIGADO_FEV,
+  PERFIL_FISCAL_NO_OBLIGADO,
+  PERFIL_FISCAL_OPTIONS,
+  DEFAULT_PERFIL_FISCAL,
+  normalizePerfilFiscal,
+  isNoObligadoFev,
+  allowsNullNumFactura,
+  normalizeRipsNumFactura,
+} from './fiscalProfile'
+export type { FiscalProfile } from './fiscalProfile'
+export {
   validateRipsExport,
   hasRipsBlockingErrors,
   countRipsIssues,

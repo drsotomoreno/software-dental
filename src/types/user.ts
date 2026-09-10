@@ -1,4 +1,5 @@
 import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
+import type { FiscalProfile } from '@/utils/fiscalProfile'
 import type { RepsHabilitationStatus } from '@/utils/repsCode'
 import type { RethusStatus } from '@/utils/rethusNumber'
 
@@ -26,6 +27,12 @@ export interface UserProfile {
   legalName?: string
   /** Tipo de prestador: IPS / persona jurídica vs consultorio unipersonal. */
   providerType?: 'institucion' | 'profesional_independiente'
+  /**
+   * Perfil fiscal del prestador (clínica). Vive en el titular (`clinicId === id`).
+   * Obligado_FEV: RIPS con numFactura = FEV DIAN.
+   * No_Obligado: RIPS temporales con numFactura null (Res. 2275).
+   */
+  perfilFiscal?: FiscalProfile
   /** NIT prestador — RIPS */
   providerNit?: string
   /** Código REPS de habilitación de la sede (12 dígitos, ej. 6800103898-01) */

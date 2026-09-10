@@ -37,6 +37,7 @@ import type { ElectronicInvoice } from '@/types/invoice'
 import type { ElectronicCreditNote } from '@/types/creditNote'
 import type { ClinicBillingSettingsRecord } from '@/types/billingModality'
 import type { RdaCryptographicConsent, RdaExternalHistory } from '@/types/rdaExternalHistory'
+import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
 import { CREDIT_NOTE_IMMUTABILITY_MESSAGE } from '@/types/creditNote'
 import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
@@ -73,6 +74,7 @@ export class DentalDatabase extends Dexie {
   clinicBillingSettings!: EntityTable<ClinicBillingSettingsRecord, 'id'>
   rdaConsents!: EntityTable<RdaCryptographicConsent, 'id'>
   rdaExternalHistories!: EntityTable<RdaExternalHistory, 'id'>
+  ripsTemporales!: EntityTable<TemporaryRipsRecord, 'id'>
 
   constructor() {
     super('DentalEMR')
@@ -660,6 +662,19 @@ export class DentalDatabase extends Dexie {
           }
         }
       })
+
+    this.version(26)
+      .stores({
+        ripsTemporales:
+          'id, clinicId, patientId, clinicalRecordId, numFactura, perfilFiscal, status, createdAt',
+      })
+      .upgrade(async (tx) => {
+        const users = await tx.table('users').toArray()
+        for (const user of users) {
+          if (!user?.id || user.perfilFiscal) continue
+          await tx.table('users').update(user.id, { perfilFiscal: 'Obligado_FEV' })
+        }
+      })
   }
 }
 
@@ -835,6 +850,7 @@ export async function seedDemoData(): Promise<void> {
         thsSpecialty: 'odontologia_general',
         rehusSpecialty: 'odontologia_general',
         repsEnabledSpecialties: ['odontologia_general'],
+        perfilFiscal: 'Obligado_FEV',
       },
       {
         id: 'user-demo-admin',
@@ -851,6 +867,7 @@ export async function seedDemoData(): Promise<void> {
         repsCode: '6800103898-01',
         repsStatus: 'activo',
         thsSpecialty: 'odontologia_general',
+        perfilFiscal: 'Obligado_FEV',
       },
     ])
   }
@@ -871,6 +888,7 @@ export async function seedDemoData(): Promise<void> {
       providerNit: '900123456-1',
       repsCode: '6800103898-01',
       repsStatus: 'activo',
+      perfilFiscal: 'Obligado_FEV',
     })
   }
 

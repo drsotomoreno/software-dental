@@ -11,6 +11,9 @@ export interface RipsValidateRequestMetadatos {
   patientUuid?: string
   clinicalRecordIds?: string[]
   patientDocument?: string
+  perfilFiscal?: import('@/utils/fiscalProfile').FiscalProfile
+  esRipsTemporal?: boolean
+  allowNullNumFactura?: boolean
 }
 
 export interface RipsValidateRequest {
@@ -62,7 +65,7 @@ export type RipsValidateResponse = RipsValidateSuccessResponse | RipsValidateErr
 export interface RipsCuvStoredRecord {
   id: string
   cuv: string
-  numFactura: string
+  numFactura: string | null
   numDocumentoIdObligado: string
   status: 'approved' | 'rejected' | 'pending'
   procesoId?: string

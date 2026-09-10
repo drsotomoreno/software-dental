@@ -11,6 +11,10 @@ import { splitPersonName, composeLegalName } from '../../shared/personName.js'
 import { formatNitInput, validateProviderNit } from '../../shared/nit.js'
 import { sanitizeRepsInput } from '../../shared/prestadorIdentity.js'
 import { isInstitutionProvider, normalizeProviderType } from '../../shared/providerType.js'
+import {
+  DEFAULT_PERFIL_FISCAL,
+  normalizePerfilFiscal,
+} from '../../shared/fiscalProfile.js'
 import { parseRepsCodeWithDane } from './repsDane.js'
 
 
@@ -1079,6 +1083,7 @@ export async function verifyEmailAndRegister({ email, code, password }) {
     estado_pago: 'pendiente',
     fecha_vencimiento: null,
     plan: null,
+    perfilFiscal: DEFAULT_PERFIL_FISCAL,
   }
 
   if (existing) {
@@ -1148,6 +1153,7 @@ function sanitizeUser(user) {
     providerType: normalizeProviderType(user.providerType),
     clinicId: user.clinicId || user.id,
     isClinicOwner: String(user.clinicId || user.id) === String(user.id),
+    perfilFiscal: normalizePerfilFiscal(user.perfilFiscal),
     providerNit: user.providerNit ?? '',
     repsCode: user.repsCode ?? '',
     repsStatus: user.repsStatus ?? 'activo',
@@ -1379,6 +1385,23 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
     prestadorVerifiedAt: mustVerifyPrestador ? now : current.prestadorVerifiedAt,
     updatedAt: now,
   })
+
+  if (patch.perfilFiscal !== undefined && (isClinicOwner(current) || canManageClinicTeam(actor))) {
+    const nextPerfil = normalizePerfilFiscal(patch.perfilFiscal)
+    const clinicId = clinicIdOf(current)
+    updated.perfilFiscal = nextPerfil
+    for (let i = 0; i < store.users.length; i++) {
+      if (clinicIdOf(store.users[i]) !== clinicId) continue
+      if (store.users[i].id === current.id) continue
+      store.users[i] = {
+        ...store.users[i],
+        perfilFiscal: nextPerfil,
+        updatedAt: now,
+      }
+    }
+  } else {
+    updated.perfilFiscal = normalizePerfilFiscal(current.perfilFiscal)
+  }
 
   store.users[index] = updated
   await saveStore(store)
@@ -1632,6 +1655,7 @@ export async function createClinicUser({ token, hint, member }) {
     clinicName: owner.clinicName || member?.clinicName || '',
     legalName: owner.legalName || '',
     providerType: owner.providerType || 'profesional_independiente',
+    perfilFiscal: normalizePerfilFiscal(owner.perfilFiscal) || DEFAULT_PERFIL_FISCAL,
     providerNit: owner.providerNit || '',
     repsCode: owner.repsCode || '',
     repsStatus: owner.repsStatus || 'activo',

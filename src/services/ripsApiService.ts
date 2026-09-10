@@ -50,11 +50,11 @@ export async function validateRipsWithMinistry(
 }
 
 /** Descarga XML FEV-Salud con CUV inyectado para transmisión DIAN. */
-export function downloadDianXml(xml: string, numFactura: string): void {
+export function downloadDianXml(xml: string, numFactura: string | null | undefined): void {
   const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
-  const safe = numFactura.replace(/[^\w.-]/g, '_') || 'FEV'
+  const safe = (numFactura ?? 'SIN_FEV').replace(/[^\w.-]/g, '_') || 'FEV'
   link.href = url
   link.download = `FEV_Salud_${safe}.xml`
   document.body.appendChild(link)

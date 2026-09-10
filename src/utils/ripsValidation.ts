@@ -90,7 +90,10 @@ export function validateRipsExport(
     })
   }
 
-  const structureContext = buildStructureValidationContext(metadata)
+  const structureContext = buildStructureValidationContext(metadata, {
+    perfilFiscal: metadata.perfilFiscal ?? professional.perfilFiscal,
+    esRipsTemporal: metadata.esRipsTemporal === true,
+  })
   issues.push(...validateRipsMetadataStructure(metadata, structureContext))
   issues.push(...validateRipsJsonStructure(rips, structureContext))
 

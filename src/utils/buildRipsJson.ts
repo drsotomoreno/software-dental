@@ -3,6 +3,7 @@ import type { RipsProcedimiento, RipsTransaction } from '@/types/rips'
 import type { BuildRipsJsonOptions, BuildRipsJsonResult } from '@/types/invoice'
 import { buildRipsFromRecords } from '@/utils/rips'
 import { validateRipsExport } from '@/utils/ripsValidation'
+import { normalizeRipsNumFactura } from '@/utils/fiscalProfile'
 
 const CUPS_PATTERN = /^\d{6}$/
 
@@ -90,7 +91,7 @@ export function buildRipsJson(options: BuildRipsJsonOptions): BuildRipsJsonResul
 
   const rips: RipsTransaction = {
     ...exportResult.rips,
-    numFactura: invoice.invoiceNumber,
+    numFactura: normalizeRipsNumFactura(metadata.numFactura ?? invoice.invoiceNumber),
     usuarios: filteredUsuarios,
   }
 
