@@ -100,12 +100,13 @@ export function usePatientsList() {
 export function usePatientListFilter(patients: Patient[] | undefined) {
   const [query, setQuery] = useState('')
   const debouncedQuery = useDebouncedValue(query, 300)
+  const effectiveQuery = query.trim() === '' ? '' : debouncedQuery
   const filteredPatients = useMemo(
-    () => (patients ? filterPatientsByQuery(patients, debouncedQuery) : undefined),
-    [patients, debouncedQuery],
+    () => (patients ? filterPatientsByQuery(patients, effectiveQuery) : undefined),
+    [patients, effectiveQuery],
   )
 
-  return { query, setQuery, debouncedQuery, filteredPatients }
+  return { query, setQuery, debouncedQuery: effectiveQuery, filteredPatients }
 }
 
 export function formatPatientLabel(patient: Patient): string {
