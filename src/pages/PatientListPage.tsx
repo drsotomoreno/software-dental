@@ -4,8 +4,10 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
+import { usePatientListFilter } from '@/hooks/usePatientsList'
 
 import { isActivePatient } from '@/types/patient'
+import { PatientListNoMatches, PatientListSearch } from '@/components/patients/PatientListSearch'
 import { SeedTestDataPanel } from '@/components/dev/SeedTestDataPanel'
 import { forzarSincronizacionLocal } from '@/services/clinicalSyncService'
 
@@ -20,6 +22,7 @@ export function PatientListPage() {
     const all = await db.patients.orderBy('lastName').reverse().toArray()
     return all.filter(isActivePatient)
   })
+  const { query, setQuery, debouncedQuery, filteredPatients } = usePatientListFilter(patients)
 
   useEffect(() => {
     if (loggedRef.current) return
@@ -70,7 +73,7 @@ export function PatientListPage() {
 
       {can('patients.write') && <SeedTestDataPanel />}
 
-      {!patients ? (
+      {!patients || !filteredPatients ? (
         <p className="text-slate-500">Cargando...</p>
       ) : patients.length === 0 ? (
         <div className="card text-center">
@@ -82,42 +85,49 @@ export function PatientListPage() {
           )}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 font-medium text-slate-600">Documento</th>
-                <th className="px-4 py-3 font-medium text-slate-600">Nombre</th>
-                <th className="px-4 py-3 font-medium text-slate-600">Teléfono</th>
-                <th className="px-4 py-3 font-medium text-slate-600">EPS</th>
-                <th className="px-4 py-3 font-medium text-slate-600">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {patients.map((p) => (
-                <tr key={p.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono text-xs">
-                    {p.documentType} {p.documentNumber}
-                  </td>
-                  <td className="px-4 py-3 font-medium">
-                    {p.firstName} {p.lastName}
-                  </td>
-                  <td className="px-4 py-3">{p.phone}</td>
-                  <td className="px-4 py-3">{p.insurer ?? '—'}</td>
-                  <td className="px-4 py-3">
-                    <Link
-                      to={`/pacientes/${p.id}`}
-                      state={{ resetHistoryView: true }}
-                      className="text-dental-600 hover:underline"
-                    >
-                      Ver historia
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <PatientListSearch value={query} onChange={setQuery} />
+          {filteredPatients.length === 0 ? (
+            <PatientListNoMatches query={debouncedQuery} />
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-slate-200 bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 font-medium text-slate-600">Documento</th>
+                    <th className="px-4 py-3 font-medium text-slate-600">Nombre</th>
+                    <th className="px-4 py-3 font-medium text-slate-600">Teléfono</th>
+                    <th className="px-4 py-3 font-medium text-slate-600">EPS</th>
+                    <th className="px-4 py-3 font-medium text-slate-600">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredPatients.map((p) => (
+                    <tr key={p.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {p.documentType} {p.documentNumber}
+                      </td>
+                      <td className="px-4 py-3 font-medium">
+                        {p.firstName} {p.lastName}
+                      </td>
+                      <td className="px-4 py-3">{p.phone}</td>
+                      <td className="px-4 py-3">{p.insurer ?? '—'}</td>
+                      <td className="px-4 py-3">
+                        <Link
+                          to={`/pacientes/${p.id}`}
+                          state={{ resetHistoryView: true }}
+                          className="text-dental-600 hover:underline"
+                        >
+                          Ver historia
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
