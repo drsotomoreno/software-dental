@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "theme": {
+    "name": "dental-default",
+    "colors": {
+      "dental-50": "#f0f9ff",
+      "dental-100": "#e0f2fe",
+      "dental-200": "#bae6fd",
+      "dental-300": "#7dd3fc",
+      "dental-400": "#38bdf8",
+      "dental-500": "#0ea5e9",
+      "dental-600": "#0284c7",
+      "dental-700": "#0369a1",
+      "dental-800": "#075985",
+      "dental-900": "#0c4a6e",
+      "surface": "#f8fafc",
+      "text": "#0f172a",
+      "nav-inactive-bg": "#fff7ed",
+      "nav-inactive-text": "#7c2d12",
+      "nav-inactive-border": "#fed7aa",
+      "nav-inactive-hover": "#ffedd5"
+    },
+    "radius": "0.75rem",
+    "fontFamily": "Inter, system-ui, sans-serif"
+  },
+  "layout": {
+    "homeGridColumns": 4
+  },
+  "modules": {
+    "home": [
+      { "id": "nuevo-paciente", "enabled": true, "order": 1 },
+      { "id": "lista-pacientes", "enabled": true, "order": 2 },
+      { "id": "agenda", "enabled": true, "order": 3 },
+      { "id": "exportar-historia", "enabled": true, "order": 4 },
+      { "id": "exportar-fhir", "enabled": true, "order": 5 },
+      { "id": "exportar-rips", "enabled": true, "order": 6 },
+      { "id": "historia-clinica", "enabled": true, "order": 7 },
+      { "id": "precios", "enabled": true, "order": 8 }
+    ],
+    "nav": [
+      { "id": "nuevo-paciente", "enabled": true, "order": 1, "row": 1 },
+      { "id": "pacientes-activos", "enabled": true, "order": 2, "row": 1 },
+      { "id": "pacientes-valorados", "enabled": true, "order": 3, "row": 1 },
+      { "id": "pacientes-terminados", "enabled": true, "order": 4, "row": 1 },
+      { "id": "agenda", "enabled": true, "order": 5, "row": 1 },
+      { "id": "historia-clinica", "enabled": true, "order": 6, "row": 1 },
+      { "id": "precios", "enabled": true, "order": 7, "row": 1 },
+      { "id": "cuentas-facturas", "enabled": true, "order": 8, "row": 2 },
+      { "id": "rips", "enabled": true, "order": 9, "row": 2 },
+      { "id": "fhir", "enabled": true, "order": 10, "row": 2 },
+      { "id": "catalogos", "enabled": true, "order": 11, "row": 2 },
+      { "id": "copias", "enabled": true, "order": 12, "row": 2 },
+      { "id": "usuarios", "enabled": true, "order": 13, "row": 2 },
+      { "id": "auditoria", "enabled": true, "order": 14, "row": 2 },
+      { "id": "suscripciones", "enabled": true, "order": 15, "row": 2 }
+    ]
+  }
+}
