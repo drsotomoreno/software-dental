@@ -44,13 +44,15 @@ ${indent}</cac:TaxTotal>`
 
 /**
  * Construye XML UBL 2.1 de Factura Electrónica de Venta en Salud (FEV-Salud)
- * con el CUV inyectado en el anexo normativo del sector salud (Res. 2275 / Anexo técnico DIAN).
+ * para el Paso 1 (envío a la DIAN). El CUV del MUV NO es requisito de este XML:
+ * la DIAN solo valida montos financieros. El CUV se obtiene después (Paso 5).
  *
  * Tributo IVA código `01`, tarifa `0.00%` (servicios de salud excluidos, ET Art. 476).
  * BaseImponible = ValorTotal; ValorImpuesto = 0.00.
  *
  * @param {object} params
- * @param {string} params.cuv
+ * @param {string} [params.cuv] - Opcional; solo se inyecta si ya existe (reproceso)
+ * @param {string} [params.cufe] - CUFE si ya fue asignado; si no, UUID temporal
  * @param {string} params.numFactura
  * @param {string} params.nitEmisor
  * @param {string} params.razonSocialEmisor
@@ -59,9 +61,11 @@ ${indent}</cac:TaxTotal>`
  * @param {string} params.issueDate
  * @param {number} params.payableAmount
  * @param {string} [params.codPrestadorReps]
+ * @param {boolean} [params.requireCuv=false]
  */
 export function buildDianHealthInvoiceXml({
   cuv,
+  cufe,
   numFactura,
   nitEmisor,
   razonSocialEmisor,
@@ -71,17 +75,26 @@ export function buildDianHealthInvoiceXml({
   payableAmount,
   lines = [],
   codPrestadorReps,
+  requireCuv = false,
 }) {
-  if (!cuv?.trim()) {
-    throw new Error('El CUV es obligatorio para generar la FEV-Salud ante la DIAN.')
+  if (requireCuv && !cuv?.trim()) {
+    throw new Error('El CUV es obligatorio para este XML FEV-Salud.')
   }
 
-  const uuid = randomUUID()
+  const uuid = String(cufe ?? '').trim() || randomUUID()
   const iva = buildExcludedIvaBreakdown(payableAmount)
   const reps = parseRepsCode(codPrestadorReps)
   const repsXml = reps.valid
     ? `
           <salud:CodigoPrestadorREPS>${escapeXml(reps.digits)}</salud:CodigoPrestadorREPS>`
+    : ''
+  const cuvXml = cuv?.trim()
+    ? `
+          <salud:CodigoUnicoValidacion>${escapeXml(cuv.trim())}</salud:CodigoUnicoValidacion>`
+    : ''
+  const cufeXml = String(cufe ?? '').trim()
+    ? `
+          <salud:CodigoUnicoFacturacionElectronica>${escapeXml(String(cufe).trim())}</salud:CodigoUnicoFacturacionElectronica>`
     : ''
 
   const lineXml = lines
@@ -121,8 +134,7 @@ ${excludedIvaTaxTotalXml(lineExtension, '      ')}
             <sts:SoftwareID>${escapeXml(config.dian.softwareId)}</sts:SoftwareID>
           </sts:SoftwareProvider>
         </sts:DianExtensions>
-        <salud:SectorSalud>
-          <salud:CodigoUnicoValidacion>${escapeXml(cuv)}</salud:CodigoUnicoValidacion>${repsXml}
+        <salud:SectorSalud>${cufeXml}${cuvXml}${repsXml}
           <salud:NumeroFacturaVinculada>${escapeXml(numFactura)}</salud:NumeroFacturaVinculada>
           <salud:ResolucionAplicable>Resolución 2275 de 2023</salud:ResolucionAplicable>
         </salud:SectorSalud>
@@ -163,4 +175,43 @@ ${excludedIvaTaxTotalXml(iva.valorTotal, '  ')}
   </cac:LegalMonetaryTotal>
   ${lineXml}
 </Invoice>`
+}
+
+/**
+ * Reemplaza el UUID/CUFE del XML con el código oficial devuelto por la DIAN (Paso 2).
+ * @param {string} xml
+ * @param {string} cufe
+ */
+export function stampCufeInInvoiceXml(xml, cufe) {
+  const token = String(cufe ?? '').trim()
+  if (!xml || !token) return xml
+  const escaped = escapeXml(token)
+  let next = String(xml).replace(
+    /<cbc:UUID schemeName="CUFE-SHA384">[^<]*<\/cbc:UUID>/,
+    `<cbc:UUID schemeName="CUFE-SHA384">${escaped}</cbc:UUID>`,
+  )
+  if (/<salud:CodigoUnicoFacturacionElectronica>/.test(next)) {
+    next = next.replace(
+      /<salud:CodigoUnicoFacturacionElectronica>[^<]*<\/salud:CodigoUnicoFacturacionElectronica>/,
+      `<salud:CodigoUnicoFacturacionElectronica>${escaped}</salud:CodigoUnicoFacturacionElectronica>`,
+    )
+  } else {
+    next = next.replace(
+      /<salud:SectorSalud>/,
+      `<salud:SectorSalud>\n          <salud:CodigoUnicoFacturacionElectronica>${escaped}</salud:CodigoUnicoFacturacionElectronica>`,
+    )
+  }
+  return next
+}
+
+/**
+ * Extrae PayableAmount del XML UBL para cruzar montos con el RIPS.
+ * @param {string} [xml]
+ */
+export function extractPayableAmountFromXml(xml) {
+  if (!xml) return null
+  const match = String(xml).match(/<cbc:PayableAmount[^>]*>([^<]+)<\/cbc:PayableAmount>/)
+  if (!match) return null
+  const n = Number(match[1])
+  return Number.isFinite(n) ? n : null
 }

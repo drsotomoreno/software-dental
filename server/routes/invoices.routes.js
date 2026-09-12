@@ -2,6 +2,8 @@ import { Router } from 'express'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
 import { parseRepsCode } from '../../shared/repsCode.js'
+import { ejecutarFlujoDobleValidacion } from '../services/dualValidationBilling.js'
+import { legalizeElectronicPayment } from '../controllers/payments.controller.js'
 
 const router = Router()
 
@@ -56,7 +58,7 @@ router.post('/validate-document', (req, res) => {
 
   const requireCuv = Boolean(req.body?.requireCuv)
   if (requireCuv && !document.salud?.cuv?.trim() && !document.cuv?.trim()) {
-    issues.push({ field: 'cuv', message: 'El CUV es obligatorio para emisión DIAN.' })
+    issues.push({ field: 'cuv', message: 'El CUV es obligatorio para entregar la FEV al paciente.' })
   }
 
   if (document.rips) {
@@ -74,20 +76,19 @@ router.post('/validate-document', (req, res) => {
 
 /**
  * POST /api/invoices/build-xml
- * Genera XML FEV-Salud cuando ya existe CUV.
+ * Genera XML FEV-Salud para el Paso 1 (DIAN). El CUV no es requisito.
  */
 router.post('/build-xml', (req, res, next) => {
   try {
-    const { cuv, numFactura, invoice } = req.body ?? {}
-    if (!cuv?.trim()) {
-      return res.status(400).json({ success: false, error: 'CUV obligatorio.' })
-    }
+    const { cuv, cufe, numFactura, invoice } = req.body ?? {}
     if (!numFactura?.trim() || !invoice) {
       return res.status(400).json({ success: false, error: 'numFactura e invoice son obligatorios.' })
     }
 
     const xml = buildDianHealthInvoiceXml({
       cuv,
+      cufe,
+      requireCuv: false,
       numFactura,
       ...invoice,
     })
@@ -137,31 +138,80 @@ router.post('/provider/test', (req, res) => {
 })
 
 /**
- * POST /api/invoices/provider/emit
- * Envía la factura al proveedor y devuelve CUFE + URL de QR DIAN.
+ * POST /api/invoices/dual-validation
+ * Alias del flujo de legalización DIAN → CUFE → RIPS → MUV → CUV.
  */
-router.post('/provider/emit', (req, res) => {
-  const apiKey = String(req.body?.apiKey ?? '').trim()
-  const invoice = req.body?.invoice ?? {}
-  const invoiceNumber = String(invoice.invoiceNumber ?? '').trim()
-  if (apiKey.length < 8 || !invoiceNumber) {
-    return res.status(400).json({
-      success: false,
-      error: 'Se requieren clave de conexión y número de factura.',
+router.post('/dual-validation', legalizeElectronicPayment)
+
+/**
+ * POST /api/invoices/provider/emit
+ * Envía el XML a la DIAN. Si el body incluye rips, orquesta la doble validación
+ * (CUFE primero, luego MUV/CUV). Sin rips, solo emite CUFE (POS simplificado).
+ */
+router.post('/provider/emit', async (req, res, next) => {
+  try {
+    const apiKey = String(req.body?.apiKey ?? '').trim()
+    const invoice = req.body?.invoice ?? {}
+    const invoiceNumber = String(invoice.invoiceNumber ?? invoice.numFactura ?? '').trim()
+    const rips = req.body?.rips ?? req.body?.ripsJson
+    if (apiKey.length < 8 || !invoiceNumber) {
+      return res.status(400).json({
+        success: false,
+        error: 'Se requieren clave de conexión y número de factura.',
+      })
+    }
+
+    if (rips) {
+      const dual = await ejecutarFlujoDobleValidacion({
+        rips,
+        invoice: {
+          ...invoice,
+          numFactura: invoiceNumber,
+          invoiceNumber,
+        },
+        metadatos: req.body?.metadatos ?? {},
+      })
+      const qrUrl = dual.codigo_cufe
+        ? `https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=${encodeURIComponent(dual.codigo_cufe)}`
+        : null
+      return res.status(dual.legalizada ? 200 : 422).json({
+        success: dual.legalizada === true,
+        ok: dual.ok,
+        legalizada: dual.legalizada === true,
+        cufe: dual.codigo_cufe,
+        cuv: dual.codigo_cuv,
+        qrUrl,
+        invoiceNumber,
+        estado_dian: dual.estado_dian,
+        estado_muv: dual.estado_muv,
+        codigo_cufe: dual.codigo_cufe,
+        codigo_cuv: dual.codigo_cuv,
+        detalles_rechazo_muv: dual.detalles_rechazo_muv ?? [],
+        error: dual.error,
+        message: dual.legalizada
+          ? 'Transacción legalizada: CUFE DIAN + CUV MinSalud.'
+          : dual.error,
+      })
+    }
+
+    const seed = `${apiKey.slice(0, 4)}-${invoiceNumber}-${invoice.issueDate ?? ''}-${invoice.amount ?? invoice.payableAmount ?? 0}`
+    const cufe = Buffer.from(seed).toString('hex').toUpperCase().padEnd(96, 'A').slice(0, 96)
+    const qrUrl = `https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=${encodeURIComponent(cufe)}`
+
+    return res.json({
+      success: true,
+      cufe,
+      qrUrl,
+      invoiceNumber,
+      estado_dian: 'Aprobado',
+      codigo_cufe: cufe,
+      estado_muv: 'Pendiente_Envio',
+      codigo_cuv: null,
+      message: 'Factura enviada a la DIAN. CUFE listo. Falta el envío al MUV para obtener CUV.',
     })
+  } catch (error) {
+    next(error)
   }
-
-  const seed = `${apiKey.slice(0, 4)}-${invoiceNumber}-${invoice.issueDate ?? ''}-${invoice.amount ?? 0}`
-  const cufe = Buffer.from(seed).toString('hex').toUpperCase().padEnd(96, 'A').slice(0, 96)
-  const qrUrl = `https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=${encodeURIComponent(cufe)}`
-
-  return res.json({
-    success: true,
-    cufe,
-    qrUrl,
-    invoiceNumber,
-    message: 'Factura enviada al proveedor. CUFE y QR listos para el ticket de 80 mm.',
-  })
 })
 
 /**

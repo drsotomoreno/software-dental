@@ -3,6 +3,7 @@ import { submitRipsToMinsalud } from '../services/minsaludRipsClient.js'
 import { saveCuvRecord, getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
+import { ejecutarFlujoDobleValidacion } from '../services/dualValidationBilling.js'
 import {
   saveTemporaryRipsRecord,
   listTemporaryRipsRecords,
@@ -33,7 +34,8 @@ router.post('/mensual/enviar', runMonthlyRipsJob)
 
 /**
  * POST /api/rips/validate
- * Valida localmente y radica ante MinSalud; persiste CUV si es aprobado.
+ * Si hay invoice: flujo de doble validación DIAN (CUFE) → MUV (CUV).
+ * Si no hay invoice: radicación MUV directa (RIPS sin FEV / No_Obligado).
  */
 router.post('/validate', async (req, res, next) => {
   try {
@@ -43,7 +45,50 @@ router.post('/validate', async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'El cuerpo debe incluir el objeto rips.' })
     }
 
-    const result = await submitRipsToMinsalud({ rips, metadatos })
+    if (invoice) {
+      const dual = await ejecutarFlujoDobleValidacion({ rips, invoice, metadatos })
+      if (!dual.legalizada) {
+        return res.status(422).json({
+          success: false,
+          approved: false,
+          legalizada: false,
+          failedStep: dual.failedStep,
+          source: dual.source,
+          error: dual.error,
+          localIssues: dual.localIssues ?? [],
+          ministryErrors: dual.ministryErrors ?? dual.detalles_rechazo_muv ?? [],
+          estado_dian: dual.estado_dian,
+          codigo_cufe: dual.codigo_cufe,
+          estado_muv: dual.estado_muv,
+          codigo_cuv: dual.codigo_cuv,
+          detalles_rechazo_muv: dual.detalles_rechazo_muv ?? [],
+          cufe: dual.codigo_cufe,
+          dianXml: dual.dianXml,
+        })
+      }
+
+      return res.json({
+        success: true,
+        approved: true,
+        legalizada: true,
+        cuv: dual.codigo_cuv,
+        cufe: dual.codigo_cufe,
+        procesoId: dual.procesoId,
+        fechaRadicacion: dual.fechaRadicacion,
+        estado: dual.estado,
+        source: dual.source,
+        localWarnings: dual.localIssues ?? [],
+        cuvRecordId: dual.cuvRecordId,
+        dianXml: dual.dianXml,
+        estado_dian: dual.estado_dian,
+        codigo_cufe: dual.codigo_cufe,
+        estado_muv: dual.estado_muv,
+        codigo_cuv: dual.codigo_cuv,
+        detalles_rechazo_muv: [],
+      })
+    }
+
+    const result = await submitRipsToMinsalud({ rips, metadatos, requireCufe: false })
 
     if (!result.success) {
       return res.status(422).json({
@@ -74,6 +119,7 @@ router.post('/validate', async (req, res, next) => {
       dianXml = buildDianHealthInvoiceXml({
         cuv: result.cuv,
         numFactura: rips.numFactura,
+        requireCuv: false,
         ...invoice,
       })
       cuvRecord.dianXmlGenerated = true
@@ -153,20 +199,22 @@ router.get('/cuv/history', async (req, res, next) => {
 
 /**
  * POST /api/rips/dian-xml
- * Genera XML FEV-Salud con CUV ya obtenido.
+ * Genera XML FEV-Salud. El CUV es opcional: el flujo oficial envía el XML a la DIAN primero.
  */
 router.post('/dian-xml', async (req, res, next) => {
   try {
-    const { cuv, numFactura, invoice } = req.body ?? {}
-    if (!cuv || !numFactura) {
+    const { cuv, cufe, numFactura, invoice } = req.body ?? {}
+    if (!numFactura) {
       return res.status(400).json({
         success: false,
-        error: 'cuv y numFactura son obligatorios.',
+        error: 'numFactura es obligatorio.',
       })
     }
 
     const xml = buildDianHealthInvoiceXml({
       cuv,
+      cufe,
+      requireCuv: false,
       numFactura,
       nitEmisor: invoice?.nitEmisor ?? '',
       razonSocialEmisor: invoice?.razonSocialEmisor ?? 'Prestador de servicios de salud',
@@ -175,6 +223,7 @@ router.post('/dian-xml', async (req, res, next) => {
       issueDate: invoice?.issueDate ?? new Date().toISOString().slice(0, 10),
       payableAmount: invoice?.payableAmount ?? 0,
       lines: invoice?.lines ?? [],
+      codPrestadorReps: invoice?.codPrestadorReps,
     })
 
     res.json({ success: true, xml })

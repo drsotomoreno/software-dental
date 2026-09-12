@@ -1,3 +1,5 @@
+import type { DualValidationFields } from './dualValidation'
+import type { RipsMinistryError } from './ripsCuv'
 import type { RipsTransaction } from './rips'
 
 /** Estado del ciclo de vida de la factura electrónica */
@@ -87,12 +89,23 @@ export interface ElectronicInvoice {
   consecutiveNumber?: number
   issueDate: string
   dueDate?: string
-  /** Código Único de Factura Electrónica (DIAN) */
+  /** Código Único de Factura Electrónica (DIAN) — alias de codigo_cufe */
   cufe?: string | null
-  /** Código Único de Validación (MinSalud / MUV) */
+  /** Código Único de Validación (MinSalud / MUV) — alias de codigo_cuv */
   cuv?: string | null
   cuvRecordId?: string | null
   status: InvoiceStatus
+
+  /** Estado independiente de la DIAN (Paso 1–2). */
+  estado_dian?: DualValidationFields['estado_dian']
+  /** CUFE oficial emitido por la DIAN (Paso 2). */
+  codigo_cufe?: string | null
+  /** Estado independiente del MUV (Paso 4–5). */
+  estado_muv?: DualValidationFields['estado_muv']
+  /** CUV de éxito del MUV (Paso 5, solo si aprueba). */
+  codigo_cuv?: string | null
+  /** Glosas / rechazos exactos devueltos por el MUV. */
+  detalles_rechazo_muv?: RipsMinistryError[]
 
   // Emisor (prestador)
   issuerNit: string

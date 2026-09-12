@@ -1,13 +1,11 @@
 /**
  * Orquestación FEV / RIPS según perfil fiscal del prestador.
- * Tras el dictado (CIE-10 + CUPS), Obligado_FEV genera FEV+RIPS;
+ * Tras el dictado (CIE-10 + CUPS), Obligado_FEV ejecuta DIAN→CUFE→RIPS→MUV→CUV;
  * No_Obligado guarda RIPS pendiente con numFactura = null.
  */
-import { submitRipsToMinsalud } from './minsaludRipsClient.js'
-import { buildDianHealthInvoiceXml } from './dianFeXmlBuilder.js'
-import { saveCuvRecord } from './cuvRepository.js'
 import { saveTemporaryRipsRecord } from './ripsTemporalStore.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
+import { ejecutarFlujoDobleValidacion } from './dualValidationBilling.js'
 import {
   isObligadoFev,
   normalizePerfilFiscal,
@@ -77,7 +75,8 @@ function stampNumFactura(rips, numFactura) {
 }
 
 /**
- * Prestador obligado a FEV: valida, radica RIPS y genera XML FEV-Salud.
+ * Prestador obligado a FEV: valida localmente y ejecuta la doble validación
+ * DIAN (CUFE) → ensamblaje RIPS → MUV (CUV).
  * @param {{ rips: object, invoice?: object, metadatos?: object, user?: object }} params
  */
 export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user }) {
@@ -106,70 +105,56 @@ export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user })
       perfilFiscal,
       error: 'El RIPS no cumple validaciones locales para generar FEV.',
       localIssues,
+      estado_dian: 'Pendiente',
+      estado_muv: 'Pendiente_Envio',
+      codigo_cufe: null,
+      codigo_cuv: null,
+      detalles_rechazo_muv: [],
     }
   }
 
-  const ministryResult = await submitRipsToMinsalud({ rips: payload, metadatos: mergedMetadatos })
-  if (!ministryResult.success) {
+  if (!invoice) {
     return {
       ok: false,
       success: false,
       route: 'generarFEV_y_RIPS',
       perfilFiscal,
-      error: 'No se pudo radicar el RIPS ante MinSalud.',
-      localIssues: ministryResult.localIssues ?? localIssues,
-      ministryErrors: ministryResult.ministryErrors ?? [],
-      source: ministryResult.source,
+      error: 'El flujo FEV exige el payload de factura para enviar el XML a la DIAN (Paso 1).',
+      localIssues,
+      estado_dian: 'Pendiente',
+      estado_muv: 'Pendiente_Envio',
+      codigo_cufe: null,
+      codigo_cuv: null,
+      detalles_rechazo_muv: [],
     }
   }
 
-  const cuvRecord = await saveCuvRecord({
-    cuv: ministryResult.cuv,
-    numFactura: payload.numFactura,
-    numDocumentoIdObligado: payload.numDocumentoIdObligado,
-    status: 'approved',
-    procesoId: ministryResult.procesoId,
-    fechaRadicacion: ministryResult.fechaRadicacion,
-    estado: ministryResult.estado,
-    source: ministryResult.source,
-    metadatos: { ...mergedMetadatos, ...ministryResult.metadatos },
-    clinicalRecordIds: mergedMetadatos.clinicalRecordIds ?? [],
-    patientUuid: mergedMetadatos.patientUuid ?? null,
+  const result = await ejecutarFlujoDobleValidacion({
+    rips: payload,
+    invoice,
+    metadatos: mergedMetadatos,
   })
 
-  let dianXml = null
-  if (invoice) {
-    dianXml = buildDianHealthInvoiceXml({
-      cuv: ministryResult.cuv,
-      numFactura: payload.numFactura,
-      nitEmisor: invoice.nitEmisor,
-      razonSocialEmisor: invoice.razonSocialEmisor,
-      nitAdquiriente: invoice.nitAdquiriente,
-      razonSocialAdquiriente: invoice.razonSocialAdquiriente,
-      issueDate: invoice.issueDate,
-      payableAmount: invoice.payableAmount,
-      lines: invoice.lines ?? [],
-      codPrestadorReps: invoice.codPrestadorReps,
-    })
-    cuvRecord.dianXmlGenerated = true
-  }
-
   return {
-    ok: true,
-    success: true,
-    approved: true,
+    ...result,
+    ok: result.legalizada === true,
+    success: result.legalizada === true,
+    approved: result.legalizada === true,
     route: 'generarFEV_y_RIPS',
     perfilFiscal,
     numFactura: payload.numFactura,
-    cuv: ministryResult.cuv,
-    cuvRecordId: cuvRecord.id,
-    procesoId: ministryResult.procesoId,
-    fechaRadicacion: ministryResult.fechaRadicacion,
-    estado: ministryResult.estado,
-    source: ministryResult.source,
-    localIssues: ministryResult.localIssues ?? [],
-    dianXml,
-    rips: payload,
+    cuv: result.codigo_cuv ?? null,
+    cufe: result.codigo_cufe ?? null,
+    cuvRecordId: result.cuvRecordId,
+    procesoId: result.procesoId,
+    fechaRadicacion: result.fechaRadicacion,
+    estado: result.estado,
+    source: result.source,
+    localIssues: result.localIssues ?? localIssues,
+    ministryErrors: result.ministryErrors ?? result.detalles_rechazo_muv ?? [],
+    dianXml: result.dianXml,
+    rips: result.rips ?? payload,
+    error: result.error,
   }
 }
 

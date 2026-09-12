@@ -314,7 +314,11 @@ export function RipsExportForm({
 
     if (response.success && response.approved) {
       setCuvResult(response)
-      setValidateMessage('RIPS aprobado por el motor de validación. CUV almacenado.')
+      setValidateMessage(
+        response.cufe
+          ? `Legalizada: CUFE DIAN y CUV MinSalud almacenados.`
+          : 'RIPS aprobado por el motor de validación. CUV almacenado.',
+      )
       onCuvObtained?.(response)
       return
     }
@@ -612,7 +616,7 @@ export function RipsExportForm({
           disabled={!canValidate || validating}
           className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {validating ? 'Validando ante MinSalud…' : 'Validar y obtener CUV'}
+          {validating ? 'Validando DIAN + MUV…' : 'Legalizar (DIAN → CUFE → MUV → CUV)'}
         </button>
         {exported && (
           <span className="text-sm text-green-600">Archivo RIPS descargado correctamente.</span>
@@ -630,11 +634,10 @@ export function RipsExportForm({
       </div>
 
       <p className="text-xs text-slate-500">
-        Resolución 2275 de 2023 — RIPS JSON como soporte de la FEV en salud. El MUV valida que el{' '}
-        <strong>codConsulta</strong> coincida con la especialidad THS del prestador declarada en REPS.
-        La validación se realiza mediante el API en{' '}
-        <code className="font-mono">http://localhost:3000</code> (proxy /api en desarrollo). En sandbox
-        se simula la respuesta del MUV y se genera un CUV de prueba.
+        Resolución 2275 de 2023 — RIPS JSON como soporte de la FEV en salud. Orden legal: XML a la
+        DIAN (CUFE) → inyectar CUFE en el RIPS → paquete al MUV (CUV). El MUV valida que los montos
+        cuadren al centavo y que el <strong>codConsulta</strong> coincida con la especialidad THS
+        del prestador. En sandbox se simulan DIAN y MUV.
       </p>
     </div>
   )

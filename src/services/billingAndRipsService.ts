@@ -227,7 +227,11 @@ export async function processClinicalSession(
 
   let ministryResponse: ProcessClinicalSessionResult['ministryResponse']
   let cuv: string | null = null
-  const cufe: string | null = null
+  let cufe: string | null = null
+  let estado_dian: ProcessClinicalSessionResult['estado_dian']
+  let estado_muv: ProcessClinicalSessionResult['estado_muv']
+  let detalles_rechazo_muv: ProcessClinicalSessionResult['detalles_rechazo_muv'] = []
+  let legalizada = false
   const extractedCie10 = clinicalItems.map((item) => item.cie10Code).filter(Boolean)
   const extractedCups = clinicalItems.map((item) => item.cupsCode).filter(Boolean)
   const metadatos = {
@@ -250,16 +254,35 @@ export async function processClinicalSession(
         cups: extractedCups,
         clinicalItems,
       })
-      if (routed.ok && routed.route === 'generarFEV_y_RIPS' && routed.cuv && routed.cuvRecordId) {
-        cuv = routed.cuv
+      if (routed.route === 'generarFEV_y_RIPS') {
+        cufe = routed.cufe ?? routed.codigo_cufe ?? null
+        cuv = routed.cuv ?? routed.codigo_cuv ?? null
+        estado_dian = routed.estado_dian
+        estado_muv = routed.estado_muv
+        detalles_rechazo_muv = routed.detalles_rechazo_muv ?? []
+        legalizada = routed.legalizada === true
         pendingWithoutInvoice = false
-        ministryResponse = {
-          success: true,
-          approved: true,
-          cuv: routed.cuv,
-          cuvRecordId: routed.cuvRecordId,
-          dianXml: routed.dianXml ?? undefined,
-          source: 'sandbox',
+        if (routed.ok && cuv && routed.cuvRecordId) {
+          ministryResponse = {
+            success: true,
+            approved: true,
+            cuv,
+            cufe: cufe ?? undefined,
+            cuvRecordId: routed.cuvRecordId,
+            dianXml: routed.dianXml ?? undefined,
+            source: 'sandbox',
+            estado_dian,
+            codigo_cufe: cufe,
+            estado_muv,
+            codigo_cuv: cuv,
+            legalizada: true,
+          }
+        } else if (!routed.ok) {
+          validationIssues.push({
+            level: routed.estado_muv === 'Rechazado_Por_MUV' ? 'error' : 'warning',
+            field: routed.estado_dian === 'Rechazado' ? 'cufe' : 'cuv',
+            message: routed.error || 'No se pudo legalizar FEV/RIPS (DIAN → MUV).',
+          })
         }
       } else if (routed.ok && routed.route === 'guardarRIPS_Pendiente') {
         pendingWithoutInvoice = true
@@ -278,6 +301,8 @@ export async function processClinicalSession(
         })
         if (ministryResponse.success && ministryResponse.approved) {
           cuv = ministryResponse.cuv
+          cufe = ministryResponse.cufe ?? cufe
+          legalizada = true
         }
       }
     }
@@ -288,24 +313,26 @@ export async function processClinicalSession(
     })
     if (ministryResponse.success && ministryResponse.approved) {
       cuv = ministryResponse.cuv
+      cufe = ministryResponse.cufe ?? cufe
+      legalizada = true
     }
   }
 
-  if (ministryResponse?.success && ministryResponse.approved && invoice) {
+  if (invoice) {
     await saveElectronicInvoice({
       ...invoice,
-      ripsJson: ripsWithRules,
+      ripsJson: { ...ripsWithRules, ...(cufe ? { cufe } : {}), ...(cuv ? { cuv } : {}) },
       cuv,
-      cuvRecordId: ministryResponse.cuvRecordId,
-      status: 'cuv_approved',
+      cufe,
+      cuvRecordId: ministryResponse?.success ? ministryResponse.cuvRecordId : null,
+      status: legalizada ? 'cuv_approved' : cufe ? 'dian_sent' : invoice.status,
+      estado_dian: estado_dian ?? (cufe ? 'Aprobado' : 'Pendiente'),
+      codigo_cufe: cufe,
+      estado_muv: estado_muv ?? (cuv ? 'Aprobado_Con_CUV' : 'Pendiente_Envio'),
+      codigo_cuv: cuv,
+      detalles_rechazo_muv: detalles_rechazo_muv ?? [],
       updatedAt: new Date().toISOString(),
-      submittedAt: new Date().toISOString(),
-    })
-  } else if (invoice) {
-    await saveElectronicInvoice({
-      ...invoice,
-      ripsJson: ripsWithRules,
-      updatedAt: new Date().toISOString(),
+      submittedAt: cufe || cuv ? new Date().toISOString() : invoice.submittedAt,
     })
   }
 
@@ -338,6 +365,12 @@ export async function processClinicalSession(
     ministryResponse,
     cuv,
     cufe,
+    estado_dian,
+    codigo_cufe: cufe,
+    estado_muv,
+    codigo_cuv: cuv,
+    detalles_rechazo_muv,
+    legalizada,
   }
 }
 

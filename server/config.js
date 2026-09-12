@@ -26,6 +26,9 @@ export const config = {
     nit: process.env.MINSALUD_NIT ?? '',
   },
   dian: {
+    sandbox: process.env.DIAN_SANDBOX !== 'false',
+    apiBaseUrl: (process.env.DIAN_API_BASE_URL ?? '').replace(/\/$/, ''),
+    submitPath: process.env.DIAN_SUBMIT_PATH ?? '/api/v1/invoice/send',
     softwareId: process.env.DIAN_SOFTWARE_ID ?? 'SOFTWARE-DENTAL-EMR',
     technicalKey: process.env.DIAN_TECHNICAL_KEY ?? '',
   },
@@ -67,6 +70,12 @@ export function hasMinsaludCredentials() {
     apiBaseUrl &&
       ((clientId && clientSecret) || (username && password)),
   )
+}
+
+/** Endpoint DIAN / proveedor tecnológico configurado para envío de XML FEV. */
+export function hasDianCredentials() {
+  const { apiBaseUrl, technicalKey } = config.dian
+  return Boolean(apiBaseUrl && technicalKey)
 }
 
 export default config

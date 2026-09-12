@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto'
 import { config, hasMinsaludCredentials } from '../config.js'
 import { getMinsaludAccessToken } from './minsaludAuth.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
+import { extractPayableAmountFromXml } from './dianFeXmlBuilder.js'
+import { amountsMatchToTheCent, sumRipsVrServicio } from '../../shared/dualValidation.js'
 
 /**
  * Genera CUV simulado para entorno sandbox / desarrollo local.
@@ -42,18 +44,31 @@ function normalizeMinistryErrors(payload) {
 }
 
 /**
- * Envía el paquete RIPS al API REST del Ministerio y procesa la respuesta (CUV o errores).
+ * Envía el paquete RIPS al API REST del Ministerio (MUV) y procesa la respuesta (CUV o glosas).
+ * En el flujo FEV, el paquete completo es JSON RIPS (con CUFE) + XML de la factura DIAN.
  * @param {object} params
  * @param {object} params.rips - Paquete JSON RIPS Res. 2275
  * @param {object} [params.metadatos] - Metadatos de trazabilidad (UUID paciente, IDs clínicos)
+ * @param {string} [params.facturaXml] - XML FEV ya aprobado por la DIAN
+ * @param {object} [params.invoice]
+ * @param {boolean} [params.requireCufe=false] - Obligatorio en el flujo de doble validación
  */
-export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
-  const localIssues = validateRipsPackageLocally(rips, {
-    crossValidateAgeSex: true,
-    perfilFiscal: metadatos.perfilFiscal,
-    esRipsTemporal: metadatos.esRipsTemporal,
-    allowNullNumFactura: metadatos.allowNullNumFactura,
-  })
+export async function submitRipsToMinsalud({
+  rips,
+  metadatos = {},
+  facturaXml = null,
+  invoice = null,
+  requireCufe = false,
+}) {
+  const isFullRips = Array.isArray(rips?.usuarios)
+  const localIssues = isFullRips
+    ? validateRipsPackageLocally(rips, {
+        crossValidateAgeSex: true,
+        perfilFiscal: metadatos.perfilFiscal,
+        esRipsTemporal: metadatos.esRipsTemporal,
+        allowNullNumFactura: metadatos.allowNullNumFactura,
+      })
+    : []
   if (hasBlockingValidationErrors(localIssues)) {
     return {
       success: false,
@@ -63,10 +78,28 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     }
   }
 
+  if (requireCufe && !String(rips?.cufe ?? '').trim()) {
+    return {
+      success: false,
+      source: 'local',
+      localIssues,
+      ministryErrors: [
+        {
+          code: 'MUV-SIN-CUFE',
+          field: 'cufe',
+          message: 'El MUV no puede auditar el paquete: falta el CUFE de la DIAN en el JSON RIPS.',
+        },
+      ],
+    }
+  }
+
   const useSandbox = config.minsalud.sandbox || !hasMinsaludCredentials()
 
   if (useSandbox) {
-    const ministryErrors = simulateMinistryCrossValidation(rips)
+    const ministryErrors = [
+      ...simulateMinistryCrossValidation(rips),
+      ...simulateMuvPackageAudit({ rips, facturaXml, invoice, requireCufe }),
+    ]
     if (ministryErrors.length > 0) {
       return {
         success: false,
@@ -94,10 +127,13 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
 
   const payload = {
     rips,
+    facturaXml: facturaXml ?? undefined,
+    xmlFactura: facturaXml ?? undefined,
     metadatos: {
       ...metadatos,
       nitObligado: rips.numDocumentoIdObligado,
       numFactura: rips.numFactura,
+      cufe: rips.cufe ?? null,
     },
   }
 
@@ -158,7 +194,7 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
 function simulateMinistryCrossValidation(rips) {
   const errors = []
 
-  for (const usuario of rips.usuarios ?? []) {
+  for (const usuario of rips?.usuarios ?? []) {
     const age = getAgeYears(usuario.fechaNacimiento)
     for (const proc of usuario.servicios?.procedimientos ?? []) {
       const cups = String(proc.codProcedimiento ?? '').replace(/\D/g, '')
@@ -175,6 +211,39 @@ function simulateMinistryCrossValidation(rips) {
   return errors
 }
 
+/**
+ * Auditoría sandbox del inspector MUV: CUFE presente y RIPS vs factura al centavo.
+ */
+function simulateMuvPackageAudit({ rips, facturaXml, invoice, requireCufe }) {
+  const errors = []
+  if (requireCufe && !String(rips?.cufe ?? '').trim()) {
+    errors.push({
+      code: 'MUV-SIN-CUFE',
+      field: 'cufe',
+      message: 'El paquete RIPS no incluye el CUFE emitido por la DIAN.',
+    })
+  }
+
+  const dianAmount =
+    Number(invoice?.payableAmount) ||
+    extractPayableAmountFromXml(facturaXml) ||
+    Number(rips?.vrTotalDian) ||
+    null
+  const ripsAmount = sumRipsVrServicio(rips)
+
+  if (dianAmount != null && Number.isFinite(Number(dianAmount)) && (ripsAmount > 0 || dianAmount > 0)) {
+    if (!amountsMatchToTheCent(dianAmount, ripsAmount)) {
+      errors.push({
+        code: 'MUV-GLOSA-CENTAVO',
+        field: 'vrServicio',
+        message: `El JSON RIPS ($${ripsAmount.toFixed(2)}) no cuadra al centavo con la factura DIAN ($${Number(dianAmount).toFixed(2)}).`,
+      })
+    }
+  }
+
+  return errors
+}
+
 function getAgeYears(birthDate) {
   const born = new Date(birthDate)
   const now = new Date()
@@ -183,3 +252,7 @@ function getAgeYears(birthDate) {
   if (m < 0 || (m === 0 && now.getDate() < born.getDate())) age--
   return age
 }
+
+/** Alias histórico usado por invoiceService. */
+export const submitRipsToMinistry = submitRipsToMinsalud
+

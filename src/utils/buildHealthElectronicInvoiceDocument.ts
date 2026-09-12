@@ -59,8 +59,13 @@ export function buildHealthElectronicInvoiceDocument(
   return {
     schemaVersion: '2026.1',
     generatedAt: now,
-    cuv: invoice.cuv ?? null,
-    cufe: invoice.cufe ?? null,
+    cuv: invoice.cuv ?? invoice.codigo_cuv ?? null,
+    cufe: invoice.cufe ?? invoice.codigo_cufe ?? null,
+    estado_dian: invoice.estado_dian,
+    codigo_cufe: invoice.codigo_cufe ?? invoice.cufe ?? null,
+    estado_muv: invoice.estado_muv,
+    codigo_cuv: invoice.codigo_cuv ?? invoice.cuv ?? null,
+    detalles_rechazo_muv: invoice.detalles_rechazo_muv ?? [],
     rips: invoice.ripsJson ?? null,
     dian: {
       invoiceNumber: invoice.invoiceNumber,
