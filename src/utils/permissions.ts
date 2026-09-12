@@ -60,7 +60,6 @@ const ROLE_PERMISSIONS: Record<CanonicalRole, Permission[]> = {
     'invoices.read',
     'profile.edit',
     'audit.read',
-    'users.manage',
     'backups.manage',
     'catalogs.manage',
   ],
@@ -99,36 +98,42 @@ export const ROLE_LABELS: Record<CanonicalRole, string> = {
 export const ASSIGNABLE_ROLES: CanonicalRole[] = ['admin', 'odontologo', 'recepcion']
 
 export const USERS_MANAGE_DENIED =
-  'Solo el administrador de esta clínica o el Super Administrador pueden gestionar el equipo.'
+  'Solo el administrador titular de esta clínica puede gestionar el equipo.'
+
+type ClinicTeamActor = {
+  role?: UserRole | string | null
+  rol?: string | null
+  isClinicOwner?: boolean
+  id?: string
+  clinicId?: string
+}
+
+/** Titular de la clínica: dueño de la cuenta / `id === clinicId`. */
+export function isClinicOwnerAccount(user: ClinicTeamActor | null | undefined): boolean {
+  if (!user?.id) return false
+  if (user.isClinicOwner) return true
+  if (user.clinicId && String(user.id) === String(user.clinicId)) return true
+  return false
+}
 
 /**
- * Gestión de Usuarios: el titular de la clínica y quienes tienen rol
- * Administración pueden crear, editar y asignar accesos de su propio tenant.
+ * Gestión de Usuarios por rol: solo el Super Administrador de plataforma.
+ * Los colaboradores con rol Administración no gestionan el equipo.
  */
 export function canManageUsers(role: UserRole | string | null | undefined): boolean {
   if (!role) return false
-  const canonical = normalizeRole(role)
-  return canonical === 'admin' || canonical === 'superadmin'
+  return normalizeRole(role) === 'superadmin'
 }
 
-export function canManageClinicTeam(
-  user:
-    | {
-        role?: UserRole | string | null
-        rol?: string | null
-        isClinicOwner?: boolean
-        id?: string
-        clinicId?: string
-      }
-    | null
-    | undefined,
-): boolean {
+/**
+ * Gestión de Usuarios: solo el titular de la clínica (y el Super Administrador
+ * de plataforma) pueden crear, editar y ver el menú de usuarios.
+ */
+export function canManageClinicTeam(user: ClinicTeamActor | null | undefined): boolean {
   if (!user) return false
   const role = user.role ?? user.rol
-  if (canManageUsers(role)) return true
-  if (user.isClinicOwner) return true
-  if (user.id && user.clinicId && String(user.id) === String(user.clinicId)) return true
-  return false
+  if (normalizeRole(role ?? undefined) === 'superadmin') return true
+  return isClinicOwnerAccount(user)
 }
 
 /** Compatibilidad con roles legacy en IndexedDB. */
@@ -168,7 +173,7 @@ export function hasPermission(role: UserRole, permission: Permission): boolean {
   const canonical = normalizeRole(role)
   if (canonical === 'superadmin') return true
   if (permission === 'users.manage') {
-    return canManageUsers(role)
+    return false
   }
   return ROLE_PERMISSIONS[canonical]?.includes(permission) ?? false
 }

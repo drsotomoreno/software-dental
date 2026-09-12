@@ -6,7 +6,7 @@ import {
   ASSIGNABLE_ROLES,
   USERS_MANAGE_DENIED,
   canManageClinicTeam,
-  canManageUsers,
+  isClinicOwnerAccount,
   normalizeRole,
   type CanonicalRole,
 } from '@/utils/permissions'
@@ -256,10 +256,10 @@ function sanitizeAssignableRole(
 async function ensureRemainingUserManager(excludeUserId?: string): Promise<string | null> {
   const allUsers = await db.users.toArray()
   const remaining = allUsers.filter(
-    (user) => user.id !== excludeUserId && canManageUsers(user.role),
+    (user) => user.id !== excludeUserId && isClinicOwnerAccount(user),
   )
   if (remaining.length > 0) return null
-  return 'Debe existir al menos un administrador o superadministrador en el sistema.'
+  return 'No puede eliminar ni degradar al administrador titular de la clínica.'
 }
 
 export async function listAppUsers(): Promise<UserProfile[]> {
@@ -396,11 +396,11 @@ export async function updateAppUser(
     const roleResult = sanitizeAssignableRole(nextPatch.role, gate.actorRole)
     if (!roleResult.ok) return roleResult
     nextPatch.role = roleResult.role
+  }
 
-    if (current && canManageUsers(current.role) && !canManageUsers(roleResult.role)) {
-      const remainingError = await ensureRemainingUserManager(userId)
-      if (remainingError) return { ok: false, error: remainingError }
-    }
+  if (current && isClinicOwnerAccount(current) && nextPatch.isClinicOwner === false) {
+    const remainingError = await ensureRemainingUserManager(userId)
+    if (remainingError) return { ok: false, error: remainingError }
   }
 
   if (nextPatch.email !== undefined) {
@@ -498,9 +498,8 @@ export async function deleteAppUser(
   const user = await db.users.get(userId)
   if (!user) return { ok: false, error: 'Usuario no encontrado.' }
 
-  if (canManageUsers(user.role)) {
-    const remainingError = await ensureRemainingUserManager(userId)
-    if (remainingError) return { ok: false, error: remainingError }
+  if (isClinicOwnerAccount(user)) {
+    return { ok: false, error: 'No puede eliminar al titular de la clínica.' }
   }
 
   await db.userCredentials.delete(userId)
