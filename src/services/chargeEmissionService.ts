@@ -1,6 +1,8 @@
 import type { PaymentInvoice } from '@/types/clinicalRecord'
 import type { BillingModality } from '@/types/billingModality'
 import { FOLIO_DEPLETED_MESSAGE } from '@/types/billingModality'
+import type { CheckoutBuyerForm, CheckoutLineItem } from '@/types/consultationCheckout'
+import { assertFevEqualsRips } from '@/types/consultationCheckout'
 import {
   consumeElectronicFolio,
   getBillingModalitySettings,
@@ -18,6 +20,8 @@ export interface ChargeEmissionContext {
   cupsCode?: string
   amount: number
   forceCashReceipt?: boolean
+  buyer?: CheckoutBuyerForm
+  cart?: CheckoutLineItem[]
 }
 
 export interface ChargeEmissionResult {
@@ -33,6 +37,26 @@ function buildRipsSnapshot(
   context: ChargeEmissionContext,
   extras?: { cuv?: string | null; cufe?: string | null },
 ): Record<string, unknown> {
+  const cart = context.cart ?? []
+  const procedimientos = cart
+    .filter((item) => item.ripsGroup === 'procedimientos')
+    .map((item) => ({
+      cups: item.cupsCode || null,
+      descripcion: item.name,
+      vrServicio: item.totalAmount,
+      cantidad: item.quantity,
+    }))
+  const otrosServicios = cart
+    .filter((item) => item.ripsGroup === 'otrosServicios')
+    .map((item) => ({
+      tipoOS: '01',
+      codTecnologiaSalud: 'OTROS',
+      nomTecnologiaSalud: item.name,
+      vrServicio: item.totalAmount,
+      cantidadOS: item.quantity,
+    }))
+  const equality = cart.length > 0 ? assertFevEqualsRips(cart) : { ok: true, dianTotal: context.amount, ripsTotal: context.amount }
+
   return {
     tipo: extras?.cufe ? 'fev_salud_marca_blanca' : 'recibo_caja_salud',
     numFactura: context.invoice.invoiceNumber,
@@ -42,17 +66,27 @@ function buildRipsSnapshot(
     paciente: {
       nombre: context.patientName ?? '',
       documento: context.patientDocument ?? '',
+      tipoDocumento: context.buyer?.documentType ?? null,
+      email: context.buyer?.email ?? null,
+      responsabilidadFiscal: context.buyer?.fiscalResponsibility ?? null,
     },
-    procedimientos: [
-      {
-        cups: context.cupsCode || null,
-        descripcion: context.paymentReason || context.invoice.notes || 'Atención odontológica',
-        vrServicio: context.amount,
-        cantidad: 1,
-      },
-    ],
+    procedimientos:
+      procedimientos.length > 0
+        ? procedimientos
+        : [
+            {
+              cups: context.cupsCode || null,
+              descripcion: context.paymentReason || context.invoice.notes || 'Atención odontológica',
+              vrServicio: context.amount,
+              cantidad: 1,
+            },
+          ],
+    otrosServicios,
+    vrTotalDian: equality.dianTotal,
+    vrTotalRips: equality.ripsTotal,
+    fevEqualsRips: equality.ok,
     nota: extras?.cufe
-      ? 'Factura electrónica DIAN (marca blanca). Folio consumido.'
+      ? 'Factura electrónica DIAN (marca blanca). Folio consumido. Cruce CUFE ↔ RIPS JSON.'
       : 'Comprobante interno. No consume folios electrónicos.',
   }
 }

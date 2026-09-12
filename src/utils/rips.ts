@@ -32,6 +32,7 @@ import {
   compileProcedimientosForRecord,
   type EvolutionCatalogLookup,
 } from './ripsCompiler'
+import { compileOtrosServiciosForRecord } from './ripsOtrosServicios'
 import { validateRipsExport } from './ripsValidation'
 
 export interface RipsSourceRecord {
@@ -287,6 +288,7 @@ export function buildRipsFromRecords(
   for (const { patient, records } of grouped.values()) {
     const consultas: RipsConsulta[] = []
     const procedimientos: RipsProcedimiento[] = []
+    const otrosServicios = [] as ReturnType<typeof compileOtrosServiciosForRecord>
     let consultaConsecutivo = 1
     let procedimientoConsecutivo = 1
 
@@ -307,6 +309,7 @@ export function buildRipsFromRecords(
       procedimientos.push(...compiled.procedimientos)
       procedimientoConsecutivo = compiled.nextConsecutivo
       compileStats.push(compiled.stats)
+      otrosServicios.push(...compileOtrosServiciosForRecord(record, professional, resolvedMetadata))
     }
 
     usuarios.push({
@@ -318,7 +321,7 @@ export function buildRipsFromRecords(
         hospitalizacion: [],
         recienNacidos: [],
         medicamentos: [],
-        otrosServicios: [],
+        otrosServicios: otrosServicios.map((item, index) => ({ ...item, consecutivo: index + 1 })),
       },
     })
     usuarioConsecutivo++

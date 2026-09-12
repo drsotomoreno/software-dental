@@ -89,6 +89,24 @@ export function buildEvolutionNotePatchFromServices(
   }
 }
 
+export function appendAestheticServiceToNote(
+  note: EvolutionNote,
+  name: string,
+  cost: number,
+): Partial<EvolutionNote> {
+  const current = getEvolutionCatalogServices(note)
+  const aesthetic: EvolutionCatalogService = {
+    id: crypto.randomUUID(),
+    procedure: name,
+    serviceName: name,
+    cupsCode: null,
+    requiereCupsRips: false,
+    cost: Math.max(0, cost),
+    isBillable: cost > 0,
+  }
+  return buildEvolutionNotePatchFromServices(note, [...current, aesthetic])
+}
+
 export function appendCatalogServiceToNote(note: EvolutionNote): Partial<EvolutionNote> {
   const current = getEvolutionCatalogServices(note)
   return buildEvolutionNotePatchFromServices(note, [...current, createEmptyCatalogService()])

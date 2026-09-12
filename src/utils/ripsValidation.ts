@@ -231,11 +231,15 @@ export function validateRipsExport(
     (n, u) => n + u.servicios.procedimientos.length,
     0,
   )
+  const totalOtros = rips.usuarios.reduce(
+    (n, u) => n + (u.servicios.otrosServicios?.length ?? 0),
+    0,
+  )
 
-  if (totalConsultas === 0 && totalProcedimientos === 0) {
+  if (totalConsultas === 0 && totalProcedimientos === 0 && totalOtros === 0) {
     issues.push({
       level: 'error',
-      message: 'El archivo RIPS no contiene consultas ni procedimientos.',
+      message: 'El archivo RIPS no contiene consultas, procedimientos ni otros servicios.',
     })
   }
 

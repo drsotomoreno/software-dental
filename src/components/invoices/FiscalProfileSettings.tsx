@@ -44,7 +44,7 @@ export function FiscalProfileSettings({ settings, onPersist }: FiscalProfileSett
         onChange={(next) => void selectProfile(next)}
         disabled={!canEdit}
         title="Perfil fiscal de la clínica"
-        description="Define si el prestador está obligado a factura electrónica de venta. Un profesional independiente por debajo de 3.500 UVT reporta RIPS sin FEV."
+        description="Define si el prestador está obligado a factura electrónica de venta. Un profesional independiente por debajo de 3.500 UVT ($183.309.000 COP en 2026) reporta RIPS sin FEV."
       />
     </div>
   )

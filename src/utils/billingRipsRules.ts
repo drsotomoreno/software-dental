@@ -4,6 +4,7 @@ import { normalizeCie10ForRips } from '@/utils/rips'
 import {
   getRipsVrServicioForClinicalItem,
   isClinicalItemBillable,
+  isClinicalItemOtrosServicios,
   isClinicalItemRipsReportable,
 } from '@/utils/clinicalSessionItems'
 
@@ -72,11 +73,12 @@ export function validateClinicalItems(items: ClinicalEvolutionItem[]): BillingVa
   }
 
   const hasRips = items.some(isClinicalItemRipsReportable)
-  if (!hasRips && items.every((item) => item.isCustomProcedure || item.requiereCupsRips === false)) {
+  const hasOtros = items.some(isClinicalItemOtrosServicios)
+  if (!hasRips && !hasOtros && items.every((item) => item.isCustomProcedure || item.requiereCupsRips === false)) {
     issues.push({
       level: 'warning',
       message:
-        'La sesión no contiene procedimientos CUPS reportables. Solo se procesará facturación DIAN si aplica.',
+        'La sesión no contiene procedimientos CUPS. Los ítems estéticos se reportarán en RIPS como Otros Servicios.',
     })
   }
 
@@ -90,7 +92,7 @@ export function hasBlockingBillingIssues(issues: BillingValidationIssue[]): bool
 /**
  * Aplica reglas MinSalud:
  * - Procedimientos CUPS no facturables → vrServicio: 0 (sí van al RIPS)
- * - Personalizados → excluidos del RIPS
+ * - Personalizados / estéticos → RIPS `otrosServicios` (nombre literal DIAN)
  */
 export function applyClinicalRulesToRips(
   rips: RipsTransaction,

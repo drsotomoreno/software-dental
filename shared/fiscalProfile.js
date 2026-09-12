@@ -15,6 +15,13 @@ export const DEFAULT_PERFIL_FISCAL = PERFIL_FISCAL_OBLIGADO_FEV
 export const PERFIL_FISCAL_NO_OBLIGADO_NOTICE =
   'Sus RIPS se enviarán mensualmente sin factura.'
 
+/** UVT 2026 y umbral de obligado a factura electrónica (3.500 UVT). */
+export const UVT_2026_VALUE_COP = 52_374
+export const UVT_OBLIGADO_FEV_THRESHOLD = 3_500
+export const UVT_OBLIGADO_FEV_AMOUNT_COP = 183_309_000
+export const UVT_2026_EDUCATION_BANNER =
+  'Obligado: Empresas o independientes con ingresos > 3.500 UVT ($183.309.000 COP). No obligado: Independientes por debajo de este tope.'
+
 export const PERFIL_FISCAL_OPTIONS = [
   {
     id: PERFIL_FISCAL_OBLIGADO_FEV,

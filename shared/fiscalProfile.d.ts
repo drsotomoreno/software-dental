@@ -4,6 +4,10 @@ export type FiscalProfile = 'Obligado_FEV' | 'No_Obligado'
 export const PERFIL_FISCAL_VALUES: FiscalProfile[]
 export const DEFAULT_PERFIL_FISCAL: FiscalProfile
 export const PERFIL_FISCAL_NO_OBLIGADO_NOTICE: string
+export const UVT_2026_VALUE_COP: number
+export const UVT_OBLIGADO_FEV_THRESHOLD: number
+export const UVT_OBLIGADO_FEV_AMOUNT_COP: number
+export const UVT_2026_EDUCATION_BANNER: string
 export const PERFIL_FISCAL_OPTIONS: Array<{
   id: FiscalProfile
   label: string

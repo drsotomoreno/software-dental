@@ -52,6 +52,7 @@ export function validateRipsPackageLocally(rips, context = {}) {
 
   let totalConsultas = 0
   let totalProcedimientos = 0
+  let totalOtrosServicios = 0
 
   rips.usuarios.forEach((usuario, userIndex) => {
     const prefix = `usuarios[${userIndex}]`
@@ -71,8 +72,10 @@ export function validateRipsPackageLocally(rips, context = {}) {
     const servicios = usuario.servicios ?? {}
     const consultas = servicios.consultas ?? []
     const procedimientos = servicios.procedimientos ?? []
+    const otrosServicios = servicios.otrosServicios ?? []
     totalConsultas += consultas.length
     totalProcedimientos += procedimientos.length
+    totalOtrosServicios += otrosServicios.length
 
     consultas.forEach((consulta, idx) => {
       const field = `${prefix}.servicios.consultas[${idx}]`
@@ -105,10 +108,16 @@ export function validateRipsPackageLocally(rips, context = {}) {
         }
       }
     })
+    otrosServicios.forEach((item, idx) => {
+      const field = `${prefix}.servicios.otrosServicios[${idx}]`
+      if (!String(item?.nomTecnologiaSalud ?? '').trim()) {
+        pushError(errors, `${field}.nomTecnologiaSalud`, 'El nombre literal del servicio estético/insumo es obligatorio.')
+      }
+    })
   })
 
-  if (totalConsultas === 0 && totalProcedimientos === 0) {
-    pushError(errors, 'servicios', 'El RIPS no contiene consultas ni procedimientos.')
+  if (totalConsultas === 0 && totalProcedimientos === 0 && totalOtrosServicios === 0) {
+    pushError(errors, 'servicios', 'El RIPS no contiene consultas, procedimientos ni otros servicios.')
   }
 
   return errors

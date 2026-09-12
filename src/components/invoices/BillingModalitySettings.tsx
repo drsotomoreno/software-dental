@@ -10,6 +10,9 @@ import {
 } from '@/services/billingModalityService'
 import { FolioRechargeModal } from './FolioRechargeModal'
 import { FiscalProfileSettings } from './FiscalProfileSettings'
+import { Uvt2026EducationBanner } from './Uvt2026EducationBanner'
+import { DianPortalVsPlatformBanner } from './DianPortalVsPlatformBanner'
+import { LegalTooltip } from '@/components/ui/LegalTooltip'
 
 export function BillingModalitySettingsPanel() {
   const [settings, setSettings] = useState<BillingModalitySettings>(() => getBillingModalitySettings())
@@ -38,11 +41,16 @@ export function BillingModalitySettingsPanel() {
 
   return (
     <section className="space-y-5">
+      <Uvt2026EducationBanner />
+      <DianPortalVsPlatformBanner />
+
       <div className="overflow-hidden rounded-2xl border border-dental-200 bg-gradient-to-br from-dental-50 via-white to-emerald-50 p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-dental-700">
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-dental-700">
               Saldo de Facturas Electrónicas
+              <LegalTooltip topic="folio" />
+              <LegalTooltip topic="dian" />
             </p>
             <p className="mt-2 text-2xl font-bold text-slate-900">{getFolioBalanceLabel(settings)}</p>
             <p className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800">
@@ -71,8 +79,11 @@ export function BillingModalitySettingsPanel() {
         <div>
           <h2 className="text-xl font-bold text-slate-900">Cómo quiere cobrar</h2>
           <p className="mt-1 text-sm text-slate-600">
-            La facturación electrónica usa 1 folio por cobro. El Recibo de Caja interno no tiene
-            costo de folios.
+            La facturación electrónica{' '}
+            <span className="inline-flex items-center gap-1">
+              (<LegalTooltip topic="fev" />)
+            </span>{' '}
+            usa 1 folio por cobro. El Recibo de Caja interno no tiene costo de folios.
           </p>
         </div>
 
