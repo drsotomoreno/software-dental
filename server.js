@@ -42,7 +42,8 @@ app.use(
     ],
   }),
 )
-app.use(express.json({ limit: '10mb' }))
+app.use(express.json({ limit: '80mb' }))
+app.use(express.urlencoded({ extended: true, limit: '80mb' }))
 
 app.use('/api/health', healthRoutes)
 app.use('/api/rips', ripsRoutes)

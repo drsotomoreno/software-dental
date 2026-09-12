@@ -3,7 +3,10 @@ import { logAuditEvent } from '@/services/auditService'
 import {
   deleteDiagnosticAidBlob,
   saveDiagnosticAidBlob,
+  saveDiagnosticAidBlobFromBuffer,
 } from '@/services/diagnosticAidBlobStore'
+import { ensureLocalDiagnosticAidBlob } from '@/services/diagnosticAidRemoteStore'
+import { enqueueDiagnosticAidForSync, resolvePatientSyncId } from '@/services/syncQueueService'
 import type { UserProfile } from '@/types/user'
 import type { DiagnosticAid, DiagnosticAidFileType } from '@/types/diagnosticAid'
 import { getDesktopBridge, isDesktopApp } from '@/types/desktopBridge'
@@ -12,6 +15,7 @@ import {
   hasLocalDiskPath,
   inferDiagnosticAidFileTypeFromName,
   isBrowserStoredDiagnosticAid,
+  mimeTypeForDiagnosticFile,
 } from '@/utils/diagnosticAidWebClassification'
 import {
   getDiagnosticAidOpenerPreference,
@@ -134,20 +138,38 @@ export async function registerDiagnosticAid(
   input: RegisterDiagnosticAidInput,
 ): Promise<DiagnosticAid> {
   const fileHash = await generateFileHash(input.absolutePath)
+  const entryId = generateId()
+  const bridge = getDesktopBridge()
+  let blobId: string | null = null
+  if (bridge?.readFileBytes) {
+    try {
+      const data = await bridge.readFileBytes(input.absolutePath)
+      blobId = await saveDiagnosticAidBlobFromBuffer(entryId, {
+        fileName: input.fileName,
+        mimeType: mimeTypeForDiagnosticFile(input.fileName),
+        data,
+      })
+    } catch {
+      blobId = null
+    }
+  }
   const entry: DiagnosticAid = {
-    id: generateId(),
+    id: entryId,
     patientId: input.patientId,
     encounterId: input.encounterId,
     fileType: input.fileType ?? inferDiagnosticAidFileType(input.fileName),
     fileName: input.fileName,
     absolutePath: input.absolutePath,
+    blobId,
     fileHash,
     createdAt: new Date().toISOString(),
     receivedAt: input.receivedAt?.trim() || new Date().toISOString(),
     comments: input.comments?.trim() ?? '',
+    patientSyncId: await resolvePatientSyncId(input.patientId),
   }
 
   await db.diagnosticAids.add(entry)
+  await enqueueDiagnosticAidForSync(entry)
 
   await logAuditEvent({
     action: 'UPLOAD_DIAGNOSTIC_AID',
@@ -179,6 +201,17 @@ export async function registerDiagnosticAidFromBrowserFile(
   if (!absolutePath) {
     absolutePath = `[navegador]/${file.name}`
     blobId = await saveDiagnosticAidBlob(entryId, file)
+  } else if (bridge?.readFileBytes) {
+    try {
+      const data = await bridge.readFileBytes(absolutePath)
+      blobId = await saveDiagnosticAidBlobFromBuffer(entryId, {
+        fileName: file.name,
+        mimeType: file.type || mimeTypeForDiagnosticFile(file.name),
+        data,
+      })
+    } catch {
+      blobId = null
+    }
   }
 
   const fileHash = await generateFileHash(
@@ -197,9 +230,11 @@ export async function registerDiagnosticAidFromBrowserFile(
     createdAt: new Date().toISOString(),
     receivedAt: input.receivedAt?.trim() || new Date().toISOString(),
     comments: input.comments?.trim() ?? '',
+    patientSyncId: await resolvePatientSyncId(input.patientId),
   }
 
   await db.diagnosticAids.add(entry)
+  await enqueueDiagnosticAidForSync(entry)
 
   await logAuditEvent({
     action: 'UPLOAD_DIAGNOSTIC_AID',
@@ -273,6 +308,13 @@ export async function openDiagnosticFile(
   }
 
   if (!hasLocalDiskPath(entry)) {
+    const restored = await ensureLocalDiagnosticAidBlob(entry)
+    if (restored) {
+      return {
+        ok: false,
+        message: 'Use el menú de apertura web para este archivo.',
+      }
+    }
     return {
       ok: false,
       message: 'Este archivo no tiene ruta de disco local disponible.',
@@ -281,6 +323,13 @@ export async function openDiagnosticFile(
 
   const exists = await pathExists(entry.absolutePath)
   if (!exists) {
+    const restored = await ensureLocalDiagnosticAidBlob(entry)
+    if (restored) {
+      return {
+        ok: false,
+        message: 'Use el menú de apertura web para este archivo.',
+      }
+    }
     const message =
       'El archivo ya no existe en la ruta registrada. Verifique que el disco o carpeta de red esté disponible.'
     await logAuditEvent({

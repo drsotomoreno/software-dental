@@ -132,6 +132,11 @@ export interface OdontogramData {
   edentulismScope?: EdentulismScope | null
   isInitialState: boolean
   updatedAt: string
+  syncId?: string
+  clinicId?: string
+  patientSyncId?: string
+  pendingSync?: boolean
+  lastSyncedAt?: string
 }
 
 export const EDENTULISM_SCOPE_LABELS: Record<EdentulismScope, string> = {

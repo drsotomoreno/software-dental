@@ -10,6 +10,11 @@ import type { ClinicalSyncRecord } from '@/types/clinicalSync'
 import type { Patient } from '@/types/patient'
 import { generateId } from '@/utils'
 import { renderCitas, syncCitasToLocalStorage } from '@/utils/agendaStorage'
+import {
+  applyClinicSnapshot,
+  pushClinicSnapshotLocal,
+  readCachedClinicPull,
+} from '@/services/clinicSnapshotSync'
 
 const POLL_MS = 2_000
 const DIRTY_DEBOUNCE_MS = 200
@@ -252,8 +257,8 @@ async function pushAllLocal(clinicId: string): Promise<boolean> {
   return true
 }
 
-async function pullAndMerge(): Promise<boolean> {
-  const { response, payload } = await syncFetch('/api/sync/clinical')
+async function pullAndMerge(includeBlobs = false): Promise<boolean> {
+  const { response, payload } = await syncFetch(`/api/sync/pull?full=${includeBlobs ? '1' : '0'}`)
   if (!response.ok) return false
 
   const patients = Array.isArray(payload.patients) ? (payload.patients as ClinicalSyncRecord[]) : []
@@ -267,7 +272,8 @@ async function pullAndMerge(): Promise<boolean> {
     const appointmentsChanged = await mergeAppointments(appointments)
     changed = patientsChanged || appointmentsChanged
   })
-  return changed
+  const extraChanged = await applyClinicSnapshot(payload)
+  return changed || extraChanged
 }
 
 let inFlight: Promise<boolean> | null = null
@@ -281,7 +287,8 @@ async function performClinicalSyncCycle(): Promise<boolean> {
 
   try {
     await pushAllLocal(clinicId).catch(() => false)
-    const changed = await pullAndMerge().catch(() => false)
+    await pushClinicSnapshotLocal(clinicId).catch(() => false)
+    const changed = await pullAndMerge(false).catch(() => false)
     await syncCitasToLocalStorage()
     renderCitas()
     return Boolean(changed)
@@ -356,7 +363,7 @@ export async function forzarSincronizacionLocal(): Promise<ForzarSincronizacionR
         error: 'El servidor rechazó el POST /api/sync/clinical.',
       }
     }
-    await pullAndMerge()
+    await pullAndMerge(true)
     await syncCitasToLocalStorage()
     renderCitas()
     return { ok: true, patients: patientCount, appointments: appointmentCount, clinicId }
@@ -368,5 +375,33 @@ export async function forzarSincronizacionLocal(): Promise<ForzarSincronizacionR
       clinicId,
       error: error instanceof Error ? error.message : 'No se pudo sincronizar.',
     }
+  }
+}
+
+/** Pull forzado al iniciar sesión: snapshot completo con archivos antes de renderizar. */
+export async function pullCompleteClinicOnLogin(): Promise<boolean> {
+  const auth = getStoredApiAuth()
+  const clinicId = getCurrentClinicId()
+  if (!auth?.token || !clinicId) return false
+  try {
+    const cached = await readCachedClinicPull()
+    if (cached) {
+      const patients = Array.isArray(cached.patients) ? cached.patients : []
+      const appointments = Array.isArray(cached.appointments) ? cached.appointments : []
+      await withRemotePullLock(async () => {
+        await mergePatients(patients)
+        await mergeAppointments(appointments)
+      })
+      await applyClinicSnapshot(cached)
+      await syncCitasToLocalStorage()
+      renderCitas()
+      return true
+    }
+    const merged = await pullAndMerge(true)
+    await syncCitasToLocalStorage()
+    renderCitas()
+    return merged
+  } catch {
+    return false
   }
 }

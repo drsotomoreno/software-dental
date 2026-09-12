@@ -11,6 +11,7 @@ import type { AuditLogEntry } from '@/types/audit'
 import type { ClinicalRecordAddendum } from '@/types/addendum'
 import type { EvolutionNoteAddendum } from '@/types/evolutionNoteAddendum'
 import type { SyncOutboxEntry } from '@/types/syncOutbox'
+import type { SyncQueueAttachment } from '@/types/syncQueue'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import type { CatalogItem, CatalogMeta } from '@/types/catalog'
 import type { DiagnosticAid, DiagnosticAidBlobRecord } from '@/types/diagnosticAid'
@@ -71,6 +72,7 @@ export class DentalDatabase extends Dexie {
   electronicCreditNotes!: EntityTable<ElectronicCreditNote, 'id'>
   evolutionNoteAddendums!: EntityTable<EvolutionNoteAddendum, 'id'>
   syncOutbox!: EntityTable<SyncOutboxEntry, 'id'>
+  syncQueue!: EntityTable<SyncQueueAttachment, 'id'>
   clinicBillingSettings!: EntityTable<ClinicBillingSettingsRecord, 'id'>
   rdaConsents!: EntityTable<RdaCryptographicConsent, 'id'>
   rdaExternalHistories!: EntityTable<RdaExternalHistory, 'id'>
@@ -675,6 +677,14 @@ export class DentalDatabase extends Dexie {
           await tx.table('users').update(user.id, { perfilFiscal: 'Obligado_FEV' })
         }
       })
+
+    this.version(27).stores({
+      clinicalRecords: '++id, patientId, professionalId, signedAt, isLocked, syncId, clinicId, pendingSync',
+      odontograms: '++id, patientId, updatedAt, syncId, clinicId, pendingSync',
+      diagnosticAids:
+        'id, patientId, encounterId, [patientId+encounterId], fileType, fileHash, createdAt, clinicId',
+      syncQueue: 'id, entityType, patientId, encounterId, fileHash, aidId, status, createdAt, clinicId',
+    })
   }
 }
 
@@ -802,6 +812,30 @@ db.appointments.hook('updating', (mods, _primKey, obj) => {
     })
   }
   return undefined
+})
+
+db.clinicalRecords.hook('creating', (_primKey, obj) => {
+  stampClinicalSyncOnCreate(obj as ClinicalRecord)
+})
+
+db.clinicalRecords.hook('updating', (mods, _primKey, obj) => {
+  stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as ClinicalRecord)
+})
+
+db.odontograms.hook('creating', (_primKey, obj) => {
+  stampClinicalSyncOnCreate(obj as OdontogramData)
+})
+
+db.odontograms.hook('updating', (mods, _primKey, obj) => {
+  stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as OdontogramData)
+})
+
+db.diagnosticAids.hook('creating', (_primKey, obj) => {
+  stampClinicalSyncOnCreate(obj as DiagnosticAid)
+})
+
+db.diagnosticAids.hook('updating', (mods, _primKey, obj) => {
+  stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as DiagnosticAid)
 })
 
 async function seedDefaultColumns(): Promise<void> {

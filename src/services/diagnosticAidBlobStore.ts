@@ -18,17 +18,34 @@ export async function saveDiagnosticAidBlob(
   aidId: string,
   file: File,
 ): Promise<string> {
-  const id = generateId()
-  const record: DiagnosticAidBlobRecord = {
-    id,
-    aidId,
+  return saveDiagnosticAidBlobFromBuffer(aidId, {
     fileName: file.name,
     mimeType: file.type || mimeTypeForDiagnosticFile(file.name),
     data: await file.arrayBuffer(),
-    createdAt: new Date().toISOString(),
+  })
+}
+
+export async function saveDiagnosticAidBlobFromBuffer(
+  aidId: string,
+  input: {
+    fileName: string
+    mimeType?: string
+    data: ArrayBuffer
+    id?: string
+    createdAt?: string
+  },
+): Promise<string> {
+  const existing = await getDiagnosticAidBlobByAidId(aidId)
+  const record: DiagnosticAidBlobRecord = {
+    id: input.id || existing?.id || generateId(),
+    aidId,
+    fileName: input.fileName,
+    mimeType: input.mimeType || mimeTypeForDiagnosticFile(input.fileName),
+    data: input.data,
+    createdAt: input.createdAt || existing?.createdAt || new Date().toISOString(),
   }
-  await db.diagnosticAidBlobs.add(record)
-  return id
+  await db.diagnosticAidBlobs.put(record)
+  return record.id
 }
 
 export async function getDiagnosticAidBlobByAidId(
