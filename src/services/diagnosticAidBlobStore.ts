@@ -1,9 +1,18 @@
 import { db } from '@/db/database'
-import type { DiagnosticAidBlobRecord } from '@/types/diagnosticAid'
+import type { DiagnosticAidBlobRecord, DiagnosticAidFileType } from '@/types/diagnosticAid'
 import { generateId } from '@/utils/crypto'
-import { mimeTypeForDiagnosticFile } from '@/utils/diagnosticAidWebClassification'
+import {
+  getFileExtension,
+  mimeTypeForDiagnosticFile,
+  resolveDiagnosticAidDownloadFileName,
+} from '@/utils/diagnosticAidWebClassification'
 
 export type { DiagnosticAidBlobRecord }
+
+export interface DownloadDiagnosticAidBlobOptions {
+  patientId?: string
+  fileType?: DiagnosticAidFileType
+}
 
 export async function saveDiagnosticAidBlob(
   aidId: string,
@@ -35,17 +44,38 @@ export async function getDiagnosticAidBlobUrl(aidId: string): Promise<string | n
   return URL.createObjectURL(blob)
 }
 
-export async function downloadDiagnosticAidBlob(aidId: string, fileName: string): Promise<boolean> {
+export async function downloadDiagnosticAidBlob(
+  aidId: string,
+  fileName: string,
+  options?: DownloadDiagnosticAidBlobOptions,
+): Promise<boolean> {
   const record = await getDiagnosticAidBlobByAidId(aidId)
   if (!record) return false
+
+  const sourceName =
+    (fileName && getFileExtension(fileName) && fileName) ||
+    (record.fileName && getFileExtension(record.fileName) && record.fileName) ||
+    fileName ||
+    record.fileName
+
+  const downloadName = resolveDiagnosticAidDownloadFileName(
+    sourceName,
+    options?.patientId ?? '',
+    options?.fileType,
+  )
 
   const blob = new Blob([record.data], { type: record.mimeType })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = fileName || record.fileName
-  anchor.click()
-  URL.revokeObjectURL(url)
+  anchor.download = downloadName
+  document.body.appendChild(anchor)
+  try {
+    anchor.click()
+  } finally {
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+  }
   return true
 }
 
