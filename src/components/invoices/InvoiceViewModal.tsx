@@ -475,17 +475,31 @@ function ElectronicInvoicePreview({
 
     <div className="space-y-5">
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 
         <SummaryCard label="Total factura" value={formatCurrency(invoice.netPayable)} />
 
         <SummaryCard label="Estado" value={invoice.status} />
 
-        <SummaryCard label="CUV MinSalud" value={invoice.cuv || 'Pendiente'} />
+        <SummaryCard label="DIAN / CUFE" value={invoice.estado_dian ? `${invoice.estado_dian}${invoice.codigo_cufe || invoice.cufe ? ` · ${invoice.codigo_cufe || invoice.cufe}` : ''}` : invoice.cufe || 'Pendiente'} />
+
+        <SummaryCard label="MUV / CUV" value={invoice.estado_muv ? `${invoice.estado_muv}${invoice.codigo_cuv || invoice.cuv ? ` · ${invoice.codigo_cuv || invoice.cuv}` : ''}` : invoice.cuv || 'Pendiente'} />
 
       </div>
 
-
+      {(invoice.detalles_rechazo_muv?.length ?? 0) > 0 && (
+        <section className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-950">
+          <h4 className="mb-2 font-semibold">Glosas / rechazos MUV</h4>
+          <ul className="list-disc space-y-1 pl-5">
+            {invoice.detalles_rechazo_muv?.map((glosa, index) => (
+              <li key={`${glosa.code ?? 'glosa'}-${index}`}>
+                {glosa.code ? `${glosa.code}: ` : ''}
+                {glosa.message}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="rounded-xl border border-slate-200 p-4">
 

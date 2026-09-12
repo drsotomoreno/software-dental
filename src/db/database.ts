@@ -675,6 +675,29 @@ export class DentalDatabase extends Dexie {
           await tx.table('users').update(user.id, { perfilFiscal: 'Obligado_FEV' })
         }
       })
+
+    this.version(27)
+      .stores({
+        electronicInvoices:
+          'id, patientId, invoiceNumber, status, issueDate, professionalId, createdAt, estado_dian, estado_muv',
+      })
+      .upgrade(async (tx) => {
+        const invoices = await tx.table('electronicInvoices').toArray()
+        for (const invoice of invoices) {
+          if (!invoice?.id) continue
+          const patch: Record<string, unknown> = {}
+          if (!invoice.estado_dian) patch.estado_dian = invoice.cufe ? 'Aprobado' : 'Pendiente'
+          if (invoice.codigo_cufe == null && invoice.cufe) patch.codigo_cufe = invoice.cufe
+          if (!invoice.estado_muv) {
+            patch.estado_muv = invoice.cuv ? 'Aprobado_Con_CUV' : 'Pendiente_Envio'
+          }
+          if (invoice.codigo_cuv == null && invoice.cuv) patch.codigo_cuv = invoice.cuv
+          if (!Array.isArray(invoice.detalles_rechazo_muv)) patch.detalles_rechazo_muv = []
+          if (Object.keys(patch).length > 0) {
+            await tx.table('electronicInvoices').update(invoice.id, patch)
+          }
+        }
+      })
   }
 }
 

@@ -63,6 +63,11 @@ const ALLOWED_ISSUED_PATCH_KEYS = new Set([
   'creditNoteId',
   'creditNoteNumber',
   'voidReason',
+  'estado_dian',
+  'codigo_cufe',
+  'estado_muv',
+  'codigo_cuv',
+  'detalles_rechazo_muv',
 ])
 
 export function isAllowedIssuedElectronicInvoiceUpdate(

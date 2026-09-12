@@ -113,6 +113,8 @@ export function paymentInvoiceStatusLabel(invoice: {
 export function electronicInvoiceStatusLabel(invoice: {
   status: string
   creditNoteNumber?: string | null
+  estado_dian?: string | null
+  estado_muv?: string | null
 }): string {
   if (invoice.status === 'voided_by_credit_note' && invoice.creditNoteNumber) {
     return `Anulada por Nota Crédito #${invoice.creditNoteNumber}`
@@ -121,12 +123,15 @@ export function electronicInvoiceStatusLabel(invoice: {
     draft: 'Borrador',
     validated: 'Validada',
     submitted: 'Enviada',
-    cuv_approved: 'CUV aprobado',
-    dian_sent: 'DIAN',
+    cuv_approved: 'Legalizada (CUFE + CUV)',
+    dian_sent: 'DIAN aprobó (pendiente MUV)',
     accepted: 'Aceptada',
-    rejected: 'Rechazada',
+    rejected: 'Rechazada / en corrección',
     cancelled: 'Cancelada',
     voided_by_credit_note: 'Anulada',
   }
-  return labels[invoice.status] ?? invoice.status
+  const base = labels[invoice.status] ?? invoice.status
+  const dian = invoice.estado_dian ? ` · DIAN ${invoice.estado_dian}` : ''
+  const muv = invoice.estado_muv ? ` · MUV ${invoice.estado_muv.replaceAll('_', ' ')}` : ''
+  return `${base}${dian}${muv}`
 }

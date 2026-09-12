@@ -29,7 +29,15 @@ export const LEGAL_TOOLTIP_COPY = {
   },
   cufe: {
     label: 'CUFE',
-    text: 'Código único de la factura electrónica. Debe cruzarse con el JSON RIPS para que MinSalud no rechace el paquete.',
+    text: 'Código Único de Facturación Electrónica. Lo emite la DIAN y valida únicamente que los montos financieros sean correctos. Debe inyectarse en el JSON RIPS antes de enviar el paquete al MUV.',
+  },
+  cuv: {
+    label: 'CUV',
+    text: 'Código Único de Validación. Lo devuelve el MUV del Ministerio de Salud únicamente si el paquete (RIPS + factura) es aprobado. Sin CUV la transacción clínica es inválida.',
+  },
+  muv: {
+    label: 'MUV',
+    text: 'Mecanismo Único de Validación: la API del Ministerio de Salud. Audita que el JSON RIPS cuadre al centavo con la factura DIAN y que los procedimientos tengan permiso legal.',
   },
 } as const
 

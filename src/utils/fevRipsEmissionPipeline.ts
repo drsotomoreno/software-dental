@@ -113,6 +113,7 @@ export function validateCupsAssociationStep(items: InvoiceItem[]): FevRipsPipeli
 
 /**
  * Paso 4 — El CUV MinSalud debe estar enlazado antes de entregar la FEV al paciente.
+ * El CUFE DIAN se obtiene primero; el CUV es el sello final del MUV.
  */
 export function validateCuvLinkageStep(
   invoice: Pick<ElectronicInvoice, 'cuv'>,

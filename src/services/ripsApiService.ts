@@ -65,6 +65,51 @@ export async function validateRipsWithMinistry(
 
 export type FiscalBillingRoute = 'generarFEV_y_RIPS' | 'guardarRIPS_Pendiente'
 
+export interface DualValidationLegalizeResult {
+  ok: boolean
+  success: boolean
+  legalizada: boolean
+  approved?: boolean
+  failedStep?: 'dian' | 'rips_cufe' | 'muv' | 'rips_local' | string | null
+  error?: string
+  estado_dian?: import('@/types/dualValidation').EstadoDian
+  codigo_cufe?: string | null
+  estado_muv?: import('@/types/dualValidation').EstadoMuv
+  codigo_cuv?: string | null
+  detalles_rechazo_muv?: Array<{ code?: string; field?: string; message: string }>
+  cufe?: string | null
+  cuv?: string | null
+  cuvRecordId?: string
+  dianXml?: string | null
+  rips?: RipsTransaction
+  source?: string
+  procesoId?: string
+  fechaRadicacion?: string
+  localIssues?: Array<{ level: string; field?: string; message: string }>
+  ministryErrors?: Array<{ message: string }>
+}
+
+/**
+ * Legaliza la transacción clínica: DIAN (CUFE) → inyecta CUFE en RIPS → MUV (CUV).
+ */
+export async function legalizeElectronicPayment(input: {
+  rips: RipsTransaction | Record<string, unknown>
+  invoice: DianInvoicePayload & { invoiceNumber?: string; numFactura?: string }
+  metadatos?: RipsValidateRequestMetadatos
+  transactionId?: string
+}): Promise<DualValidationLegalizeResult> {
+  const response = await fetch('/api/payments/legalize', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...identityHeaders(),
+    },
+    body: JSON.stringify(input),
+  })
+  return parseJson<DualValidationLegalizeResult>(response)
+}
+
 export interface DictatedEvolutionBillingResult {
   ok: boolean
   success: boolean
@@ -72,6 +117,7 @@ export interface DictatedEvolutionBillingResult {
   perfilFiscal?: FiscalProfile
   numFactura?: string | null
   cuv?: string | null
+  cufe?: string | null
   cuvRecordId?: string
   dianXml?: string | null
   pendingRips?: { id: string; numFactura: string | null; status: string }
@@ -80,6 +126,12 @@ export interface DictatedEvolutionBillingResult {
   codes?: { cie10: string[]; cups: string[] }
   localIssues?: Array<{ level: string; field?: string; message: string }>
   ministryErrors?: Array<{ message: string }>
+  estado_dian?: import('@/types/dualValidation').EstadoDian
+  codigo_cufe?: string | null
+  estado_muv?: import('@/types/dualValidation').EstadoMuv
+  codigo_cuv?: string | null
+  detalles_rechazo_muv?: Array<{ message: string }>
+  legalizada?: boolean
 }
 
 /**

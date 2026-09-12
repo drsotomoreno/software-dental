@@ -12,6 +12,7 @@ import { errorHandler } from './server/middleware/errorHandler.js'
 import healthRoutes from './server/routes/health.routes.js'
 import ripsRoutes from './server/routes/rips.routes.js'
 import invoicesRoutes from './server/routes/invoices.routes.js'
+import paymentsRoutes from './server/routes/payments.routes.js'
 import authRoutes from './server/routes/auth.routes.js'
 import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
 import { mailTransportLabel } from './server/services/mailer.js'
@@ -47,6 +48,7 @@ app.use(express.json({ limit: '10mb' }))
 app.use('/api/health', healthRoutes)
 app.use('/api/rips', ripsRoutes)
 app.use('/api/invoices', invoicesRoutes)
+app.use('/api/payments', paymentsRoutes)
 app.use('/api/sync', clinicalSyncRoutes)
 app.use('/api', authRoutes)
 
@@ -131,6 +133,9 @@ app.listen(config.port, '0.0.0.0', () => {
   })
   console.log(
     `[RIPS API] Modo MinSalud: ${config.minsalud.sandbox ? 'SANDBOX (local)' : 'PRODUCCIÓN'}`,
+  )
+  console.log(
+    `[RIPS API] Modo DIAN: ${config.dian.sandbox ? 'SANDBOX (local)' : 'PRODUCCIÓN'}`,
   )
   void startMonthlyRipsCron()
 })

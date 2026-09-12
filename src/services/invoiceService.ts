@@ -17,10 +17,10 @@ import type { UserProfile } from '@/types/user'
 import { DOCUMENT_TYPE_RIPS, REGIME_TO_TIPO_USUARIO, RIPS_DEFAULTS } from '@/constants/rips'
 import { DEFAULT_ODONTOLOGY_CONSULTATION_CUPS } from '@/constants/rips'
 import { normalizeCupsCode } from '@/services/catalogService'
-import { validateRipsWithMinistry } from '@/services/ripsApiService'
+import { legalizeElectronicPayment } from '@/services/ripsApiService'
 import type { RipsValidateResponse } from '@/types/ripsCuv'
 import { usesManualCashReceipt, usesProviderEmission, consumeElectronicFolio } from '@/services/billingModalityService'
-import { emitInvoiceWithDianProvider } from '@/services/dianProviderClient'
+import { emptyDualValidationFields } from '@/types/dualValidation'
 import {
   buildRipsJson,
   isInvoiceItemRipsEligible,
@@ -295,12 +295,16 @@ export function buildInvoiceDraftFromClinicalRecord(input: InvoiceDraftInput): E
 
   const totals = computeInvoiceTotals(items)
   const now = new Date().toISOString()
+  const dual = emptyDualValidationFields()
 
   return {
     id: generateId(),
     invoiceNumber: invoiceNumber.trim(),
     issueDate,
     status: 'draft',
+    ...dual,
+    cufe: null,
+    cuv: null,
     issuerNit: normalizeNit(professional.providerNit ?? ''),
     issuerBusinessName:
       professional.legalName ||
@@ -448,76 +452,69 @@ export async function submitInvoiceToMinistry(
   }
 
   const dianPayload = buildDianProviderPayload(invoice)
-
-  const ministryResponse = await validateRipsWithMinistry(ripsPackage.rips, {
+  const legalize = await legalizeElectronicPayment({
+    rips: ripsPackage.rips,
+    invoice: { ...dianPayload, invoiceNumber: invoice.invoiceNumber, numFactura: invoice.invoiceNumber },
     metadatos: {
       patientUuid: invoice.patientId,
       clinicalRecordIds: invoice.clinicalRecordIds,
       patientDocument: invoice.buyerDocumentNumber,
     },
-    invoice: dianPayload,
   })
 
-  const cuv = ministryResponse.success ? ministryResponse.cuv ?? null : null
-  if (!cuv) {
-    const rejected: ElectronicInvoice = {
-      ...invoice,
-      ripsJson: ripsPackage.rips,
-      ripsReportableTotal: ripsPackage.ripsReportableTotal,
-      ripsExcludedLineCount: ripsPackage.excludedLineCount,
-      updatedAt: now,
-      submittedAt: now,
-      status: 'rejected',
-      cuv: null,
-      cufe: null,
-      rejectionReason:
-        ministryResponse.error ??
-        'MUV no devolvió CUV. No se emite FEV ni se entrega factura al paciente sin CUV.',
-    }
-    await saveElectronicInvoice(rejected)
-    return {
-      validationIssues: [
-        ...allIssues,
-        {
-          level: 'error',
-          field: 'cuv',
-          message:
-            'El CUV del Ministerio de Salud es obligatorio antes de generar la FEV y entregarla al paciente.',
-        },
-      ],
-      ministryResponse: {
+  const cufe = legalize.codigo_cufe ?? legalize.cufe ?? null
+  const cuv = legalize.codigo_cuv ?? legalize.cuv ?? null
+  const folioConsumed = legalize.estado_dian === 'Aprobado' && Boolean(cufe) ? consumeElectronicFolio() : false
+
+  const ripsJson = legalize.rips ?? {
+    ...ripsPackage.rips,
+    ...(cufe ? { cufe } : {}),
+    ...(cuv ? { cuv } : {}),
+  }
+
+  const overallStatus: ElectronicInvoice['status'] = legalize.legalizada
+    ? 'cuv_approved'
+    : legalize.estado_dian === 'Aprobado'
+      ? 'dian_sent'
+      : 'rejected'
+
+  const ministryResponse: RipsValidateResponse = legalize.legalizada
+    ? {
+        success: true,
+        approved: true,
+        cuv: cuv ?? '',
+        cufe: cufe ?? undefined,
+        cuvRecordId: legalize.cuvRecordId ?? '',
+        dianXml: legalize.dianXml ?? undefined,
+        source: (legalize.source as 'sandbox' | 'minsalud' | 'local' | 'dian') ?? 'sandbox',
+        estado_dian: legalize.estado_dian,
+        codigo_cufe: cufe,
+        estado_muv: legalize.estado_muv,
+        codigo_cuv: cuv,
+        detalles_rechazo_muv: [],
+        legalizada: true,
+      }
+    : {
         success: false,
         approved: false,
-        error: rejected.rejectionReason ?? undefined,
-        ministryErrors: ministryResponse.success ? undefined : ministryResponse.ministryErrors,
-        localIssues: ministryResponse.success ? ministryResponse.localWarnings : ministryResponse.localIssues,
-      },
-      invoice: rejected,
-      folioConsumed: false,
-      depleted: !usesProviderEmission(),
-    }
-  }
-
-  let cufe = invoice.cufe ?? null
-  let folioConsumed = false
-  const providerResult = await emitInvoiceWithDianProvider({
-    invoiceNumber: invoice.invoiceNumber,
-    issueDate: invoice.issueDate,
-    amount: invoice.netPayable,
-    buyerName: invoice.buyerName,
-    buyerDocument: invoice.buyerDocumentNumber,
-    cuv,
-  })
-  if (providerResult.ok && providerResult.cufe) {
-    cufe = providerResult.cufe
-    folioConsumed = consumeElectronicFolio()
-  }
-
-  const ripsJson = {
-    ...ripsPackage.rips,
-    cuv,
-    ...(cufe ? { cufe } : {}),
-  }
+        error: legalize.error,
+        ministryErrors: legalize.ministryErrors ?? legalize.detalles_rechazo_muv,
+        localIssues: legalize.localIssues?.map((issue) => ({
+          level: issue.level === 'error' ? ('error' as const) : ('warning' as const),
+          field: issue.field,
+          message: issue.message,
+        })),
+        cufe,
+        estado_dian: legalize.estado_dian,
+        codigo_cufe: cufe,
+        estado_muv: legalize.estado_muv,
+        codigo_cuv: cuv,
+        detalles_rechazo_muv: legalize.detalles_rechazo_muv ?? [],
+        legalizada: false,
+        failedStep: legalize.failedStep === 'dian' || legalize.failedStep === 'rips_cufe' || legalize.failedStep === 'muv'
+          ? legalize.failedStep
+          : 'muv',
+      }
 
   const updatedInvoice: ElectronicInvoice = {
     ...invoice,
@@ -526,30 +523,42 @@ export async function submitInvoiceToMinistry(
     ripsExcludedLineCount: ripsPackage.excludedLineCount,
     updatedAt: now,
     submittedAt: now,
-    status: 'cuv_approved',
+    status: overallStatus,
     cuv,
-    cuvRecordId: ministryResponse.success ? ministryResponse.cuvRecordId : null,
     cufe,
-    rejectionReason: null,
+    cuvRecordId: legalize.cuvRecordId ?? null,
+    estado_dian: legalize.estado_dian ?? 'Pendiente',
+    codigo_cufe: cufe,
+    estado_muv: legalize.estado_muv ?? 'Pendiente_Envio',
+    codigo_cuv: cuv,
+    detalles_rechazo_muv: legalize.detalles_rechazo_muv ?? [],
+    rejectionReason: legalize.legalizada
+      ? null
+      : legalize.error ??
+        (legalize.estado_muv === 'Rechazado_Por_MUV'
+          ? 'MUV rechazó el paquete. Corrija las glosas; el CUFE DIAN se conserva.'
+          : 'La DIAN rechazó la factura. No se envió el paquete al MUV.'),
   }
 
   await saveElectronicInvoice(updatedInvoice)
 
-  const fevDocument = buildHealthElectronicInvoiceDocument({
-    invoice: updatedInvoice,
-    patient: sources[0]?.patient ?? null,
-    professional,
-  })
-  await enqueueElectronicInvoiceOutbox(updatedInvoice.id, updatedInvoice.patientId, fevDocument)
-
-  try {
-    await fetch('/api/invoices/queue', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ document: fevDocument }),
+  if (legalize.legalizada) {
+    const fevDocument = buildHealthElectronicInvoiceDocument({
+      invoice: updatedInvoice,
+      patient: sources[0]?.patient ?? null,
+      professional,
     })
-  } catch {
-    // Offline: queda en syncOutbox local
+    await enqueueElectronicInvoiceOutbox(updatedInvoice.id, updatedInvoice.patientId, fevDocument)
+
+    try {
+      await fetch('/api/invoices/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ document: fevDocument }),
+      })
+    } catch {
+      // Offline: queda en syncOutbox local
+    }
   }
 
   return {
@@ -559,6 +568,11 @@ export async function submitInvoiceToMinistry(
         level: issue.level,
         field: issue.field,
         message: issue.message,
+      })),
+      ...(legalize.detalles_rechazo_muv ?? []).map((glosa) => ({
+        level: 'error' as const,
+        field: glosa.field,
+        message: glosa.message,
       })),
     ],
     ministryResponse,

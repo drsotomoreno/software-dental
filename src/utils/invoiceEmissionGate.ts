@@ -31,7 +31,7 @@ export function validateInvoiceEmissionGate(
       level: 'error',
       field: 'cuv',
       message:
-        'No puede emitir la FEV-Salud sin el CUV del Ministerio de Salud. Radique primero los RIPS en MUV/PISIS.',
+        'No puede entregar la FEV-Salud al paciente sin el CUV del Ministerio de Salud. El flujo es DIAN (CUFE) y luego MUV (CUV).',
     })
   }
 

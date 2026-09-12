@@ -10,6 +10,7 @@ import {
   usesProviderEmission,
 } from '@/services/billingModalityService'
 import { emitInvoiceWithDianProvider } from '@/services/dianProviderClient'
+import { legalizeElectronicPayment } from '@/services/ripsApiService'
 import { buildDianQrUrl } from '@/utils/thermalInvoicePrint'
 
 export interface ChargeEmissionContext {
@@ -109,6 +110,11 @@ function cashReceiptResult(
       emissionMode: 'manual',
       cufe: null,
       cuv: null,
+      estado_dian: 'Pendiente',
+      codigo_cufe: null,
+      estado_muv: 'Pendiente_Envio',
+      codigo_cuv: null,
+      detalles_rechazo_muv: [],
       dianQrUrl: null,
       ripsJsonSnapshot,
     },
@@ -123,6 +129,60 @@ export async function emitChargeReceipt(
 
   if (context.forceCashReceipt || !usesProviderEmission(settings)) {
     return cashReceiptResult(context, depleted && settings.modality === 'automatic')
+  }
+
+  const snapshot = buildRipsSnapshot(context)
+  try {
+    const legalize = await legalizeElectronicPayment({
+      rips: snapshot,
+      invoice: {
+        nitEmisor: 'PRESTADOR',
+        razonSocialEmisor: 'Prestador odontológico',
+        nitAdquiriente: context.patientDocument || context.buyer?.documentNumber || '222222222222',
+        razonSocialAdquiriente: context.patientName || 'Adquiriente',
+        issueDate: context.invoice.invoiceDate,
+        payableAmount: context.amount,
+        invoiceNumber: context.invoice.invoiceNumber,
+        numFactura: context.invoice.invoiceNumber,
+        lines: (context.cart ?? []).map((item) => ({
+          description: item.name,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          cupsCode: item.cupsCode || undefined,
+        })),
+      },
+    })
+
+    if (legalize.codigo_cufe) {
+      const consumed = legalize.estado_dian === 'Aprobado' ? consumeElectronicFolio() : false
+      const ripsJsonSnapshot = JSON.stringify(
+        buildRipsSnapshot(context, { cuv: legalize.codigo_cuv, cufe: legalize.codigo_cufe }),
+      )
+      return {
+        modality: 'automatic',
+        usedProvider: true,
+        folioConsumed: consumed,
+        depleted: getFoliosAvailable() <= 0,
+        message: legalize.legalizada
+          ? `Transacción legalizada (CUFE + CUV).${consumed ? ' Se descontó 1 folio.' : ''}`
+          : legalize.error || 'DIAN aprobó CUFE. El MUV aún no legalizó (sin CUV).',
+        invoice: {
+          ...context.invoice,
+          emissionMode: 'provider',
+          cufe: legalize.codigo_cufe,
+          cuv: legalize.codigo_cuv ?? null,
+          estado_dian: legalize.estado_dian,
+          codigo_cufe: legalize.codigo_cufe,
+          estado_muv: legalize.estado_muv,
+          codigo_cuv: legalize.codigo_cuv ?? null,
+          detalles_rechazo_muv: legalize.detalles_rechazo_muv ?? [],
+          dianQrUrl: buildDianQrUrl(legalize.codigo_cufe),
+          ripsJsonSnapshot,
+        },
+      }
+    }
+  } catch {
+    // API caído: se intenta emisión DIAN local como respaldo
   }
 
   const emitted = await emitInvoiceWithDianProvider({

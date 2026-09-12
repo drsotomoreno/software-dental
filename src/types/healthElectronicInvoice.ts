@@ -11,6 +11,11 @@ export interface HealthElectronicInvoiceDocument {
   rips?: RipsTransaction | null
   cuv?: string | null
   cufe?: string | null
+  estado_dian?: import('./dualValidation').EstadoDian
+  codigo_cufe?: string | null
+  estado_muv?: import('./dualValidation').EstadoMuv
+  codigo_cuv?: string | null
+  detalles_rechazo_muv?: import('./ripsCuv').RipsMinistryError[]
 }
 
 export interface DianBillingResolution {

@@ -175,16 +175,24 @@ export function ElectronicInvoicePanel({
       if (result.ministryResponse.success && result.ministryResponse.approved) {
         const folioNote = result.folioConsumed ? ' · Se descontó 1 folio.' : ''
         const cufeNote = result.invoice.cufe ? ` · CUFE ${result.invoice.cufe.slice(0, 12)}…` : ''
-        setStatusMessage(`CUV aprobado: ${result.ministryResponse.cuv}${cufeNote}${folioNote}`)
+        setStatusMessage(
+          `Transacción legalizada (DIAN + MUV). CUV ${result.ministryResponse.cuv}${cufeNote}${folioNote}`,
+        )
         if (result.ministryResponse.dianXml) {
           downloadDianXmlApi(result.ministryResponse.dianXml, draft.invoiceNumber)
         }
-      } else if (result.invoice.cufe) {
+      } else if (result.invoice.estado_dian === 'Aprobado' || result.invoice.cufe) {
+        const glosas = (result.invoice.detalles_rechazo_muv ?? [])
+          .map((item) => item.message)
+          .filter(Boolean)
+          .join(' ')
         setStatusMessage(
-          `Factura firmada con CUFE y QR DIAN.${result.folioConsumed ? ' Se descontó 1 folio.' : ''} ${result.ministryResponse.error ?? ''}`.trim(),
+          `DIAN aprobó (CUFE). MUV no legalizó: ${glosas || result.ministryResponse.error || 'sin CUV. Transacción en corrección.'}${result.folioConsumed ? ' Se descontó 1 folio.' : ''}`,
         )
       } else {
-        setStatusMessage(result.ministryResponse.error ?? 'El envío a MUV fue rechazado.')
+        setStatusMessage(
+          result.ministryResponse.error ?? 'La DIAN rechazó la factura. No se envió el paquete al MUV.',
+        )
       }
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'Error al emitir.')
@@ -244,8 +252,8 @@ export function ElectronicInvoicePanel({
       <div>
         <h2 className="text-xl font-bold text-slate-900">Facturación electrónica FEV-Salud</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Genera la FEV DIAN con soporte RIPS JSON. Cada factura electrónica consume 1 folio. El
-          Recibo de Caja interno de 80 mm no tiene costo de folios.
+          Flujo legal: 1) XML a la DIAN (CUFE) → 2) CUFE inyectado en RIPS → 3) paquete al MUV (CUV).
+          La transacción clínica solo queda legalizada con ambos códigos. Cada FEV consume 1 folio.
         </p>
         <p className="mt-2 text-sm font-medium text-slate-700">{folioLabel}</p>
         {foliosDepleted && (
@@ -449,7 +457,8 @@ export function ElectronicInvoicePanel({
                   <p className="font-medium text-slate-800">{invoice.invoiceNumber}</p>
                   <p className="text-xs text-slate-500">
                     {invoice.issueDate} · {electronicInvoiceStatusLabel(invoice)}
-                    {invoice.cuv ? ` · CUV ${invoice.cuv}` : ''}
+                    {invoice.cufe || invoice.codigo_cufe ? ` · CUFE ${(invoice.codigo_cufe || invoice.cufe || '').slice(0, 10)}…` : ''}
+                    {invoice.cuv || invoice.codigo_cuv ? ` · CUV ${invoice.codigo_cuv || invoice.cuv}` : ''}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

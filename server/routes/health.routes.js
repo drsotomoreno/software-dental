@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { config, hasMinsaludCredentials } from '../config.js'
+import { config, hasDianCredentials, hasMinsaludCredentials } from '../config.js'
 import { isMailConfigured, mailTransportLabel } from '../services/mailer.js'
 
 const router = Router()
@@ -11,6 +11,13 @@ router.get('/', async (_req, res) => {
     minsalud: {
       sandbox: config.minsalud.sandbox,
       credentialsConfigured: hasMinsaludCredentials(),
+    },
+    dian: {
+      sandbox: config.dian.sandbox,
+      credentialsConfigured: hasDianCredentials(),
+    },
+    dualValidation: {
+      order: ['DIAN_XML', 'CUFE', 'RIPS_CUFE', 'MUV_PACKAGE', 'CUV'],
     },
     mail: {
       configured: await isMailConfigured(),
