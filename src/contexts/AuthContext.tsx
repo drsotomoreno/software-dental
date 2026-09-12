@@ -22,6 +22,7 @@ import {
   type ApiSubscriptionUser,
 } from '@/services/apiAuthService'
 import { logAuditEvent } from '@/services/auditService'
+import { pullCompleteClinicOnLogin } from '@/services/clinicalSyncService'
 import type { AuthUser } from '@/types/auth'
 import type { Permission } from '@/utils/permissions'
 import { canManageClinicTeam, normalizeRole } from '@/utils/permissions'
@@ -88,17 +89,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       if (validation.ok) {
         setStoredApiAuth(apiAuth.token, validation.user)
+        await pullCompleteClinicOnLogin()
         setUser(mapApiUserToAuthUser(validation.user, apiAuth.token))
         setIsLoading(false)
         return
       }
       if (validation.requiresPayment && validation.user) {
         setStoredApiAuth(apiAuth.token, validation.user)
+        await pullCompleteClinicOnLogin()
         setUser(mapApiUserToAuthUser(validation.user, apiAuth.token))
         setIsLoading(false)
         return
       }
       if (isApiSuperAdmin(apiAuth.user)) {
+        await pullCompleteClinicOnLogin()
         setUser(mapApiUserToAuthUser(apiAuth.user, apiAuth.token))
         setIsLoading(false)
         return
@@ -133,6 +137,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const completeApiLogin = async (token: string, sessionUser: ApiSubscriptionUser) => {
       setStoredApiAuth(token, sessionUser)
+      await pullCompleteClinicOnLogin()
       const authUser = mapApiUserToAuthUser(sessionUser, token)
       setUser(authUser)
       window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
@@ -207,6 +212,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       if (masterLogin) {
         const granted = grantMasterLocalSession()
+        await pullCompleteClinicOnLogin()
         const authUser = mapApiUserToAuthUser(granted.user, granted.token)
         setUser(authUser)
         window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
@@ -216,6 +222,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (masterLogin) {
       const granted = grantMasterLocalSession()
+      await pullCompleteClinicOnLogin()
       const authUser = mapApiUserToAuthUser(granted.user, granted.token)
       setUser(authUser)
       window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))

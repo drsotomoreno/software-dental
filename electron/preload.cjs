@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('desktopBridge', {
   pickDiagnosticFile: () => ipcRenderer.invoke('diagnostic:pick-file'),
   generateFileHash: (filePath) => ipcRenderer.invoke('diagnostic:generate-hash', filePath),
   fileExists: (filePath) => ipcRenderer.invoke('diagnostic:file-exists', filePath),
+  readFileBytes: (filePath) => ipcRenderer.invoke('diagnostic:read-file', filePath),
   openPath: (filePath) => ipcRenderer.invoke('diagnostic:open-path', filePath),
   pickApplicationProgram: () => ipcRenderer.invoke('diagnostic:pick-application'),
   openPathWithProgram: (filePath, programPath) =>

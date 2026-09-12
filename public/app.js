@@ -53,8 +53,7 @@
       fecha_vencimiento: null,
     }
     storeAuth(sessionToken, user)
-    unlockApp()
-    return user
+    return { token: sessionToken, user }
   }
 
   function isSuperAdminUser(user) {
@@ -119,6 +118,98 @@
     }
 
     throw lastError || new Error('No se pudo conectar con el servidor API.')
+  }
+
+  const PULL_CACHE_DB = 'ClinicSyncPullCache'
+  const PULL_CACHE_STORE = 'snapshots'
+  let clinicPullInFlight = null
+
+  function tenantIdOfUser(user) {
+    return String(user?.clinicId || user?.id || '').trim()
+  }
+
+  function cacheClinicPullSnapshot(payload) {
+    return new Promise(function (resolve) {
+      try {
+        const req = indexedDB.open(PULL_CACHE_DB, 1)
+        req.onupgradeneeded = function () {
+          if (!req.result.objectStoreNames.contains(PULL_CACHE_STORE)) {
+            req.result.createObjectStore(PULL_CACHE_STORE)
+          }
+        }
+        req.onerror = function () {
+          resolve(false)
+        }
+        req.onsuccess = function () {
+          const db = req.result
+          const tx = db.transaction(PULL_CACHE_STORE, 'readwrite')
+          tx.objectStore(PULL_CACHE_STORE).put(payload, 'latest')
+          tx.oncomplete = function () {
+            db.close()
+            resolve(true)
+          }
+          tx.onerror = function () {
+            db.close()
+            resolve(false)
+          }
+        }
+      } catch (error) {
+        logError('no se pudo cachear snapshot de clínica', error)
+        resolve(false)
+      }
+    })
+  }
+
+  async function forceClinicPull(token, user) {
+    if (!token) return false
+    if (clinicPullInFlight) return clinicPullInFlight
+
+    clinicPullInFlight = (async function () {
+      const tenantId = tenantIdOfUser(user)
+      let path = '/api/sync/pull?full=1'
+      if (tenantId) path += '&tenant_id=' + encodeURIComponent(tenantId)
+      showMessage('Sincronizando historial y archivos de la clínica…', 'success')
+      log('pull forzado →', path)
+      try {
+        const headers = {
+          Accept: 'application/json',
+          Authorization: 'Bearer ' + token,
+        }
+        if (user?.email) headers['X-Client-Email'] = String(user.email)
+        if (user?.id) headers['X-Client-User-Id'] = String(user.id)
+        if (user?.documentNumber) headers['X-Client-Document'] = String(user.documentNumber)
+
+        const { response, payload } = await apiFetch(path, { method: 'GET', headers })
+        if (!response.ok || !(payload.success === true || payload.ok === true)) {
+          logError('pull de clínica falló', { status: response.status, payload })
+          return false
+        }
+        window.__doctorSEOClinicPull = payload
+        await cacheClinicPullSnapshot(payload)
+        window.dispatchEvent(new CustomEvent('doctorSEO-clinic-pull', { detail: payload }))
+        log('pull de clínica listo', {
+          patients: Array.isArray(payload.patients) ? payload.patients.length : 0,
+          attachments: Array.isArray(payload.attachments) ? payload.attachments.length : 0,
+          diagnosticAids: Array.isArray(payload.diagnosticAids) ? payload.diagnosticAids.length : 0,
+        })
+        return true
+      } catch (error) {
+        logError('error en pull forzado', error)
+        return false
+      } finally {
+        clinicPullInFlight = null
+      }
+    })()
+
+    return clinicPullInFlight
+  }
+
+  window.__doctorSEOForceClinicPull = forceClinicPull
+
+  async function activateSession(token, user) {
+    storeAuth(token, user)
+    await forceClinicPull(token, user)
+    unlockApp()
   }
 
   function getStoredAuth() {
@@ -259,8 +350,12 @@
           estado_pago: 'exento',
           fecha_vencimiento: null,
         }
-        storeAuth(token, { ...user, rol: 'superadmin', estado_pago: 'exento', email: MASTER_EMAIL })
-        unlockApp()
+        await activateSession(token, {
+          ...user,
+          rol: 'superadmin',
+          estado_pago: 'exento',
+          email: MASTER_EMAIL,
+        })
         showMessage('Bienvenido SuperAdmin — acceso ilimitado habilitado.', 'success')
         log('login maestro exitoso', user)
         return true
@@ -279,15 +374,15 @@
         return false
       }
 
-      storeAuth(payload.token, payload.user)
-      unlockApp()
+      await activateSession(payload.token, payload.user)
       showMessage('Sesión iniciada correctamente.', 'success')
       log('login exitoso', payload.user)
       return true
     } catch (error) {
       if (isMasterCredentials(email, password)) {
         logError('API no disponible; se otorga sesión local de SuperAdmin', error)
-        grantMasterSession()
+        const granted = grantMasterSession()
+        await activateSession(granted.token, granted.user)
         showMessage('Bienvenido SuperAdmin — acceso ilimitado habilitado.', 'success')
         return true
       }
@@ -318,7 +413,7 @@
 
   async function validateSession(token, storedUser) {
     if (isSuperAdminUser(storedUser) || localStorage.getItem(ROLE_KEY) === 'superadmin') {
-      unlockApp()
+      await activateSession(token, storedUser)
       return true
     }
 
@@ -328,20 +423,18 @@
       })
 
       if (response.ok && (payload.success === true || payload.ok === true || payload.user)) {
-        storeAuth(token, payload.user)
-        unlockApp()
+        await activateSession(token, payload.user)
         return true
       }
 
       if (response.status === 402 && isSuperAdminUser(payload.user)) {
-        storeAuth(token, payload.user)
-        unlockApp()
+        await activateSession(token, payload.user)
         return true
       }
     } catch (error) {
       logError('validación de sesión falló', error)
       if (isSuperAdminUser(storedUser)) {
-        unlockApp()
+        await activateSession(token, storedUser)
         return true
       }
     }
@@ -366,8 +459,7 @@
 
     const stored = getStoredAuth()
     if (stored?.token && (isSuperAdminUser(stored.user) || localStorage.getItem(ROLE_KEY) === 'superadmin')) {
-      storeAuth(stored.token, stored.user)
-      unlockApp()
+      await activateSession(stored.token, stored.user)
       return
     }
 
@@ -464,8 +556,7 @@
         return
       }
 
-      storeAuth(payload.token, payload.user)
-      unlockApp()
+      await activateSession(payload.token, payload.user)
       showMessage('Pago confirmado. Acceso activado por 30 días.', 'success')
     } catch (error) {
       logError('error en pago', error)
