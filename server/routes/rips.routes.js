@@ -3,6 +3,7 @@ import { submitRipsToMinsalud } from '../services/minsaludRipsClient.js'
 import { saveCuvRecord, getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
+import { runFevDualValidation } from '../services/fevDualValidationService.js'
 import {
   saveTemporaryRipsRecord,
   listTemporaryRipsRecords,
@@ -43,6 +44,23 @@ router.post('/validate', async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'El cuerpo debe incluir el objeto rips.' })
     }
 
+    if (invoice) {
+      const dual = await runFevDualValidation({ rips, invoice, metadatos })
+      const httpStatus = dual.listoParaEntrega
+        ? 200
+        : dual.estado_dian === 'Rechazado' || dual.estado_minsalud_muv === 'Rechazado_Con_Glosas'
+          ? 422
+          : 200
+      return res.status(httpStatus).json({
+        ...dual,
+        success: dual.listoParaEntrega === true,
+        approved: dual.listoParaEntrega === true,
+        cuv: dual.codigo_cuv ?? null,
+        cufe: dual.codigo_cufe ?? null,
+        localWarnings: dual.localIssues ?? [],
+      })
+    }
+
     const result = await submitRipsToMinsalud({ rips, metadatos })
 
     if (!result.success) {
@@ -69,16 +87,6 @@ router.post('/validate', async (req, res, next) => {
       patientUuid: metadatos?.patientUuid ?? null,
     })
 
-    let dianXml = null
-    if (invoice) {
-      dianXml = buildDianHealthInvoiceXml({
-        cuv: result.cuv,
-        numFactura: rips.numFactura,
-        ...invoice,
-      })
-      cuvRecord.dianXmlGenerated = true
-    }
-
     res.json({
       success: true,
       approved: true,
@@ -89,7 +97,6 @@ router.post('/validate', async (req, res, next) => {
       source: result.source,
       localWarnings: result.localIssues ?? [],
       cuvRecordId: cuvRecord.id,
-      dianXml,
     })
   } catch (error) {
     next(error)
@@ -153,20 +160,21 @@ router.get('/cuv/history', async (req, res, next) => {
 
 /**
  * POST /api/rips/dian-xml
- * Genera XML FEV-Salud con CUV ya obtenido.
+ * Genera XML FEV-Salud. El CUV es opcional (se envía a la DIAN antes del MUV).
  */
 router.post('/dian-xml', async (req, res, next) => {
   try {
-    const { cuv, numFactura, invoice } = req.body ?? {}
-    if (!cuv || !numFactura) {
+    const { cuv, cufe, numFactura, invoice } = req.body ?? {}
+    if (!numFactura) {
       return res.status(400).json({
         success: false,
-        error: 'cuv y numFactura son obligatorios.',
+        error: 'numFactura es obligatorio.',
       })
     }
 
     const xml = buildDianHealthInvoiceXml({
       cuv,
+      cufe,
       numFactura,
       nitEmisor: invoice?.nitEmisor ?? '',
       razonSocialEmisor: invoice?.razonSocialEmisor ?? 'Prestador de servicios de salud',
@@ -175,6 +183,7 @@ router.post('/dian-xml', async (req, res, next) => {
       issueDate: invoice?.issueDate ?? new Date().toISOString().slice(0, 10),
       payableAmount: invoice?.payableAmount ?? 0,
       lines: invoice?.lines ?? [],
+      codPrestadorReps: invoice?.codPrestadorReps,
     })
 
     res.json({ success: true, xml })
