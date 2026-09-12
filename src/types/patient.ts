@@ -60,6 +60,10 @@ export interface Patient {
   phase?: PatientPhase
   /** Consentimiento de valoración rápida — metadatos legales */
   valuationConsent?: ValuationConsentMetadata
+  /** Autorización expresa de tratamiento de datos (Ley 1581 de 2012). */
+  habeas_data_aceptado?: boolean
+  /** Timestamp ISO 8601 de la autorización de habeas data. */
+  fecha_aceptacion_habeas_data?: string
   /** Solo valoración: aparece en Pacientes Valorados hasta pasar a historia completa */
   valuationOnly?: boolean
   /** Tratamiento finalizado: aparece en Pacientes Terminados */
@@ -77,4 +81,4 @@ export interface Patient {
   lastSyncedAt?: string
 }
 
-export interface PatientFormData extends Omit<Patient, 'id' | 'createdAt' | 'updatedAt'> {}
+export type PatientFormData = Omit<Patient, 'id' | 'createdAt' | 'updatedAt'>
