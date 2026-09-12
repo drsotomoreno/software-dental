@@ -64,6 +64,9 @@ interface ClinicalHistoryFormProps {
   clinicalUser?: UserProfile | null
   patientName?: string
   patientDocument?: string
+  patientDocumentType?: string
+  patientDocumentNumber?: string
+  patientEmail?: string
 }
 
 function showClinicalSection(activeSection: string, section: string): boolean {
@@ -115,6 +118,9 @@ export function ClinicalHistoryForm({
   clinicalUser = null,
   patientName = '',
   patientDocument = '',
+  patientDocumentType,
+  patientDocumentNumber,
+  patientEmail,
 }: ClinicalHistoryFormProps) {
   const snapshotLocked = disabled
   const livingLocked = lockLivingChart
@@ -444,6 +450,11 @@ export function ClinicalHistoryForm({
             clinicalRecordId={clinicalRecordId}
             patientName={patientName}
             patientDocument={patientDocument}
+            patientDocumentType={patientDocumentType}
+            patientDocumentNumber={patientDocumentNumber}
+            patientEmail={patientEmail}
+            evolutionNotes={form.evolutionNotes}
+            budgetItems={form.budgetItems}
             onChange={(paymentControl) => update({ paymentControl })}
             onOrthodonticsPaymentControlChange={(orthodonticsPaymentControl) =>
               update({ orthodonticsPaymentControl })

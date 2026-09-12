@@ -41,7 +41,7 @@ export interface RipsServicios {
   hospitalizacion: []
   recienNacidos: []
   medicamentos: []
-  otrosServicios: []
+  otrosServicios: RipsOtroServicio[]
 }
 
 export interface RipsConsulta {
@@ -109,6 +109,34 @@ export interface RipsProcedimiento {
   cuadranteFdi?: string | null
   /** Extensión EMR — arcada tratada */
   arcada?: 'superior' | 'inferior' | null
+}
+
+/**
+ * Grupo RIPS `otrosServicios` (Res. 2275).
+ * Usado para estética/insumos sin CUPS: la DIAN recibe el nombre literal y el MUV
+ * clasifica el ítem aquí en lugar de un procedimiento CUPS inventado.
+ */
+export const RIPS_OTROS_SERVICIOS_TIPO_OS = '01'
+export const RIPS_OTROS_SERVICIOS_COD_TECNOLOGIA = 'OTROS'
+
+export interface RipsOtroServicio {
+  codPrestador: string
+  numAutorizacion: string | null
+  idMIPRES: string | null
+  fechaSuministroTecnologia: string
+  /** 01 = materiales e insumos / dispositivos; evita CUPS inventado. */
+  tipoOS: string
+  codTecnologiaSalud: string
+  nomTecnologiaSalud: string
+  cantidadOS: number
+  tipoDocumentoIdentificacion: string
+  numDocumentoIdentificacion: string
+  vrUnitOS: number
+  vrServicio: number
+  conceptoRecaudo: string
+  valorPagoModerador: number
+  numFEVPagoModerador: string | null
+  consecutivo: number
 }
 
 export interface RipsExportMetadata {

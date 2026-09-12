@@ -104,7 +104,7 @@ export function isClinicalItemBillable(item: ClinicalEvolutionItem): boolean {
   return item.isBillable !== false && item.cost > 0
 }
 
-/** Reportable en RIPS: tiene CUPS válido y no es procedimiento personalizado interno */
+/** Reportable en RIPS procedimientos: tiene CUPS válido y no es estético/insumo. */
 export function isClinicalItemRipsReportable(item: ClinicalEvolutionItem): boolean {
   if (item.isCustomProcedure) return false
   if (item.requiereCupsRips === false) return false
@@ -112,8 +112,14 @@ export function isClinicalItemRipsReportable(item: ClinicalEvolutionItem): boole
   return Boolean(cups)
 }
 
+/** Estética/insumo: va a RIPS `otrosServicios` con el nombre literal de la DIAN. */
+export function isClinicalItemOtrosServicios(item: ClinicalEvolutionItem): boolean {
+  if (!isClinicalItemBillable(item) && item.cost <= 0) return false
+  return item.isCustomProcedure === true || item.requiereCupsRips === false || !normalizeCups(item.cupsCode)
+}
+
 export function getRipsVrServicioForClinicalItem(item: ClinicalEvolutionItem): number {
-  if (!isClinicalItemRipsReportable(item)) return 0
+  if (!isClinicalItemRipsReportable(item) && !isClinicalItemOtrosServicios(item)) return 0
   return isClinicalItemBillable(item) ? item.cost : 0
 }
 
@@ -129,6 +135,6 @@ export function computeDianTotal(items: ClinicalEvolutionItem[]): number {
 
 export function computeRipsReportableTotal(items: ClinicalEvolutionItem[]): number {
   return items
-    .filter(isClinicalItemRipsReportable)
+    .filter((item) => isClinicalItemRipsReportable(item) || isClinicalItemOtrosServicios(item))
     .reduce((sum, item) => sum + getRipsVrServicioForClinicalItem(item), 0)
 }

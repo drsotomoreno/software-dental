@@ -2,10 +2,12 @@ import { Landmark } from 'lucide-react'
 import {
   PERFIL_FISCAL_NO_OBLIGADO_NOTICE,
   PERFIL_FISCAL_OPTIONS,
+  UVT_2026_EDUCATION_BANNER,
   isNoObligadoFev,
   normalizePerfilFiscal,
   type FiscalProfile,
 } from '@/utils/fiscalProfile'
+import { LegalTooltip } from '@/components/ui/LegalTooltip'
 
 export interface FiscalProfileSelectorProps {
   value?: FiscalProfile | string | boolean | null
@@ -37,8 +39,13 @@ export function FiscalProfileSelector({
       <div className="flex items-start gap-3">
         <Landmark className="mt-0.5 h-5 w-5 shrink-0 text-dental-700" aria-hidden />
         <div>
-          <p className="text-base font-semibold text-slate-900">{title}</p>
+          <p className="flex items-center gap-1.5 text-base font-semibold text-slate-900">
+            {title}
+            <LegalTooltip topic="uvt" />
+            <LegalTooltip topic="fev" />
+          </p>
           <p className="mt-1 text-sm text-slate-600">{description}</p>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">{UVT_2026_EDUCATION_BANNER}</p>
         </div>
       </div>
 
