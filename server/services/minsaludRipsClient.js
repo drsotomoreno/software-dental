@@ -43,12 +43,27 @@ function normalizeMinistryErrors(payload) {
 
 /**
  * Envía el paquete RIPS al API REST del Ministerio y procesa la respuesta (CUV o errores).
+ * En el flujo FEV se adjunta el XML de la factura y el CUFE ya legalizado por la DIAN.
+ *
  * @param {object} params
  * @param {object} params.rips - Paquete JSON RIPS Res. 2275
  * @param {object} [params.metadatos] - Metadatos de trazabilidad (UUID paciente, IDs clínicos)
+ * @param {string} [params.facturaXml] - XML FEV aprobado por la DIAN
+ * @param {string} [params.cufe] - CUFE a cruzar con el RIPS
+ * @param {boolean} [params.requireCufe]
  */
-export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
-  const localIssues = validateRipsPackageLocally(rips, {
+export async function submitRipsToMinsalud({
+  rips,
+  metadatos = {},
+  facturaXml,
+  cufe,
+  requireCufe = false,
+} = {}) {
+  const injectedCufe = String(cufe ?? rips?.cufe ?? metadatos.cufe ?? '').trim() || null
+  const payloadRips = injectedCufe ? { ...rips, cufe: injectedCufe } : rips
+  const needCufe = Boolean(facturaXml || requireCufe || metadatos.requireCufe)
+
+  const localIssues = validateRipsPackageLocally(payloadRips, {
     crossValidateAgeSex: true,
     perfilFiscal: metadatos.perfilFiscal,
     esRipsTemporal: metadatos.esRipsTemporal,
@@ -63,10 +78,25 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     }
   }
 
+  if (needCufe && !injectedCufe) {
+    return {
+      success: false,
+      source: 'local',
+      localIssues,
+      ministryErrors: [
+        {
+          code: 'MUV-CUFE',
+          field: 'cufe',
+          message: 'El CUFE DIAN es obligatorio en el RIPS antes de radicar el paquete en MUV.',
+        },
+      ],
+    }
+  }
+
   const useSandbox = config.minsalud.sandbox || !hasMinsaludCredentials()
 
   if (useSandbox) {
-    const ministryErrors = simulateMinistryCrossValidation(rips)
+    const ministryErrors = simulateMinistryCrossValidation(payloadRips)
     if (ministryErrors.length > 0) {
       return {
         success: false,
@@ -93,11 +123,14 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
   const url = `${apiBaseUrl}${validatePath}`
 
   const payload = {
-    rips,
+    rips: payloadRips,
+    facturaXml: facturaXml || undefined,
+    cufe: injectedCufe || undefined,
     metadatos: {
       ...metadatos,
-      nitObligado: rips.numDocumentoIdObligado,
-      numFactura: rips.numFactura,
+      nitObligado: payloadRips.numDocumentoIdObligado,
+      numFactura: payloadRips.numFactura,
+      cufe: injectedCufe || undefined,
     },
   }
 
@@ -107,7 +140,7 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
       'Content-Type': 'application/json',
       Accept: 'application/json',
       Authorization: `Bearer ${token}`,
-      'X-NIT-Prestador': nit || rips.numDocumentoIdObligado,
+      'X-NIT-Prestador': nit || payloadRips.numDocumentoIdObligado,
     },
     body: JSON.stringify(payload),
   })
@@ -183,3 +216,5 @@ function getAgeYears(birthDate) {
   if (m < 0 || (m === 0 && now.getDate() < born.getDate())) age--
   return age
 }
+
+export { submitRipsToMinsalud as submitRipsToMinistry }

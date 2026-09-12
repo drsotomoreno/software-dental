@@ -9,8 +9,15 @@ CREATE TABLE IF NOT EXISTS electronic_invoices (
   issue_date TEXT NOT NULL,
   due_date TEXT,
   cufe TEXT,
+  codigo_cufe TEXT,
   cuv TEXT,
+  codigo_cuv TEXT,
   cuv_record_id TEXT,
+  estado_dian TEXT NOT NULL DEFAULT 'Pendiente'
+    CHECK (estado_dian IN ('Pendiente', 'Aprobado', 'Rechazado')),
+  estado_minsalud_muv TEXT NOT NULL DEFAULT 'Pendiente_Envio'
+    CHECK (estado_minsalud_muv IN ('Pendiente_Envio', 'Aprobado', 'Rechazado_Con_Glosas')),
+  detalles_rechazo_muv TEXT, -- JSON array de glosas MUV
   status TEXT NOT NULL DEFAULT 'draft',
 
   issuer_nit TEXT NOT NULL,

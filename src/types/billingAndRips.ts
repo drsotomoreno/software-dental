@@ -87,6 +87,12 @@ export interface ProcessClinicalSessionResult {
   ministryResponse?: RipsValidateResponse
   cuv?: string | null
   cufe?: string | null
+  codigo_cufe?: string | null
+  codigo_cuv?: string | null
+  estado_dian?: import('@/utils/dualValidation').EstadoDian
+  estado_minsalud_muv?: import('@/utils/dualValidation').EstadoMinsaludMuv
+  detalles_rechazo_muv?: import('@/utils/dualValidation').MuvRejectionDetail[]
+  listoParaEntrega?: boolean
 }
 
 /** Factura simplificada para API externa */
