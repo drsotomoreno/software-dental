@@ -1,4 +1,11 @@
 import type { RipsTransaction } from './rips'
+import type {
+  EstadoDian,
+  EstadoMinsaludMuv,
+  MuvRejectionDetail,
+} from '@/utils/dualValidation'
+
+export type { EstadoDian, EstadoMinsaludMuv, MuvRejectionDetail }
 
 /** Estado del ciclo de vida de la factura electrónica */
 export type InvoiceStatus =
@@ -89,9 +96,19 @@ export interface ElectronicInvoice {
   dueDate?: string
   /** Código Único de Factura Electrónica (DIAN) */
   cufe?: string | null
+  /** Alias normativo de `cufe` (paso 2 del flujo dual). */
+  codigo_cufe?: string | null
   /** Código Único de Validación (MinSalud / MUV) */
   cuv?: string | null
+  /** Alias normativo de `cuv` (paso 5 del flujo dual). */
+  codigo_cuv?: string | null
   cuvRecordId?: string | null
+  /** Estado independiente ante la DIAN. */
+  estado_dian?: EstadoDian
+  /** Estado independiente ante el MUV del MinSalud. */
+  estado_minsalud_muv?: EstadoMinsaludMuv
+  /** Glosas o errores si el RIPS rebota en MUV. */
+  detalles_rechazo_muv?: MuvRejectionDetail[]
   status: InvoiceStatus
 
   // Emisor (prestador)

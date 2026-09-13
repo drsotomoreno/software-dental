@@ -14,13 +14,11 @@ import type {
 import type { DianInvoicePayload } from '@/types/ripsCuv'
 import type { RipsExportMetadata } from '@/types/rips'
 import type { UserProfile } from '@/types/user'
-import { DOCUMENT_TYPE_RIPS, REGIME_TO_TIPO_USUARIO, RIPS_DEFAULTS } from '@/constants/rips'
-import { DEFAULT_ODONTOLOGY_CONSULTATION_CUPS } from '@/constants/rips'
+import { DOCUMENT_TYPE_RIPS, REGIME_TO_TIPO_USUARIO, RIPS_DEFAULTS, DEFAULT_ODONTOLOGY_CONSULTATION_CUPS } from '@/constants/rips'
 import { normalizeCupsCode } from '@/services/catalogService'
-import { validateRipsWithMinistry } from '@/services/ripsApiService'
+import { emitDualValidation } from '@/services/ripsApiService'
 import type { RipsValidateResponse } from '@/types/ripsCuv'
 import { usesManualCashReceipt, usesProviderEmission, consumeElectronicFolio } from '@/services/billingModalityService'
-import { emitInvoiceWithDianProvider } from '@/services/dianProviderClient'
 import {
   buildRipsJson,
   isInvoiceItemRipsEligible,
@@ -55,6 +53,10 @@ import {
   validateInvoiceForSubmission,
 } from '@/utils/invoiceValidation'
 import { generateId } from '@/utils/crypto'
+import {
+  invoiceStatusFromDualValidation,
+  isListoParaEntrega,
+} from '@/utils/dualValidation'
 
 const CUPS_PATTERN = /^\d{6}$/
 
@@ -449,74 +451,31 @@ export async function submitInvoiceToMinistry(
 
   const dianPayload = buildDianProviderPayload(invoice)
 
-  const ministryResponse = await validateRipsWithMinistry(ripsPackage.rips, {
+  const dual = await emitDualValidation({
+    rips: ripsPackage.rips,
+    invoice: {
+      ...dianPayload,
+      invoiceNumber: invoice.invoiceNumber,
+    },
     metadatos: {
       patientUuid: invoice.patientId,
       clinicalRecordIds: invoice.clinicalRecordIds,
       patientDocument: invoice.buyerDocumentNumber,
     },
-    invoice: dianPayload,
   })
 
-  const cuv = ministryResponse.success ? ministryResponse.cuv ?? null : null
-  if (!cuv) {
-    const rejected: ElectronicInvoice = {
-      ...invoice,
-      ripsJson: ripsPackage.rips,
-      ripsReportableTotal: ripsPackage.ripsReportableTotal,
-      ripsExcludedLineCount: ripsPackage.excludedLineCount,
-      updatedAt: now,
-      submittedAt: now,
-      status: 'rejected',
-      cuv: null,
-      cufe: null,
-      rejectionReason:
-        ministryResponse.error ??
-        'MUV no devolvió CUV. No se emite FEV ni se entrega factura al paciente sin CUV.',
-    }
-    await saveElectronicInvoice(rejected)
-    return {
-      validationIssues: [
-        ...allIssues,
-        {
-          level: 'error',
-          field: 'cuv',
-          message:
-            'El CUV del Ministerio de Salud es obligatorio antes de generar la FEV y entregarla al paciente.',
-        },
-      ],
-      ministryResponse: {
-        success: false,
-        approved: false,
-        error: rejected.rejectionReason ?? undefined,
-        ministryErrors: ministryResponse.success ? undefined : ministryResponse.ministryErrors,
-        localIssues: ministryResponse.success ? ministryResponse.localWarnings : ministryResponse.localIssues,
-      },
-      invoice: rejected,
-      folioConsumed: false,
-      depleted: !usesProviderEmission(),
-    }
-  }
-
-  let cufe = invoice.cufe ?? null
-  let folioConsumed = false
-  const providerResult = await emitInvoiceWithDianProvider({
-    invoiceNumber: invoice.invoiceNumber,
-    issueDate: invoice.issueDate,
-    amount: invoice.netPayable,
-    buyerName: invoice.buyerName,
-    buyerDocument: invoice.buyerDocumentNumber,
-    cuv,
-  })
-  if (providerResult.ok && providerResult.cufe) {
-    cufe = providerResult.cufe
-    folioConsumed = consumeElectronicFolio()
-  }
-
+  const cufe = dual.codigo_cufe ?? dual.cufe ?? null
+  const cuv = dual.codigo_cuv ?? dual.cuv ?? null
   const ripsJson = {
     ...ripsPackage.rips,
-    cuv,
+    ...(dual.rips ?? {}),
     ...(cufe ? { cufe } : {}),
+    ...(cuv ? { cuv } : {}),
+  }
+
+  let folioConsumed = false
+  if (dual.estado_dian === 'Aprobado' && cufe) {
+    folioConsumed = consumeElectronicFolio()
   }
 
   const updatedInvoice: ElectronicInvoice = {
@@ -526,30 +485,77 @@ export async function submitInvoiceToMinistry(
     ripsExcludedLineCount: ripsPackage.excludedLineCount,
     updatedAt: now,
     submittedAt: now,
-    status: 'cuv_approved',
-    cuv,
-    cuvRecordId: ministryResponse.success ? ministryResponse.cuvRecordId : null,
+    status: invoiceStatusFromDualValidation(dual),
     cufe,
-    rejectionReason: null,
+    cuv,
+    codigo_cufe: cufe,
+    codigo_cuv: cuv,
+    estado_dian: dual.estado_dian,
+    estado_minsalud_muv: dual.estado_minsalud_muv,
+    detalles_rechazo_muv: dual.detalles_rechazo_muv ?? [],
+    cuvRecordId: dual.cuvRecordId ?? null,
+    rejectionReason: isListoParaEntrega(dual)
+      ? null
+      : dual.error ??
+        (dual.estado_dian === 'Rechazado'
+          ? 'DIAN rechazó la factura.'
+          : 'MUV no devolvió CUV. El CUFE DIAN se conserva.'),
   }
 
   await saveElectronicInvoice(updatedInvoice)
 
-  const fevDocument = buildHealthElectronicInvoiceDocument({
-    invoice: updatedInvoice,
-    patient: sources[0]?.patient ?? null,
-    professional,
-  })
-  await enqueueElectronicInvoiceOutbox(updatedInvoice.id, updatedInvoice.patientId, fevDocument)
+  const ministryResponse: RipsValidateResponse = isListoParaEntrega(dual)
+    ? {
+        success: true,
+        approved: true,
+        cuv: cuv ?? '',
+        cufe,
+        codigo_cufe: cufe,
+        codigo_cuv: cuv,
+        estado_dian: dual.estado_dian,
+        estado_minsalud_muv: dual.estado_minsalud_muv,
+        listoParaEntrega: true,
+        source: (dual.source as 'sandbox' | 'minsalud' | 'local' | 'dian') ?? 'sandbox',
+        cuvRecordId: dual.cuvRecordId ?? '',
+        dianXml: dual.dianXml ?? undefined,
+        rips: dual.rips,
+      }
+    : {
+        success: false,
+        approved: false,
+        error: updatedInvoice.rejectionReason ?? undefined,
+        ministryErrors: dual.ministryErrors,
+        localIssues: dual.localIssues,
+        cufe,
+        cuv,
+        codigo_cufe: cufe,
+        codigo_cuv: cuv,
+        estado_dian: dual.estado_dian,
+        estado_minsalud_muv: dual.estado_minsalud_muv,
+        detalles_rechazo_muv: dual.detalles_rechazo_muv,
+        listoParaEntrega: false,
+        cuvRecordId: dual.cuvRecordId,
+        dianXml: dual.dianXml ?? undefined,
+        rips: dual.rips,
+      }
 
-  try {
-    await fetch('/api/invoices/queue', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ document: fevDocument }),
+  if (isListoParaEntrega(dual)) {
+    const fevDocument = buildHealthElectronicInvoiceDocument({
+      invoice: updatedInvoice,
+      patient: sources[0]?.patient ?? null,
+      professional,
     })
-  } catch {
-    // Offline: queda en syncOutbox local
+    await enqueueElectronicInvoiceOutbox(updatedInvoice.id, updatedInvoice.patientId, fevDocument)
+
+    try {
+      await fetch('/api/invoices/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ document: fevDocument }),
+      })
+    } catch {
+      // Offline: queda en syncOutbox local
+    }
   }
 
   return {
@@ -559,6 +565,11 @@ export async function submitInvoiceToMinistry(
         level: issue.level,
         field: issue.field,
         message: issue.message,
+      })),
+      ...(dual.detalles_rechazo_muv ?? []).map((glosa) => ({
+        level: 'error' as const,
+        field: glosa.field,
+        message: glosa.message,
       })),
     ],
     ministryResponse,

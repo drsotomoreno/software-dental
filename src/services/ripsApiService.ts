@@ -1,5 +1,6 @@
 import type {
   DianInvoicePayload,
+  DualValidationApiResponse,
   RipsValidateRequestMetadatos,
   RipsValidateResponse,
   RipsCuvStoredRecord,
@@ -72,8 +73,16 @@ export interface DictatedEvolutionBillingResult {
   perfilFiscal?: FiscalProfile
   numFactura?: string | null
   cuv?: string | null
+  cufe?: string | null
+  codigo_cufe?: string | null
+  codigo_cuv?: string | null
+  estado_dian?: import('@/utils/dualValidation').EstadoDian
+  estado_minsalud_muv?: import('@/utils/dualValidation').EstadoMinsaludMuv
+  detalles_rechazo_muv?: import('@/utils/dualValidation').MuvRejectionDetail[]
+  listoParaEntrega?: boolean
   cuvRecordId?: string
   dianXml?: string | null
+  rips?: RipsTransaction
   pendingRips?: { id: string; numFactura: string | null; status: string }
   message?: string
   error?: string
@@ -106,7 +115,26 @@ export async function routeDictatedEvolutionByFiscalProfile(input: {
   return parseJson<DictatedEvolutionBillingResult>(response)
 }
 
-/** Descarga XML FEV-Salud con CUV inyectado para transmisión DIAN. */
+const INVOICES_API = import.meta.env.VITE_INVOICES_API_URL ?? '/api/invoices'
+
+/**
+ * Orquesta CUFE (DIAN) → RIPS → CUV (MUV) en el backend.
+ */
+export async function emitDualValidation(input: {
+  rips?: RipsTransaction | Record<string, unknown>
+  invoice?: DianInvoicePayload & { invoiceNumber?: string; amount?: number }
+  metadatos?: RipsValidateRequestMetadatos
+  options?: { forceDianReject?: boolean; apiKey?: string }
+}): Promise<DualValidationApiResponse> {
+  const response = await fetch(`${INVOICES_API}/emit-dual`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...identityHeaders() },
+    body: JSON.stringify(input),
+  })
+  return parseJson<DualValidationApiResponse>(response)
+}
+
+/** Descarga XML FEV-Salud (CUFE inyectado; CUV opcional en copias de entrega). */
 export function downloadDianXml(xml: string, numFactura: string | null | undefined): void {
   const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' })
   const url = URL.createObjectURL(blob)

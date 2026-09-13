@@ -3,11 +3,10 @@
  * Tras el dictado (CIE-10 + CUPS), Obligado_FEV genera FEV+RIPS;
  * No_Obligado guarda RIPS pendiente con numFactura = null.
  */
-import { submitRipsToMinsalud } from './minsaludRipsClient.js'
-import { buildDianHealthInvoiceXml } from './dianFeXmlBuilder.js'
-import { saveCuvRecord } from './cuvRepository.js'
 import { saveTemporaryRipsRecord } from './ripsTemporalStore.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
+import { runFevDualValidation } from './fevDualValidationService.js'
+import { ESTADO_DIAN } from '../../shared/dualValidation.js'
 import {
   isObligadoFev,
   normalizePerfilFiscal,
@@ -77,7 +76,7 @@ function stampNumFactura(rips, numFactura) {
 }
 
 /**
- * Prestador obligado a FEV: valida, radica RIPS y genera XML FEV-Salud.
+ * Prestador obligado a FEV: DIAN (CUFE) → inyección en RIPS → MUV (CUV).
  * @param {{ rips: object, invoice?: object, metadatos?: object, user?: object }} params
  */
 export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user }) {
@@ -93,83 +92,23 @@ export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user })
     clinicId: metadatos.clinicId || user?.clinicId || user?.id || null,
   }
 
-  const localIssues = validateRipsPackageLocally(payload, {
-    perfilFiscal,
-    esRipsTemporal: false,
-    crossValidateAgeSex: true,
+  const result = await runFevDualValidation({
+    rips: payload,
+    invoice,
+    metadatos: mergedMetadatos,
+    user,
   })
-  if (hasBlockingValidationErrors(localIssues)) {
-    return {
-      ok: false,
-      success: false,
-      route: 'generarFEV_y_RIPS',
-      perfilFiscal,
-      error: 'El RIPS no cumple validaciones locales para generar FEV.',
-      localIssues,
-    }
-  }
-
-  const ministryResult = await submitRipsToMinsalud({ rips: payload, metadatos: mergedMetadatos })
-  if (!ministryResult.success) {
-    return {
-      ok: false,
-      success: false,
-      route: 'generarFEV_y_RIPS',
-      perfilFiscal,
-      error: 'No se pudo radicar el RIPS ante MinSalud.',
-      localIssues: ministryResult.localIssues ?? localIssues,
-      ministryErrors: ministryResult.ministryErrors ?? [],
-      source: ministryResult.source,
-    }
-  }
-
-  const cuvRecord = await saveCuvRecord({
-    cuv: ministryResult.cuv,
-    numFactura: payload.numFactura,
-    numDocumentoIdObligado: payload.numDocumentoIdObligado,
-    status: 'approved',
-    procesoId: ministryResult.procesoId,
-    fechaRadicacion: ministryResult.fechaRadicacion,
-    estado: ministryResult.estado,
-    source: ministryResult.source,
-    metadatos: { ...mergedMetadatos, ...ministryResult.metadatos },
-    clinicalRecordIds: mergedMetadatos.clinicalRecordIds ?? [],
-    patientUuid: mergedMetadatos.patientUuid ?? null,
-  })
-
-  let dianXml = null
-  if (invoice) {
-    dianXml = buildDianHealthInvoiceXml({
-      cuv: ministryResult.cuv,
-      numFactura: payload.numFactura,
-      nitEmisor: invoice.nitEmisor,
-      razonSocialEmisor: invoice.razonSocialEmisor,
-      nitAdquiriente: invoice.nitAdquiriente,
-      razonSocialAdquiriente: invoice.razonSocialAdquiriente,
-      issueDate: invoice.issueDate,
-      payableAmount: invoice.payableAmount,
-      lines: invoice.lines ?? [],
-      codPrestadorReps: invoice.codPrestadorReps,
-    })
-    cuvRecord.dianXmlGenerated = true
-  }
 
   return {
-    ok: true,
-    success: true,
-    approved: true,
+    ...result,
     route: 'generarFEV_y_RIPS',
     perfilFiscal,
     numFactura: payload.numFactura,
-    cuv: ministryResult.cuv,
-    cuvRecordId: cuvRecord.id,
-    procesoId: ministryResult.procesoId,
-    fechaRadicacion: ministryResult.fechaRadicacion,
-    estado: ministryResult.estado,
-    source: ministryResult.source,
-    localIssues: ministryResult.localIssues ?? [],
-    dianXml,
-    rips: payload,
+    cuv: result.codigo_cuv ?? null,
+    cufe: result.codigo_cufe ?? null,
+    ok: result.estado_dian === ESTADO_DIAN.APROBADO,
+    success: result.listoParaEntrega === true,
+    approved: result.listoParaEntrega === true,
   }
 }
 

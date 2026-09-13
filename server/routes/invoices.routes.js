@@ -1,5 +1,7 @@
 import { Router } from 'express'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
+import { emitProviderInvoice } from '../services/dianFeClient.js'
+import { processElectronicInvoiceSubmission } from '../services/invoiceService.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
 import { parseRepsCode } from '../../shared/repsCode.js'
 
@@ -56,7 +58,10 @@ router.post('/validate-document', (req, res) => {
 
   const requireCuv = Boolean(req.body?.requireCuv)
   if (requireCuv && !document.salud?.cuv?.trim() && !document.cuv?.trim()) {
-    issues.push({ field: 'cuv', message: 'El CUV es obligatorio para emisión DIAN.' })
+    issues.push({
+      field: 'cuv',
+      message: 'El CUV es obligatorio para entregar la FEV al paciente, no para enviarla a la DIAN.',
+    })
   }
 
   if (document.rips) {
@@ -74,20 +79,18 @@ router.post('/validate-document', (req, res) => {
 
 /**
  * POST /api/invoices/build-xml
- * Genera XML FEV-Salud cuando ya existe CUV.
+ * Genera XML FEV-Salud para envío a la DIAN (CUV opcional).
  */
 router.post('/build-xml', (req, res, next) => {
   try {
-    const { cuv, numFactura, invoice } = req.body ?? {}
-    if (!cuv?.trim()) {
-      return res.status(400).json({ success: false, error: 'CUV obligatorio.' })
-    }
+    const { cuv, cufe, numFactura, invoice } = req.body ?? {}
     if (!numFactura?.trim() || !invoice) {
       return res.status(400).json({ success: false, error: 'numFactura e invoice son obligatorios.' })
     }
 
     const xml = buildDianHealthInvoiceXml({
       cuv,
+      cufe,
       numFactura,
       ...invoice,
     })
@@ -137,31 +140,69 @@ router.post('/provider/test', (req, res) => {
 })
 
 /**
+ * POST /api/invoices/emit-dual
+ * Orquesta CUFE (DIAN) → inyección en RIPS → CUV (MUV).
+ */
+router.post('/emit-dual', async (req, res, next) => {
+  try {
+    const { rips, invoice, metadatos, options } = req.body ?? {}
+    if (!invoice && !rips) {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error: 'Se requiere invoice y/o rips para el flujo dual CUFE/CUV.',
+      })
+    }
+
+    const result = await processElectronicInvoiceSubmission({
+      rips: rips ?? {},
+      invoice,
+      metadatos: metadatos ?? {},
+      options: options ?? {},
+    })
+
+    const status = result.listoParaEntrega
+      ? 200
+      : result.estado_dian === 'Rechazado'
+        ? 422
+        : result.estado_minsalud_muv === 'Rechazado_Con_Glosas'
+          ? 422
+          : 200
+
+    return res.status(status).json({
+      ...result,
+      success: result.listoParaEntrega === true,
+      ok: result.listoParaEntrega === true || result.estado_dian === 'Aprobado',
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
  * POST /api/invoices/provider/emit
  * Envía la factura al proveedor y devuelve CUFE + URL de QR DIAN.
  */
-router.post('/provider/emit', (req, res) => {
-  const apiKey = String(req.body?.apiKey ?? '').trim()
-  const invoice = req.body?.invoice ?? {}
-  const invoiceNumber = String(invoice.invoiceNumber ?? '').trim()
-  if (apiKey.length < 8 || !invoiceNumber) {
-    return res.status(400).json({
-      success: false,
-      error: 'Se requieren clave de conexión y número de factura.',
+router.post('/provider/emit', async (req, res, next) => {
+  try {
+    const apiKey = String(req.body?.apiKey ?? '').trim()
+    const invoice = req.body?.invoice ?? {}
+    const invoiceNumber = String(invoice.invoiceNumber ?? '').trim()
+    if (apiKey.length < 8 || !invoiceNumber) {
+      return res.status(400).json({
+        success: false,
+        error: 'Se requieren clave de conexión y número de factura.',
+      })
+    }
+
+    const result = await emitProviderInvoice({ apiKey, invoice: { ...invoice, invoiceNumber } })
+    return res.json({
+      ...result,
+      message: result.message || 'Factura enviada al proveedor. CUFE y QR listos para el ticket de 80 mm.',
     })
+  } catch (error) {
+    next(error)
   }
-
-  const seed = `${apiKey.slice(0, 4)}-${invoiceNumber}-${invoice.issueDate ?? ''}-${invoice.amount ?? 0}`
-  const cufe = Buffer.from(seed).toString('hex').toUpperCase().padEnd(96, 'A').slice(0, 96)
-  const qrUrl = `https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=${encodeURIComponent(cufe)}`
-
-  return res.json({
-    success: true,
-    cufe,
-    qrUrl,
-    invoiceNumber,
-    message: 'Factura enviada al proveedor. CUFE y QR listos para el ticket de 80 mm.',
-  })
 })
 
 /**
