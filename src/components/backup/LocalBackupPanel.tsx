@@ -7,6 +7,7 @@ import {
   parseBackupInput,
   restoreFromBackupFile,
 } from '@/services/backupService'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 
 interface LocalBackupPanelProps {
   onSettingsChange?: () => void
@@ -170,11 +171,9 @@ export function LocalBackupPanel({ onSettingsChange, compact = false }: LocalBac
       {needsPassword && (
         <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
           <label className="label-field">Contraseña del respaldo cifrado</label>
-          <input
-            type="password"
+          <PasswordInput
             value={restorePassword}
             onChange={(event) => setRestorePassword(event.target.value)}
-            className="input-field"
             autoComplete="off"
           />
           <button

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { APP_INITIALS, APP_NAME } from '@/constants/branding'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 
 export function ResetPasswordPage() {
   const [params] = useSearchParams()
@@ -70,27 +71,23 @@ export function ResetPasswordPage() {
           <form onSubmit={handleSubmit} className="card space-y-4">
             <div>
               <label className="label-field">Nueva contraseña</label>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 required
                 minLength={6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="input-field"
                 placeholder="••••••••"
               />
             </div>
             <div>
               <label className="label-field">Confirmar contraseña</label>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 required
                 minLength={6}
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
-                className="input-field"
                 placeholder="••••••••"
               />
             </div>

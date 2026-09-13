@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 
 interface SignConfirmationModalProps {
   open: boolean
@@ -56,11 +57,9 @@ export function SignConfirmationModal({
 
         <div className="mt-4">
           <label className="label-field">Confirme su contraseña</label>
-          <input
-            type="password"
+          <PasswordInput
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="input-field"
             autoFocus
             required
           />
