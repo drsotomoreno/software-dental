@@ -17,9 +17,13 @@ import type { DiagnosticAid } from '@/types/diagnosticAid'
 import type { OdontogramData } from '@/types/odontogram'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import type { SyncQueueAttachment } from '@/types/syncQueue'
+import { getDesktopBridge } from '@/types/desktopBridge'
 import { arrayBufferToBase64, base64ToArrayBuffer } from '@/utils/base64Binary'
 import { generateId } from '@/utils/crypto'
-import { mimeTypeForDiagnosticFile } from '@/utils/diagnosticAidWebClassification'
+import {
+  hasLocalDiskPath,
+  mimeTypeForDiagnosticFile,
+} from '@/utils/diagnosticAidWebClassification'
 
 const LOCAL_ONLY_KEYS = new Set(['id', 'pendingSync', 'lastSyncedAt'])
 const PULL_CACHE_DB = 'ClinicSyncPullCache'
@@ -196,7 +200,7 @@ async function mergeDiagnosticAids(records: ClinicalSyncRecord[]): Promise<boole
       ...(payload as unknown as DiagnosticAid),
       id,
       patientId,
-      encounterId: String(payload.encounterId || ''),
+      encounterId: String(payload.encounterId || payload.evolutionId || ''),
       fileType: (payload.fileType as DiagnosticAid['fileType']) || 'OTHER',
       fileName: String(payload.fileName || 'archivo'),
       absolutePath: String(payload.absolutePath || `[navegador]/${payload.fileName || 'archivo'}`),
@@ -267,6 +271,7 @@ async function mergeAttachments(records: ClinicalSyncRecord[]): Promise<boolean>
       createdAt: String(payload.createdAt || remote.updatedAt),
       updatedAt: remote.updatedAt,
       lastSyncedAt: new Date().toISOString(),
+      binarySynced: true,
     }
     await db.syncQueue.put(queueItem)
     changed = true
@@ -274,16 +279,90 @@ async function mergeAttachments(records: ClinicalSyncRecord[]): Promise<boolean>
   return changed
 }
 
-export async function applyClinicSnapshot(payload: ClinicalSyncPullResponse): Promise<boolean> {
+async function fetchRemoteAttachment(params: Record<string, string>): Promise<ClinicalSyncRecord | null> {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value) search.set(key, value)
+  }
+  const tenantId = String(getStoredApiAuth()?.user?.clinicId || getStoredApiAuth()?.user?.id || '').trim()
+  if (tenantId) search.set('tenant_id', tenantId)
+  const { response, payload } = await syncFetch(`/api/sync/attachment?${search.toString()}`)
+  if (!response.ok || !payload?.attachment) return null
+  return payload.attachment as ClinicalSyncRecord
+}
+
+function recordHasBlob(record: ClinicalSyncRecord): boolean {
+  const payload = payloadOf(record)
+  return Boolean(payload.dataBase64 || (record as { dataBase64?: string }).dataBase64)
+}
+
+async function hydrateMissingAttachmentBlobs(
+  snapshot: ClinicalSyncPullResponse,
+): Promise<ClinicalSyncPullResponse> {
+  const rows = [
+    ...recordsOf(snapshot.attachments),
+    ...recordsOf(snapshot.sync_queue),
+    ...recordsOf(snapshot.diagnosticAids),
+  ]
+  const lookups: Record<string, string>[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    if (recordHasBlob(row)) continue
+    const payload = payloadOf(row)
+    const id = String(payload.aidId || payload.id || row.syncId || '').trim()
+    const fileHash = String(payload.fileHash || '').trim()
+    const patientId = String(payload.patientSyncId || payload.patientId || '').trim()
+    const encounterId = String(payload.encounterId || payload.evolutionId || '').trim()
+    const key = id || fileHash || `${patientId}:${encounterId}`
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    lookups.push({
+      id,
+      aidId: id,
+      fileHash,
+      patientId,
+      encounterId,
+      evolutionId: encounterId,
+    })
+  }
+  if (!lookups.length) return snapshot
+
+  const extras: ClinicalSyncRecord[] = []
+  const concurrency = 4
+  let cursor = 0
+  async function worker() {
+    while (cursor < lookups.length) {
+      const current = lookups[cursor]
+      cursor += 1
+      try {
+        const attachment = await fetchRemoteAttachment(current)
+        if (attachment && recordHasBlob(attachment)) extras.push(attachment)
+      } catch {
+        /* siguiente adjunto */
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, lookups.length) }, () => worker()))
+  return {
+    ...snapshot,
+    attachments: [...recordsOf(snapshot.attachments), ...extras],
+  }
+}
+
+export async function applyClinicSnapshot(
+  payload: ClinicalSyncPullResponse,
+  options: { hydrateBlobs?: boolean } = {},
+): Promise<boolean> {
+  const hydrated = options.hydrateBlobs ? await hydrateMissingAttachmentBlobs(payload) : payload
   let changed = false
   await withRemotePullLock(async () => {
-    const clinicalChanged = await mergeClinicalRecords(recordsOf(payload.clinicalRecords))
-    const odontogramsChanged = await mergeOdontograms(recordsOf(payload.odontograms))
-    const aidsChanged = await mergeDiagnosticAids(recordsOf(payload.diagnosticAids))
-    const draftsChanged = await mergeDrafts(recordsOf(payload.drafts))
+    const clinicalChanged = await mergeClinicalRecords(recordsOf(hydrated.clinicalRecords))
+    const odontogramsChanged = await mergeOdontograms(recordsOf(hydrated.odontograms))
+    const aidsChanged = await mergeDiagnosticAids(recordsOf(hydrated.diagnosticAids))
+    const draftsChanged = await mergeDrafts(recordsOf(hydrated.drafts))
     const attachmentsChanged = await mergeAttachments([
-      ...recordsOf(payload.attachments),
-      ...recordsOf(payload.sync_queue),
+      ...recordsOf(hydrated.attachments),
+      ...recordsOf(hydrated.sync_queue),
     ])
     changed = clinicalChanged || odontogramsChanged || aidsChanged || draftsChanged || attachmentsChanged
   })
@@ -342,20 +421,36 @@ export async function pullAndApplyClinicSnapshot(options: {
   if (options.useCache) {
     const cached = await readCachedClinicPull()
     if (cached) {
-      await applyClinicSnapshot(cached)
+      await applyClinicSnapshot(cached, { hydrateBlobs: includeBlobs })
     }
   }
   const remote = await pullClinicSnapshotRemote({ includeBlobs })
   if (!remote) return false
   ;(window as Window & { __doctorSEOClinicPull?: ClinicalSyncPullResponse }).__doctorSEOClinicPull = remote
-  await applyClinicSnapshot(remote)
+  await applyClinicSnapshot(remote, { hydrateBlobs: includeBlobs })
   return true
 }
 
 async function blobBase64ForAid(aidId: string): Promise<string> {
   const blob = await db.diagnosticAidBlobs.where('aidId').equals(aidId).first()
-  if (!blob?.data) return ''
-  return arrayBufferToBase64(blob.data)
+  if (blob?.data) return arrayBufferToBase64(blob.data)
+
+  const aid = await db.diagnosticAids.get(aidId)
+  const bridge = getDesktopBridge()
+  if (aid && bridge?.readFileBytes && hasLocalDiskPath(aid)) {
+    try {
+      const data = await bridge.readFileBytes(aid.absolutePath)
+      await saveDiagnosticAidBlobFromBuffer(aidId, {
+        fileName: aid.fileName,
+        mimeType: mimeTypeForDiagnosticFile(aid.fileName),
+        data,
+      })
+      return arrayBufferToBase64(data)
+    } catch {
+      return ''
+    }
+  }
+  return ''
 }
 
 export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean> {
@@ -368,7 +463,13 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
 
   for (const aid of diagnosticAids) {
     const queued = await db.syncQueue.where('aidId').equals(aid.id).first()
-    if (!queued) await enqueueDiagnosticAidForSync(aid)
+    if (!queued) {
+      await enqueueDiagnosticAidForSync(aid)
+      continue
+    }
+    if (queued.binarySynced === true) continue
+    const hasBlob = Boolean(await blobBase64ForAid(aid.id))
+    if (hasBlob) await enqueueDiagnosticAidForSync(aid)
   }
   const pendingQueue = await listPendingSyncQueue()
 
@@ -413,7 +514,7 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
   const builtQueue = await Promise.all(
     pendingQueue.map(async (item) => {
       const dataBase64 = await blobBase64ForAid(item.aidId)
-      if (!dataBase64 && !item.absolutePath) return null
+      if (!dataBase64) return null
       const syncId = item.id || item.aidId
       const record: ClinicalSyncRecord = {
         syncId,
@@ -424,6 +525,7 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
           dataBase64,
           entityType: 'diagnostic_aid',
           clinicId,
+          hasBinary: true,
         },
       }
       return record
@@ -431,19 +533,46 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
   )
   const syncQueuePayload = builtQueue.filter((row): row is ClinicalSyncRecord => row != null)
 
-  const { response } = await syncFetch('/api/sync/push', {
+  const metadataResponse = await syncFetch('/api/sync/push', {
     method: 'POST',
     body: JSON.stringify({
       clinicalRecords: clinicalRecordsPayload,
       odontograms: odontogramsPayload,
       diagnosticAids: diagnosticAidsPayload,
       drafts: draftsPayload,
-      sync_queue: syncQueuePayload,
-      attachments: syncQueuePayload,
     }),
   })
-  if (!response.ok) return false
-  await markSyncQueueSynced(syncQueuePayload.map((row) => row.syncId))
+  if (!metadataResponse.response.ok) return false
+
+  const MAX_BATCH_CHARS = 18 * 1024 * 1024
+  const batches: ClinicalSyncRecord[][] = []
+  let current: ClinicalSyncRecord[] = []
+  let currentSize = 0
+  for (const record of syncQueuePayload) {
+    const size = String(record.payload.dataBase64 || '').length
+    if (current.length && currentSize + size > MAX_BATCH_CHARS) {
+      batches.push(current)
+      current = []
+      currentSize = 0
+    }
+    current.push(record)
+    currentSize += size
+  }
+  if (current.length) batches.push(current)
+
+  const syncedIds: string[] = []
+  for (const batch of batches) {
+    const { response } = await syncFetch('/api/sync/push', {
+      method: 'POST',
+      body: JSON.stringify({
+        sync_queue: batch,
+        attachments: batch,
+      }),
+    })
+    if (!response.ok) continue
+    syncedIds.push(...batch.map((row) => row.syncId))
+  }
+  await markSyncQueueSynced(syncedIds)
   return true
 }
 

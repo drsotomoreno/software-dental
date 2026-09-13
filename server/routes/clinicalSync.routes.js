@@ -191,7 +191,18 @@ router.get('/attachment', async (req, res) => {
 
     const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
     const query = req.query && typeof req.query === 'object' ? req.query : {}
-    const attachment = await findClinicAttachment(auth.canonical, query, aliases)
+    const attachment = await findClinicAttachment(
+      auth.canonical,
+      {
+        ...query,
+        id: query.id || query.fileId || query.aidId,
+        aidId: query.aidId || query.id || query.fileId,
+        fileHash: query.fileHash || query.hash,
+        patientId: query.patientId || query.patientSyncId,
+        encounterId: query.encounterId || query.evolutionId,
+      },
+      aliases,
+    )
     if (!attachment) {
       return res.status(404).json({
         success: false,
@@ -222,6 +233,7 @@ router.get('/files/:fileId', async (req, res) => {
       ...(req.query && typeof req.query === 'object' ? req.query : {}),
       id: req.params.fileId,
       aidId: req.params.fileId,
+      fileId: req.params.fileId,
     }
     const attachment = await findClinicAttachment(auth.canonical, query, aliases)
     if (!attachment) {

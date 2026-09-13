@@ -54,16 +54,23 @@ async function fetchClinicAttachment(params: Record<string, string>): Promise<Re
   }
   const tenantId = String(auth.user.clinicId || auth.user.id || '').trim()
   if (tenantId) search.set('tenant_id', tenantId)
-  const response = await fetch(`/api/sync/attachment?${search.toString()}`, {
-    headers: {
-      Accept: 'application/json',
-      ...identityHeaders(),
-    },
-  })
-  if (!response.ok) return null
-  const body = await response.json().catch(() => ({}))
-  if (!body?.attachment) return null
-  return payloadOf(body.attachment)
+  const paths = [`/api/sync/attachment?${search.toString()}`]
+  const fileId = params.id || params.aidId || params.fileId
+  if (fileId) paths.push(`/api/sync/files/${encodeURIComponent(fileId)}?${search.toString()}`)
+
+  for (const path of paths) {
+    const response = await fetch(path, {
+      headers: {
+        Accept: 'application/json',
+        ...identityHeaders(),
+      },
+    })
+    if (!response.ok) continue
+    const body = await response.json().catch(() => ({}))
+    if (!body?.attachment) continue
+    return payloadOf(body.attachment)
+  }
+  return null
 }
 
 /**
@@ -77,33 +84,32 @@ export async function ensureLocalDiagnosticAidBlob(
   if (local?.data) return local
 
   if (entry.fileHash) {
-    const byHash = await db.diagnosticAids.where('fileHash').equals(entry.fileHash).first()
-    if (byHash?.id && byHash.id !== entry.id) {
+    const hashedMatches = await db.diagnosticAids.where('fileHash').equals(entry.fileHash).toArray()
+    for (const byHash of hashedMatches) {
+      if (!byHash?.id) continue
       const hashedBlob = await getDiagnosticAidBlobByAidId(byHash.id)
-      if (hashedBlob?.data) {
-        const blobId = await saveDiagnosticAidBlobFromBuffer(entry.id, {
-          fileName: hashedBlob.fileName || entry.fileName,
-          mimeType: hashedBlob.mimeType,
-          data: hashedBlob.data,
-        })
-        await db.diagnosticAids.update(entry.id, { blobId })
-        entry.blobId = blobId
-        return (await getDiagnosticAidBlobByAidId(entry.id)) ?? null
-      }
+      if (!hashedBlob?.data) continue
+      if (byHash.id === entry.id) return hashedBlob
+      const blobId = await saveDiagnosticAidBlobFromBuffer(entry.id, {
+        fileName: hashedBlob.fileName || entry.fileName,
+        mimeType: hashedBlob.mimeType,
+        data: hashedBlob.data,
+      })
+      await db.diagnosticAids.update(entry.id, { blobId })
+      entry.blobId = blobId
+      return (await getDiagnosticAidBlobByAidId(entry.id)) ?? null
     }
   }
 
+  const patientId = String(entry.patientSyncId || entry.patientId || '')
+  const encounterId = String(entry.encounterId || '')
   const queries: Record<string, string>[] = [
     { id: entry.id, aidId: entry.id, fileHash: entry.fileHash },
-    {
-      patientId: String(entry.patientId || ''),
-      encounterId: String(entry.encounterId || ''),
-      fileHash: entry.fileHash,
-    },
-    {
-      patientId: String(entry.patientSyncId || entry.patientId || ''),
-      encounterId: String(entry.encounterId || ''),
-    },
+    { id: entry.id, fileHash: entry.fileHash, patientId, encounterId, evolutionId: encounterId },
+    { fileHash: entry.fileHash, patientId, encounterId, evolutionId: encounterId },
+    { fileHash: entry.fileHash },
+    { patientId, encounterId, evolutionId: encounterId },
+    { aidId: entry.id },
   ]
 
   for (const query of queries) {

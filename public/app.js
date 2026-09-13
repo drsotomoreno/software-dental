@@ -128,6 +128,17 @@
     return String(user?.clinicId || user?.id || '').trim()
   }
 
+  function payloadOfSyncRecord(record) {
+    if (!record || typeof record !== 'object') return {}
+    if (record.payload && typeof record.payload === 'object') return record.payload
+    return record
+  }
+
+  function recordHasBlob(record) {
+    const payload = payloadOfSyncRecord(record)
+    return Boolean(payload.dataBase64 || record.dataBase64)
+  }
+
   function cacheClinicPullSnapshot(payload) {
     return new Promise(function (resolve) {
       try {
@@ -160,37 +171,175 @@
     })
   }
 
+  function syncHeaders(token, user) {
+    const headers = {
+      Accept: 'application/json',
+      Authorization: 'Bearer ' + token,
+    }
+    if (user?.email) headers['X-Client-Email'] = String(user.email)
+    if (user?.id) headers['X-Client-User-Id'] = String(user.id)
+    if (user?.documentNumber) headers['X-Client-Document'] = String(user.documentNumber)
+    return headers
+  }
+
+  function collectAttachmentLookups(payload) {
+    const rows = []
+      .concat(Array.isArray(payload.attachments) ? payload.attachments : [])
+      .concat(Array.isArray(payload.sync_queue) ? payload.sync_queue : [])
+      .concat(Array.isArray(payload.diagnosticAids) ? payload.diagnosticAids : [])
+    const lookups = []
+    const seen = {}
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i]
+      const data = payloadOfSyncRecord(row)
+      if (recordHasBlob(row)) continue
+      const id = String(data.aidId || data.id || row.syncId || '').trim()
+      const fileHash = String(data.fileHash || data.hash || '').trim()
+      const patientId = String(data.patientSyncId || data.patientId || '').trim()
+      const encounterId = String(data.encounterId || data.evolutionId || '').trim()
+      const key = id || fileHash || patientId + ':' + encounterId
+      if (!key || seen[key]) continue
+      seen[key] = true
+      lookups.push({ id: id, fileHash: fileHash, patientId: patientId, encounterId: encounterId })
+    }
+    return lookups
+  }
+
+  async function fetchAttachmentBlob(lookup, headers, tenantId) {
+    const search = new URLSearchParams()
+    if (lookup.id) {
+      search.set('id', lookup.id)
+      search.set('aidId', lookup.id)
+    }
+    if (lookup.fileHash) search.set('fileHash', lookup.fileHash)
+    if (lookup.patientId) search.set('patientId', lookup.patientId)
+    if (lookup.encounterId) {
+      search.set('encounterId', lookup.encounterId)
+      search.set('evolutionId', lookup.encounterId)
+    }
+    if (tenantId) search.set('tenant_id', tenantId)
+    const { response, payload } = await apiFetch('/api/sync/attachment?' + search.toString(), {
+      method: 'GET',
+      headers: headers,
+    })
+    if (!response.ok || !payload.attachment) return null
+    return payload.attachment
+  }
+
+  async function hydrateMissingAttachmentBlobs(payload, headers, tenantId) {
+    const lookups = collectAttachmentLookups(payload)
+    if (!lookups.length) return payload
+    if (!Array.isArray(payload.attachments)) payload.attachments = []
+    const concurrency = 4
+    let index = 0
+    async function worker() {
+      while (index < lookups.length) {
+        const current = lookups[index]
+        index += 1
+        try {
+          const attachment = await fetchAttachmentBlob(current, headers, tenantId)
+          if (attachment && recordHasBlob(attachment)) {
+            payload.attachments.push(attachment)
+          }
+        } catch (error) {
+          logError('no se pudo hidratar adjunto', current, error)
+        }
+      }
+    }
+    const workers = []
+    for (let i = 0; i < Math.min(concurrency, lookups.length); i += 1) {
+      workers.push(worker())
+    }
+    await Promise.all(workers)
+    return payload
+  }
+
+  async function waitForClinicPullApply(payload, timeoutMs) {
+    if (typeof window.__doctorSEOApplyClinicPull === 'function') {
+      try {
+        await window.__doctorSEOApplyClinicPull(payload)
+        return true
+      } catch (error) {
+        logError('applier de pull falló', error)
+        return false
+      }
+    }
+
+    return new Promise(function (resolve) {
+      let settled = false
+      function finish(ok) {
+        if (settled) return
+        settled = true
+        window.removeEventListener('doctorSEO-clinic-pull-applier-ready', onReady)
+        resolve(Boolean(ok))
+      }
+      function onReady() {
+        if (typeof window.__doctorSEOApplyClinicPull !== 'function') return
+        window.__doctorSEOApplyClinicPull(payload).then(function () {
+          finish(true)
+        }).catch(function (error) {
+          logError('applier de pull falló', error)
+          finish(false)
+        })
+      }
+      window.addEventListener('doctorSEO-clinic-pull-applier-ready', onReady)
+      const poll = window.setInterval(function () {
+        if (typeof window.__doctorSEOApplyClinicPull === 'function') {
+          window.clearInterval(poll)
+          onReady()
+        }
+      }, 50)
+      window.setTimeout(function () {
+        window.clearInterval(poll)
+        finish(false)
+      }, timeoutMs)
+    })
+  }
+
+  async function fetchClinicSnapshot(token, user) {
+    const tenantId = tenantIdOfUser(user)
+    const headers = syncHeaders(token, user)
+
+    async function pull(full) {
+      let nextPath = '/api/sync/pull?full=' + (full ? '1' : '0')
+      if (tenantId) nextPath += '&tenant_id=' + encodeURIComponent(tenantId)
+      const { response, payload } = await apiFetch(nextPath, { method: 'GET', headers: headers })
+      if (!response.ok || !(payload.success === true || payload.ok === true)) {
+        throw new Error((payload && payload.error) || 'Pull de clínica rechazado')
+      }
+      return payload
+    }
+
+    let payload = null
+    try {
+      payload = await pull(true)
+    } catch (error) {
+      logError('pull completo falló; se reintenta metadatos + adjuntos', error)
+      payload = await pull(false)
+    }
+    await hydrateMissingAttachmentBlobs(payload, headers, tenantId)
+    return payload
+  }
+
   async function forceClinicPull(token, user) {
     if (!token) return false
     if (clinicPullInFlight) return clinicPullInFlight
 
     clinicPullInFlight = (async function () {
-      const tenantId = tenantIdOfUser(user)
-      let path = '/api/sync/pull?full=1'
-      if (tenantId) path += '&tenant_id=' + encodeURIComponent(tenantId)
       showMessage('Sincronizando historial y archivos de la clínica…', 'success')
-      log('pull forzado →', path)
+      log('pull forzado → /api/sync/pull')
       try {
-        const headers = {
-          Accept: 'application/json',
-          Authorization: 'Bearer ' + token,
-        }
-        if (user?.email) headers['X-Client-Email'] = String(user.email)
-        if (user?.id) headers['X-Client-User-Id'] = String(user.id)
-        if (user?.documentNumber) headers['X-Client-Document'] = String(user.documentNumber)
-
-        const { response, payload } = await apiFetch(path, { method: 'GET', headers })
-        if (!response.ok || !(payload.success === true || payload.ok === true)) {
-          logError('pull de clínica falló', { status: response.status, payload })
-          return false
-        }
+        const payload = await fetchClinicSnapshot(token, user)
         window.__doctorSEOClinicPull = payload
         await cacheClinicPullSnapshot(payload)
+        const applied = await waitForClinicPullApply(payload, 60000)
         window.dispatchEvent(new CustomEvent('doctorSEO-clinic-pull', { detail: payload }))
         log('pull de clínica listo', {
+          applied: applied,
           patients: Array.isArray(payload.patients) ? payload.patients.length : 0,
           attachments: Array.isArray(payload.attachments) ? payload.attachments.length : 0,
           diagnosticAids: Array.isArray(payload.diagnosticAids) ? payload.diagnosticAids.length : 0,
+          syncQueue: Array.isArray(payload.sync_queue) ? payload.sync_queue.length : 0,
         })
         return true
       } catch (error) {

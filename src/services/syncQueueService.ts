@@ -37,7 +37,7 @@ export async function enqueueDiagnosticAidForSync(
     createdAt: existing?.createdAt || entry.createdAt || now,
     updatedAt: now,
   }
-  Object.assign(item, extras, { status: 'pending' as const })
+  Object.assign(item, extras, { status: 'pending' as const, binarySynced: false })
 
   if (existing?.id) {
     await db.syncQueue.update(existing.id, item)
@@ -49,14 +49,26 @@ export async function enqueueDiagnosticAidForSync(
 }
 
 export async function listPendingSyncQueue(): Promise<SyncQueueAttachment[]> {
-  return db.syncQueue.where('status').equals('pending').toArray()
+  const pending = await db.syncQueue.where('status').equals('pending').toArray()
+  const all = await db.syncQueue.toArray()
+  const needsBinary = all.filter((item) => item.status === 'synced' && item.binarySynced !== true)
+  const byId = new Map<string, SyncQueueAttachment>()
+  for (const item of [...pending, ...needsBinary]) {
+    byId.set(item.id, item)
+  }
+  return [...byId.values()]
 }
 
 export async function markSyncQueueSynced(ids: string[]): Promise<void> {
   const now = new Date().toISOString()
   await db.transaction('rw', db.syncQueue, async () => {
     for (const id of ids) {
-      await db.syncQueue.update(id, { status: 'synced', lastSyncedAt: now, updatedAt: now })
+      await db.syncQueue.update(id, {
+        status: 'synced',
+        binarySynced: true,
+        lastSyncedAt: now,
+        updatedAt: now,
+      })
     }
   })
 }

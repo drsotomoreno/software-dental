@@ -74,6 +74,41 @@ if (!snapshot.attachments[0]?.payload?.dataBase64) throw new Error('pull no incl
 const byHash = await findClinicAttachment(clinicId, { fileHash, patientId: 'patient-1', encounterId: 'evo-9' })
 if (!byHash?.payload?.dataBase64) throw new Error('no se encontró el adjunto por paciente/evolución/hash')
 
+const aliasId = 'legacy-clinic-key'
+const aliasAid = 'aid-stl-alias'
+await pushClinicSnapshot(aliasId, {
+  sync_queue: [
+    {
+      syncId: aliasAid,
+      updatedAt: now,
+      payload: {
+        id: aliasAid,
+        aidId: aliasAid,
+        patientId: 'patient-1',
+        encounterId: 'evo-9',
+        fileName: 'scan-alias.stl',
+        fileHash: 'alias-hash',
+        entityType: 'diagnostic_aid',
+        dataBase64: Buffer.from('solid alias').toString('base64'),
+      },
+    },
+  ],
+})
+
+const aliased = await pullClinicSnapshot(clinicId, [aliasId], { includeBlobs: true })
+const aliasBlob = aliased.attachments.concat(aliased.sync_queue).find((row) => {
+  const payload = row?.payload || {}
+  return payload.aidId === aliasAid || row.syncId === aliasAid
+})
+if (!aliasBlob?.payload?.dataBase64) {
+  throw new Error('el pull no hidrató el blob almacenado en un alias de clínica')
+}
+
+const byAliasHash = await findClinicAttachment(clinicId, { fileHash: 'alias-hash' }, [aliasId])
+if (!byAliasHash?.payload?.dataBase64) {
+  throw new Error('findClinicAttachment no resolvió el binario del alias')
+}
+
 const light = await pullClinicSnapshot(clinicId, [], { includeBlobs: false })
 if (light.attachments[0]?.payload?.dataBase64) throw new Error('el pull ligero no debe incluir blobs')
 

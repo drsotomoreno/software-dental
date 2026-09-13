@@ -301,6 +301,7 @@ export async function openDiagnosticFile(
   }
 
   if (shouldOpenDiagnosticAidWithWebMenu(entry)) {
+    await ensureLocalDiagnosticAidBlob(entry)
     return {
       ok: false,
       message: 'Use el menú de apertura web para este archivo.',
@@ -317,7 +318,7 @@ export async function openDiagnosticFile(
     }
     return {
       ok: false,
-      message: 'Este archivo no tiene ruta de disco local disponible.',
+      message: 'No se pudo descargar el archivo desde el servidor de la clínica. Reintente con conexión.',
     }
   }
 
@@ -331,7 +332,7 @@ export async function openDiagnosticFile(
       }
     }
     const message =
-      'El archivo ya no existe en la ruta registrada. Verifique que el disco o carpeta de red esté disponible.'
+      'No se pudo descargar el archivo desde el servidor de la clínica. Reintente con conexión.'
     await logAuditEvent({
       action: 'OPEN_DIAGNOSTIC_AID',
       resourceType: 'diagnostic_aid',

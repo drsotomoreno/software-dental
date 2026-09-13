@@ -25,5 +25,7 @@ export interface SyncQueueAttachment {
   createdAt: string
   updatedAt: string
   lastSyncedAt?: string
+  /** true cuando el binario viajó al servidor; si falta, se reencola. */
+  binarySynced?: boolean
   error?: string
 }

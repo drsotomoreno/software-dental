@@ -158,7 +158,8 @@ export async function executeDiagnosticAidWebAction(
         const fileName = downloadNameFor(entry)
         const downloaded = await downloadStoredBlob(entry)
         if (!downloaded) {
-          const message = 'No se encontró el archivo en este equipo ni en el snapshot de la clínica.'
+          const message =
+            'No se pudo descargar el archivo desde el servidor de la clínica. Reintente con conexión.'
           await auditWebOpen(entry, action, false, message, user)
           return { ok: false, message }
         }

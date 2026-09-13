@@ -164,11 +164,27 @@ function extractBase64(raw) {
   return ''
 }
 
-async function persistAttachmentBinary(clinicId, record, raw) {
+function attachmentStorageKeys(record) {
+  const payload = record?.payload && typeof record.payload === 'object' ? record.payload : {}
+  return [
+    ...new Set(
+      [record?.syncId, payload.id, payload.aidId, payload.blobId, payload.fileHash]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean),
+    ),
+  ]
+}
+
+async function persistAttachmentBinary(clinicId, record, raw, aliasIds = []) {
   const base64 = extractBase64(raw)
   const buffer = base64ToBuffer(base64)
   if (!buffer) return record
-  await writeAttachmentBytes(clinicId, record.syncId, buffer)
+  const keys = attachmentStorageKeys(record)
+  for (const scopeId of scopeIds(clinicId, aliasIds)) {
+    for (const key of keys) {
+      await writeAttachmentBytes(scopeId, key, buffer)
+    }
+  }
   return {
     ...record,
     payload: {
@@ -179,7 +195,20 @@ async function persistAttachmentBinary(clinicId, record, raw) {
   }
 }
 
-async function hydrateAttachment(clinicId, record, includeBlobs) {
+async function readAttachmentBytesFromScopes(clinicIds, record) {
+  const ids = Array.isArray(clinicIds) ? clinicIds : [clinicIds]
+  const keys = attachmentStorageKeys(record)
+  for (const clinicId of ids) {
+    if (!clinicId) continue
+    for (const key of keys) {
+      const bytes = await readAttachmentBytes(clinicId, key)
+      if (bytes && bytes.length) return bytes
+    }
+  }
+  return null
+}
+
+async function hydrateAttachment(clinicIds, record, includeBlobs) {
   if (!record) return null
   if (!includeBlobs) {
     return {
@@ -187,7 +216,7 @@ async function hydrateAttachment(clinicId, record, includeBlobs) {
       payload: { ...record.payload, dataBase64: undefined, hasBinary: Boolean(record.payload?.hasBinary) },
     }
   }
-  const bytes = await readAttachmentBytes(clinicId, record.syncId)
+  const bytes = await readAttachmentBytesFromScopes(clinicIds, record)
   if (!bytes) return record
   return {
     ...record,
@@ -273,7 +302,11 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
   const clinic = mergeClinicBuckets(store, ids)
   const attachments = []
   for (const record of Object.values(clinic.attachments).filter(Boolean)) {
-    attachments.push(await hydrateAttachment(clinicId, record, includeBlobs))
+    attachments.push(await hydrateAttachment(ids, record, includeBlobs))
+  }
+  const syncQueue = []
+  for (const record of Object.values(clinic.sync_queue).filter(Boolean)) {
+    syncQueue.push(await hydrateAttachment(ids, record, includeBlobs))
   }
   return {
     patients: Object.values(clinic.patients).filter(Boolean),
@@ -283,7 +316,7 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
     diagnosticAids: Object.values(clinic.diagnosticAids).filter(Boolean),
     attachments,
     drafts: Object.values(clinic.drafts).filter(Boolean),
-    sync_queue: Object.values(clinic.sync_queue).filter(Boolean),
+    sync_queue: syncQueue,
     serverTime,
   }
 }
@@ -351,7 +384,7 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
     for (const raw of queueItems) {
       const record = normalizeRecord(raw, canonical)
       if (!record) continue
-      const withBinary = await persistAttachmentBinary(canonical, record, raw)
+      const withBinary = await persistAttachmentBinary(canonical, record, raw, aliasIds)
       const isAttachment =
         String(raw.entityType || raw.payload?.entityType || record.payload.entityType || '').includes(
           'diagnostic',
@@ -382,9 +415,9 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
 
 function attachmentMatches(record, query) {
   const payload = record?.payload && typeof record.payload === 'object' ? record.payload : {}
-  const id = String(query.id || query.aidId || '').trim()
+  const id = String(query.id || query.aidId || query.fileId || '').trim()
   const fileHash = String(query.fileHash || query.hash || '').trim().toLowerCase()
-  const patientId = String(query.patientId || '').trim()
+  const patientId = String(query.patientId || query.patientSyncId || '').trim()
   const encounterId = String(query.encounterId || query.evolutionId || '').trim()
 
   const ids = [
@@ -392,6 +425,7 @@ function attachmentMatches(record, query) {
     payload.id,
     payload.aidId,
     payload.blobId,
+    payload.fileHash,
   ].map((value) => String(value || '').trim()).filter(Boolean)
 
   if (id && ids.includes(id)) return true
@@ -399,10 +433,16 @@ function attachmentMatches(record, query) {
   if (patientId && encounterId) {
     const samePatient =
       String(payload.patientId || '') === patientId || String(payload.patientSyncId || '') === patientId
-    const sameEncounter = String(payload.encounterId || '') === encounterId
+    const sameEncounter =
+      String(payload.encounterId || '') === encounterId || String(payload.evolutionId || '') === encounterId
     if (samePatient && sameEncounter && (!fileHash || String(payload.fileHash || '').trim().toLowerCase() === fileHash)) {
       return true
     }
+  }
+  if (patientId && !encounterId && fileHash) {
+    const samePatient =
+      String(payload.patientId || '') === patientId || String(payload.patientSyncId || '') === patientId
+    if (samePatient && String(payload.fileHash || '').trim().toLowerCase() === fileHash) return true
   }
   return false
 }
@@ -413,7 +453,22 @@ export async function findClinicAttachment(clinicId, query = {}, aliasIds = []) 
   const store = await loadStore()
   const clinic = mergeClinicBuckets(store, ids)
   const pools = [...Object.values(clinic.attachments), ...Object.values(clinic.sync_queue)]
-  const match = pools.find((record) => attachmentMatches(record, query))
+  let match = pools.find((record) => attachmentMatches(record, query))
+  if (!match) {
+    const aid = Object.values(clinic.diagnosticAids).find((record) => attachmentMatches(record, query))
+    if (aid) {
+      match =
+        pools.find((record) => {
+          const payload = record?.payload && typeof record.payload === 'object' ? record.payload : {}
+          return (
+            record.syncId === aid.syncId ||
+            payload.aidId === aid.syncId ||
+            payload.aidId === aid.payload?.id ||
+            payload.id === aid.payload?.id
+          )
+        }) || aid
+    }
+  }
   if (!match) return null
-  return hydrateAttachment(clinicId, match, true)
+  return hydrateAttachment(ids, match, true)
 }
