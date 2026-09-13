@@ -30,6 +30,7 @@ export type AuditAction =
   | 'VIEW_INVOICE_LEDGER'
   | 'ACCESS_DENIED'
   | 'ACCEPT_VALUATION_CONSENT'
+  | 'ACCEPT_HABEAS_DATA'
   | 'UPLOAD_DIAGNOSTIC_AID'
   | 'OPEN_DIAGNOSTIC_AID'
   | 'DELETE_DIAGNOSTIC_AID'
@@ -108,6 +109,7 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   OPEN_DIAGNOSTIC_AID: 'Apertura examen complementario (app externa)',
   DELETE_DIAGNOSTIC_AID: 'Eliminación registro examen complementario',
   ACCEPT_VALUATION_CONSENT: 'Aceptación consentimiento de valoración',
+  ACCEPT_HABEAS_DATA: 'Autorización de habeas data (Ley 1581 de 2012)',
   CREATE_EVOLUTION_NOTE: 'Creación nota de evolución clínica',
   CREATE_EVOLUTION_ADDENDUM: 'Creación nota aclaratoria de evolución',
   BLOCK_EVOLUTION_MUTATION: 'Bloqueo edición/eliminación evolución (Res. 1995/1999)',
