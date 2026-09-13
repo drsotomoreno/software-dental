@@ -16,6 +16,17 @@ import {
   readCachedClinicPull,
 } from '@/services/clinicSnapshotSync'
 
+declare global {
+  interface Window {
+    __doctorSEOClinicPull?: import('@/types/clinicalSync').ClinicalSyncPullResponse
+    __doctorSEOApplyClinicPull?: (payload: import('@/types/clinicalSync').ClinicalSyncPullResponse) => Promise<boolean>
+    __doctorSEOForceClinicPull?: (
+      token: string,
+      user?: { clinicId?: string; id?: string; email?: string; documentNumber?: string } | null,
+    ) => Promise<boolean>
+  }
+}
+
 const POLL_MS = 2_000
 const DIRTY_DEBOUNCE_MS = 200
 
@@ -257,23 +268,68 @@ async function pushAllLocal(clinicId: string): Promise<boolean> {
   return true
 }
 
+/** Aplica pacientes, citas, historias y blobs del snapshot a IndexedDB. */
+export async function applyFullClinicPull(
+  payload: {
+    patients?: ClinicalSyncRecord[]
+    appointments?: ClinicalSyncRecord[]
+    clinicalRecords?: unknown
+    odontograms?: unknown
+    diagnosticAids?: unknown
+    attachments?: unknown
+    drafts?: unknown
+    sync_queue?: unknown
+  },
+  options?: { hydrateBlobs?: boolean },
+): Promise<boolean> {
+  const patients = Array.isArray(payload.patients) ? payload.patients : []
+  const appointments = Array.isArray(payload.appointments) ? payload.appointments : []
+  await withRemotePullLock(async () => {
+    await mergePatients(patients)
+    await mergeAppointments(appointments)
+  })
+  const extraChanged = await applyClinicSnapshot(payload as import('@/types/clinicalSync').ClinicalSyncPullResponse, {
+    hydrateBlobs: options?.hydrateBlobs !== false,
+  })
+  await syncCitasToLocalStorage()
+  renderCitas()
+  return extraChanged || patients.length > 0 || appointments.length > 0
+}
+
 async function pullAndMerge(includeBlobs = false): Promise<boolean> {
   const { response, payload } = await syncFetch(`/api/sync/pull?full=${includeBlobs ? '1' : '0'}`)
   if (!response.ok) return false
+  return applyFullClinicPull(payload, { hydrateBlobs: includeBlobs })
+}
 
-  const patients = Array.isArray(payload.patients) ? (payload.patients as ClinicalSyncRecord[]) : []
-  const appointments = Array.isArray(payload.appointments)
-    ? (payload.appointments as ClinicalSyncRecord[])
-    : []
+/** Pull forzado al iniciar sesión: snapshot completo con archivos antes de renderizar. */
+export async function pullCompleteClinicOnLogin(): Promise<boolean> {
+  const auth = getStoredApiAuth()
+  if (!auth?.token) return false
+  try {
+    if (typeof window !== 'undefined' && typeof window.__doctorSEOForceClinicPull === 'function') {
+      const forced = await window.__doctorSEOForceClinicPull(auth.token, auth.user)
+      if (forced) {
+        const cached = await readCachedClinicPull()
+        if (cached) await applyFullClinicPull(cached)
+        return true
+      }
+    }
+    const cached = await readCachedClinicPull()
+    if (cached) await applyFullClinicPull(cached)
+    if (!getCurrentClinicId()) return Boolean(cached)
+    const merged = await pullAndMerge(true)
+    await syncCitasToLocalStorage()
+    renderCitas()
+    return merged
+  } catch {
+    return false
+  }
+}
 
-  let changed = false
-  await withRemotePullLock(async () => {
-    const patientsChanged = await mergePatients(patients)
-    const appointmentsChanged = await mergeAppointments(appointments)
-    changed = patientsChanged || appointmentsChanged
-  })
-  const extraChanged = await applyClinicSnapshot(payload)
-  return changed || extraChanged
+if (typeof window !== 'undefined') {
+  window.__doctorSEOApplyClinicPull = applyFullClinicPull
+  window.dispatchEvent(new Event('doctorSEO-clinic-pull-applier-ready'))
 }
 
 let inFlight: Promise<boolean> | null = null
@@ -375,33 +431,5 @@ export async function forzarSincronizacionLocal(): Promise<ForzarSincronizacionR
       clinicId,
       error: error instanceof Error ? error.message : 'No se pudo sincronizar.',
     }
-  }
-}
-
-/** Pull forzado al iniciar sesión: snapshot completo con archivos antes de renderizar. */
-export async function pullCompleteClinicOnLogin(): Promise<boolean> {
-  const auth = getStoredApiAuth()
-  const clinicId = getCurrentClinicId()
-  if (!auth?.token || !clinicId) return false
-  try {
-    const cached = await readCachedClinicPull()
-    if (cached) {
-      const patients = Array.isArray(cached.patients) ? cached.patients : []
-      const appointments = Array.isArray(cached.appointments) ? cached.appointments : []
-      await withRemotePullLock(async () => {
-        await mergePatients(patients)
-        await mergeAppointments(appointments)
-      })
-      await applyClinicSnapshot(cached)
-      await syncCitasToLocalStorage()
-      renderCitas()
-      return true
-    }
-    const merged = await pullAndMerge(true)
-    await syncCitasToLocalStorage()
-    renderCitas()
-    return merged
-  } catch {
-    return false
   }
 }

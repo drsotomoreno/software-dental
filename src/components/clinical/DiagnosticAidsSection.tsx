@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useLiveQuery } from "dexie-react-hooks";
 
@@ -17,6 +17,8 @@ import {
   clinicalSectionTitle,
 } from "@/constants/clinicalHistorySections";
 
+import { ensureLocalDiagnosticAidBlob } from "@/services/diagnosticAidRemoteStore";
+
 import {
   deleteDiagnosticAid,
   listDiagnosticAidsForPatient,
@@ -26,7 +28,6 @@ import {
   registerDiagnosticAidFromBrowserFile,
   shouldOpenDiagnosticAidWithWebMenu,
   updateDiagnosticAidComments,
-  updateDiagnosticAidReceivedAt,
 } from "@/services/diagnosticAidService";
 
 import {
@@ -426,6 +427,12 @@ export function DiagnosticAidsSection({
 
     [] as DiagnosticAid[],
   );
+
+  useEffect(() => {
+    for (const item of items) {
+      void ensureLocalDiagnosticAidBlob(item);
+    }
+  }, [items]);
 
   const handleUploadElectron = useCallback(async () => {
     const bridge = getDesktopBridge();
