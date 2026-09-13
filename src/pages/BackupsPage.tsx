@@ -15,6 +15,7 @@ import {
   saveBackupSettings,
   setScheduledPassphrase,
 } from '@/services/backupService'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { BACKUP_REMINDER_DAYS, WORKDAY_END_HOUR } from '@/types/backup'
 import type { BackupSettings } from '@/types/backup'
 
@@ -162,22 +163,18 @@ export function BackupsPage() {
           </p>
           <div>
             <label className="label-field">Contraseña de cifrado</label>
-            <input
-              type="password"
+            <PasswordInput
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="input-field"
               minLength={8}
               required
             />
           </div>
           <div>
             <label className="label-field">Confirmar contraseña</label>
-            <input
-              type="password"
+            <PasswordInput
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="input-field"
               minLength={8}
               required
             />
@@ -212,12 +209,10 @@ export function BackupsPage() {
             </div>
             <div>
               <label className="label-field">Clave para respaldo programado</label>
-              <input
-                type="password"
+              <PasswordInput
                 value={scheduledPassphrase || getScheduledPassphrase() || ''}
                 onChange={(e) => setScheduledPassphraseState(e.target.value)}
                 placeholder="Solo si activa almacenamiento local"
-                className="input-field"
                 minLength={8}
               />
             </div>

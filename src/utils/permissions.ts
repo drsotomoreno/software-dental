@@ -92,7 +92,7 @@ export const ROLE_LABELS: Record<CanonicalRole, string> = {
   superadmin: 'Super Administrador',
   admin: 'Administración',
   odontologo: 'Odontólogo',
-  recepcion: 'Recepción',
+  recepcion: 'Auxiliar',
 }
 
 /** Roles que se pueden asignar en Gestión de Usuarios. */

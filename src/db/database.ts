@@ -685,6 +685,35 @@ export class DentalDatabase extends Dexie {
         'id, patientId, encounterId, [patientId+encounterId], fileType, fileHash, createdAt, clinicId',
       syncQueue: 'id, entityType, patientId, encounterId, fileHash, aidId, status, createdAt, clinicId',
     })
+
+    this.version(28).upgrade(async (tx) => {
+      const users = await tx.table('users').toArray()
+      const owner =
+        users.find((user) => user.id === 'user-demo-admin') ||
+        users.find((user) => user.role === 'admin' && user.isClinicOwner) ||
+        users.find((user) => user.role === 'admin')
+      if (!owner?.id) return
+      await tx.table('users').update(owner.id, {
+        role: 'admin',
+        clinicId: owner.id,
+        isClinicOwner: true,
+        accessEnabled: true,
+      })
+      for (const user of users) {
+        if (!user?.id || user.id === owner.id) continue
+        const sameClinic =
+          user.id === 'user-demo-001' ||
+          user.clinicId === owner.id ||
+          (user.clinicName && user.clinicName === owner.clinicName)
+        if (sameClinic) {
+          await tx.table('users').update(user.id, {
+            clinicId: owner.id,
+            isClinicOwner: false,
+            accessEnabled: user.accessEnabled !== false,
+          })
+        }
+      }
+    })
   }
 }
 

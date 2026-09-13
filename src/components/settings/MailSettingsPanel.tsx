@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getStoredApiAuth } from '@/services/apiAuthService'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 
 export function MailSettingsPanel() {
   const [from, setFrom] = useState('')
@@ -121,22 +122,18 @@ export function MailSettingsPanel() {
       </div>
       <div>
         <label className="label-field">API key de Brevo</label>
-        <input
-          type="password"
+        <PasswordInput
           value={brevoApiKey}
           onChange={(e) => setBrevoApiKey(e.target.value)}
-          className="input-field"
           placeholder="Dejar vacío para no cambiar"
           autoComplete="off"
         />
       </div>
       <div>
         <label className="label-field">API key de Resend (opcional)</label>
-        <input
-          type="password"
+        <PasswordInput
           value={resendApiKey}
           onChange={(e) => setResendApiKey(e.target.value)}
-          className="input-field"
           placeholder="Dejar vacío para no cambiar"
           autoComplete="off"
         />

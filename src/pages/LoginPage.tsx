@@ -4,6 +4,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import { userNeedsWelcome } from '@/utils/subscriptionAccess'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 
 type AuthMode = 'login' | 'register' | 'verify'
 
@@ -176,13 +177,11 @@ export function LoginPage() {
                   ¿Olvidó su contraseña?
                 </Link>
               </div>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="input-field"
                 placeholder="••••••••"
               />
             </div>
@@ -244,27 +243,23 @@ export function LoginPage() {
             </div>
             <div>
               <label className="label-field">Contraseña</label>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 required
                 minLength={6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="input-field"
                 placeholder="••••••••"
               />
             </div>
             <div>
               <label className="label-field">Confirmar contraseña</label>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 required
                 minLength={6}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="input-field"
                 placeholder="••••••••"
               />
             </div>

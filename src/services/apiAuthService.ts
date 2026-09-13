@@ -37,6 +37,8 @@ export interface ApiSubscriptionUser {
   legalName?: string
   clinicId?: string
   isClinicOwner?: boolean
+  accessEnabled?: boolean
+  phone?: string
   providerType?: 'institucion' | 'profesional_independiente'
   perfilFiscal?: import('@/utils/fiscalProfile').FiscalProfile
   prestadorVerifiedAt?: string | null
@@ -272,12 +274,14 @@ export function mapApiUserToAuthUser(
     lastName,
     documentType: user.documentType || 'CC',
     documentNumber: user.documentNumber || '',
-    role: mapApiRoleToUserRole(user.rol),
+    role: user.isClinicOwner && user.rol !== 'superadmin' ? 'admin' : mapApiRoleToUserRole(user.rol),
     clinicName: user.clinicName || '',
     legalName: user.providerType === 'institucion' ? user.legalName || '' : '',
     providerType: user.providerType === 'institucion' ? 'institucion' : 'profesional_independiente',
     clinicId: user.clinicId || user.id,
     isClinicOwner: user.isClinicOwner === true || String(user.clinicId || user.id) === String(user.id),
+    accessEnabled: user.accessEnabled !== false,
+    phone: user.phone || '',
     perfilFiscal: user.perfilFiscal,
     sessionId: token,
     providerNit: user.providerNit,

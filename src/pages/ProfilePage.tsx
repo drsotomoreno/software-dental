@@ -17,6 +17,7 @@ import {
 } from '@/components/settings/RegulatoryIdentityFields'
 import { getStoredApiAuth, setStoredApiAuth } from '@/services/apiAuthService'
 import { updateOwnProfile, changeOwnPassword } from '@/services/subscriptionService'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
 import type { RepsHabilitationStatus } from '@/utils/repsCode'
 import { validateActiveRepsSede } from '@/utils/repsCode'
@@ -568,33 +569,28 @@ export function ProfilePage() {
         </p>
         <div>
           <label className="label-field">Contraseña actual</label>
-          <input
-            type="password"
+          <PasswordInput
             required
             autoComplete="current-password"
             value={passwordForm.currentPassword}
             onChange={(e) =>
               setPasswordForm({ ...passwordForm, currentPassword: e.target.value })
             }
-            className="input-field"
           />
         </div>
         <div>
           <label className="label-field">Nueva contraseña</label>
-          <input
-            type="password"
+          <PasswordInput
             required
             minLength={8}
             autoComplete="new-password"
             value={passwordForm.newPassword}
             onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-            className="input-field"
           />
         </div>
         <div>
           <label className="label-field">Confirmar nueva contraseña</label>
-          <input
-            type="password"
+          <PasswordInput
             required
             minLength={8}
             autoComplete="new-password"
@@ -602,7 +598,6 @@ export function ProfilePage() {
             onChange={(e) =>
               setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })
             }
-            className="input-field"
           />
         </div>
         {passwordError && (
