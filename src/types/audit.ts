@@ -36,6 +36,8 @@ export type AuditAction =
   | 'CREATE_EVOLUTION_NOTE'
   | 'CREATE_EVOLUTION_ADDENDUM'
   | 'BLOCK_EVOLUTION_MUTATION'
+  | 'REQUEST_RDA_OTP'
+  | 'IMPORT_EXTERNAL_RDA'
 
 export type AuditResourceType =
   | 'session'
@@ -54,6 +56,7 @@ export type AuditResourceType =
   | 'invoice_ledger'
   | 'route'
   | 'diagnostic_aid'
+  | 'rda'
 
 export interface AuditLogEntry {
   id: string
@@ -108,4 +111,6 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   CREATE_EVOLUTION_NOTE: 'Creación nota de evolución clínica',
   CREATE_EVOLUTION_ADDENDUM: 'Creación nota aclaratoria de evolución',
   BLOCK_EVOLUTION_MUTATION: 'Bloqueo edición/eliminación evolución (Res. 1995/1999)',
+  REQUEST_RDA_OTP: 'Solicitud OTP historial externo (RDA)',
+  IMPORT_EXTERNAL_RDA: 'Importación de historial externo (RDA)',
 }

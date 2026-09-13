@@ -3,11 +3,13 @@ import {
   downloadDiagnosticAidBlob,
   getDiagnosticAidBlobUrl,
 } from '@/services/diagnosticAidBlobStore'
+import { ensureLocalDiagnosticAidBlob } from '@/services/diagnosticAidRemoteStore'
 import type { DiagnosticAid } from '@/types/diagnosticAid'
 import type { UserProfile } from '@/types/user'
 import {
   classifyDiagnosticAidForWeb,
   getFileExtension,
+  resolveDiagnosticAidDownloadFileName,
 } from '@/utils/diagnosticAidWebClassification'
 
 export const EXOCAD_WEBVIEW_URL = 'https://webview.dental/'
@@ -49,6 +51,19 @@ function openExternalTab(url: string): void {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+function downloadNameFor(entry: DiagnosticAid): string {
+  return resolveDiagnosticAidDownloadFileName(entry.fileName, entry.patientId, entry.fileType)
+}
+
+async function downloadStoredBlob(entry: DiagnosticAid): Promise<boolean> {
+  const local = await ensureLocalDiagnosticAidBlob(entry)
+  if (!local) return false
+  return downloadDiagnosticAidBlob(entry.id, entry.fileName, {
+    patientId: entry.patientId,
+    fileType: entry.fileType,
+  })
+}
+
 function meshDownloadLabel(fileName: string): string {
   const extension = getFileExtension(fileName)
   if (extension === 'ply') return 'Descargar escaneo (.ply)'
@@ -63,7 +78,6 @@ export function getWebOpenActions(entry: DiagnosticAid): Array<{
   disabled?: boolean
 }> {
   const category = classifyDiagnosticAidForWeb(entry.fileName)
-  const hasBlob = Boolean(entry.blobId)
 
   if (category === 'mesh3d') {
     return [
@@ -72,7 +86,6 @@ export function getWebOpenActions(entry: DiagnosticAid): Array<{
         id: 'download_mesh',
         label: meshDownloadLabel(entry.fileName),
         icon: 'download',
-        disabled: !hasBlob,
       },
     ]
   }
@@ -84,7 +97,6 @@ export function getWebOpenActions(entry: DiagnosticAid): Array<{
         id: 'download_dicom',
         label: 'Descargar archivo / carpeta DICOM (.zip)',
         icon: 'download',
-        disabled: !hasBlob,
       },
     ]
   }
@@ -97,13 +109,11 @@ export function getWebOpenActions(entry: DiagnosticAid): Array<{
         id: 'preview_media',
         label: isPdf ? 'Vista previa rápida (PDF)' : 'Vista previa rápida',
         icon: 'eye',
-        disabled: !entry.blobId,
       },
       {
         id: 'download_media',
         label: 'Descargar archivo',
         icon: 'download',
-        disabled: !entry.blobId,
       },
     ]
   }
@@ -113,7 +123,6 @@ export function getWebOpenActions(entry: DiagnosticAid): Array<{
       id: 'download_media',
       label: 'Descargar archivo',
       icon: 'download',
-      disabled: !entry.blobId,
     },
   ]
 }
@@ -126,22 +135,19 @@ export async function executeDiagnosticAidWebAction(
   try {
     switch (action) {
       case 'open_exocad_webview': {
-        const blobUrl = entry.blobId ? await getDiagnosticAidBlobUrl(entry.id) : null
-        if (blobUrl) {
-          window.open(blobUrl, '_blank', 'noopener,noreferrer')
-        }
+        const downloaded = await downloadStoredBlob(entry)
         openExternalTab(EXOCAD_WEBVIEW_URL)
         await auditWebOpen(
           entry,
           action,
           true,
-          `${entry.fileName} — exocad webview${blobUrl ? ' + blob' : ''}`,
+          `${downloadNameFor(entry)} — exocad webview${downloaded ? ' + descarga' : ''}`,
           user,
         )
         return {
           ok: true,
-          message: blobUrl
-            ? 'Escaneo abierto en nueva pestaña. También puede importarlo en exocad webview.'
+          message: downloaded
+            ? 'Visor exocad webview abierto. El escaneo se descargó con su extensión para importarlo.'
             : 'Visor exocad webview abierto. Descargue el escaneo si necesita importarlo.',
         }
       }
@@ -149,39 +155,34 @@ export async function executeDiagnosticAidWebAction(
       case 'download_mesh':
       case 'download_dicom':
       case 'download_media': {
-        if (!entry.blobId) {
-          const message =
-            'No hay copia local del archivo en el navegador. Vuelva a cargar el estudio para habilitar la descarga.'
-          await auditWebOpen(entry, action, false, message, user)
-          return { ok: false, message }
-        }
-        const downloaded = await downloadDiagnosticAidBlob(entry.id, entry.fileName)
+        const fileName = downloadNameFor(entry)
+        const downloaded = await downloadStoredBlob(entry)
         if (!downloaded) {
-          const message = 'No se encontró el archivo almacenado en este navegador.'
+          const message =
+            'No se pudo descargar el archivo desde el servidor de la clínica. Reintente con conexión.'
           await auditWebOpen(entry, action, false, message, user)
           return { ok: false, message }
         }
-        await auditWebOpen(entry, action, true, `Descarga: ${entry.fileName}`, user)
-        return { ok: true, message: `Descargando ${entry.fileName}…` }
+        await auditWebOpen(entry, action, true, `Descarga: ${fileName}`, user)
+        return { ok: true, message: `Descargando ${fileName}…` }
       }
 
       case 'open_dicom_viewer': {
         openExternalTab(DICOM_VIEWER_ONLINE_URL)
-        if (entry.blobId) {
-          await downloadDiagnosticAidBlob(entry.id, entry.fileName)
-        }
-        await auditWebOpen(entry, action, true, `${entry.fileName} — dicomviewer.net`, user)
+        const downloaded = await downloadStoredBlob(entry)
+        await auditWebOpen(entry, action, true, `${downloadNameFor(entry)} — dicomviewer.net`, user)
         return {
           ok: true,
-          message: entry.blobId
-            ? 'Visor DICOM abierto. El archivo se descargó para importarlo en el visor.'
+          message: downloaded
+            ? 'Visor DICOM abierto. El archivo se descargó con su extensión para importarlo en el visor.'
             : 'Visor DICOM online abierto en una nueva pestaña.',
         }
       }
 
       case 'preview_media': {
-        if (!entry.blobId) {
-          const message = 'Vista previa no disponible. Vuelva a cargar el archivo en este navegador.'
+        const local = await ensureLocalDiagnosticAidBlob(entry)
+        if (!local) {
+          const message = 'No se pudo descargar la vista previa desde la clínica.'
           await auditWebOpen(entry, action, false, message, user)
           return { ok: false, message }
         }

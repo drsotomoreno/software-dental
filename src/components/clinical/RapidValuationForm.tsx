@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ClinicalRecordFormData, Cie10Diagnosis } from '@/types/clinicalRecord'
-import type { PatientFormData } from '@/types/patient'
+import type { Patient, PatientFormData } from '@/types/patient'
 import { addTreatmentPlanItemToBudget, calcClinicalBudgetSummaryWithTax } from '@/utils/budget'
 import { createEmptyClinicalForm } from './ClinicalHistoryForm'
 import { ChiefComplaintSection } from './ChiefComplaintSection'
@@ -15,6 +15,7 @@ import type { OdontogramData } from '@/types/odontogram'
 interface RapidValuationFormProps {
   patientData?: PatientFormData
   onPatientDataChange?: (data: PatientFormData) => void
+  patient?: Patient | null
   initialData?: Partial<ClinicalRecordFormData>
   odontogram?: OdontogramData | null
   onChange: (data: ClinicalRecordFormData) => void
@@ -29,6 +30,7 @@ interface RapidValuationFormProps {
 export function RapidValuationForm({
   patientData,
   onPatientDataChange,
+  patient = null,
   initialData,
   odontogram = null,
   onChange,
@@ -98,12 +100,16 @@ export function RapidValuationForm({
       </div>
 
       {patientData && onPatientDataChange && (
-        <PatientRegistrationSection
-          value={patientData}
-          onChange={onPatientDataChange}
-          disabled={disabled}
-          sectionTitle="1. Datos de Identificación del Paciente"
-        />
+        <div className="space-y-3">
+          <PatientRegistrationSection
+            value={patientData}
+            onChange={onPatientDataChange}
+            disabled={disabled}
+            sectionTitle="1. Datos de Identificación del Paciente"
+            patientRecord={patient}
+            canRequestExternalHistory={!disabled}
+          />
+        </div>
       )}
 
       <ChiefComplaintSection

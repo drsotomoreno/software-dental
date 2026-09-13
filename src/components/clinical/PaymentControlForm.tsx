@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import type { UserProfile } from '@/types/user'
 import type {
+  BudgetLineItem,
   BudgetSummary,
   OrthodonticsBudget,
   OrthodonticsPaymentRecord,
@@ -12,6 +13,8 @@ import type {
   PaymentPlanItem,
   PaymentRecord,
 } from '@/types/clinicalRecord'
+import type { EvolutionNote } from '@/types/evolutionNote'
+import { ConsultationCheckout } from '@/components/checkout/ConsultationCheckout'
 import { PAYMENT_METHOD_LABELS } from '@/constants/dental'
 import {
   CLINICAL_HISTORY_SECTION_NUMBERS,
@@ -68,6 +71,11 @@ interface PaymentControlFormProps {
   clinicalRecordId?: string | number
   patientName?: string
   patientDocument?: string
+  patientDocumentType?: string
+  patientDocumentNumber?: string
+  patientEmail?: string
+  evolutionNotes?: EvolutionNote[]
+  budgetItems?: BudgetLineItem[]
   onChange: (paymentControl: PaymentRecord[]) => void
   onOrthodonticsPaymentControlChange: (payments: OrthodonticsPaymentRecord[]) => void
 }
@@ -122,6 +130,11 @@ export function PaymentControlForm({
   clinicalRecordId,
   patientName = '',
   patientDocument = '',
+  patientDocumentType,
+  patientDocumentNumber,
+  patientEmail,
+  evolutionNotes,
+  budgetItems,
   onChange,
   onOrthodonticsPaymentControlChange,
 }: PaymentControlFormProps) {
@@ -380,6 +393,21 @@ export function PaymentControlForm({
         </div>
       )}
       <p className="mb-3 text-xs font-medium text-slate-600">{folioLabel}</p>
+
+      <ConsultationCheckout
+        disabled={disabled}
+        patientId={patientId}
+        clinicalRecordId={clinicalRecordId}
+        patientName={patientName}
+        patientDocument={patientDocument}
+        patientDocumentType={patientDocumentType}
+        patientDocumentNumber={patientDocumentNumber}
+        patientEmail={patientEmail}
+        evolutionNotes={evolutionNotes}
+        budgetItems={budgetItems}
+        paymentControl={paymentControl}
+        onPaymentRegistered={onChange}
+      />
 
       <div className="mb-4 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-4">
         <div>

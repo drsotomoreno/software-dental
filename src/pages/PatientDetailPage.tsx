@@ -16,6 +16,8 @@ import {
 
   RapidValuationForm,
 
+  ExternalHistoryRdaPanel,
+
   createEmptyClinicalForm,
 
 } from '@/components/clinical'
@@ -70,6 +72,9 @@ import {
 } from '@/services/evolutionNoteService'
 import { isEvolutionNoteImmutable } from '@/types/evolutionNote'
 import { validateEvolutionNote } from '@/utils/evolutionNoteValidation'
+import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
+import type { RipsShieldMismatch } from '@/types/consultationCheckout'
+import { RipsShieldModal } from '@/components/rips/RipsShieldModal'
 import {
   clearPatientClinicalDraft,
   getPatientClinicalDraft,
@@ -177,6 +182,7 @@ export function PatientDetailPage() {
   } | null>(null)
 
   const [showSignConfirm, setShowSignConfirm] = useState(false)
+  const [ripsShieldMismatches, setRipsShieldMismatches] = useState<RipsShieldMismatch[]>([])
 
   const [activeSection, setActiveSection] = useState<string>('all')
 
@@ -1052,6 +1058,14 @@ export function PatientDetailPage() {
 
     if (!validateClinical()) return
 
+    const mismatches = (clinicalData.evolutionNotes ?? []).flatMap((note) =>
+      evaluateEvolutionRipsShield(note, user),
+    )
+    if (mismatches.length > 0) {
+      setRipsShieldMismatches(mismatches)
+      return
+    }
+
     setShowSignConfirm(true)
 
   }
@@ -1536,6 +1550,19 @@ export function PatientDetailPage() {
 
           </p>
 
+          <div className="mt-3">
+            <ExternalHistoryRdaPanel
+              variant="compact"
+              patient={{
+                ...patient,
+                documentType: patientForm?.documentType ?? patient.documentType,
+                documentNumber: patientForm?.documentNumber ?? patient.documentNumber,
+                phone: patientForm?.phone ?? patient.phone,
+              }}
+              canRequest={can('patients.write') && !isArchiveView}
+            />
+          </div>
+
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -1707,6 +1734,7 @@ export function PatientDetailPage() {
               setConsentMetadata(null)
               setConsentAccepted(false)
             }}
+            patient={patient}
             initialData={clinicalData}
             odontogram={odontogram}
             onChange={setClinicalData}
@@ -1762,6 +1790,9 @@ export function PatientDetailPage() {
           patientName={`${patient.firstName} ${patient.lastName}`.trim()}
 
           patientDocument={`${patient.documentType} ${patient.documentNumber}`.trim()}
+          patientDocumentType={patient.documentType}
+          patientDocumentNumber={patient.documentNumber}
+          patientEmail={patient.email}
 
         />
 
@@ -2032,6 +2063,11 @@ export function PatientDetailPage() {
 
       )}
 
+      <RipsShieldModal
+        open={ripsShieldMismatches.length > 0}
+        mismatches={ripsShieldMismatches}
+        onChangeProcedure={() => setRipsShieldMismatches([])}
+      />
       <SignConfirmationModal
         open={showSignConfirm}
         title="Cerrar atención y firmar evoluciones"

@@ -6,9 +6,8 @@ import type {
 } from '@/types/billingAndRips'
 import type { ElectronicInvoice } from '@/types/invoice'
 import type { Patient } from '@/types/patient'
-import type { UserProfile } from '@/types/user'
 import { DOCUMENT_TYPE_RIPS, REGIME_TO_TIPO_USUARIO } from '@/constants/rips'
-import { validateRipsWithMinistry } from '@/services/ripsApiService'
+import { validateRipsWithMinistry, routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
 import {
   buildDianProviderPayload,
   buildInvoiceDraftFromClinicalRecord,
@@ -19,7 +18,6 @@ import { isInvoiceItemRipsEligible } from '@/utils/buildRipsJson'
 import { buildRipsJson } from '@/utils/buildRipsJson'
 import {
   applyClinicalRulesToRips,
-  buildRipsOnlyReference,
   hasBlockingBillingIssues,
   validateClinicalItems,
 } from '@/utils/billingRipsRules'
@@ -33,6 +31,13 @@ import {
 import { buildDefaultRipsMetadata, type RipsSourceRecord } from '@/utils/rips'
 import { validateRipsExport } from '@/utils/ripsValidation'
 import { generateId } from '@/utils/crypto'
+import { getBillingModalitySettings } from '@/services/billingModalityService'
+import { saveTemporaryRips } from '@/services/ripsTemporalService'
+import {
+  isNoObligadoFev,
+  normalizePerfilFiscal,
+  normalizeRipsNumFactura,
+} from '@/utils/fiscalProfile'
 
 function mapPatientBillingData(patient: Patient) {
   return {
@@ -113,8 +118,12 @@ export async function processClinicalSession(
     evolutionNoteIds,
   })
 
+  const perfilFiscal = normalizePerfilFiscal(
+    professional.perfilFiscal ?? getBillingModalitySettings().perfilFiscal,
+  )
+  const noObligado = isNoObligadoFev(perfilFiscal)
   const validationIssues: BillingValidationIssue[] = validateClinicalItems(clinicalItems)
-  const needsDian = requiresDianBilling(clinicalItems)
+  const needsDian = !noObligado && requiresDianBilling(clinicalItems)
   const dianTotal = computeDianTotal(clinicalItems)
   const ripsReportableTotal = computeRipsReportableTotal(clinicalItems)
   const pipeline: ClinicalSessionPipeline = needsDian ? 'rips_and_dian' : 'rips_only'
@@ -126,7 +135,7 @@ export async function processClinicalSession(
       pipeline,
       requiresDianBilling: needsDian,
       invoice: null,
-      ripsPayload: { numDocumentoIdObligado: '', numFactura: '', tipoNota: null, numNota: null, usuarios: [] },
+      ripsPayload: { numDocumentoIdObligado: '', numFactura: null, tipoNota: null, numNota: null, usuarios: [] },
       ripsProcedureItems: [],
       dianTotal,
       ripsReportableTotal,
@@ -134,20 +143,24 @@ export async function processClinicalSession(
     }
   }
 
-  const invoiceNumber =
-    input.invoiceNumber?.trim() ||
-    (needsDian ? `FV${Date.now().toString().slice(-8)}` : buildRipsOnlyReference(sessionId))
-
-  const invoice = needsDian
-    ? buildInvoiceFromBillableSession(input, clinicalItems, invoiceNumber)
+  const invoiceNumber = needsDian
+    ? input.invoiceNumber?.trim() || `FV${Date.now().toString().slice(-8)}`
     : null
+  const esRipsTemporal = normalizeRipsNumFactura(invoiceNumber) == null
+
+  const invoice =
+    needsDian && invoiceNumber
+      ? buildInvoiceFromBillableSession(input, clinicalItems, invoiceNumber)
+      : null
 
   const sources: RipsSourceRecord[] = [{ record, patient }]
   const metadata = invoice
-    ? buildRipsMetadataFromInvoice(invoice, professional)
+    ? { ...buildRipsMetadataFromInvoice(invoice, professional), perfilFiscal }
     : {
         ...buildDefaultRipsMetadata(professional),
         numFactura: invoiceNumber,
+        perfilFiscal,
+        esRipsTemporal,
       }
 
   const baseRips = buildRipsJson({
@@ -155,7 +168,7 @@ export async function processClinicalSession(
       invoice ??
       ({
         id: generateId(),
-        invoiceNumber,
+        invoiceNumber: invoiceNumber ?? '',
         issueDate: new Date().toISOString().slice(0, 10),
         status: 'draft',
         issuerNit: metadata.numDocumentoIdObligado,
@@ -207,40 +220,107 @@ export async function processClinicalSession(
     })),
   )
 
+  const ripsPayload = {
+    ...ripsWithRules,
+    numFactura: esRipsTemporal ? null : normalizeRipsNumFactura(ripsWithRules.numFactura),
+  }
+
   let ministryResponse: ProcessClinicalSessionResult['ministryResponse']
   let cuv: string | null = null
-  let cufe: string | null = null
+  const cufe: string | null = null
+  const extractedCie10 = clinicalItems.map((item) => item.cie10Code).filter(Boolean)
+  const extractedCups = clinicalItems.map((item) => item.cupsCode).filter(Boolean)
+  const metadatos = {
+    patientUuid: String(patient.id),
+    clinicalRecordIds: [String(record.id ?? sessionId)],
+    patientDocument: patient.documentNumber,
+    perfilFiscal,
+    esRipsTemporal,
+  }
+  const dianInvoice = needsDian && invoice ? buildDianProviderPayload(invoice) : undefined
+  let pendingWithoutInvoice = noObligado
 
-  if (submitToMinistry && !hasBlockingBillingIssues(validationIssues)) {
-    ministryResponse = await validateRipsWithMinistry(ripsWithRules, {
-      metadatos: {
-        patientUuid: String(patient.id),
-        clinicalRecordIds: [String(record.id ?? sessionId)],
-        patientDocument: patient.documentNumber,
-      },
-      invoice: needsDian && invoice ? buildDianProviderPayload(invoice) : undefined,
-    })
-
-    if (ministryResponse.success && ministryResponse.approved) {
-      cuv = ministryResponse.cuv
-      if (invoice) {
-        const saved: ElectronicInvoice = {
-          ...invoice,
-          ripsJson: ripsWithRules,
-          cuv,
-          cuvRecordId: ministryResponse.cuvRecordId,
-          status: 'cuv_approved',
-          updatedAt: new Date().toISOString(),
-          submittedAt: new Date().toISOString(),
+  if (extractedCie10.length && extractedCups.length && !hasBlockingBillingIssues(validationIssues)) {
+    try {
+      const routed = await routeDictatedEvolutionByFiscalProfile({
+        rips: ripsPayload,
+        invoice: dianInvoice,
+        metadatos,
+        cie10: extractedCie10,
+        cups: extractedCups,
+        clinicalItems,
+      })
+      if (routed.ok && routed.route === 'generarFEV_y_RIPS' && routed.cuv && routed.cuvRecordId) {
+        cuv = routed.cuv
+        pendingWithoutInvoice = false
+        ministryResponse = {
+          success: true,
+          approved: true,
+          cuv: routed.cuv,
+          cuvRecordId: routed.cuvRecordId,
+          dianXml: routed.dianXml ?? undefined,
+          source: 'sandbox',
         }
-        await saveElectronicInvoice(saved)
+      } else if (routed.ok && routed.route === 'guardarRIPS_Pendiente') {
+        pendingWithoutInvoice = true
+      } else if (!routed.ok) {
+        validationIssues.push({
+          level: 'warning',
+          field: 'perfilFiscal',
+          message: routed.error || 'No se pudo enrutar FEV/RIPS según el perfil fiscal.',
+        })
+      }
+    } catch {
+      if (submitToMinistry) {
+        ministryResponse = await validateRipsWithMinistry(ripsPayload, {
+          metadatos,
+          invoice: dianInvoice,
+        })
+        if (ministryResponse.success && ministryResponse.approved) {
+          cuv = ministryResponse.cuv
+        }
       }
     }
+  } else if (submitToMinistry && !hasBlockingBillingIssues(validationIssues)) {
+    ministryResponse = await validateRipsWithMinistry(ripsPayload, {
+      metadatos,
+      invoice: dianInvoice,
+    })
+    if (ministryResponse.success && ministryResponse.approved) {
+      cuv = ministryResponse.cuv
+    }
+  }
+
+  if (ministryResponse?.success && ministryResponse.approved && invoice) {
+    await saveElectronicInvoice({
+      ...invoice,
+      ripsJson: ripsWithRules,
+      cuv,
+      cuvRecordId: ministryResponse.cuvRecordId,
+      status: 'cuv_approved',
+      updatedAt: new Date().toISOString(),
+      submittedAt: new Date().toISOString(),
+    })
   } else if (invoice) {
     await saveElectronicInvoice({
       ...invoice,
       ripsJson: ripsWithRules,
       updatedAt: new Date().toISOString(),
+    })
+  }
+
+  if (esRipsTemporal || pendingWithoutInvoice) {
+    await saveTemporaryRips({
+      clinicId: professional.clinicId || professional.id,
+      patientId: String(patient.id),
+      professionalId: professional.id,
+      clinicalRecordId: String(record.id ?? sessionId),
+      numDocumentoIdObligado: ripsPayload.numDocumentoIdObligado,
+      numFactura: null,
+      perfilFiscal,
+      status: pendingWithoutInvoice ? 'pendiente' : 'draft',
+      ripsJson: { ...ripsPayload, numFactura: null },
+      submittedAt: null,
     })
   }
 
@@ -250,7 +330,7 @@ export async function processClinicalSession(
     pipeline,
     requiresDianBilling: needsDian,
     invoice,
-    ripsPayload: ripsWithRules,
+    ripsPayload,
     ripsProcedureItems: procedureItems,
     dianTotal,
     ripsReportableTotal: procedureItems.reduce((sum, item) => sum + item.vrServicio, 0),

@@ -63,3 +63,45 @@ export function mimeTypeForDiagnosticFile(fileName: string): string {
   }
   return map[extension] ?? 'application/octet-stream'
 }
+
+function fallbackDownloadExtension(
+  fileName: string,
+  fileType?: DiagnosticAidFileType,
+): string {
+  const extension = getFileExtension(fileName)
+  if (MESH3D_EXTENSIONS.has(extension)) return extension
+  if (extension === 'zip') return 'zip'
+  if (DICOM_EXTENSIONS.has(extension)) return extension === 'dicom' ? 'dcm' : extension
+  if (MEDIA_EXTENSIONS.has(extension)) return extension
+  if (extension) return extension
+  if (fileType === 'DICOM') return 'dcm'
+  if (fileType === 'IMG') return 'bin'
+  if (fileType === 'OTHER') return 'bin'
+  return 'stl'
+}
+
+function sanitizeDownloadBaseName(fileName: string): string {
+  const stripped = fileName
+    .trim()
+    .replace(/^.*[/\\]/, '')
+    .replace(/[<>:"|?*]/g, '_')
+  return stripped || ''
+}
+
+export function resolveDiagnosticAidDownloadFileName(
+  originalName: string | undefined | null,
+  patientId: string,
+  fileType?: DiagnosticAidFileType,
+  date = new Date(),
+): string {
+  const sanitized = sanitizeDownloadBaseName(String(originalName ?? ''))
+  if (sanitized && getFileExtension(sanitized)) {
+    return sanitized
+  }
+
+  const extension = fallbackDownloadExtension(sanitized, fileType)
+  const safePatient = (patientId.trim() || 'paciente').replace(/[^\w.-]+/g, '_')
+  const stamp = Number.isNaN(date.getTime()) ? new Date() : date
+  const isoDate = stamp.toISOString().slice(0, 10)
+  return `escaneo_${safePatient}_${isoDate}.${extension}`
+}

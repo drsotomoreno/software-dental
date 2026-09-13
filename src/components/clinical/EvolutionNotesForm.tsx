@@ -21,6 +21,9 @@ import {
   removeEvolutionNoteFromList,
   updateEvolutionNoteInList,
 } from '@/services/evolutionNoteService'
+import { RipsShieldModal } from '@/components/rips/RipsShieldModal'
+import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
+import type { RipsShieldMismatch } from '@/types/consultationCheckout'
 import { EvolutionNoteCard } from './EvolutionNoteCard'
 
 interface EvolutionNotesFormProps {
@@ -53,6 +56,7 @@ export function EvolutionNotesForm({
 }: EvolutionNotesFormProps) {
   const { user } = useAuth()
   const [blockedMessage, setBlockedMessage] = useState('')
+  const [shieldMismatches, setShieldMismatches] = useState<RipsShieldMismatch[]>([])
 
   const logBlockedMutation = (noteId: string, action: 'UPDATE' | 'DELETE') => {
     if (!user) return
@@ -117,6 +121,14 @@ export function EvolutionNotesForm({
     if (issues.length > 0) {
       showBlocked(issues[0]?.message ?? 'Complete la nota antes de firmar.')
       return
+    }
+
+    if (user) {
+      const mismatches = evaluateEvolutionRipsShield(note, user)
+      if (mismatches.length > 0) {
+        setShieldMismatches(mismatches)
+        return
+      }
     }
 
     if (!patientId) {
@@ -226,6 +238,11 @@ export function EvolutionNotesForm({
           ))}
         </div>
       )}
+      <RipsShieldModal
+        open={shieldMismatches.length > 0}
+        mismatches={shieldMismatches}
+        onChangeProcedure={() => setShieldMismatches([])}
+      />
     </section>
   )
 }

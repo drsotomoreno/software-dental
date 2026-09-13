@@ -69,6 +69,14 @@ function registerIpcHandlers() {
     }
   })
 
+  ipcMain.handle('diagnostic:read-file', async (_event, filePath) => {
+    if (!filePath || typeof filePath !== 'string') {
+      throw new Error('Ruta de archivo inválida.')
+    }
+    const buffer = await fs.promises.readFile(filePath)
+    return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+  })
+
   ipcMain.handle('diagnostic:open-path', async (_event, filePath) => {
     if (!filePath || typeof filePath !== 'string') {
       return 'Ruta de archivo inválida.'

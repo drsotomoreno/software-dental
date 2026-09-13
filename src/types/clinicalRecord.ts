@@ -253,6 +253,11 @@ export interface ClinicalRecord {
   isLocked: boolean
   createdAt: string
   updatedAt: string
+  syncId?: string
+  clinicId?: string
+  patientSyncId?: string
+  pendingSync?: boolean
+  lastSyncedAt?: string
 }
 
 export interface ClinicalRecordFormData {

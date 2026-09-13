@@ -8,6 +8,7 @@ import {
 } from '@/types/billingModality'
 import { setPaymentInvoicePrefix } from '@/services/paymentInvoiceService'
 import { generateId } from '@/utils/crypto'
+import { DEFAULT_PERFIL_FISCAL, normalizePerfilFiscal } from '@/utils/fiscalProfile'
 
 export const BILLING_SETTINGS_CHANGED_EVENT = 'dental-billing-modality-changed'
 
@@ -65,6 +66,7 @@ export function getBillingModalitySettings(): BillingModalitySettings {
       foliosAvailable: Math.max(0, folios),
       welcomeFolios: parsed.welcomeFolios ?? WELCOME_FOLIO_GRANT,
       hasPurchasedPack: Boolean(parsed.hasPurchasedPack),
+      perfilFiscal: normalizePerfilFiscal(parsed.perfilFiscal ?? DEFAULT_PERFIL_FISCAL),
     }
     return settings
   } catch {

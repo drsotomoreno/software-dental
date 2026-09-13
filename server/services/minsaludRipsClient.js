@@ -48,7 +48,12 @@ function normalizeMinistryErrors(payload) {
  * @param {object} [params.metadatos] - Metadatos de trazabilidad (UUID paciente, IDs clínicos)
  */
 export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
-  const localIssues = validateRipsPackageLocally(rips, { crossValidateAgeSex: true })
+  const localIssues = validateRipsPackageLocally(rips, {
+    crossValidateAgeSex: true,
+    perfilFiscal: metadatos.perfilFiscal,
+    esRipsTemporal: metadatos.esRipsTemporal,
+    allowNullNumFactura: metadatos.allowNullNumFactura,
+  })
   if (hasBlockingValidationErrors(localIssues)) {
     return {
       success: false,

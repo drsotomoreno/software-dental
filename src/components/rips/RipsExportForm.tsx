@@ -31,6 +31,13 @@ import {
   downloadDianXml,
   validateRipsWithMinistry,
 } from '@/services/ripsApiService'
+import { saveTemporaryRips } from '@/services/ripsTemporalService'
+import { getBillingModalitySettings } from '@/services/billingModalityService'
+import {
+  isNoObligadoFev,
+  normalizePerfilFiscal,
+  normalizeRipsNumFactura,
+} from '@/utils/fiscalProfile'
 
 interface RipsExportFormProps {
   sources: RipsSourceRecord[]
@@ -47,17 +54,26 @@ export function RipsExportForm({
   onExported,
   onCuvObtained,
 }: RipsExportFormProps) {
-  const [metadata, setMetadata] = useState<RipsExportMetadata>(() => ({
-    ...buildDefaultRipsMetadata(professional),
-    ...initialMetadata,
-  }))
+  const [metadata, setMetadata] = useState<RipsExportMetadata>(() => {
+    const perfilFiscal = normalizePerfilFiscal(
+      professional.perfilFiscal ?? getBillingModalitySettings().perfilFiscal,
+    )
+    const noObligado = isNoObligadoFev(perfilFiscal)
+    return {
+      ...buildDefaultRipsMetadata(professional),
+      ...initialMetadata,
+      perfilFiscal,
+      numFactura: noObligado ? null : normalizeRipsNumFactura(initialMetadata?.numFactura),
+      esRipsTemporal: noObligado,
+    }
+  })
   const [exported, setExported] = useState(false)
   const [apiOnline, setApiOnline] = useState<boolean | null>(null)
   const [validating, setValidating] = useState(false)
   const [cuvResult, setCuvResult] = useState<RipsValidateSuccessResponse | null>(null)
   const [ministryErrors, setMinistryErrors] = useState<RipsMinistryError[]>([])
   const [validateMessage, setValidateMessage] = useState('')
-  const invoiceTouchedRef = useRef(Boolean(initialMetadata?.numFactura?.trim()))
+  const invoiceTouchedRef = useRef(Boolean(normalizeRipsNumFactura(initialMetadata?.numFactura)))
 
   const sourceKey = sources
     .map(({ record, patient }) => `${patient.id}:${record.id}`)
@@ -95,7 +111,7 @@ export function RipsExportForm({
       return {
         rips: {
           numDocumentoIdObligado: metadata.numDocumentoIdObligado ?? '',
-          numFactura: metadata.numFactura ?? '',
+          numFactura: metadata.numFactura ?? null,
           tipoNota: metadata.tipoNota ?? null,
           numNota: metadata.numNota ?? null,
           usuarios: [],
@@ -141,21 +157,43 @@ export function RipsExportForm({
     })
   }, [professional.id, professional.providerNit, professional.repsCode])
 
+  const perfilFiscal = normalizePerfilFiscal(
+    metadata.perfilFiscal ?? professional.perfilFiscal ?? getBillingModalitySettings().perfilFiscal,
+  )
+  const noObligado = isNoObligadoFev(perfilFiscal)
+
   useEffect(() => {
+    if (noObligado) {
+      setMetadata((prev) => {
+        if (prev.numFactura == null && prev.perfilFiscal === perfilFiscal && prev.esRipsTemporal) {
+          return prev
+        }
+        return {
+          ...prev,
+          numFactura: null,
+          fevReferencia: undefined,
+          perfilFiscal,
+          esRipsTemporal: true,
+        }
+      })
+      return
+    }
     if (invoiceTouchedRef.current) return
     if (sources.length === 0) return
     if (invoices === undefined) return
     const suggested = pickInvoiceNumberForRips(sources, invoices)
     if (!suggested) return
     setMetadata((prev) => {
-      if (prev.numFactura.trim() === suggested) return prev
+      if (prev.numFactura === suggested) return prev
       return {
         ...prev,
         numFactura: suggested,
         fevReferencia: prev.fevReferencia?.trim() ? prev.fevReferencia : suggested,
+        perfilFiscal,
+        esRipsTemporal: false,
       }
     })
-  }, [invoices, sources, sourceKey])
+  }, [invoices, sources, sourceKey, noObligado, perfilFiscal])
 
   const update = (patch: Partial<RipsExportMetadata>) => {
     setMetadata((prev) => {
@@ -196,6 +234,18 @@ export function RipsExportForm({
   const handleExport = () => {
     if (!canExport) return
     downloadRipsJson(result.rips, suggestRipsFilename(metadata.numFactura))
+    const first = sources[0]
+    void saveTemporaryRips({
+      clinicId: professional.clinicId || professional.id,
+      patientId: first ? String(first.patient.id) : null,
+      professionalId: professional.id,
+      clinicalRecordId: first ? String(first.record.id ?? '') : null,
+      numDocumentoIdObligado: result.rips.numDocumentoIdObligado,
+      numFactura: normalizeRipsNumFactura(result.rips.numFactura),
+      perfilFiscal,
+      status: 'ready',
+      ripsJson: result.rips,
+    })
     setExported(true)
     onExported?.()
   }
@@ -234,26 +284,30 @@ export function RipsExportForm({
         patientDocument: firstPatient
           ? `${firstPatient.documentType} ${firstPatient.documentNumber}`
           : undefined,
+        perfilFiscal,
+        esRipsTemporal: noObligado || normalizeRipsNumFactura(result.rips.numFactura) == null,
       },
-      invoice: {
-        nitEmisor: metadata.numDocumentoIdObligado,
-        razonSocialEmisor:
-          professional.legalName ?? professional.clinicName ?? 'Prestador odontológico',
-        nitAdquiriente: firstPatient?.documentNumber ?? '222222222222',
-        razonSocialAdquiriente: firstPatient
-          ? `${firstPatient.firstName} ${firstPatient.lastName}`
-          : 'Paciente',
-        issueDate: new Date().toISOString().slice(0, 10),
-        payableAmount: totalAmount,
-        lines: [
-          {
-            description: 'Servicios odontológicos — consulta y procedimientos',
-            quantity: 1,
-            unitPrice: totalAmount,
-            cupsCode: metadata.codConsultaOdontologia ?? DEFAULT_ODONTOLOGY_CONSULTATION_CUPS,
+      invoice: noObligado
+        ? undefined
+        : {
+            nitEmisor: metadata.numDocumentoIdObligado,
+            razonSocialEmisor:
+              professional.legalName ?? professional.clinicName ?? 'Prestador odontológico',
+            nitAdquiriente: firstPatient?.documentNumber ?? '222222222222',
+            razonSocialAdquiriente: firstPatient
+              ? `${firstPatient.firstName} ${firstPatient.lastName}`
+              : 'Paciente',
+            issueDate: new Date().toISOString().slice(0, 10),
+            payableAmount: totalAmount,
+            lines: [
+              {
+                description: 'Servicios odontológicos — consulta y procedimientos',
+                quantity: 1,
+                unitPrice: totalAmount,
+                cupsCode: metadata.codConsultaOdontologia ?? DEFAULT_ODONTOLOGY_CONSULTATION_CUPS,
+              },
+            ],
           },
-        ],
-      },
     })
 
     setValidating(false)
@@ -346,17 +400,22 @@ export function RipsExportForm({
         <div>
           <label className="label-field">Nº factura electrónica (FEV)</label>
           <input
-            value={metadata.numFactura}
+            value={metadata.numFactura ?? ''}
+            disabled={noObligado}
             onChange={(e) => {
               invoiceTouchedRef.current = true
-              update({ numFactura: e.target.value })
+              update({ numFactura: e.target.value.trim() ? e.target.value : null })
             }}
-            placeholder="FV12345"
+            placeholder={noObligado ? 'null — No obligado a FEV' : 'FV12345'}
             className="input-field font-mono"
           />
           <p className="mt-1 text-[10px] text-slate-500">
-            Formato Prefijo + Número (sin espacios ni guiones). Debe coincidir 1:1 con la FEV DIAN.
-            {metadata.numFactura.trim() ? ' Si hay factura electrónica del paciente, se completa sola.' : ''}
+            {noObligado
+              ? 'Perfil No_Obligado: el JSON RIPS se almacena y radica con numFactura en null.'
+              : 'Formato Prefijo + Número (sin espacios ni guiones). Debe coincidir 1:1 con la FEV DIAN.'}
+            {!noObligado && metadata.numFactura
+              ? ' Si hay factura electrónica del paciente, se completa sola.'
+              : ''}
           </p>
         </div>
         <div>

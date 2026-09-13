@@ -16,6 +16,10 @@ router.get('/', async (_req, res) => {
       configured: await isMailConfigured(),
       transport: await mailTransportLabel(),
     },
+    ripsMonthly: {
+      timezone: 'America/Bogota',
+      cron: '0 2 1 * *',
+    },
   })
 })
 

@@ -14,6 +14,12 @@ export type {
   TreatmentPlanItem,
   BudgetSummary,
 } from './clinicalRecord'
+export type {
+  RdaCryptographicConsent,
+  RdaExternalHistory,
+  RdaDiagnosis,
+  RdaProcedure,
+} from './rdaExternalHistory'
 export type { DigitalSignature, SignatureMetadata } from './signature'
 export type {
   Appointment,
@@ -31,6 +37,8 @@ export type {
   Professional,
 } from './dentalServiceCatalog'
 export type { UserProfile, PriceItem, Subscription, SubscriptionPlan } from './user'
+export type { FiscalProfile } from '@/utils/fiscalProfile'
+export type { TemporaryRipsRecord, TemporaryRipsStatus } from './ripsTemporal'
 export type {
   TariffItemType,
   TariffItem,

@@ -22,8 +22,21 @@ export interface Appointment {
   status: AppointmentStatus
   /** Vínculo opcional al registro de paciente */
   patientId?: string
+  /** syncId del paciente en el origen (para remapear el id Dexie local). */
+  patientSyncId?: string
   createdAt: string
   updatedAt: string
+  /** Identidad estable entre dispositivos (no es el id Dexie). */
+  syncId?: string
+  clinicId?: string
+  pendingSync?: boolean
+  lastSyncedAt?: string
+  /** Tumba suave: la cita no se muestra pero sí se replica el borrado. */
+  deletedAt?: string
+}
+
+export function isActiveAppointment(appointment: Pick<Appointment, 'deletedAt'>): boolean {
+  return !appointment.deletedAt
 }
 
 /** Columna dinámica del scheduler (silla / consultorio) */

@@ -206,8 +206,13 @@ export function buildThermalDataFromPayment(input: {
   let ripsCount = 0
   if (invoice.ripsJsonSnapshot) {
     try {
-      const parsed = JSON.parse(invoice.ripsJsonSnapshot) as { procedimientos?: unknown[] }
-      ripsCount = Array.isArray(parsed.procedimientos) ? parsed.procedimientos.length : 0
+      const parsed = JSON.parse(invoice.ripsJsonSnapshot) as {
+        procedimientos?: unknown[]
+        otrosServicios?: unknown[]
+      }
+      const procCount = Array.isArray(parsed.procedimientos) ? parsed.procedimientos.length : 0
+      const otrosCount = Array.isArray(parsed.otrosServicios) ? parsed.otrosServicios.length : 0
+      ripsCount = procCount + otrosCount
     } catch {
       ripsCount = 0
     }

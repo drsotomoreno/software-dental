@@ -68,6 +68,13 @@ export interface Patient {
   updatedAt: string
   /** Cuenta de suscripción que creó el paciente (límites de prueba). */
   ownerUserId?: string
+  /** Identidad estable entre dispositivos (no es el id Dexie). */
+  syncId?: string
+  /** Clínica dueña del registro para el pull multi-dispositivo. */
+  clinicId?: string
+  /** true = hay cambios locales aún no confirmados por el servidor. */
+  pendingSync?: boolean
+  lastSyncedAt?: string
 }
 
 export interface PatientFormData extends Omit<Patient, 'id' | 'createdAt' | 'updatedAt'> {}

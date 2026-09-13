@@ -24,6 +24,10 @@ export interface DiagnosticAid {
   /** ISO 8601 — fecha/hora de recepción del estudio (puede diferir del alta) */
   receivedAt?: string
   comments: string
+  clinicId?: string
+  patientSyncId?: string
+  pendingSync?: boolean
+  lastSyncedAt?: string
 }
 
 /** Copia binaria local para archivos cargados desde el navegador web */

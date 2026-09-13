@@ -15,7 +15,9 @@
     "electron:dev": "electron .",
     "build": "npm install pg@^8.23.0 --no-save && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "rips:mensual": "node server/jobs/enviarRipsMensuales.js",
+    "rips:mensual:dry": "node server/jobs/enviarRipsMensuales.js --dry-run"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.10",

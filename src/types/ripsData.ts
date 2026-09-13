@@ -11,7 +11,7 @@ export type {
 } from './rips'
 
 export interface RIPSDataSummary {
-  numFactura: string
+  numFactura: string | null
   numDocumentoIdObligado: string
   usuarioCount: number
   consultaCount: number

@@ -40,6 +40,7 @@ export interface ApiSubscriptionUser {
   accessEnabled?: boolean
   phone?: string
   providerType?: 'institucion' | 'profesional_independiente'
+  perfilFiscal?: import('@/utils/fiscalProfile').FiscalProfile
   prestadorVerifiedAt?: string | null
   trialLimited?: boolean
   trialLimits?: { maxPatients: number; maxVoiceNotesPerField: number } | null
@@ -281,6 +282,7 @@ export function mapApiUserToAuthUser(
     isClinicOwner: user.isClinicOwner === true || String(user.clinicId || user.id) === String(user.id),
     accessEnabled: user.accessEnabled !== false,
     phone: user.phone || '',
+    perfilFiscal: user.perfilFiscal,
     sessionId: token,
     providerNit: user.providerNit,
     repsCode: user.repsCode,

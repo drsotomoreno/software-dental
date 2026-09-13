@@ -45,8 +45,13 @@ router.post('/validate-document', (req, res) => {
       issues.push({ field: 'salud.codPrestadorReps', message: reps.message })
     }
   }
-  if (!document.salud?.procedures?.length) {
-    issues.push({ field: 'salud.procedures', message: 'Debe incluir al menos un procedimiento CUPS.' })
+  const hasCups = (document.salud?.procedures ?? []).some((proc) => String(proc?.cupsCode ?? '').replace(/\D/g, '').length === 6)
+  const hasNamedLine = (document.salud?.procedures ?? []).some((proc) => String(proc?.description ?? '').trim())
+  if (!document.salud?.procedures?.length || (!hasCups && !hasNamedLine)) {
+    issues.push({
+      field: 'salud.procedures',
+      message: 'Debe incluir al menos un procedimiento CUPS o un servicio estético/insumo con nombre.',
+    })
   }
 
   const requireCuv = Boolean(req.body?.requireCuv)

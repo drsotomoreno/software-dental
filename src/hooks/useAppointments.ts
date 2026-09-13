@@ -1,18 +1,22 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import type { Appointment, CreateAppointmentInput } from '@/types/appointment'
-import { syncCitasToLocalStorage } from '@/utils/agendaStorage'
+import { isActiveAppointment } from '@/types/appointment'
+import { syncCitasToLocalStorage, tombstoneAppointment } from '@/utils/agendaStorage'
 import { syncAppointmentPatientPhone } from '@/utils/syncAppointmentPatientPhone'
 
 function filterByDateRange(appointments: Appointment[], startDate: string, endDate: string) {
   return appointments.filter((apt) => {
+    if (!isActiveAppointment(apt)) return false
     const day = apt.startTime.slice(0, 10)
     return day >= startDate && day <= endDate
   })
 }
 
 function filterBySingleDate(appointments: Appointment[], date: string) {
-  return appointments.filter((apt) => apt.startTime.startsWith(date))
+  return appointments.filter(
+    (apt) => isActiveAppointment(apt) && apt.startTime.startsWith(date),
+  )
 }
 
 async function mutateAppointment(id: number | string, patch: Partial<Appointment>) {
@@ -61,7 +65,7 @@ function createAppointmentOps() {
   ) => syncAppointmentPatientPhone(appointment, phone)
 
   const deleteAppointment = async (id: number | string) => {
-    await db.appointments.delete(id)
+    await tombstoneAppointment(id)
     await syncCitasToLocalStorage()
   }
 

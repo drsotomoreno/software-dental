@@ -11,6 +11,7 @@ import type { AuditLogEntry } from '@/types/audit'
 import type { ClinicalRecordAddendum } from '@/types/addendum'
 import type { EvolutionNoteAddendum } from '@/types/evolutionNoteAddendum'
 import type { SyncOutboxEntry } from '@/types/syncOutbox'
+import type { SyncQueueAttachment } from '@/types/syncQueue'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import type { CatalogItem, CatalogMeta } from '@/types/catalog'
 import type { DiagnosticAid, DiagnosticAidBlobRecord } from '@/types/diagnosticAid'
@@ -24,11 +25,20 @@ import { DEMO_DEFAULT_PASSWORD } from '@/types/auth'
 import { seedUserCredentials } from '@/services/authService'
 import { seedCatalogsIfEmpty } from '@/services/catalogService'
 import { generateId } from '@/utils'
+import {
+  getCurrentClinicId,
+  isApplyingRemotePull,
+  isClinicalSyncSuppressed,
+  notifyClinicalRecordDirty,
+  withClinicalSyncSuppressed,
+} from '@/services/clinicalSyncState'
 import { dentalServiceSpecialtyId, normalizeOrganizationId } from '@/utils/organizationId'
 import type { RehusSpecialtyId } from '@/constants/rehusSpecialties'
 import type { ElectronicInvoice } from '@/types/invoice'
 import type { ElectronicCreditNote } from '@/types/creditNote'
 import type { ClinicBillingSettingsRecord } from '@/types/billingModality'
+import type { RdaCryptographicConsent, RdaExternalHistory } from '@/types/rdaExternalHistory'
+import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
 import { CREDIT_NOTE_IMMUTABILITY_MESSAGE } from '@/types/creditNote'
 import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
@@ -62,7 +72,11 @@ export class DentalDatabase extends Dexie {
   electronicCreditNotes!: EntityTable<ElectronicCreditNote, 'id'>
   evolutionNoteAddendums!: EntityTable<EvolutionNoteAddendum, 'id'>
   syncOutbox!: EntityTable<SyncOutboxEntry, 'id'>
+  syncQueue!: EntityTable<SyncQueueAttachment, 'id'>
   clinicBillingSettings!: EntityTable<ClinicBillingSettingsRecord, 'id'>
+  rdaConsents!: EntityTable<RdaCryptographicConsent, 'id'>
+  rdaExternalHistories!: EntityTable<RdaExternalHistory, 'id'>
+  ripsTemporales!: EntityTable<TemporaryRipsRecord, 'id'>
 
   constructor() {
     super('DentalEMR')
@@ -629,7 +643,50 @@ export class DentalDatabase extends Dexie {
         }
       })
 
-    this.version(24).upgrade(async (tx) => {
+    this.version(24).stores({
+      rdaConsents: 'id, patientId, createdAt',
+      rdaExternalHistories: 'id, patientId, receivedAt',
+    })
+
+    this.version(25)
+      .stores({
+        patients:
+          '++id, documentNumber, lastName, createdAt, phase, ownerUserId, syncId, clinicId, pendingSync',
+        appointments:
+          '++id, columnId, startTime, status, procedureType, syncId, clinicId, pendingSync',
+      })
+      .upgrade(async (tx) => {
+        for (const tableName of ['patients', 'appointments'] as const) {
+          const rows = await tx.table(tableName).toArray()
+          for (const row of rows) {
+            if (!row?.id || row.syncId) continue
+            await tx.table(tableName).update(row.id, { syncId: generateId() })
+          }
+        }
+      })
+
+    this.version(26)
+      .stores({
+        ripsTemporales:
+          'id, clinicId, patientId, clinicalRecordId, numFactura, perfilFiscal, status, createdAt',
+      })
+      .upgrade(async (tx) => {
+        const users = await tx.table('users').toArray()
+        for (const user of users) {
+          if (!user?.id || user.perfilFiscal) continue
+          await tx.table('users').update(user.id, { perfilFiscal: 'Obligado_FEV' })
+        }
+      })
+
+    this.version(27).stores({
+      clinicalRecords: '++id, patientId, professionalId, signedAt, isLocked, syncId, clinicId, pendingSync',
+      odontograms: '++id, patientId, updatedAt, syncId, clinicId, pendingSync',
+      diagnosticAids:
+        'id, patientId, encounterId, [patientId+encounterId], fileType, fileHash, createdAt, clinicId',
+      syncQueue: 'id, entityType, patientId, encounterId, fileHash, aidId, status, createdAt, clinicId',
+    })
+
+    this.version(28).upgrade(async (tx) => {
       const users = await tx.table('users').toArray()
       const owner =
         users.find((user) => user.id === 'user-demo-admin') ||
@@ -728,6 +785,88 @@ db.syncOutbox.hook('updating', (_mods, _primKey, obj, transaction) => {
   }
 })
 
+function dexieLookupKey(id: string | number): number | string {
+  const value = String(id)
+  if (/^\d+$/.test(value)) return Number.parseInt(value, 10)
+  return value
+}
+
+function stampClinicalSyncOnCreate(obj: {
+  syncId?: string
+  clinicId?: string
+  pendingSync?: boolean
+}): void {
+  if (!obj.syncId) obj.syncId = generateId()
+  if (backupRestoreUnlock || isApplyingRemotePull() || isClinicalSyncSuppressed()) return
+  const clinicId = getCurrentClinicId()
+  if (!clinicId) return
+  obj.pendingSync = true
+  obj.clinicId = clinicId
+  notifyClinicalRecordDirty()
+}
+
+function stampClinicalSyncOnUpdate(
+  mods: Record<string, unknown>,
+  obj: { syncId?: string; clinicId?: string },
+): void {
+  if (!obj.syncId && mods.syncId == null) mods.syncId = generateId()
+  if (backupRestoreUnlock || isApplyingRemotePull() || isClinicalSyncSuppressed()) return
+  const clinicId = getCurrentClinicId()
+  if (!clinicId) return
+  if (!('pendingSync' in mods)) mods.pendingSync = true
+  if (mods.clinicId == null) mods.clinicId = clinicId
+  if (mods.pendingSync === true) notifyClinicalRecordDirty()
+}
+
+db.patients.hook('creating', (_primKey, obj) => {
+  stampClinicalSyncOnCreate(obj as Patient)
+})
+
+db.patients.hook('updating', (mods, _primKey, obj) => {
+  stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as Patient)
+})
+
+db.appointments.hook('creating', (_primKey, obj) => {
+  stampClinicalSyncOnCreate(obj as Appointment)
+})
+
+db.appointments.hook('updating', (mods, _primKey, obj) => {
+  const appointment = obj as Appointment
+  const next = mods as Partial<Appointment> & Record<string, unknown>
+  stampClinicalSyncOnUpdate(next, appointment)
+  const patientId = (next.patientId as string | undefined) ?? appointment.patientId
+  if (patientId && !next.patientSyncId && !appointment.patientSyncId) {
+    return db.patients.get(dexieLookupKey(patientId)).then((patient) => {
+      if (patient?.syncId) next.patientSyncId = patient.syncId
+    })
+  }
+  return undefined
+})
+
+db.clinicalRecords.hook('creating', (_primKey, obj) => {
+  stampClinicalSyncOnCreate(obj as ClinicalRecord)
+})
+
+db.clinicalRecords.hook('updating', (mods, _primKey, obj) => {
+  stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as ClinicalRecord)
+})
+
+db.odontograms.hook('creating', (_primKey, obj) => {
+  stampClinicalSyncOnCreate(obj as OdontogramData)
+})
+
+db.odontograms.hook('updating', (mods, _primKey, obj) => {
+  stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as OdontogramData)
+})
+
+db.diagnosticAids.hook('creating', (_primKey, obj) => {
+  stampClinicalSyncOnCreate(obj as DiagnosticAid)
+})
+
+db.diagnosticAids.hook('updating', (mods, _primKey, obj) => {
+  stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as DiagnosticAid)
+})
+
 async function seedDefaultColumns(): Promise<void> {
   const count = await db.scheduleColumns.count()
   if (count > 0) return
@@ -774,6 +913,7 @@ export async function seedDemoData(): Promise<void> {
         thsSpecialty: 'odontologia_general',
         rehusSpecialty: 'odontologia_general',
         repsEnabledSpecialties: ['odontologia_general'],
+        perfilFiscal: 'Obligado_FEV',
       },
       {
         id: 'user-demo-admin',
@@ -790,6 +930,7 @@ export async function seedDemoData(): Promise<void> {
         repsCode: '6800103898-01',
         repsStatus: 'activo',
         thsSpecialty: 'odontologia_general',
+        perfilFiscal: 'Obligado_FEV',
       },
     ])
   }
@@ -810,6 +951,7 @@ export async function seedDemoData(): Promise<void> {
       providerNit: '900123456-1',
       repsCode: '6800103898-01',
       repsStatus: 'activo',
+      perfilFiscal: 'Obligado_FEV',
     })
   }
 
@@ -828,7 +970,7 @@ export async function seedDemoData(): Promise<void> {
     const patientCount = await db.patients.count()
     if (patientCount > 0) return
     const { seedTestClinicalAndBillingData } = await import('./seed-test-data')
-    await seedTestClinicalAndBillingData()
+    await withClinicalSyncSuppressed(() => seedTestClinicalAndBillingData())
   } catch (error) {
     console.error('No se pudo cargar datos de prueba clínicos/facturación:', error)
   }

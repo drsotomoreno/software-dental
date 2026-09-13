@@ -17,6 +17,7 @@ export interface DesktopBridge {
   pickDiagnosticFile(): Promise<PickedDiagnosticFile | null>
   generateFileHash(filePath: string): Promise<string>
   fileExists(filePath: string): Promise<boolean>
+  readFileBytes?(filePath: string): Promise<ArrayBuffer>
   /** Devuelve cadena vacía si la apertura fue exitosa; mensaje de error en caso contrario. */
   openPath(filePath: string): Promise<string>
   pickApplicationProgram(): Promise<PickedApplicationProgram | null>

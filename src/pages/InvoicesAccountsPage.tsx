@@ -3,6 +3,7 @@ import { RequirePermission } from '@/components/auth/RequirePermission'
 import { BillingModalitySettingsPanel } from '@/components/invoices/BillingModalitySettings'
 import { ElectronicInvoicePanel } from '@/components/invoices/ElectronicInvoicePanel'
 import { InvoiceLedgerPanel } from '@/components/invoices/InvoiceLedgerPanel'
+import { TemporaryRipsPanel } from '@/components/invoices/FiscalProfileSettings'
 import { useAudit } from '@/hooks/useAudit'
 
 type InvoicesTab = 'ledger' | 'fev'
@@ -45,7 +46,14 @@ export function InvoicesAccountsPage() {
           </button>
         </div>
 
-        {tab === 'fev' ? <ElectronicInvoicePanel /> : <InvoiceLedgerPanel />}
+        {tab === 'fev' ? (
+          <div className="space-y-6">
+            <ElectronicInvoicePanel />
+            <TemporaryRipsPanel />
+          </div>
+        ) : (
+          <InvoiceLedgerPanel />
+        )}
       </div>
     </RequirePermission>
   )

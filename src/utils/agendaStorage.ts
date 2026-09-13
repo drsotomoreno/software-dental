@@ -1,5 +1,6 @@
 import { db } from '@/db/database'
 import type { Appointment, CreateAppointmentInput } from '@/types/appointment'
+import { isActiveAppointment } from '@/types/appointment'
 
 export const CITAS_STORAGE_KEY = 'citas_dental'
 
@@ -25,7 +26,7 @@ export function saveCitasToStorage(citas: Appointment[]): void {
 
 /** Sincroniza IndexedDB → localStorage (clave citas_dental). */
 export async function syncCitasToLocalStorage(): Promise<Appointment[]> {
-  const all = await db.appointments.orderBy('startTime').toArray()
+  const all = (await db.appointments.orderBy('startTime').toArray()).filter(isActiveAppointment)
   saveCitasToStorage(all)
   return all
 }
@@ -56,6 +57,27 @@ async function resolveAppointmentId(idOrIndex: string | number): Promise<string 
 }
 
 /**
+ * Marca la cita como eliminada (tumba) para replicar el borrado sin perder el syncId.
+ */
+export async function tombstoneAppointment(id: number | string): Promise<boolean> {
+  const existing = await db.appointments.get(id)
+  if (!existing && typeof id === 'number') {
+    const asString = await db.appointments.get(String(id))
+    if (asString?.id != null) return tombstoneAppointment(asString.id)
+    return false
+  }
+  if (!existing?.id) return false
+  if (existing.deletedAt) return true
+
+  const now = new Date().toISOString()
+  await db.appointments.update(existing.id, {
+    deletedAt: now,
+    updatedAt: now,
+  })
+  return true
+}
+
+/**
  * Elimina una cita por id o índice del array en localStorage.
  * Pide confirmación y actualiza la interfaz vía renderCitas().
  */
@@ -68,19 +90,9 @@ export async function eliminarCita(idOrIndex: string | number): Promise<boolean>
   const id = await resolveAppointmentId(idOrIndex)
   if (id == null) return false
 
-  const existing = await db.appointments.get(id)
-  if (!existing && typeof id === 'number') {
-    const asString = await db.appointments.get(String(id))
-    if (asString) {
-      await db.appointments.delete(String(id))
-      await syncCitasToLocalStorage()
-      renderCitas()
-      return true
-    }
-    return false
-  }
+  const removed = await tombstoneAppointment(id)
+  if (!removed) return false
 
-  await db.appointments.delete(id)
   await syncCitasToLocalStorage()
   renderCitas()
   return true

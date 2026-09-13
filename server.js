@@ -13,8 +13,10 @@ import healthRoutes from './server/routes/health.routes.js'
 import ripsRoutes from './server/routes/rips.routes.js'
 import invoicesRoutes from './server/routes/invoices.routes.js'
 import authRoutes from './server/routes/auth.routes.js'
+import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
 import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
+import { startMonthlyRipsCron } from './server/jobs/monthlyRipsCron.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -40,11 +42,13 @@ app.use(
     ],
   }),
 )
-app.use(express.json({ limit: '5mb' }))
+app.use(express.json({ limit: '250mb' }))
+app.use(express.urlencoded({ extended: true, limit: '250mb' }))
 
 app.use('/api/health', healthRoutes)
 app.use('/api/rips', ripsRoutes)
 app.use('/api/invoices', invoicesRoutes)
+app.use('/api/sync', clinicalSyncRoutes)
 app.use('/api', authRoutes)
 
 const distDir = path.join(__dirname, 'dist')
@@ -119,7 +123,7 @@ if (isProduction) {
 
 app.use(errorHandler)
 
-app.listen(config.port, '0.0.0.0', () => {
+const httpServer = app.listen(config.port, '0.0.0.0', () => {
   console.log(`[RIPS API] App y API en http://0.0.0.0:${config.port}`)
   console.log(`[config] DATABASE_URL=${DATABASE_URL}`)
   console.log(`[Auth] SuperAdmin exento: ${config.superAdmin.email}`)
@@ -129,4 +133,9 @@ app.listen(config.port, '0.0.0.0', () => {
   console.log(
     `[RIPS API] Modo MinSalud: ${config.minsalud.sandbox ? 'SANDBOX (local)' : 'PRODUCCIÓN'}`,
   )
+  void startMonthlyRipsCron()
 })
+
+httpServer.timeout = 5 * 60 * 1000
+httpServer.headersTimeout = 6 * 60 * 1000
+httpServer.requestTimeout = 5 * 60 * 1000

@@ -4,6 +4,7 @@ import { differenceInYears } from 'date-fns'
 import { REGIME_TYPES } from '@/constants/dental'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 import { PatientRegistrationSection } from './PatientRegistrationSection'
+import { ExternalHistoryRdaPanel } from './ExternalHistoryRdaPanel'
 
 interface PatientIdentificationSummaryProps {
   patient: Patient
@@ -78,6 +79,8 @@ export function PatientIdentificationSummary({
               <PhaseBadge patient={patient} />
             </div>
           }
+          patientRecord={patient}
+          canRequestExternalHistory={canEdit && !disabled}
         />
         {onSave && !disabled && (
           <div className="flex justify-end">
@@ -115,19 +118,32 @@ export function PatientIdentificationSummary({
   ]
 
   return (
-    <section className="card">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h3 className={CLINICAL_SECTION_TITLE_CLASS}>Datos de Identificación del Paciente</h3>
-        <PhaseBadge patient={patient} />
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {fields.map(({ label, value }) => (
-          <div key={label}>
-            <span className="text-xs font-medium uppercase text-slate-500">{label}</span>
-            <p className="text-sm text-slate-800">{value}</p>
-          </div>
-        ))}
-      </div>
-    </section>
+    <div className="space-y-3">
+      <section className="card">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h3 className={CLINICAL_SECTION_TITLE_CLASS}>Datos de Identificación del Paciente</h3>
+          <PhaseBadge patient={patient} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {fields.slice(0, 4).map(({ label, value }) => (
+            <div key={label}>
+              <span className="text-xs font-medium uppercase text-slate-500">{label}</span>
+              <p className="text-sm text-slate-800">{value}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4">
+          <ExternalHistoryRdaPanel patient={patient} canRequest={canEdit && !disabled} />
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {fields.slice(4).map(({ label, value }) => (
+            <div key={label}>
+              <span className="text-xs font-medium uppercase text-slate-500">{label}</span>
+              <p className="text-sm text-slate-800">{value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
   )
 }

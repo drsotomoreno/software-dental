@@ -4,7 +4,11 @@ import type { OdontologyThsSpecialtyId, RipsConsultationVisitType } from '@/cons
 
 export interface RipsTransaction {
   numDocumentoIdObligado: string
-  numFactura: string
+  /**
+   * Número FEV. Null en RIPS temporales y cuando el prestador es No_Obligado
+   * (Res. 2275 — el campo debe existir en el JSON con valor null).
+   */
+  numFactura: string | null
   tipoNota: string | null
   numNota: string | null
   usuarios: RipsUsuario[]
@@ -37,7 +41,7 @@ export interface RipsServicios {
   hospitalizacion: []
   recienNacidos: []
   medicamentos: []
-  otrosServicios: []
+  otrosServicios: RipsOtroServicio[]
 }
 
 export interface RipsConsulta {
@@ -107,13 +111,45 @@ export interface RipsProcedimiento {
   arcada?: 'superior' | 'inferior' | null
 }
 
+/**
+ * Grupo RIPS `otrosServicios` (Res. 2275).
+ * Usado para estética/insumos sin CUPS: la DIAN recibe el nombre literal y el MUV
+ * clasifica el ítem aquí en lugar de un procedimiento CUPS inventado.
+ */
+export const RIPS_OTROS_SERVICIOS_TIPO_OS = '01'
+export const RIPS_OTROS_SERVICIOS_COD_TECNOLOGIA = 'OTROS'
+
+export interface RipsOtroServicio {
+  codPrestador: string
+  numAutorizacion: string | null
+  idMIPRES: string | null
+  fechaSuministroTecnologia: string
+  /** 01 = materiales e insumos / dispositivos; evita CUPS inventado. */
+  tipoOS: string
+  codTecnologiaSalud: string
+  nomTecnologiaSalud: string
+  cantidadOS: number
+  tipoDocumentoIdentificacion: string
+  numDocumentoIdentificacion: string
+  vrUnitOS: number
+  vrServicio: number
+  conceptoRecaudo: string
+  valorPagoModerador: number
+  numFEVPagoModerador: string | null
+  consecutivo: number
+}
+
 export interface RipsExportMetadata {
   /** NIT del prestador (solo dígitos) */
   numDocumentoIdObligado: string
-  /** Número de factura electrónica de venta en salud */
-  numFactura: string
+  /** Número de factura electrónica de venta en salud. Null si No_Obligado o RIPS temporal. */
+  numFactura: string | null
   /** Referencia FEV DIAN para validación 1:1 con numFactura (opcional si coincide con numFactura) */
-  fevReferencia?: string
+  fevReferencia?: string | null
+  /** Perfil fiscal del prestador al generar el paquete. */
+  perfilFiscal?: import('@/utils/fiscalProfile').FiscalProfile
+  /** Si true, numFactura puede ser null aunque el prestador sea Obligado_FEV. */
+  esRipsTemporal?: boolean
   /** Inicio vigencia convenio (YYYY-MM-DD) — límite inferior de fechaInicioAtencion */
   convenioFechaInicio?: string
   /** Código REPS del prestador (12 dígitos) */

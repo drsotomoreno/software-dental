@@ -21,6 +21,7 @@ import {
 } from '@/constants/rips'
 import { extractRepsDigits, parseRepsCode } from '@/utils/repsCode'
 import { RIPS_FEV_NUMERO_PATTERN } from './ripsStructureValidation'
+import { normalizePerfilFiscal, normalizeRipsNumFactura } from './fiscalProfile'
 import {
   resolveConsultationCupsForThs,
   type OdontologyThsSpecialtyId,
@@ -31,6 +32,7 @@ import {
   compileProcedimientosForRecord,
   type EvolutionCatalogLookup,
 } from './ripsCompiler'
+import { compileOtrosServiciosForRecord } from './ripsOtrosServicios'
 import { validateRipsExport } from './ripsValidation'
 
 export interface RipsSourceRecord {
@@ -83,7 +85,8 @@ export function isUsingDemoPrestadorDefaults(user: Pick<UserProfile, 'providerNi
   return !normalizeNit(user.providerNit ?? '') || !String(user.repsCode ?? '').replace(/\D/g, '')
 }
 
-export function isValidRipsFevNumero(value: string): boolean {
+export function isValidRipsFevNumero(value: string | null | undefined): boolean {
+  if (value == null) return false
   return RIPS_FEV_NUMERO_PATTERN.test(value.trim())
 }
 
@@ -140,7 +143,8 @@ function resolveExportMetadata(
     ...metadata,
     numDocumentoIdObligado: resolveRipsNit(professional, metadata.numDocumentoIdObligado),
     codPrestador: resolveRipsCodPrestador(professional, metadata.codPrestador),
-    numFactura: metadata.numFactura.trim(),
+    numFactura: normalizeRipsNumFactura(metadata.numFactura),
+    perfilFiscal: normalizePerfilFiscal(metadata.perfilFiscal ?? professional.perfilFiscal),
   }
 }
 
@@ -284,6 +288,7 @@ export function buildRipsFromRecords(
   for (const { patient, records } of grouped.values()) {
     const consultas: RipsConsulta[] = []
     const procedimientos: RipsProcedimiento[] = []
+    const otrosServicios = [] as ReturnType<typeof compileOtrosServiciosForRecord>
     let consultaConsecutivo = 1
     let procedimientoConsecutivo = 1
 
@@ -304,6 +309,7 @@ export function buildRipsFromRecords(
       procedimientos.push(...compiled.procedimientos)
       procedimientoConsecutivo = compiled.nextConsecutivo
       compileStats.push(compiled.stats)
+      otrosServicios.push(...compileOtrosServiciosForRecord(record, professional, resolvedMetadata))
     }
 
     usuarios.push({
@@ -315,7 +321,7 @@ export function buildRipsFromRecords(
         hospitalizacion: [],
         recienNacidos: [],
         medicamentos: [],
-        otrosServicios: [],
+        otrosServicios: otrosServicios.map((item, index) => ({ ...item, consecutivo: index + 1 })),
       },
     })
     usuarioConsecutivo++
@@ -349,7 +355,8 @@ export function buildDefaultRipsMetadata(user: UserProfile): RipsExportMetadata 
 
   return {
     numDocumentoIdObligado: resolveRipsNit(user),
-    numFactura: '',
+    numFactura: null,
+    perfilFiscal: normalizePerfilFiscal(user.perfilFiscal),
     codPrestador: resolveRipsCodPrestador(user),
     tipoNota: null,
     numNota: null,
@@ -378,8 +385,8 @@ export function downloadRipsJson(rips: RipsTransaction, filename: string): void 
   URL.revokeObjectURL(url)
 }
 
-export function suggestRipsFilename(numFactura: string): string {
-  const safe = numFactura.replace(/[^\w.-]/g, '_') || 'RIPS'
+export function suggestRipsFilename(numFactura: string | null | undefined): string {
+  const safe = (numFactura ?? 'SIN_FEV').replace(/[^\w.-]/g, '_') || 'RIPS'
   const date = new Date().toISOString().slice(0, 10)
   return `RIPS_${safe}_${date}.json`
 }
