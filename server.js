@@ -1,6 +1,6 @@
 /**
  * Servidor unificado: API RIPS + interfaz web
- * Ejecutar: npm run server  →  http://localhost:3000
+ * Ejecutar: npm run server  →  http://localhost:10000 (o el puerto en PORT)
  */
 import { existsSync } from 'node:fs'
 import path from 'node:path'
@@ -123,9 +123,9 @@ if (isProduction) {
 
 app.use(errorHandler)
 
-const httpServer = app.listen(config.port, '0.0.0.0', () => {
-  console.log(`[RIPS API] App y API en http://0.0.0.0:${config.port}`)
-  console.log(`[config] DATABASE_URL=${DATABASE_URL}`)
+const PORT = process.env.PORT || 10000
+const httpServer = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Servidor corriendo en el puerto ${PORT}`)
   console.log(`[Auth] SuperAdmin exento: ${config.superAdmin.email}`)
   void mailTransportLabel().then((label) => {
     console.log(`[Auth] Correo transaccional: ${label} (${config.appPublicUrl})`)
