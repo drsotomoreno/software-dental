@@ -3,7 +3,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const port = Number(process.env.PORT ?? 3000)
+const port = Number(process.env.PORT) || 10000
 
 /** URL de PostgreSQL requerida por la aplicación (local o producción). */
 export const DATABASE_URL =
@@ -76,6 +76,5 @@ const invokedDirectly =
 
 if (invokedDirectly) {
   console.log('[config] Módulo válido')
-  console.log(`[config] DATABASE_URL=${config.databaseUrl}`)
   console.log(`[config] SuperAdmin=${config.superAdmin.email} rol=superadmin estado_pago=exento`)
 }
