@@ -37,6 +37,9 @@ function getPool() {
     max: 2,
     ssl: local ? false : { rejectUnauthorized: false },
   })
+  pool.on('error', (err) => {
+    console.error('Error de base de datos:', err)
+  })
   return pool
 }
 
