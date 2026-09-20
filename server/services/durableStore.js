@@ -1,7 +1,6 @@
 import { createRequire } from 'node:module'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import '../config.js'
 
 const STORE_KEY = 'subscription-users'
 const require = createRequire(import.meta.url)

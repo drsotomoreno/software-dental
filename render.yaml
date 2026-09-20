@@ -1,5 +1,5 @@
-# Blueprint de Render. DATABASE_URL queda definida aquí porque el panel
-# de variables de entorno del servicio está en solo lectura.
+# Blueprint de Render. DATABASE_URL se gestiona en el dashboard (sync: false)
+# para que la casilla no quede bloqueada ni la contraseña viva en el repo.
 services:
   - type: web
     name: software-dental
@@ -10,4 +10,4 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        value: postgresql://mihistoriadentaldb_lf6q_user:WOZaagLgcA7I9XiARazTLJ1i58sTf3dI@dpg-da8vcphsrm7s73an9hi0-a/software_dental
+        sync: false
