@@ -36,9 +36,66 @@ function getPool() {
   pool = new Pool({
     connectionString: url,
     max: 2,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
     ssl: local ? false : { rejectUnauthorized: false },
   })
+  // Evita que un corte de red en un cliente inactivo apague el proceso.
+  // El pool descarta el cliente muerto y abre uno nuevo en el próximo query.
+  pool.on('error', (err) => {
+    console.error(
+      '[store] Error inesperado en el cliente de PostgreSQL inactivo',
+      err instanceof Error ? err.message : err,
+    )
+  })
   return pool
+}
+
+export { getPool as getPostgresPool }
+
+const CONNECT_RETRY_ATTEMPTS = 3
+const CONNECT_RETRY_DELAY_MS = 400
+
+function isTransientPgError(error) {
+  const code = typeof error?.code === 'string' ? error.code : ''
+  const message = String(error?.message ?? error ?? '')
+  return (
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'EPIPE' ||
+    code === '57P01' ||
+    code === '57P02' ||
+    code === '57P03' ||
+    /connection terminated|server closed the connection|timeout expired/i.test(message)
+  )
+}
+
+async function withPostgresClient(fn) {
+  const db = getPool()
+  if (!db) return { ok: false }
+
+  let lastError
+  for (let attempt = 1; attempt <= CONNECT_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const client = await db.connect()
+      try {
+        await ensureTable(client)
+        return { ok: true, value: await fn(client) }
+      } finally {
+        client.release()
+      }
+    } catch (error) {
+      lastError = error
+      const retry = attempt < CONNECT_RETRY_ATTEMPTS && isTransientPgError(error)
+      if (!retry) break
+      console.error(
+        `[store] Conexión a PostgreSQL caída (intento ${attempt}/${CONNECT_RETRY_ATTEMPTS}), reintentando...`,
+        error instanceof Error ? error.message : error,
+      )
+      await new Promise((resolve) => setTimeout(resolve, CONNECT_RETRY_DELAY_MS * attempt))
+    }
+  }
+  return { ok: false, error: lastError }
 }
 
 async function ensureTable(client) {
@@ -61,27 +118,23 @@ async function readJsonFile(filePath) {
 }
 
 async function readPostgresJson(storeKey) {
-  const db = getPool()
-  if (!db) return null
-  try {
-    const client = await db.connect()
-    try {
-      await ensureTable(client)
-      const { rows } = await client.query('SELECT value FROM app_json_store WHERE key = $1', [
-        storeKey,
-      ])
-      const value = rows[0]?.value
-      return value && typeof value === 'object' ? value : null
-    } finally {
-      client.release()
+  const { ok, value, error } = await withPostgresClient(async (client) => {
+    const { rows } = await client.query('SELECT value FROM app_json_store WHERE key = $1', [
+      storeKey,
+    ])
+    const rowValue = rows[0]?.value
+    return rowValue && typeof rowValue === 'object' ? rowValue : null
+  })
+  if (!ok) {
+    if (error) {
+      console.error(
+        '[store] PostgreSQL no disponible, se usa archivo local:',
+        error instanceof Error ? error.message : error,
+      )
     }
-  } catch (error) {
-    console.error(
-      '[store] PostgreSQL no disponible, se usa archivo local:',
-      error instanceof Error ? error.message : error,
-    )
     return null
   }
+  return value ?? null
 }
 
 function stamp(item) {
@@ -156,27 +209,20 @@ export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
   await mkdir(dirname(filePath), { recursive: true })
   await writeFile(filePath, JSON.stringify(value, null, 2), 'utf8')
 
-  const db = getPool()
-  if (!db) return
-  try {
-    const client = await db.connect()
-    try {
-      await ensureTable(client)
-      const { rows } = await client.query('SELECT value FROM app_json_store WHERE key = $1', [
-        storeKey,
-      ])
-      const current = rows[0]?.value && typeof rows[0].value === 'object' ? rows[0].value : null
-      const toWrite = current ? mergeDurableStores(value, current, { primaryUserWins: true }) : value
-      await client.query(
-        `INSERT INTO app_json_store (key, value, updated_at)
-         VALUES ($1, $2::jsonb, now())
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-        [storeKey, JSON.stringify(toWrite)],
-      )
-    } finally {
-      client.release()
-    }
-  } catch (error) {
+  const { ok, error } = await withPostgresClient(async (client) => {
+    const { rows } = await client.query('SELECT value FROM app_json_store WHERE key = $1', [
+      storeKey,
+    ])
+    const current = rows[0]?.value && typeof rows[0].value === 'object' ? rows[0].value : null
+    const toWrite = current ? mergeDurableStores(value, current, { primaryUserWins: true }) : value
+    await client.query(
+      `INSERT INTO app_json_store (key, value, updated_at)
+       VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [storeKey, JSON.stringify(toWrite)],
+    )
+  })
+  if (!ok && error) {
     console.error(
       '[store] No se pudo persistir el perfil en PostgreSQL; se conserva el archivo local:',
       error instanceof Error ? error.message : error,
@@ -206,28 +252,20 @@ export async function writeDurableJsonWithMerge(filePath, value, storeKey, merge
   await mkdir(dirname(filePath), { recursive: true })
   await writeFile(filePath, JSON.stringify(value, null, 2), 'utf8')
 
-  const db = getPool()
-  if (!db) return
-  try {
-    const client = await db.connect()
-    try {
-      await ensureTable(client)
-      const { rows } = await client.query('SELECT value FROM app_json_store WHERE key = $1', [
-        storeKey,
-      ])
-      const current = rows[0]?.value && typeof rows[0].value === 'object' ? rows[0].value : null
-      const toWrite =
-        current && typeof mergeFn === 'function' ? mergeFn(value, current) : value
-      await client.query(
-        `INSERT INTO app_json_store (key, value, updated_at)
-         VALUES ($1, $2::jsonb, now())
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-        [storeKey, JSON.stringify(toWrite)],
-      )
-    } finally {
-      client.release()
-    }
-  } catch (error) {
+  const { ok, error } = await withPostgresClient(async (client) => {
+    const { rows } = await client.query('SELECT value FROM app_json_store WHERE key = $1', [
+      storeKey,
+    ])
+    const current = rows[0]?.value && typeof rows[0].value === 'object' ? rows[0].value : null
+    const toWrite = current && typeof mergeFn === 'function' ? mergeFn(value, current) : value
+    await client.query(
+      `INSERT INTO app_json_store (key, value, updated_at)
+       VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [storeKey, JSON.stringify(toWrite)],
+    )
+  })
+  if (!ok && error) {
     console.error(
       '[store] No se pudo persistir el almacén en PostgreSQL; se conserva el archivo local:',
       error instanceof Error ? error.message : error,
