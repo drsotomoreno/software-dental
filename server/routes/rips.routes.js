@@ -10,8 +10,16 @@ import {
 } from '../services/ripsTemporalStore.js'
 import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.controller.js'
 import { getMonthlyRipsStatus, runMonthlyRipsJob } from '../controllers/monthlyRips.controller.js'
+import { transmitirRips } from '../controllers/ripsMotor.controller.js'
 
 const router = Router()
+
+/**
+ * POST /api/rips/transmitir
+ * Motor RIPS mock: valida el DTO clínico (Zod) y devuelve un CUV simulado.
+ * No persiste CUV ni genera XML DIAN; eso sigue en POST /validate.
+ */
+router.post('/transmitir', transmitirRips)
 
 /**
  * POST /api/rips/evolucion-dictada
