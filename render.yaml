@@ -1,0 +1,13 @@
+# Blueprint de Render. DATABASE_URL queda definida aquí porque el panel
+# de variables de entorno del servicio está en solo lectura.
+services:
+  - type: web
+    name: software-dental
+    runtime: node
+    buildCommand: npm run build
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: postgresql://mihistoriadentaldb_lf6q_user:WOZaagLgcA7I9XiARazTLJ1i58sTf3dI@dpg-da8vcphsrm7s73an9hi0-a/software_dental

@@ -125,7 +125,7 @@ app.use(errorHandler)
 
 const httpServer = app.listen(config.port, '0.0.0.0', () => {
   console.log(`[RIPS API] App y API en http://0.0.0.0:${config.port}`)
-  console.log(`[config] DATABASE_URL=${DATABASE_URL}`)
+  console.log(`[config] DATABASE_URL=${DATABASE_URL.replace(/:([^:@/]+)@/, ':***@')}`)
   console.log(`[Auth] SuperAdmin exento: ${config.superAdmin.email}`)
   void mailTransportLabel().then((label) => {
     console.log(`[Auth] Correo transaccional: ${label} (${config.appPublicUrl})`)
