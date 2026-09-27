@@ -40,6 +40,8 @@ import type { ClinicBillingSettingsRecord } from '@/types/billingModality'
 import type { RdaCryptographicConsent, RdaExternalHistory } from '@/types/rdaExternalHistory'
 import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
 import type { RipsValidadorRecord } from '@/types/ripsValidador'
+import type { LocalRipsRecord } from '@/db/localRipsDatabase'
+import { RIPS_RECORDS_SCHEMA } from '@/db/localRipsDatabase'
 import { CREDIT_NOTE_IMMUTABILITY_MESSAGE } from '@/types/creditNote'
 import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
@@ -79,6 +81,7 @@ export class DentalDatabase extends Dexie {
   rdaExternalHistories!: EntityTable<RdaExternalHistory, 'id'>
   ripsTemporales!: EntityTable<TemporaryRipsRecord, 'id'>
   ripsValidador!: EntityTable<RipsValidadorRecord, 'id'>
+  ripsRecords!: EntityTable<LocalRipsRecord, 'id'>
 
   constructor() {
     super('DentalEMR')
@@ -719,6 +722,10 @@ export class DentalDatabase extends Dexie {
 
     this.version(29).stores({
       ripsValidador: 'id, clinicId, patientId, createdAt',
+    })
+
+    this.version(30).stores({
+      ripsRecords: RIPS_RECORDS_SCHEMA,
     })
   }
 }

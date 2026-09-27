@@ -1,6 +1,7 @@
 import { db } from '@/db/database'
+import type { LocalRipsRecord } from '@/db/localRipsDatabase'
 import type { RipsValidadorRecord, SaveRipsValidadorInput } from '@/types/ripsValidador'
-import { validarEstructuraRips, type PaqueteRIPS } from '@/utils/ripsValidator'
+import { guardarRipsLocal } from '@/services/localRipsStore'
 import {
   mapearRipsParaValidador,
   normalizarDocumentoRipsValidador,
@@ -19,16 +20,27 @@ export async function guardarRipsValidador(input: SaveRipsValidadorInput): Promi
   isValid: boolean
   errors: string[]
   registro: RipsValidadorRecord | null
+  localRecord: LocalRipsRecord
   documento: RipsValidadorDocumento
   rips: ReturnType<typeof mapearRipsParaValidador> | null
 }> {
   const documento = normalizarDocumentoRipsValidador(input.documento ?? input)
-  const estructura = validarEstructuraRips({
-    ...documento,
-    numFactura: documento.numFactura ?? '',
-  } as PaqueteRIPS)
-  if (!estructura.isValid) {
-    return { isValid: false, errors: estructura.errors, registro: null, documento, rips: null }
+  const paquete = { ...documento, numFactura: documento.numFactura ?? '' }
+  const local = await guardarRipsLocal({
+    numFactura: paquete.numFactura,
+    numDocumentoIdObligado: documento.numDocumentoIdObligado,
+    tipoNota: documento.tipoNota,
+    payload: paquete,
+  })
+  if (!local.isValid) {
+    return {
+      isValid: false,
+      errors: local.errors,
+      registro: null,
+      localRecord: local.record,
+      documento,
+      rips: null,
+    }
   }
 
   const id = input.id?.trim() || crypto.randomUUID()
@@ -47,6 +59,7 @@ export async function guardarRipsValidador(input: SaveRipsValidadorInput): Promi
     isValid: true,
     errors: [],
     registro,
+    localRecord: local.record,
     documento,
     rips: mapearRipsParaValidador(documento, { profesional: registro.profesional ?? undefined }),
   }

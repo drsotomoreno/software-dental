@@ -226,6 +226,7 @@ export async function collectBackupPayload(exportedBy: string | null): Promise<B
     rdaExternalHistories,
     ripsTemporales,
     ripsValidador,
+    ripsRecords,
   ] = await Promise.all([
     db.patients.toArray(),
     db.odontograms.toArray(),
@@ -257,6 +258,7 @@ export async function collectBackupPayload(exportedBy: string | null): Promise<B
     db.rdaExternalHistories.toArray(),
     db.ripsTemporales.toArray(),
     db.ripsValidador.toArray(),
+    db.ripsRecords.toArray(),
   ])
 
   return {
@@ -296,6 +298,7 @@ export async function collectBackupPayload(exportedBy: string | null): Promise<B
       rdaExternalHistories,
       ripsTemporales,
       ripsValidador,
+      ripsRecords,
     },
   }
 }
@@ -452,6 +455,7 @@ export async function restoreBackupPayload(payload: BackupPayload): Promise<void
     db.rdaExternalHistories,
     db.ripsTemporales,
     db.ripsValidador,
+    db.ripsRecords,
   ] as const
 
   await withBackupRestoreUnlock(async () => {
@@ -493,6 +497,7 @@ export async function restoreBackupPayload(payload: BackupPayload): Promise<void
         bulkPutIfAny(db.rdaExternalHistories, data.rdaExternalHistories),
         bulkPutIfAny(db.ripsTemporales, data.ripsTemporales),
         bulkPutIfAny(db.ripsValidador, data.ripsValidador),
+        bulkPutIfAny(db.ripsRecords, data.ripsRecords),
       ])
     })
   })
