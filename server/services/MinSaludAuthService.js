@@ -1,17 +1,11 @@
 import { config, hasMinsaludCredentials } from '../config.js'
-
-let cachedToken = null
-let tokenExpiresAt = 0
+import { invalidarCacheSispro, obtenerBearerToken } from './SisproAuthService.js'
 
 /**
  * Sandbox (o sin credenciales de producción) no llama al Ministerio.
  */
 export function shouldUseMinsaludSandbox() {
   return config.minsalud.sandbox || !hasMinsaludCredentials()
-}
-
-function encodeBase64Url(value) {
-  return Buffer.from(value).toString('base64url')
 }
 
 /**
@@ -65,71 +59,16 @@ export function buildLoginSisproRequest() {
   }
 }
 
-function buildSimulatedJwt(credenciales) {
-  const now = Math.floor(Date.now() / 1000)
-  const claims = {
-    sub: credenciales.persona.identificacion.numero,
-    nit: credenciales.nit,
-    tipoPrestador: credenciales.tipoPrestador,
-    reps: credenciales.codPrestador ?? null,
-    iat: now,
-    exp: now + 3600,
-  }
-  const header = encodeBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
-  const payload = encodeBase64Url(JSON.stringify(claims))
-  const signature = encodeBase64Url(`sandbox.${claims.sub}.${claims.exp}`)
-  return { token: `${header}.${payload}.${signature}`, expiresIn: 3600 }
-}
-
-function cacheToken(token, expiresInSeconds) {
-  cachedToken = token
-  tokenExpiresAt = Date.now() + (expiresInSeconds ?? 3600) * 1000
-  return cachedToken
-}
-
 /**
- * Obtiene el Bearer token SISPRO.
- * En sandbox simula el POST a /api/Auth/LoginSISPRO y retorna un JWT.
- * Con credenciales de producción ejecuta el POST real.
+ * Obtiene el Bearer token SISPRO del prestador.
+ * Si no llegan credenciales descifradas, usa las del entorno (sandbox / producción).
+ * @param {object} [credencialesDescifradas]
  */
-export async function obtenerTokenSISPRO() {
-  if (cachedToken && Date.now() < tokenExpiresAt - 60_000) {
-    return cachedToken
-  }
-
-  const request = buildLoginSisproRequest()
-
-  if (shouldUseMinsaludSandbox()) {
-    const simulated = buildSimulatedJwt(request.body)
-    return cacheToken(simulated.token, simulated.expiresIn)
-  }
-
-  const response = await fetch(request.url, {
-    method: 'POST',
-    headers: request.headers,
-    body: JSON.stringify(request.body),
-  })
-
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok || data.login === false) {
-    const error = new Error('Autenticación MinSalud fallida')
-    error.status = 502
-    error.details = data
-    throw error
-  }
-
-  const token = data.token ?? data.access_token
-  if (!token) {
-    const error = new Error('Autenticación MinSalud fallida')
-    error.status = 502
-    error.details = data
-    throw error
-  }
-
-  return cacheToken(token, data.expires_in ?? data.expiresIn ?? 3600)
+export async function obtenerTokenSISPRO(credencialesDescifradas) {
+  const credenciales = credencialesDescifradas ?? buildCredencialesProfesionalIndependiente()
+  return obtenerBearerToken(credenciales)
 }
 
-export function clearMinsaludTokenCache() {
-  cachedToken = null
-  tokenExpiresAt = 0
+export function clearMinsaludTokenCache(credencialesDescifradas) {
+  invalidarCacheSispro(credencialesDescifradas)
 }

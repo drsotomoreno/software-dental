@@ -210,7 +210,7 @@ function mapMinistryResult(httpResult, localIssues, metadatos, request) {
  * @param {object} params.rips
  * @param {object} [params.metadatos]
  */
-export async function cargarFevRips({ rips, metadatos = {} }) {
+export async function cargarFevRips({ rips, metadatos = {}, credenciales } = {}) {
   const localIssues = validateRipsPackageLocally(rips, {
     crossValidateAgeSex: true,
     perfilFiscal: metadatos.perfilFiscal,
@@ -236,7 +236,9 @@ export async function cargarFevRips({ rips, metadatos = {} }) {
     }
   }
 
-  const token = await obtenerTokenSISPRO()
+  const token = await obtenerTokenSISPRO(
+    credenciales ?? metadatos.credencialesSispro ?? metadatos.credencialesDescifradas,
+  )
   const request = buildCargarFevRipsRequest(parsed.data, token)
   if (!request.headers.Authorization?.startsWith('Bearer ')) {
     return {

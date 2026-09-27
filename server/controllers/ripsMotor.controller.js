@@ -4,13 +4,26 @@ import { empaquetarConCuv } from '../services/FacturacionService.js'
 import { obtenerTokenSISPRO } from '../services/MinSaludAuthService.js'
 import { cargarFevRips } from '../services/MinSaludService.js'
 
+function metadatosSinSecretos(metadatos) {
+  if (!metadatos || typeof metadatos !== 'object') return metadatos
+  const rest = { ...metadatos }
+  delete rest.credencialesSispro
+  delete rest.credencialesDescifradas
+  delete rest.clave
+  delete rest.password
+  return rest
+}
+
 /**
  * Flujo oficial: SISPRO → CargarFevRips (CUV) → proveedor (CUFE + pdfUrl).
  * @param {{ rips: object, invoice?: object, metadatos?: object }} params
  */
 export async function ejecutarFlujoOficial({ rips, invoice, metadatos = {} }) {
-  // Paso A — autenticarse en SISPRO.
-  const token = await obtenerTokenSISPRO()
+  const credenciales = metadatos.credencialesSispro ?? metadatos.credencialesDescifradas
+  const trazabilidad = metadatosSinSecretos(metadatos)
+
+  // Paso A — autenticarse en SISPRO con las credenciales descifradas del prestador.
+  const token = await obtenerTokenSISPRO(credenciales)
   if (!token) {
     return {
       success: false,
@@ -20,7 +33,7 @@ export async function ejecutarFlujoOficial({ rips, invoice, metadatos = {} }) {
   }
 
   // Paso B — transmitir el JSON y obtener el CUV.
-  const ministry = await cargarFevRips({ rips, metadatos })
+  const ministry = await cargarFevRips({ rips, metadatos: trazabilidad, credenciales })
   if (!ministry.success || !ministry.cuv) {
     return {
       success: false,
@@ -41,7 +54,7 @@ export async function ejecutarFlujoOficial({ rips, invoice, metadatos = {} }) {
     fechaRadicacion: ministry.fechaRadicacion,
     estado: ministry.estado,
     source: ministry.source,
-    metadatos: { ...metadatos, ...ministry.metadatos, endpoint: ministry.endpoint },
+    metadatos: { ...trazabilidad, ...ministry.metadatos, endpoint: ministry.endpoint },
     clinicalRecordIds: metadatos?.clinicalRecordIds ?? [],
     patientUuid: metadatos?.patientUuid ?? null,
   })
