@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { transmitirFevRips } from '../controllers/ripsMotor.controller.js'
+import { generarRipsDesdeBaseDatos, generarRipsJson } from '../services/RipsJsonGenerator.js'
 import { getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
@@ -30,6 +31,23 @@ router.get('/mensual/estado', getMonthlyRipsStatus)
  * Disparo manual (superadmin). Body: { dryRun?: true }
  */
 router.post('/mensual/enviar', runMonthlyRipsJob)
+
+/**
+ * POST /api/rips/generar
+ * Convierte atenciones odontológicas (base clínica o cuerpo) al JSON Res. 2275.
+ * No devuelve el paquete si el esquema falla.
+ */
+router.post('/generar', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const result = body.clinicId
+      ? await generarRipsDesdeBaseDatos(body)
+      : generarRipsJson(body)
+    return res.status(result.ok ? 200 : 422).json(result)
+  } catch (error) {
+    next(error)
+  }
+})
 
 /**
  * POST /api/rips/validate
