@@ -1,4 +1,5 @@
 import { config } from '../config.js'
+import { resolveMuvAmbiente } from './muvAmbiente.js'
 
 export const MUV_LOGIN_PATH = '/api/Auth/LoginSISPRO'
 export const MUV_CARGAR_FEV_RIPS_PATH = '/api/PaquetesFevRips/CargarFevRips'
@@ -28,7 +29,37 @@ export class MuvApiError extends Error {
     this.status = status
     this.retryable = retryable
     this.details = details
+    this.glosas = details
   }
+}
+
+export function extraerCuv(data) {
+  return data?.codigoUnicoValidacion ?? data?.CodigoUnicoValidacion ?? data?.CUV ?? data?.cuv ?? null
+}
+
+export function extraerGlosas(payload) {
+  if (!payload || typeof payload !== 'object') return []
+  const candidates =
+    payload.resultadosValidacion ??
+    payload.ResultadosValidacion ??
+    payload.Errores ??
+    payload.errores ??
+    payload.errors ??
+    []
+  if (!Array.isArray(candidates)) {
+    if (typeof payload.message === 'string') {
+      return [{ clase: 'RECHAZADO', codigo: 'MUV', descripcion: payload.message, pathFuente: null }]
+    }
+    return []
+  }
+  return candidates.map((item) => ({
+    clase: item?.Clase ?? item?.clase ?? 'RECHAZADO',
+    codigo: item?.Codigo ?? item?.codigo ?? item?.code ?? null,
+    descripcion: item?.Descripcion ?? item?.descripcion ?? item?.Observaciones ?? item?.message ?? 'Glosa del MUV',
+    observaciones: item?.Observaciones ?? item?.observaciones ?? null,
+    pathFuente: item?.PathFuente ?? item?.pathFuente ?? item?.Campo ?? item?.field ?? null,
+    fuente: item?.Fuente ?? item?.fuente ?? null,
+  }))
 }
 
 function normalizeIssues(payload) {
@@ -87,7 +118,7 @@ export function createMuvClient(options = {}) {
 
   function urlFor(path, override) {
     if (override) return override
-    return joinUrl(options.baseUrl ?? config.minsalud.apiBaseUrl, path)
+    return joinUrl(options.baseUrl ?? resolveMuvAmbiente().apiBaseUrl, path)
   }
 
   async function resolveToken(explicit) {
@@ -242,15 +273,16 @@ export function createMuvClient(options = {}) {
         message: validation
           ? 'El MUV rechazó el paquete RIPS por validación.'
           : `El MUV respondió HTTP ${response.status}.`,
-        details: normalizeIssues(redact(data)),
+        details: extraerGlosas(redact(data)),
       })
     }
 
+    const cuv = extraerCuv(data)
     const approved =
       data.ResultState === true ||
       data.resultState === true ||
       data.estado === 'APROBADO' ||
-      Boolean(data.CUV ?? data.cuv)
+      Boolean(cuv)
 
     if (!approved) {
       throw new MuvApiError({
@@ -259,12 +291,12 @@ export function createMuvClient(options = {}) {
         status: 422,
         retryable: false,
         message: 'El MUV no aprobó el paquete RIPS.',
-        details: normalizeIssues(redact(data)),
+        details: extraerGlosas(redact(data)),
       })
     }
 
     return {
-      cuv: data.CUV ?? data.cuv,
+      cuv,
       procesoId: data.ProcesoId ?? data.procesoId,
       fechaRadicacion: data.FechaRadicacion ?? data.fechaRadicacion,
       estado: data.Estado ?? data.estado ?? 'APROBADO',

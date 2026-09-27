@@ -1,8 +1,6 @@
 import { saveCuvRecord } from '../services/cuvRepository.js'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
-import { empaquetarConCuv } from '../services/FacturacionService.js'
-import { obtenerTokenSISPRO } from '../services/MinSaludAuthService.js'
-import { cargarFevRips } from '../services/MinSaludService.js'
+import { facturacionOrchestrator } from '../services/FacturacionOrchestrator.js'
 
 function metadatosSinSecretos(metadatos) {
   if (!metadatos || typeof metadatos !== 'object') return metadatos
@@ -22,86 +20,48 @@ export async function ejecutarFlujoOficial({ rips, invoice, metadatos = {} }) {
   const credenciales = metadatos.credencialesSispro ?? metadatos.credencialesDescifradas
   const trazabilidad = metadatosSinSecretos(metadatos)
 
-  // Paso A — autenticarse en SISPRO con las credenciales descifradas del prestador.
-  const token = await obtenerTokenSISPRO(credenciales)
-  if (!token) {
-    return {
-      success: false,
-      approved: false,
-      error: 'No se obtuvo el token SISPRO.',
-    }
-  }
+  const ciclo = await facturacionOrchestrator.ejecutar({
+    rips,
+    invoice,
+    metadatos: trazabilidad,
+    credenciales,
+  })
 
-  // Paso B — transmitir el JSON y obtener el CUV.
-  const ministry = await cargarFevRips({ rips, metadatos: trazabilidad, credenciales })
-  if (!ministry.success || !ministry.cuv) {
-    return {
-      success: false,
-      approved: false,
-      source: ministry.source,
-      localIssues: ministry.localIssues ?? [],
-      ministryErrors: ministry.ministryErrors ?? [],
-      error: 'El Ministerio no devolvió CUV.',
-    }
+  if (!ciclo.cuv) {
+    return ciclo
   }
 
   const cuvRecord = await saveCuvRecord({
-    cuv: ministry.cuv,
+    cuv: ciclo.cuv,
     numFactura: rips.numFactura,
     numDocumentoIdObligado: rips.numDocumentoIdObligado,
-    status: 'approved',
-    procesoId: ministry.procesoId,
-    fechaRadicacion: ministry.fechaRadicacion,
-    estado: ministry.estado,
-    source: ministry.source,
-    metadatos: { ...trazabilidad, ...ministry.metadatos, endpoint: ministry.endpoint },
+    status: ciclo.success ? 'approved' : 'cuv-sin-cufe',
+    procesoId: ciclo.procesoId,
+    fechaRadicacion: ciclo.fechaRadicacion,
+    estado: ciclo.estado,
+    source: ciclo.source,
+    metadatos: { ...trazabilidad, endpoint: ciclo.endpoint, ambiente: ciclo.ambiente, serie: ciclo.serie },
     clinicalRecordIds: metadatos?.clinicalRecordIds ?? [],
     patientUuid: metadatos?.patientUuid ?? null,
   })
 
-  // Paso C — el CUV entra al proveedor tecnológico.
-  const billing = await empaquetarConCuv({
-    cuv: ministry.cuv,
-    invoice: {
-      ...(invoice && typeof invoice === 'object' ? invoice : {}),
-      numFactura: invoice?.numFactura ?? invoice?.invoiceNumber ?? rips.numFactura,
-    },
-    provider: invoice?.provider,
-  })
-  if (!billing.success) {
-    return {
-      success: false,
-      approved: false,
-      cuv: ministry.cuv,
-      cuvRecordId: cuvRecord.id,
-      error: billing.error,
-    }
+  if (!ciclo.success) {
+    return { ...ciclo, cuvRecordId: cuvRecord.id }
   }
 
   let dianXml = null
   if (invoice) {
     dianXml = buildDianHealthInvoiceXml({
-      cuv: ministry.cuv,
+      cuv: ciclo.cuv,
       numFactura: rips.numFactura,
       ...invoice,
     })
     cuvRecord.dianXmlGenerated = true
   }
 
-  // Paso D — respuesta consolidada para el frontend.
   return {
-    status: 'EXITOSO',
-    success: true,
-    approved: true,
-    cuv: ministry.cuv,
-    cufe: billing.cufe,
-    pdfUrl: billing.pdfUrl,
-    provider: billing.provider,
-    procesoId: ministry.procesoId,
-    fechaRadicacion: ministry.fechaRadicacion,
-    estado: ministry.estado,
-    source: ministry.source,
-    localWarnings: ministry.localIssues ?? [],
+    ...ciclo,
+    localWarnings: ciclo.localIssues ?? [],
     cuvRecordId: cuvRecord.id,
     dianXml,
   }
@@ -124,8 +84,11 @@ export async function transmitirFevRips(req, res, next) {
         success: false,
         approved: false,
         source: result.source,
+        ambiente: result.ambiente,
+        serie: result.serie,
         localIssues: result.localIssues ?? [],
         ministryErrors: result.ministryErrors ?? [],
+        glosas: result.glosas ?? [],
         error: result.error,
         cuv: result.cuv,
       })

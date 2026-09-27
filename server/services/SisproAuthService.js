@@ -1,6 +1,4 @@
 import { createHash } from 'node:crypto'
-import { config, hasMinsaludCredentials } from '../config.js'
-import { muvClient } from './muvClient.js'
 
 /** Renueva el token 2 minutos antes de que venza, para no usarlo a mitad de un envío. */
 export const SISPRO_TOKEN_SKEW_MS = 120_000
@@ -11,10 +9,6 @@ export const SISPRO_TOKEN_MAX_TTL_MS = 50 * 60 * 1000
 const cache = new Map()
 /** @type {Map<string, Promise<string>>} */
 const enVuelo = new Map()
-
-function useSandbox() {
-  return config.minsalud.sandbox || !hasMinsaludCredentials()
-}
 
 function encodeBase64Url(value) {
   return Buffer.from(value).toString('base64url')
@@ -120,20 +114,7 @@ function guardarCache(key, token, expiresInSeconds) {
   return token
 }
 
-function buildLoginBody(credenciales) {
-  return {
-    persona: {
-      identificacion: {
-        tipo: credenciales.tipo,
-        numero: credenciales.numero,
-      },
-    },
-    clave: credenciales.clave,
-    nit: credenciales.nit,
-  }
-}
-
-function simulatedToken(credenciales) {
+export function crearTokenSandbox(credenciales) {
   const now = Math.floor(Date.now() / 1000)
   const claims = {
     sub: credenciales.numero,
@@ -149,22 +130,12 @@ function simulatedToken(credenciales) {
   return { token: `${header}.${payload}.${signature}`, expiresIn: 3600 }
 }
 
-async function solicitarToken(credenciales) {
-  if (useSandbox()) {
-    return simulatedToken(credenciales)
-  }
-
-  const session = await muvClient.loginSispro(buildLoginBody(credenciales))
-  return { token: session.token, expiresIn: session.expiresIn }
-}
-
 /**
- * POST /api/Auth/LoginSISPRO con las credenciales descifradas del prestador.
- * Reutiliza el Bearer token mientras su TTL seguro siga vigente.
+ * Reutiliza el JWT mientras el TTL siga vigente. `producer` hace el POST al MUV.
  * @param {object} credencialesDescifradas
- * @returns {Promise<string>}
+ * @param {(credenciales: object) => Promise<{ token: string, expiresIn?: number }>} producer
  */
-export async function obtenerBearerToken(credencialesDescifradas) {
+export async function withCachedSisproToken(credencialesDescifradas, producer) {
   const credenciales = normalizarCredencialesDescifradas(credencialesDescifradas)
   const key = cacheKey(credenciales)
   const cached = leerCache(key)
@@ -173,7 +144,8 @@ export async function obtenerBearerToken(credencialesDescifradas) {
   const pending = enVuelo.get(key)
   if (pending) return pending
 
-  const request = solicitarToken(credenciales)
+  const request = Promise.resolve()
+    .then(() => producer(credenciales))
     .then(({ token, expiresIn }) => guardarCache(key, token, expiresIn))
     .finally(() => {
       enVuelo.delete(key)
@@ -181,6 +153,16 @@ export async function obtenerBearerToken(credencialesDescifradas) {
 
   enVuelo.set(key, request)
   return request
+}
+
+/**
+ * POST /api/Auth/LoginSISPRO con las credenciales descifradas del prestador.
+ * @param {object} credencialesDescifradas
+ * @returns {Promise<string>}
+ */
+export async function obtenerBearerToken(credencialesDescifradas) {
+  const { minSaludAuth } = await import('./MinSaludAuthService.js')
+  return minSaludAuth.obtenerToken(credencialesDescifradas)
 }
 
 export function invalidarCacheSispro(credencialesDescifradas) {

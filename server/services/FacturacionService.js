@@ -20,9 +20,9 @@ export function resolveFevProvider(explicit) {
  * Empaqueta la FEV a partir del CUV del Ministerio y simula al proveedor
  * tecnológico (Alanube / Majim-e). Sin CUV no hay CUFE ni PDF.
  *
- * @param {{ cuv?: string, invoice?: object, provider?: string }} params
+ * @param {{ cuv?: string, invoice?: object, provider?: string, ambiente?: string, serie?: string | null }} params
  */
-export async function empaquetarConCuv({ cuv, invoice = {}, provider } = {}) {
+export async function empaquetarConCuv({ cuv, invoice = {}, provider, ambiente, serie } = {}) {
   const codigo = String(cuv ?? '').trim()
   if (!codigo) {
     return {
@@ -35,7 +35,9 @@ export async function empaquetarConCuv({ cuv, invoice = {}, provider } = {}) {
   const numFactura = invoice.numFactura ?? invoice.invoiceNumber ?? ''
   const issueDate = invoice.issueDate ?? ''
   const amount = invoice.payableAmount ?? invoice.amount ?? 0
-  const seed = `${codigo}|${numFactura}|${issueDate}|${amount}|${selected}`
+  const ambienteId = ambiente ?? invoice.ambiente ?? 'pruebas'
+  const serieHabilitacion = serie ?? invoice.serie ?? null
+  const seed = `${codigo}|${numFactura}|${issueDate}|${amount}|${selected}|${ambienteId}|${serieHabilitacion ?? ''}`
   const cufe = createHash('sha384').update(seed).digest('hex').toUpperCase()
   const pdfUrl = `${PDF_BASE[selected]}/${cufe}.pdf`
 
@@ -45,5 +47,7 @@ export async function empaquetarConCuv({ cuv, invoice = {}, provider } = {}) {
     cufe,
     pdfUrl,
     provider: selected,
+    ambiente: ambienteId,
+    serie: serieHabilitacion,
   }
 }

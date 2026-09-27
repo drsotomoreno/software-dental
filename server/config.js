@@ -44,6 +44,7 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   minsalud: {
     sandbox: process.env.MINSALUD_SANDBOX !== 'false',
+    ambiente: process.env.MINSALUD_AMBIENTE ?? 'pruebas',
     apiBaseUrl: (process.env.MINSALUD_API_BASE_URL ?? '').replace(/\/$/, ''),
     authUrl: process.env.MINSALUD_AUTH_URL ?? '',
     authPath: '/api/Auth/LoginSISPRO',
@@ -94,13 +95,22 @@ export const config = {
   },
 }
 
-/** Credenciales completas para modo producción contra el API del ministerio. */
+const HOST_MUV = 'https://muv.sispro.gov.co'
+
+/**
+ * Hay credenciales de Mi Seguridad Social y un host de MUV.
+ * Si no se define MINSALUD_API_BASE_URL, el ambiente usa el host oficial.
+ */
 export function hasMinsaludCredentials() {
-  const { clientId, clientSecret, username, password, apiBaseUrl } = config.minsalud
-  return Boolean(
-    apiBaseUrl &&
-      ((clientId && clientSecret) || (username && password)),
-  )
+  const { clientId, clientSecret, username, password, apiBaseUrl, ambiente } = config.minsalud
+  const id = String(ambiente ?? 'pruebas').trim().toLowerCase()
+  const porAmbiente =
+    id === 'produccion' || id === 'production'
+      ? process.env.MINSALUD_API_BASE_URL_PRODUCCION
+      : process.env.MINSALUD_API_BASE_URL_PRUEBAS
+  const host = String(porAmbiente || apiBaseUrl || HOST_MUV).replace(/\/$/, '')
+  const hasAuth = Boolean((clientId && clientSecret) || (username && password))
+  return Boolean(host && hasAuth)
 }
 
 export default config
