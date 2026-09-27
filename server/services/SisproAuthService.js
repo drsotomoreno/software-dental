@@ -81,11 +81,14 @@ export function normalizarCredencialesDescifradas(input) {
     throw error
   }
 
+  const tipoUsuario = String(input.tipoUsuario ?? 'RE').trim() || 'RE'
+
   return {
     tipo,
     numero,
     clave,
     nit,
+    tipoUsuario,
     codPrestador: codPrestador || undefined,
     tipoPrestador: 'independiente',
   }

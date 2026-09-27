@@ -39,6 +39,7 @@ export function buildCredencialesProfesionalIndependiente(override) {
     },
     clave: password || '',
     nit: nit || '',
+    tipoUsuario: 'RE',
     tipoPrestador: tipoPrestador || 'independiente',
   }
 
@@ -55,7 +56,11 @@ export function buildCredencialesProfesionalIndependiente(override) {
   return credenciales
 }
 
-function cuerpoLogin(credenciales) {
+/**
+ * Cuerpo de 8.1 LoginSispro. `tipoUsuario: "RE"` identifica al profesional independiente
+ * (representante de entidad) cuyo documento no coincide con el NIT de la DIAN.
+ */
+export function cuerpoLogin(credenciales) {
   return {
     persona: {
       identificacion: {
@@ -65,6 +70,7 @@ function cuerpoLogin(credenciales) {
     },
     clave: credenciales.clave,
     nit: credenciales.nit,
+    tipoUsuario: credenciales.tipoUsuario || 'RE',
   }
 }
 

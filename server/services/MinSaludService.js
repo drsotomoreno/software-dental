@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
-import { config } from '../config.js'
-import { extraerCuv, extraerGlosas, muvClient } from './muvClient.js'
+import { GZIP_UMBRAL_BYTES, interpretarRespuestaCargarFevRips, muvClient } from './muvClient.js'
 import { minSaludAuth, shouldUseMinsaludSandbox } from './MinSaludAuthService.js'
 import { resolveMuvAmbiente } from './muvAmbiente.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
@@ -98,8 +97,46 @@ export const odontologiaGeneralTransmisionSchema = fevRipsPackageSchema.superRef
 })
 
 function generateSandboxCuv() {
-  const segment = () => randomBytes(4).toString('hex').toUpperCase()
-  return `CUV-${segment()}-${segment()}-${segment()}`
+  return randomBytes(48).toString('hex')
+}
+
+function escapeXml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/** XML crudo se codifica en Base64. Un string que ya es Base64 se conserva. */
+export function codificarXmlFevFile(valor) {
+  const texto = String(valor ?? '').trim()
+  if (!texto) return ''
+  if (texto.startsWith('<')) return Buffer.from(texto, 'utf8').toString('base64')
+  return texto
+}
+
+/**
+ * Paquete 8.2 CargarFevRips: `{ rips, xmlFevFile }`.
+ * xmlFevFile es el AttachedDocument de la FEV en Base64.
+ */
+export function construirPaqueteCargarFevRips({ rips, xmlFevFile, xml, invoice } = {}) {
+  const directo = xmlFevFile || xml || invoice?.xmlFevFile || invoice?.xml
+  let encoded = codificarXmlFevFile(directo)
+  if (!encoded) {
+    const numFactura = rips?.numFactura ?? invoice?.numFactura ?? invoice?.invoiceNumber ?? ''
+    const nit = rips?.numDocumentoIdObligado ?? invoice?.nitEmisor ?? ''
+    const fecha = invoice?.issueDate ?? ''
+    const documento = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<AttachedDocument xmlns="urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>${escapeXml(numFactura)}</cbc:ID>
+  <cbc:IssueDate>${escapeXml(fecha)}</cbc:IssueDate>
+  <cbc:ParentDocumentID>${escapeXml(nit)}</cbc:ParentDocumentID>
+  <cbc:DocumentType>Factura electrónica de venta</cbc:DocumentType>
+</AttachedDocument>`
+    encoded = Buffer.from(documento, 'utf8').toString('base64')
+  }
+  return { rips, xmlFevFile: encoded }
 }
 
 function glosasToMinistryErrors(glosas) {
@@ -132,10 +169,11 @@ function localIssuesToGlosas(issues) {
     }))
 }
 
-function simulateMinistryCrossValidation(rips) {
+function simulateMinistryCrossValidation(paquete) {
   const errors = []
+  const rips = paquete?.rips ?? paquete
 
-  for (const usuario of rips.usuarios ?? []) {
+  for (const usuario of rips?.usuarios ?? []) {
     const age = getAgeYears(usuario.fechaNacimiento)
     for (const proc of usuario.servicios?.procedimientos ?? []) {
       const cups = String(proc.codProcedimiento ?? '').replace(/\D/g, '')
@@ -163,21 +201,23 @@ function getAgeYears(birthDate) {
   return age
 }
 
-function buildCargarFevRipsRequest(paquete, token) {
+function buildCargarFevRipsRequest(paquete, token, { gzip = false } = {}) {
   const ambiente = resolveMuvAmbiente()
   const path = ambiente.cargarPath
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    Authorization: `Bearer ${token}`,
+  }
+  if (gzip) headers['Content-Encoding'] = 'gzip'
   return {
     method: 'POST',
     url: `${ambiente.apiBaseUrl}${path}`,
     path,
     ambiente: ambiente.id,
     serie: ambiente.serie,
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
-      'X-NIT-Prestador': config.minsalud.nit || paquete.numDocumentoIdObligado,
-    },
+    gzip,
+    headers,
     body: paquete,
   }
 }
@@ -204,8 +244,11 @@ export class MinSaludService {
    * @param {object} params.rips
    * @param {object} [params.metadatos]
    * @param {object} [params.credenciales]
+   * @param {string} [params.xmlFevFile] AttachedDocument en Base64 o XML crudo
+   * @param {string} [params.xml]
+   * @param {object} [params.invoice]
    */
-  async transmitir({ rips, metadatos = {}, credenciales } = {}) {
+  async transmitir({ rips, metadatos = {}, credenciales, xmlFevFile, xml, invoice } = {}) {
     const localIssues = validateRipsPackageLocally(rips, {
       crossValidateAgeSex: true,
       perfilFiscal: metadatos.perfilFiscal,
@@ -250,7 +293,15 @@ export class MinSaludService {
     const token = await this.auth.obtenerToken(
       credenciales ?? metadatos.credencialesSispro ?? metadatos.credencialesDescifradas,
     )
-    const request = buildCargarFevRipsRequest(odontologia.data, token)
+    const paquete = construirPaqueteCargarFevRips({
+      rips: odontologia.data,
+      xmlFevFile: xmlFevFile ?? metadatos.xmlFevFile,
+      xml: xml ?? metadatos.xml,
+      invoice,
+    })
+    const gzip =
+      Boolean(metadatos.gzip) || Buffer.byteLength(JSON.stringify(paquete)) > GZIP_UMBRAL_BYTES
+    const request = buildCargarFevRipsRequest(paquete, token, { gzip })
     if (!request.headers.Authorization?.startsWith('Bearer ')) {
       const glosas = [
         {
@@ -290,26 +341,30 @@ export class MinSaludService {
         status: 200,
         data: {
           ResultState: true,
-          codigoUnicoValidacion: generateSandboxCuv(),
-          ProcesoId: `PROC-${Date.now()}`,
+          CodigoUnicoValidacion: generateSandboxCuv(),
+          ProcesoId: Date.now(),
+          NumFactura: request.body?.rips?.numFactura ?? null,
           FechaRadicacion: new Date().toISOString(),
-          Estado: 'APROBADO',
+          ResultadosValidacion: [],
         },
       }
     }
 
     const bearer = String(request.headers.Authorization ?? '').replace(/^Bearer\s+/i, '')
     try {
-      const result = await this.client.cargarFevRips(request.body, { token: bearer })
+      const result = await this.client.cargarFevRips(request.body, {
+        token: bearer,
+        gzip: request.gzip,
+      })
       return {
         ok: true,
         status: 200,
-        data: {
+        data: result.raw ?? {
           ResultState: true,
-          codigoUnicoValidacion: result.cuv,
+          CodigoUnicoValidacion: result.cuv,
           ProcesoId: result.procesoId,
           FechaRadicacion: result.fechaRadicacion,
-          Estado: result.estado ?? 'APROBADO',
+          ResultadosValidacion: result.notificaciones ?? [],
         },
       }
     } catch (error) {
@@ -331,58 +386,42 @@ export class MinSaludService {
   mapMinistryResult(httpResult, localIssues, metadatos, request) {
     const source = shouldUseMinsaludSandbox() ? 'sandbox' : 'minsalud'
     const data = httpResult.data ?? {}
-    const cuv = extraerCuv(data)
-
-    if (!httpResult.ok) {
-      const glosas = extraerGlosas(data)
-      return {
-        success: false,
-        source,
-        httpStatus: httpResult.status,
-        endpoint: request.path,
-        ambiente: request.ambiente,
-        serie: request.serie,
-        localIssues,
-        glosas,
-        ministryErrors: glosasToMinistryErrors(glosas),
-        raw: data,
-      }
+    const lectura = interpretarRespuestaCargarFevRips(data)
+    const base = {
+      source,
+      endpoint: request.path,
+      ambiente: request.ambiente,
+      serie: request.serie,
+      localIssues,
+      notificaciones: lectura.notificaciones,
+      informes: lectura.informes,
     }
 
-    const approved =
-      data.ResultState === true ||
-      data.resultState === true ||
-      data.estado === 'APROBADO' ||
-      Boolean(cuv)
-
-    if (!approved || !cuv) {
-      const glosas = extraerGlosas(data)
+    if (!httpResult.ok || !lectura.success) {
+      const glosas = lectura.rechazos.length ? lectura.rechazos : lectura.informes
       return {
+        ...base,
         success: false,
-        source,
-        endpoint: request.path,
-        ambiente: request.ambiente,
-        serie: request.serie,
-        localIssues,
+        httpStatus: httpResult.status,
         glosas,
         ministryErrors: glosasToMinistryErrors(glosas),
+        mensaje: lectura.mensaje,
+        error: lectura.mensaje,
         raw: data,
       }
     }
 
     return {
+      ...base,
       success: true,
-      source,
-      endpoint: request.path,
-      ambiente: request.ambiente,
-      serie: request.serie,
       localIssues: localIssues.filter((issue) => issue.level === 'warning'),
       glosas: [],
       ministryErrors: [],
-      cuv,
-      procesoId: data.ProcesoId ?? data.procesoId,
-      fechaRadicacion: data.FechaRadicacion ?? data.fechaRadicacion ?? new Date().toISOString(),
-      estado: data.Estado ?? data.estado ?? 'APROBADO',
+      cuv: lectura.cuv,
+      procesoId: lectura.procesoId,
+      fechaRadicacion: lectura.fechaRadicacion ?? new Date().toISOString(),
+      estado: 'APROBADO',
+      mensaje: lectura.mensaje,
       metadatos,
       raw: shouldUseMinsaludSandbox() ? undefined : data,
     }

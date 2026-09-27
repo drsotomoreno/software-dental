@@ -51,6 +51,7 @@ export interface RipsValidateSuccessResponse {
   estado?: string
   source: 'sandbox' | 'minsalud' | 'local'
   localWarnings?: import('./rips').RipsValidationIssue[]
+  notificaciones?: Array<{ codigo: string; descripcion: string; mensaje: string; clase?: string }>
   cuvRecordId: string
   dianXml?: string
 }

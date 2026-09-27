@@ -89,6 +89,8 @@ export async function transmitirFevRips(req, res, next) {
         localIssues: result.localIssues ?? [],
         ministryErrors: result.ministryErrors ?? [],
         glosas: result.glosas ?? [],
+        informes: result.informes ?? [],
+        notificaciones: result.notificaciones ?? [],
         error: result.error,
         cuv: result.cuv,
       })

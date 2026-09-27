@@ -18,7 +18,14 @@ export class FacturacionOrchestrator {
    */
   async ejecutar({ rips, invoice, metadatos = {}, credenciales } = {}) {
     const ambiente = resolveMuvAmbiente()
-    const ministry = await this.minsalud.transmitir({ rips, metadatos, credenciales })
+    const ministry = await this.minsalud.transmitir({
+      rips,
+      metadatos,
+      credenciales,
+      xmlFevFile: invoice?.xmlFevFile ?? metadatos.xmlFevFile,
+      xml: invoice?.xml ?? metadatos.xml,
+      invoice,
+    })
 
     if (!ministry.success || !ministry.cuv) {
       return {
@@ -32,8 +39,10 @@ export class FacturacionOrchestrator {
         localIssues: ministry.localIssues ?? [],
         ministryErrors: ministry.ministryErrors ?? [],
         glosas: ministry.glosas ?? [],
+        notificaciones: ministry.notificaciones ?? [],
+        informes: ministry.informes ?? [],
         httpStatus: ministry.httpStatus,
-        error: 'El Ministerio no devolvió CUV.',
+        error: ministry.mensaje || ministry.error || 'El Ministerio no devolvió CUV.',
       }
     }
 
@@ -77,6 +86,8 @@ export class FacturacionOrchestrator {
       ambiente: ambiente.id,
       serie: ambiente.serie,
       glosas: [],
+      notificaciones: ministry.notificaciones ?? [],
+      informes: ministry.notificaciones ?? [],
       procesoId: ministry.procesoId,
       fechaRadicacion: ministry.fechaRadicacion,
       estado: ministry.estado,

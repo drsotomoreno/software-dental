@@ -1,3 +1,4 @@
+import { gzipSync } from 'node:zlib'
 import { config } from '../config.js'
 import { resolveMuvAmbiente } from './muvAmbiente.js'
 
@@ -33,8 +34,81 @@ export class MuvApiError extends Error {
   }
 }
 
+/** CodigoUnicoValidacion del numeral 8.13: 96 caracteres hexadecimales. */
+export const CUV_LONGITUD = 96
+export const CUV_HEX_PATTERN = /^[0-9a-fA-F]{96}$/
+/** El manual recomienda gzip a partir de 50 MB. */
+export const GZIP_UMBRAL_BYTES = 50 * 1024 * 1024
+
 export function extraerCuv(data) {
-  return data?.codigoUnicoValidacion ?? data?.CodigoUnicoValidacion ?? data?.CUV ?? data?.cuv ?? null
+  const raw = data?.CodigoUnicoValidacion ?? data?.codigoUnicoValidacion ?? data?.CUV ?? data?.cuv ?? null
+  if (typeof raw !== 'string') return null
+  const compact = raw.replace(/\s+/g, '')
+  return compact || null
+}
+
+export function esCodigoUnicoValidacion(value) {
+  return CUV_HEX_PATTERN.test(String(value ?? '').replace(/\s+/g, ''))
+}
+
+/**
+ * Una fila de ResultadosValidacion, lista para mostrarla al odontólogo.
+ * @param {object} item
+ */
+export function formatearResultadoValidacion(item) {
+  const claseRaw = String(item?.clase ?? item?.Clase ?? 'RECHAZADO').trim().toUpperCase()
+  const clase = claseRaw === 'NOTIFICACION' ? 'NOTIFICACION' : 'RECHAZADO'
+  const codigo = String(item?.codigo ?? item?.Codigo ?? item?.code ?? 'MUV').trim() || 'MUV'
+  const descripcion = String(
+    item?.descripcion ??
+      item?.Descripcion ??
+      item?.Observaciones ??
+      item?.observaciones ??
+      item?.message ??
+      'El Ministerio reportó una validación sin descripción.',
+  ).trim()
+  const prefijo = clase === 'NOTIFICACION' ? 'Notificación' : 'Rechazo'
+  return {
+    clase,
+    codigo,
+    descripcion,
+    observaciones: item?.observaciones ?? item?.Observaciones ?? null,
+    pathFuente: item?.pathFuente ?? item?.PathFuente ?? item?.Campo ?? item?.field ?? null,
+    fuente: item?.fuente ?? item?.Fuente ?? null,
+    mensaje: `${prefijo} ${codigo}: ${descripcion}`,
+  }
+}
+
+/**
+ * Lee el response 8.13. El CUV solo es válido con ResultState true y 96 hexadecimales.
+ * @param {object} data
+ */
+export function interpretarRespuestaCargarFevRips(data) {
+  const resultState = data?.ResultState === true || data?.resultState === true
+  const cuv = String(extraerCuv(data) ?? '')
+  const informes = extraerGlosas(data).map(formatearResultadoValidacion)
+  const notificaciones = informes.filter((item) => item.clase === 'NOTIFICACION')
+  const rechazos = informes.filter((item) => item.clase === 'RECHAZADO')
+  const cuvValido = resultState && esCodigoUnicoValidacion(cuv) && rechazos.length === 0
+  const visibles = cuvValido ? notificaciones : rechazos.length ? rechazos : informes
+  let mensaje = ''
+  if (visibles.length) mensaje = visibles.map((item) => item.mensaje).join(' · ')
+  else if (!cuvValido && !resultState) mensaje = 'El Ministerio rechazó el paquete FEV-RIPS.'
+  else if (!cuvValido) mensaje = 'El Ministerio no entregó un CodigoUnicoValidacion de 96 caracteres.'
+
+  return {
+    success: cuvValido,
+    resultState,
+    cuv: cuvValido ? cuv : null,
+    procesoId: data?.ProcesoId ?? data?.PorcesoID ?? data?.procesoId ?? null,
+    numFactura: data?.NumFactura ?? data?.numFactura ?? null,
+    fechaRadicacion: data?.FechaRadicacion ?? data?.fechaRadicacion ?? null,
+    ambiente: data?.Ambiente ?? null,
+    notificaciones,
+    rechazos,
+    informes,
+    mensaje,
+  }
 }
 
 export function extraerGlosas(payload) {
@@ -135,6 +209,8 @@ export function createMuvClient(options = {}) {
    * @param {Record<string, string>} [params.headers]
    */
   async function postJson({ endpoint, url, body, headers = {} }) {
+    const json = JSON.stringify(body)
+    const gzip = headers['Content-Encoding'] === 'gzip'
     let response
     try {
       response = await fetchImpl(url, {
@@ -144,7 +220,7 @@ export function createMuvClient(options = {}) {
           'Content-Type': 'application/json',
           ...headers,
         },
-        body: JSON.stringify(body),
+        body: gzip ? gzipSync(Buffer.from(json)) : json,
         signal: AbortSignal.timeout(timeoutMs),
       })
     } catch (error) {
@@ -201,6 +277,7 @@ export function createMuvClient(options = {}) {
         },
         clave: credenciales?.clave,
         nit: credenciales?.nit,
+        tipoUsuario: credenciales?.tipoUsuario || 'RE',
       },
     })
 
@@ -215,7 +292,7 @@ export function createMuvClient(options = {}) {
       })
     }
 
-    const token = data.token ?? data.access_token ?? data.accessToken
+    const token = data.token ?? data.Token
     if (!token) {
       throw new MuvApiError({
         code: 'AUTH',
@@ -253,53 +330,57 @@ export function createMuvClient(options = {}) {
       })
     }
 
+    const body =
+      paquete && typeof paquete === 'object' && paquete.rips && 'xmlFevFile' in paquete
+        ? { rips: paquete.rips, xmlFevFile: paquete.xmlFevFile }
+        : { rips: paquete, xmlFevFile: '' }
+
+    const headers = { Authorization: `Bearer ${token}` }
+    if (auth.gzip) headers['Content-Encoding'] = 'gzip'
+
     const { response, data } = await postJson({
       endpoint,
       url: urlFor(endpoint),
-      body: paquete,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'X-NIT-Prestador': String(config.minsalud.nit || paquete?.numDocumentoIdObligado || ''),
-      },
+      body,
+      headers,
     })
 
     if (!response.ok) {
       const validation = response.status === 400 || response.status === 422
+      const lectura = interpretarRespuestaCargarFevRips(data)
       throw new MuvApiError({
         code: validation ? 'VALIDACION' : 'HTTP',
         endpoint,
         status: response.status,
         retryable: RETRYABLE_STATUS.has(response.status),
-        message: validation
-          ? 'El MUV rechazó el paquete RIPS por validación.'
-          : `El MUV respondió HTTP ${response.status}.`,
-        details: extraerGlosas(redact(data)),
+        message: lectura.informes.length
+          ? lectura.mensaje
+          : validation
+            ? 'El MUV rechazó el paquete RIPS por validación.'
+            : `El MUV respondió HTTP ${response.status}.`,
+        details: lectura.informes.length ? lectura.informes : extraerGlosas(redact(data)),
       })
     }
 
-    const cuv = extraerCuv(data)
-    const approved =
-      data.ResultState === true ||
-      data.resultState === true ||
-      data.estado === 'APROBADO' ||
-      Boolean(cuv)
-
-    if (!approved) {
+    const lectura = interpretarRespuestaCargarFevRips(data)
+    if (!lectura.success) {
       throw new MuvApiError({
-        code: 'RECHAZO',
+        code: lectura.rechazos.length ? 'RECHAZO' : 'VALIDACION',
         endpoint,
         status: 422,
         retryable: false,
-        message: 'El MUV no aprobó el paquete RIPS.',
-        details: extraerGlosas(redact(data)),
+        message: lectura.mensaje,
+        details: lectura.rechazos.length ? lectura.rechazos : lectura.informes,
       })
     }
 
     return {
-      cuv,
-      procesoId: data.ProcesoId ?? data.procesoId,
-      fechaRadicacion: data.FechaRadicacion ?? data.fechaRadicacion,
-      estado: data.Estado ?? data.estado ?? 'APROBADO',
+      cuv: lectura.cuv,
+      procesoId: lectura.procesoId,
+      fechaRadicacion: lectura.fechaRadicacion,
+      estado: 'APROBADO',
+      notificaciones: lectura.notificaciones,
+      raw: data,
     }
   }
 

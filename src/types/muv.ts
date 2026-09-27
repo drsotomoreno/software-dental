@@ -11,6 +11,8 @@ export interface MuvLoginRequest {
   }
   clave: string
   nit: string
+  /** 8.1 LoginSispro. RE = profesional independiente. */
+  tipoUsuario?: 'RE' | 'PIN' | 'PINx' | 'PIE' | string
 }
 
 export interface MuvLoginResult {
@@ -19,11 +21,21 @@ export interface MuvLoginResult {
   login: boolean
 }
 
+export interface MuvResultadoValidacion {
+  clase: 'NOTIFICACION' | 'RECHAZADO'
+  codigo: string
+  descripcion: string
+  mensaje: string
+  pathFuente?: string | null
+  fuente?: string | null
+}
+
 export interface MuvCargarFevRipsResult {
   cuv: string
-  procesoId?: string
-  fechaRadicacion?: string
+  procesoId?: string | number | null
+  fechaRadicacion?: string | null
   estado?: string
+  notificaciones?: MuvResultadoValidacion[]
 }
 
 export interface MuvMinistryIssue {

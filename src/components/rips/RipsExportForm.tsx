@@ -581,6 +581,16 @@ export function RipsExportForm({
             Proceso: {cuvResult.procesoId ?? '—'} · Fuente: {cuvResult.source} · Estado:{' '}
             {cuvResult.estado ?? 'APROBADO'}
           </p>
+          {cuvResult.notificaciones && cuvResult.notificaciones.length > 0 && (
+            <ul className="mt-3 space-y-1 text-xs text-emerald-900">
+              {cuvResult.notificaciones.map((item) => (
+                <li key={`${item.codigo}-${item.descripcion}`}>
+                  <span className="font-semibold">{item.codigo}: </span>
+                  {item.descripcion}
+                </li>
+              ))}
+            </ul>
+          )}
           {cuvResult.dianXml && (
             <button
               type="button"
