@@ -3,6 +3,7 @@ import { pullClinicSnapshot } from './clinicalSyncStore.js'
 import { fevRipsPackageSchema } from './MinSaludService.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
 import { normalizePerfilFiscal, normalizeRipsNumFactura } from '../../shared/fiscalProfile.js'
+import { ValidadorRipsOdontologia2275 } from '../../shared/ripsOdontologia2275.js'
 
 const CUPS_PATTERN = /^\d{6}$/
 const CONSULTA_PREFIXES = ['8902', '8903', '8907']
@@ -474,8 +475,20 @@ export function generarRipsJson(input = {}) {
     crossValidateAgeSex: true,
     codPrestador: codPrestadorDe(prestador),
   })
-  const allIssues = [...issues, ...schemaIssues, ...localIssues]
-  const blocked = !parsed.success || hasBlockingValidationErrors(allIssues) || schemaIssues.length > 0
+  const odontologia = new ValidadorRipsOdontologia2275({
+    fechaGeneracion: new Date(),
+    profesional: {
+      tipoDocumento: prestador.documentType ?? 'CC',
+      numeroDocumento: prestador.documentNumber ?? '',
+      codPrestadorReps: codPrestadorDe(prestador),
+    },
+  }).validar(parsed.success ? parsed.data : draft)
+  const allIssues = [...issues, ...schemaIssues, ...localIssues, ...odontologia.errores]
+  const blocked =
+    !parsed.success ||
+    !odontologia.valido ||
+    hasBlockingValidationErrors(allIssues) ||
+    schemaIssues.length > 0
 
   if (blocked) {
     return {
