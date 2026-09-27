@@ -1,6 +1,6 @@
 import { Router } from 'express'
-import { submitRipsToMinsalud } from '../services/minsaludRipsClient.js'
-import { saveCuvRecord, getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
+import { transmitirFevRips } from '../controllers/ripsMotor.controller.js'
+import { getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
 import {
@@ -33,68 +33,9 @@ router.post('/mensual/enviar', runMonthlyRipsJob)
 
 /**
  * POST /api/rips/validate
- * Valida localmente y radica ante MinSalud; persiste CUV si es aprobado.
+ * SISPRO → CargarFevRips (CUV) → proveedor (CUFE + pdfUrl).
  */
-router.post('/validate', async (req, res, next) => {
-  try {
-    const { rips, metadatos, invoice } = req.body ?? {}
-
-    if (!rips) {
-      return res.status(400).json({ success: false, error: 'El cuerpo debe incluir el objeto rips.' })
-    }
-
-    const result = await submitRipsToMinsalud({ rips, metadatos })
-
-    if (!result.success) {
-      return res.status(422).json({
-        success: false,
-        approved: false,
-        source: result.source,
-        localIssues: result.localIssues ?? [],
-        ministryErrors: result.ministryErrors ?? [],
-      })
-    }
-
-    const cuvRecord = await saveCuvRecord({
-      cuv: result.cuv,
-      numFactura: rips.numFactura,
-      numDocumentoIdObligado: rips.numDocumentoIdObligado,
-      status: 'approved',
-      procesoId: result.procesoId,
-      fechaRadicacion: result.fechaRadicacion,
-      estado: result.estado,
-      source: result.source,
-      metadatos: { ...metadatos, ...result.metadatos },
-      clinicalRecordIds: metadatos?.clinicalRecordIds ?? [],
-      patientUuid: metadatos?.patientUuid ?? null,
-    })
-
-    let dianXml = null
-    if (invoice) {
-      dianXml = buildDianHealthInvoiceXml({
-        cuv: result.cuv,
-        numFactura: rips.numFactura,
-        ...invoice,
-      })
-      cuvRecord.dianXmlGenerated = true
-    }
-
-    res.json({
-      success: true,
-      approved: true,
-      cuv: result.cuv,
-      procesoId: result.procesoId,
-      fechaRadicacion: result.fechaRadicacion,
-      estado: result.estado,
-      source: result.source,
-      localWarnings: result.localIssues ?? [],
-      cuvRecordId: cuvRecord.id,
-      dianXml,
-    })
-  } catch (error) {
-    next(error)
-  }
-})
+router.post('/validate', transmitirFevRips)
 
 /**
  * POST /api/rips/validate-local

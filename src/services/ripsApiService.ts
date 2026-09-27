@@ -71,7 +71,10 @@ export interface DictatedEvolutionBillingResult {
   route?: FiscalBillingRoute
   perfilFiscal?: FiscalProfile
   numFactura?: string | null
+  status?: 'EXITOSO'
   cuv?: string | null
+  cufe?: string
+  pdfUrl?: string
   cuvRecordId?: string
   dianXml?: string | null
   pendingRips?: { id: string; numFactura: string | null; status: string }
