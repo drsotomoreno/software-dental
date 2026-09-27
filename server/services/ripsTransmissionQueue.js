@@ -108,6 +108,7 @@ export function isRetryableTransmissionError(resultOrError) {
     const code = resultOrError.code || resultOrError.cause?.code
     if (NETWORK_CODES.has(code)) return true
     if (resultOrError.name === 'TypeError') return true
+    if (resultOrError.retryable === true || resultOrError.code === 'RED') return true
     if (resultOrError instanceof Error) return false
   }
   const status = Number(resultOrError.httpStatus)

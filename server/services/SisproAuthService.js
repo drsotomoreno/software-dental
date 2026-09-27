@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { config, hasMinsaludCredentials } from '../config.js'
+import { muvClient } from './muvClient.js'
 
 /** Renueva el token 2 minutos antes de que venza, para no usarlo a mitad de un envío. */
 export const SISPRO_TOKEN_SKEW_MS = 120_000
@@ -132,11 +133,6 @@ function buildLoginBody(credenciales) {
   }
 }
 
-function loginUrl() {
-  const path = config.minsalud.authPath || '/api/Auth/LoginSISPRO'
-  return config.minsalud.authUrl || (config.minsalud.apiBaseUrl ? `${config.minsalud.apiBaseUrl}${path}` : path)
-}
-
 function simulatedToken(credenciales) {
   const now = Math.floor(Date.now() / 1000)
   const claims = {
@@ -158,40 +154,8 @@ async function solicitarToken(credenciales) {
     return simulatedToken(credenciales)
   }
 
-  const url = loginUrl()
-  if (!url.startsWith('http')) {
-    const error = new Error('MINSALUD_API_BASE_URL es obligatorio para LoginSISPRO.')
-    error.status = 502
-    throw error
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(buildLoginBody(credenciales)),
-  })
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok || data.login === false) {
-    const error = new Error('Autenticación SISPRO fallida')
-    error.status = 502
-    error.details = data?.errors ?? data?.message ?? null
-    throw error
-  }
-
-  const token = data.token ?? data.access_token ?? data.accessToken
-  if (!token) {
-    const error = new Error('Autenticación SISPRO fallida')
-    error.status = 502
-    throw error
-  }
-
-  return {
-    token,
-    expiresIn: data.expires_in ?? data.expiresIn,
-  }
+  const session = await muvClient.loginSispro(buildLoginBody(credenciales))
+  return { token: session.token, expiresIn: session.expiresIn }
 }
 
 /**

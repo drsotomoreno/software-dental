@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { config } from '../config.js'
 import { obtenerTokenSISPRO, shouldUseMinsaludSandbox } from './MinSaludAuthService.js'
+import { muvClient } from './muvClient.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
 
 const ripsLineaSchema = z.object({}).passthrough()
@@ -148,13 +149,34 @@ async function postCargarFevRips(request) {
     }
   }
 
-  const response = await fetch(request.url, {
-    method: 'POST',
-    headers: request.headers,
-    body: JSON.stringify(request.body),
-  })
-  const data = await response.json().catch(() => ({}))
-  return { ok: response.ok, status: response.status, data }
+  const bearer = String(request.headers.Authorization ?? '').replace(/^Bearer\s+/i, '')
+  try {
+    const result = await muvClient.cargarFevRips(request.body, { token: bearer })
+    return {
+      ok: true,
+      status: 200,
+      data: {
+        ResultState: true,
+        CUV: result.cuv,
+        ProcesoId: result.procesoId,
+        FechaRadicacion: result.fechaRadicacion,
+        Estado: result.estado ?? 'APROBADO',
+      },
+    }
+  } catch (error) {
+    if (error?.name === 'MuvApiError') {
+      return {
+        ok: false,
+        status: error.status || 502,
+        data: {
+          ResultState: false,
+          message: error.message,
+          Errores: error.details ?? [],
+        },
+      }
+    }
+    throw error
+  }
 }
 
 function mapMinistryResult(httpResult, localIssues, metadatos, request) {
