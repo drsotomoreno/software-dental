@@ -1,5 +1,6 @@
 import { db } from '@/db/database'
 import type { RipsValidadorRecord, SaveRipsValidadorInput } from '@/types/ripsValidador'
+import { validarEstructuraRips, type PaqueteRIPS } from '@/utils/ripsValidator'
 import {
   mapearRipsParaValidador,
   normalizarDocumentoRipsValidador,
@@ -15,11 +16,21 @@ function nowIso() {
  * Guarda el JSON del formulario en Dexie y devuelve el paquete que exige el validador.
  */
 export async function guardarRipsValidador(input: SaveRipsValidadorInput): Promise<{
-  registro: RipsValidadorRecord
+  isValid: boolean
+  errors: string[]
+  registro: RipsValidadorRecord | null
   documento: RipsValidadorDocumento
-  rips: ReturnType<typeof mapearRipsParaValidador>
+  rips: ReturnType<typeof mapearRipsParaValidador> | null
 }> {
   const documento = normalizarDocumentoRipsValidador(input.documento ?? input)
+  const estructura = validarEstructuraRips({
+    ...documento,
+    numFactura: documento.numFactura ?? '',
+  } as PaqueteRIPS)
+  if (!estructura.isValid) {
+    return { isValid: false, errors: estructura.errors, registro: null, documento, rips: null }
+  }
+
   const id = input.id?.trim() || crypto.randomUUID()
   const previous = await db.ripsValidador.get(id)
   const registro: RipsValidadorRecord = {
@@ -33,6 +44,8 @@ export async function guardarRipsValidador(input: SaveRipsValidadorInput): Promi
   }
   await db.ripsValidador.put(registro)
   return {
+    isValid: true,
+    errors: [],
     registro,
     documento,
     rips: mapearRipsParaValidador(documento, { profesional: registro.profesional ?? undefined }),
