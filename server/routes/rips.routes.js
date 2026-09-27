@@ -1,6 +1,12 @@
 import { Router } from 'express'
 import { transmitirFevRips } from '../controllers/ripsMotor.controller.js'
 import { generarRipsDesdeBaseDatos, generarRipsJson } from '../services/RipsJsonGenerator.js'
+import {
+  encolarPaquetesRips,
+  listarAuditoria,
+  listarCola,
+  obtenerTrabajo,
+} from '../services/ripsTransmissionQueue.js'
 import { getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
@@ -44,6 +50,68 @@ router.post('/generar', async (req, res, next) => {
       ? await generarRipsDesdeBaseDatos(body)
       : generarRipsJson(body)
     return res.status(result.ok ? 200 : 422).json(result)
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * POST /api/rips/cola
+ * Encola paquetes para transmisión asíncrona al MUV. Body: { paquetes: [{ rips, metadatos }] }
+ * o un solo { rips, metadatos }.
+ */
+router.post('/cola', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const paquetes = Array.isArray(body.paquetes)
+      ? body.paquetes
+      : body.rips
+        ? [{ rips: body.rips, metadatos: body.metadatos, credenciales: body.credenciales }]
+        : []
+    const jobs = await encolarPaquetesRips(paquetes)
+    return res.status(202).json({ success: true, accepted: jobs.length, jobs })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * GET /api/rips/cola
+ * Estado de la cola de transmisión.
+ */
+router.get('/cola', async (req, res, next) => {
+  try {
+    const jobs = await listarCola({ limit: Number(req.query.limit ?? 50) })
+    return res.json({ success: true, jobs })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * GET /api/rips/cola/:id
+ */
+router.get('/cola/:id', async (req, res, next) => {
+  try {
+    const job = await obtenerTrabajo(req.params.id)
+    if (!job) return res.status(404).json({ success: false, error: 'Trabajo no encontrado.' })
+    return res.json({ success: true, job })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * GET /api/rips/auditoria
+ * Bitácora de cada encolado, intento, reintento y resultado ante el MUV.
+ */
+router.get('/auditoria', async (req, res, next) => {
+  try {
+    const logs = await listarAuditoria({
+      jobId: req.query.jobId ? String(req.query.jobId) : undefined,
+      limit: Number(req.query.limit ?? 100),
+    })
+    return res.json({ success: true, logs })
   } catch (error) {
     next(error)
   }
