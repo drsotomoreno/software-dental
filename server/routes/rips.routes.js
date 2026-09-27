@@ -17,6 +17,11 @@ import {
 } from '../services/ripsTemporalStore.js'
 import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.controller.js'
 import { getMonthlyRipsStatus, runMonthlyRipsJob } from '../controllers/monthlyRips.controller.js'
+import {
+  guardarRipsValidador,
+  listarRipsValidador,
+  obtenerRipsValidador,
+} from '../services/ripsValidadorStore.js'
 
 const router = Router()
 
@@ -274,6 +279,49 @@ router.post('/temporales', async (req, res, next) => {
     })
 
     res.json({ success: true, record })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * POST /api/rips/validador
+ * Guarda el JSON del formulario y lo mapea al paquete que exige el validador.
+ */
+router.post('/validador', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    if (!body.usuarios && !body.documento) {
+      return res.status(400).json({
+        success: false,
+        error: 'El cuerpo debe incluir el documento RIPS con usuarios.',
+      })
+    }
+    const result = await guardarRipsValidador(body)
+    return res.status(result.validacion.valido ? 200 : 422).json({
+      success: result.validacion.valido,
+      ...result,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/validador', async (req, res, next) => {
+  try {
+    const clinicId = typeof req.query.clinicId === 'string' ? req.query.clinicId : undefined
+    const registros = await listarRipsValidador(clinicId)
+    return res.json({ success: true, registros })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/validador/:id', async (req, res, next) => {
+  try {
+    const result = await obtenerRipsValidador(req.params.id)
+    if (!result) return res.status(404).json({ success: false, error: 'No se encontró el RIPS.' })
+    return res.json({ success: true, ...result })
   } catch (error) {
     next(error)
   }
