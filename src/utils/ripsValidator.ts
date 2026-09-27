@@ -142,7 +142,7 @@ export function validarEstructuraRips(data: PaqueteRIPS): { isValid: boolean; er
       const codConsulta = exigirTexto(consulta?.codConsulta, `${campo}: codConsulta`, errors)
       if (codConsulta.startsWith('89') && !codConsulta.endsWith('03')) {
         errors.push(
-          `${campo}: Las consultas de odontología general deben utilizar subcategorías terminadas en .03.`,
+          `${campo}: Las consultas de odontología general deben usar subcategorías terminadas en .03.`,
         )
       }
 

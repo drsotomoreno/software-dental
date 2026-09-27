@@ -1,5 +1,6 @@
 import { db } from '@/db/database'
 import type { EstadoValidacionRips, LocalRipsRecord } from '@/db/localRipsDatabase'
+import type { RipsTransaction } from '@/types/rips'
 import { validarEstructuraRips, type PaqueteRIPS } from '@/utils/ripsValidator'
 
 export interface GuardarRipsLocalInput {
@@ -80,6 +81,66 @@ export async function listarRipsLocales(estado?: EstadoValidacionRips): Promise<
 
 export async function listarRipsLocalesPorFactura(numFactura: string): Promise<LocalRipsRecord[]> {
   return db.ripsRecords.where('numFactura').equals(numFactura).toArray()
+}
+
+/**
+ * Toma el JSON oficial de salida y lo deja en la forma que revisa el validador local.
+ */
+export function paqueteDesdeRipsOficial(rips: RipsTransaction): PaqueteRIPS {
+  return {
+    numDocumentoIdObligado: rips.numDocumentoIdObligado,
+    numFactura: rips.numFactura ?? '',
+    tipoNota: rips.tipoNota,
+    numNota: rips.numNota,
+    usuarios: (rips.usuarios ?? []).map((usuario) => ({
+      tipoDocumentoIdentificacion: usuario.tipoDocumentoIdentificacion,
+      numDocumentoIdentificacion: usuario.numDocumentoIdentificacion,
+      tipoUsuario: usuario.tipoUsuario,
+      fechaNacimiento: usuario.fechaNacimiento,
+      sexo: usuario.codSexo as 'M' | 'F',
+      servicios: {
+        consultas: (usuario.servicios?.consultas ?? []).map((consulta) => ({
+          codPrestador: consulta.codPrestador,
+          fechaHoraInicioAtencion: consulta.fechaInicioAtencion,
+          codConsulta: consulta.codConsulta,
+          modalidadGrupoServicioTecnol: consulta.modalidadGrupoServicioTecSal,
+          grupoServicios: consulta.grupoServicios,
+          codServicio: consulta.codServicio,
+          finalidadTecnologiaSalud: consulta.finalidadTecnologiaSalud,
+          causaExterna: consulta.causaMotivoAtencion,
+          tipoDiagnosticoPrincipal: consulta.tipoDiagnosticoPrincipal,
+          codDiagnosticoPrincipal: consulta.codDiagnosticoPrincipal,
+          valorConsulta: consulta.vrServicio,
+          conceptoRecaudo: consulta.conceptoRecaudo,
+          valorPagoModerador: consulta.valorPagoModerador,
+        })),
+        procedimientos: usuario.servicios?.procedimientos ?? [],
+      },
+    })),
+  }
+}
+
+/**
+ * Valida la consulta odontológica y la guarda en Dexie antes de generar el archivo de salida.
+ * Un CUPS 89 que no termina en 03 queda RECHAZADO y no debe exportarse.
+ */
+export async function guardarYValidarRipsLocalmente(
+  paquete: PaqueteRIPS,
+): Promise<{ success: boolean; errors: string[] }> {
+  const errors = validarEstructuraRips(paquete).errors
+  const record: LocalRipsRecord = {
+    numFactura: paquete.numFactura || 'SIN_FACTURA',
+    numDocumentoIdObligado: paquete.numDocumentoIdObligado,
+    tipoNota: paquete.tipoNota,
+    payloadJson: JSON.stringify(paquete, null, 2),
+    estadoValidacion: errors.length === 0 ? 'VALIDO' : 'RECHAZADO',
+    createdAt: new Date(),
+  }
+  await db.ripsRecords.add(record)
+  return {
+    success: errors.length === 0,
+    errors,
+  }
 }
 
 export async function asignarCuvRipsLocal(id: number, cuv: string): Promise<LocalRipsRecord | undefined> {
