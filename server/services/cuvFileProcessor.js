@@ -56,6 +56,7 @@ export async function procesarArchivoResultadosMSPS(rutaArchivo, numFactura) {
     numFactura,
     status: 'approved',
     estado: parsed.estado,
+    estadoValidacion: 'APROBADO',
     mensaje: parsed.mensaje,
     fechaRadicacion: parsed.fecha || new Date().toISOString(),
     source: 'msps-file',
