@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
+import { TOKEN_MARGEN_MS, TOKEN_VIGENCIA_MS } from '../../shared/ministerioSesion.js'
 
-/** Renueva el token 2 minutos antes de que venza, para no usarlo a mitad de un envío. */
-export const SISPRO_TOKEN_SKEW_MS = 120_000
-/** Tope de vida en caché aunque el Ministerio entregue un JWT más largo. */
-export const SISPRO_TOKEN_MAX_TTL_MS = 50 * 60 * 1000
+/** No reutilizar el token si le quedan 5 minutos o menos (rechazo TOT003). */
+export const SISPRO_TOKEN_SKEW_MS = TOKEN_MARGEN_MS
+/** Tope de vida en caché: 1 h 55 min, por debajo de las 2 horas del Ministerio. */
+export const SISPRO_TOKEN_MAX_TTL_MS = TOKEN_VIGENCIA_MS
 
 /** @type {Map<string, { token: string, expiresAtMs: number }>} */
 const cache = new Map()
@@ -38,7 +39,7 @@ export function calcularVencimientoCache(token, expiresInSeconds, now = Date.now
     Number.isFinite(Number(expiresInSeconds)) && Number(expiresInSeconds) > 0
       ? now + Number(expiresInSeconds) * 1000
       : null
-  const absolute = readJwtExpMs(token) ?? fromBody ?? now + 60 * 60 * 1000
+  const absolute = readJwtExpMs(token) ?? fromBody ?? now + SISPRO_TOKEN_MAX_TTL_MS
   const expiresAtMs = Math.min(absolute, now + SISPRO_TOKEN_MAX_TTL_MS)
   return {
     expiresAtMs,
@@ -166,6 +167,16 @@ export async function withCachedSisproToken(credencialesDescifradas, producer) {
 export async function obtenerBearerToken(credencialesDescifradas) {
   const { minSaludAuth } = await import('./MinSaludAuthService.js')
   return minSaludAuth.obtenerToken(credencialesDescifradas)
+}
+
+/** Vencimiento guardado en caché, o null si el token no se reutiliza. */
+export function vencimientoCacheSispro(credencialesDescifradas) {
+  try {
+    const credenciales = normalizarCredencialesDescifradas(credencialesDescifradas)
+    return cache.get(cacheKey(credenciales))?.expiresAtMs ?? null
+  } catch {
+    return null
+  }
 }
 
 export function invalidarCacheSispro(credencialesDescifradas) {

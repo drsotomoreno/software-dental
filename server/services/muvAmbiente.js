@@ -1,21 +1,25 @@
 import { config } from '../config.js'
-
-const HOST_MUV = 'https://muv.sispro.gov.co'
+import {
+  HOST_MUV_PRODUCCION,
+  HOST_STAGE_FEVRIPS,
+  hostMuvPorAmbiente,
+  normalizarAmbiente,
+} from '../../shared/ministerioSesion.js'
 
 /**
- * Ambiente del MUV. Pruebas usa la serie 5.x de habilitación;
- * producción usa la operación real. La URL base se puede reemplazar por entorno.
+ * Ambiente del MUV. Pruebas (serie 5.x) usa stage-fevrips;
+ * producción usa el MUV real. La URL base se puede reemplazar por entorno.
  */
 export function resolveMuvAmbiente() {
-  const raw = String(process.env.MINSALUD_AMBIENTE ?? config.minsalud.ambiente ?? 'pruebas')
-    .trim()
-    .toLowerCase()
-  const id = raw === 'produccion' || raw === 'production' ? 'produccion' : 'pruebas'
+  const id = normalizarAmbiente(process.env.MINSALUD_AMBIENTE ?? config.minsalud.ambiente ?? 'pruebas')
   const porAmbiente =
     id === 'produccion'
       ? process.env.MINSALUD_API_BASE_URL_PRODUCCION
       : process.env.MINSALUD_API_BASE_URL_PRUEBAS
-  const apiBaseUrl = (porAmbiente || config.minsalud.apiBaseUrl || HOST_MUV).replace(/\/$/, '')
+  const apiBaseUrl = (porAmbiente || config.minsalud.apiBaseUrl || hostMuvPorAmbiente(id)).replace(
+    /\/$/,
+    '',
+  )
 
   return {
     id,
@@ -24,6 +28,8 @@ export function resolveMuvAmbiente() {
     apiBaseUrl,
     authPath: config.minsalud.authPath || '/api/Auth/LoginSISPRO',
     cargarPath: config.minsalud.validatePath || '/api/PaquetesFevRips/CargarFevRips',
-    hostOficial: HOST_MUV,
+    hostOficial: id === 'produccion' ? HOST_MUV_PRODUCCION : HOST_STAGE_FEVRIPS,
+    hostPruebas: HOST_STAGE_FEVRIPS,
+    hostProduccion: HOST_MUV_PRODUCCION,
   }
 }

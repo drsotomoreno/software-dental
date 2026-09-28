@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { GZIP_UMBRAL_BYTES, interpretarRespuestaCargarFevRips, muvClient } from './muvClient.js'
+import { esRechazoTot003 } from '../../shared/ministerioSesion.js'
 import { minSaludAuth, shouldUseMinsaludSandbox } from './MinSaludAuthService.js'
 import { resolveMuvAmbiente } from './muvAmbiente.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
@@ -192,6 +193,10 @@ function simulateMinistryCrossValidation(paquete) {
   return errors
 }
 
+function sesionMinisterioExpirada(httpResult) {
+  return Boolean(httpResult?.sesionExpirada) || esRechazoTot003(httpResult?.data)
+}
+
 function getAgeYears(birthDate) {
   const born = new Date(birthDate)
   const now = new Date()
@@ -290,9 +295,9 @@ export class MinSaludService {
       }
     }
 
-    const token = await this.auth.obtenerToken(
-      credenciales ?? metadatos.credencialesSispro ?? metadatos.credencialesDescifradas,
-    )
+    const credencialesToken =
+      credenciales ?? metadatos.credencialesSispro ?? metadatos.credencialesDescifradas
+    let token = await this.auth.obtenerToken(credencialesToken)
     const paquete = construirPaqueteCargarFevRips({
       rips: odontologia.data,
       xmlFevFile: xmlFevFile ?? metadatos.xmlFevFile,
@@ -301,7 +306,7 @@ export class MinSaludService {
     })
     const gzip =
       Boolean(metadatos.gzip) || Buffer.byteLength(JSON.stringify(paquete)) > GZIP_UMBRAL_BYTES
-    const request = buildCargarFevRipsRequest(paquete, token, { gzip })
+    let request = buildCargarFevRipsRequest(paquete, token, { gzip })
     if (!request.headers.Authorization?.startsWith('Bearer ')) {
       const glosas = [
         {
@@ -321,7 +326,13 @@ export class MinSaludService {
       }
     }
 
-    const httpResult = await this.postCargarFevRips(request)
+    let httpResult = await this.postCargarFevRips(request)
+    if (sesionMinisterioExpirada(httpResult)) {
+      this.auth.invalidar?.(credencialesToken)
+      token = await this.auth.obtenerToken(credencialesToken)
+      request = buildCargarFevRipsRequest(paquete, token, { gzip })
+      httpResult = await this.postCargarFevRips(request)
+    }
     return this.mapMinistryResult(httpResult, localIssues, metadatos, request)
   }
 
@@ -372,6 +383,7 @@ export class MinSaludService {
         return {
           ok: false,
           status: error.status || 502,
+          sesionExpirada: Boolean(error.sesionExpirada) || esRechazoTot003(error),
           data: {
             ResultState: false,
             message: error.message,

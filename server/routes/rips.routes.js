@@ -22,6 +22,10 @@ import {
   listarRipsValidador,
   obtenerRipsValidador,
 } from '../services/ripsValidadorStore.js'
+import {
+  enviarPaqueteAlMinisterio,
+  obtenerSesionMinisterio,
+} from '../services/ministerioPaquete.js'
 
 const router = Router()
 
@@ -312,6 +316,41 @@ router.get('/validador', async (req, res, next) => {
     const clinicId = typeof req.query.clinicId === 'string' ? req.query.clinicId : undefined
     const registros = await listarRipsValidador(clinicId)
     return res.json({ success: true, registros })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * POST /api/rips/ministerio/token
+ * LoginSISPRO contra el ambiente activo. Reutiliza el token si le quedan más de 5 minutos.
+ * Body: { tipoUsuario, documento, nit }
+ */
+router.post('/ministerio/token', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const sesion = await obtenerSesionMinisterio(body.tipoUsuario, body.documento, body.nit)
+    return res.json({ token: sesion.token, expiresAt: sesion.expiresAt })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * POST /api/rips/ministerio/paquete
+ * CargarFevRips con { rips, xmlFevFile }. Ante TOT003 renueva la sesión una vez.
+ * Body: { xmlFev, jsonRips, credenciales: { tipoUsuario, documento, nit } }
+ */
+router.post('/ministerio/paquete', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const credenciales = body.credenciales ?? {}
+    const result = await enviarPaqueteAlMinisterio(body.xmlFev, body.jsonRips, {
+      tipoUsuario: credenciales.tipoUsuario,
+      documento: credenciales.documento,
+      nit: credenciales.nit,
+    })
+    return res.json(result)
   } catch (error) {
     next(error)
   }

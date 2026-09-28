@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
+import { hostMuvPorAmbiente, normalizarAmbiente } from '../shared/ministerioSesion.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const port = Number(process.env.PORT ?? 3000)
@@ -95,20 +96,18 @@ export const config = {
   },
 }
 
-const HOST_MUV = 'https://muv.sispro.gov.co'
-
 /**
  * Hay credenciales de Mi Seguridad Social y un host de MUV.
- * Si no se define MINSALUD_API_BASE_URL, el ambiente usa el host oficial.
+ * Sin MINSALUD_API_BASE_URL, pruebas usa stage-fevrips y producción el MUV real.
  */
 export function hasMinsaludCredentials() {
   const { clientId, clientSecret, username, password, apiBaseUrl, ambiente } = config.minsalud
-  const id = String(ambiente ?? 'pruebas').trim().toLowerCase()
+  const id = normalizarAmbiente(ambiente)
   const porAmbiente =
-    id === 'produccion' || id === 'production'
+    id === 'produccion'
       ? process.env.MINSALUD_API_BASE_URL_PRODUCCION
       : process.env.MINSALUD_API_BASE_URL_PRUEBAS
-  const host = String(porAmbiente || apiBaseUrl || HOST_MUV).replace(/\/$/, '')
+  const host = String(porAmbiente || apiBaseUrl || hostMuvPorAmbiente(id)).replace(/\/$/, '')
   const hasAuth = Boolean((clientId && clientSecret) || (username && password))
   return Boolean(host && hasAuth)
 }

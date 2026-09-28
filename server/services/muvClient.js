@@ -1,6 +1,7 @@
 import { gzipSync } from 'node:zlib'
 import { config } from '../config.js'
 import { resolveMuvAmbiente } from './muvAmbiente.js'
+import { esRechazoTot003 } from '../../shared/ministerioSesion.js'
 
 export const MUV_LOGIN_PATH = '/api/Auth/LoginSISPRO'
 export const MUV_CARGAR_FEV_RIPS_PATH = '/api/PaquetesFevRips/CargarFevRips'
@@ -163,6 +164,14 @@ function redact(value) {
   return out
 }
 
+function errorMuv(params, data) {
+  const error = new MuvApiError(params)
+  if (esRechazoTot003(data) || esRechazoTot003(params.details) || esRechazoTot003(params.message)) {
+    error.sesionExpirada = true
+  }
+  return error
+}
+
 function joinUrl(baseUrl, path) {
   const base = String(baseUrl ?? '').replace(/\/$/, '')
   const suffix = path.startsWith('/') ? path : `/${path}`
@@ -282,14 +291,17 @@ export function createMuvClient(options = {}) {
     })
 
     if (!response.ok || data.login === false) {
-      throw new MuvApiError({
-        code: 'AUTH',
-        endpoint,
-        status: response.status || 401,
-        retryable: RETRYABLE_STATUS.has(response.status),
-        message: typeof data.message === 'string' ? data.message : 'Autenticación SISPRO fallida.',
-        details: normalizeIssues(redact(data)),
-      })
+      throw errorMuv(
+        {
+          code: 'AUTH',
+          endpoint,
+          status: response.status || 401,
+          retryable: RETRYABLE_STATUS.has(response.status),
+          message: typeof data.message === 'string' ? data.message : 'Autenticación SISPRO fallida.',
+          details: normalizeIssues(redact(data)),
+        },
+        data,
+      )
     }
 
     const token = data.token ?? data.Token
@@ -348,30 +360,36 @@ export function createMuvClient(options = {}) {
     if (!response.ok) {
       const validation = response.status === 400 || response.status === 422
       const lectura = interpretarRespuestaCargarFevRips(data)
-      throw new MuvApiError({
-        code: validation ? 'VALIDACION' : 'HTTP',
-        endpoint,
-        status: response.status,
-        retryable: RETRYABLE_STATUS.has(response.status),
-        message: lectura.informes.length
-          ? lectura.mensaje
-          : validation
-            ? 'El MUV rechazó el paquete RIPS por validación.'
-            : `El MUV respondió HTTP ${response.status}.`,
-        details: lectura.informes.length ? lectura.informes : extraerGlosas(redact(data)),
-      })
+      throw errorMuv(
+        {
+          code: validation ? 'VALIDACION' : 'HTTP',
+          endpoint,
+          status: response.status,
+          retryable: RETRYABLE_STATUS.has(response.status),
+          message: lectura.informes.length
+            ? lectura.mensaje
+            : validation
+              ? 'El MUV rechazó el paquete RIPS por validación.'
+              : `El MUV respondió HTTP ${response.status}.`,
+          details: lectura.informes.length ? lectura.informes : extraerGlosas(redact(data)),
+        },
+        data,
+      )
     }
 
     const lectura = interpretarRespuestaCargarFevRips(data)
     if (!lectura.success) {
-      throw new MuvApiError({
-        code: lectura.rechazos.length ? 'RECHAZO' : 'VALIDACION',
-        endpoint,
-        status: 422,
-        retryable: false,
-        message: lectura.mensaje,
-        details: lectura.rechazos.length ? lectura.rechazos : lectura.informes,
-      })
+      throw errorMuv(
+        {
+          code: lectura.rechazos.length ? 'RECHAZO' : 'VALIDACION',
+          endpoint,
+          status: 422,
+          retryable: false,
+          message: lectura.mensaje,
+          details: lectura.rechazos.length ? lectura.rechazos : lectura.informes,
+        },
+        data,
+      )
     }
 
     return {
