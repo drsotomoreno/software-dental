@@ -29,3 +29,6 @@ dist-ssr
 
 # API RIPS — registros CUV locales
 server/data/
+
+# Archivos mock del simulador de resultados MSPS
+salida_msps_mock/
