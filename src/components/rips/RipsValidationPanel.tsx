@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ClipboardCheck } from 'lucide-react'
+import { CuvNotifierPanel } from '@/components/rips/CuvNotifierPanel'
 import { procesarArchivoResultadosMSPS } from '@/services/cuvProcessor'
 import { guardarYValidarRipsLocalmente } from '@/services/localRipsStore'
 import { validarEstructuraRips, type PaqueteRIPS } from '@/utils/ripsValidator'
@@ -69,7 +70,6 @@ export function RipsValidationPanel() {
   const [guardando, setGuardando] = useState(false)
   const [errorGuardado, setErrorGuardado] = useState('')
   const [leyendoCuv, setLeyendoCuv] = useState(false)
-  const [cuvMinisterio, setCuvMinisterio] = useState('')
   const [errorCuv, setErrorCuv] = useState('')
 
   const evaluacion = useMemo(() => validarEstructuraRips(paquete), [paquete])
@@ -80,7 +80,6 @@ export function RipsValidationPanel() {
   const cambiarCodConsulta = (valor: string) => {
     setGuardadoExitoso(false)
     setErrorGuardado('')
-    setCuvMinisterio('')
     setErrorCuv('')
     setPaquete((prev) => actualizarCodConsulta(prev, valor))
   }
@@ -92,9 +91,8 @@ export function RipsValidationPanel() {
       const facturaEvento = String(detail.numFactura ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
       const facturaPanel = paquete.numFactura.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
       if (facturaEvento && facturaEvento !== facturaPanel) return
-      if (detail.success && detail.cuv) {
+      if (detail.success) {
         setErrorCuv('')
-        setCuvMinisterio(detail.cuv)
         return
       }
       if (detail.error) setErrorCuv(detail.error)
@@ -105,16 +103,13 @@ export function RipsValidationPanel() {
 
   const handleArchivoMinisterio = async (archivo: File | null) => {
     setErrorCuv('')
-    setCuvMinisterio('')
     if (!archivo) return
     setLeyendoCuv(true)
     try {
       const resultado = await procesarArchivoResultadosMSPS(archivo, paquete.numFactura)
       if (!resultado.success || !resultado.cuv) {
         setErrorCuv(resultado.error ?? 'No se pudo leer el CUV.')
-        return
       }
-      setCuvMinisterio(resultado.cuv)
     } finally {
       setLeyendoCuv(false)
     }
@@ -250,18 +245,14 @@ export function RipsValidationPanel() {
           Guarde el paquete y luego elija ResultadosMSPS_{paquete.numFactura}_[ID]_A_CUV.txt. El CUV queda en ese registro local.
         </p>
         {leyendoCuv && <p className="mt-2 text-sm text-slate-600">Leyendo el archivo…</p>}
-        {cuvMinisterio && (
-          <div className="mt-3 rounded-r-lg border-l-4 border-emerald-500 bg-emerald-50 p-4">
-            <p className="text-sm font-medium text-emerald-800">Aprobado por el Ministerio. CUV guardado.</p>
-            <p className="mt-1 break-all font-mono text-xs text-emerald-900">{cuvMinisterio}</p>
-          </div>
-        )}
         {errorCuv && (
           <p className="mt-2 text-sm text-red-700" role="alert">
             {errorCuv}
           </p>
         )}
       </div>
+
+      <CuvNotifierPanel numFactura={paquete.numFactura} />
     </section>
   )
 }
