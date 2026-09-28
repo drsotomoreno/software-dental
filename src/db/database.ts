@@ -41,7 +41,7 @@ import type { RdaCryptographicConsent, RdaExternalHistory } from '@/types/rdaExt
 import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
 import type { RipsValidadorRecord } from '@/types/ripsValidador'
 import type { LocalRipsRecord } from '@/db/localRipsDatabase'
-import { RIPS_RECORDS_SCHEMA } from '@/db/localRipsDatabase'
+import { RIPS_RECORDS_SCHEMA, RIPS_RECORDS_SCHEMA_V30 } from '@/db/localRipsDatabase'
 import { CREDIT_NOTE_IMMUTABILITY_MESSAGE } from '@/types/creditNote'
 import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
@@ -725,6 +725,10 @@ export class DentalDatabase extends Dexie {
     })
 
     this.version(30).stores({
+      ripsRecords: RIPS_RECORDS_SCHEMA_V30,
+    })
+
+    this.version(31).stores({
       ripsRecords: RIPS_RECORDS_SCHEMA,
     })
   }

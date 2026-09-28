@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ClipboardCheck } from 'lucide-react'
+import { procesarArchivoResultadosMSPS } from '@/services/cuvProcessor'
 import { guardarYValidarRipsLocalmente } from '@/services/localRipsStore'
 import { validarEstructuraRips, type PaqueteRIPS } from '@/utils/ripsValidator'
 
@@ -67,6 +68,9 @@ export function RipsValidationPanel() {
   const [guardadoExitoso, setGuardadoExitoso] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [errorGuardado, setErrorGuardado] = useState('')
+  const [leyendoCuv, setLeyendoCuv] = useState(false)
+  const [cuvMinisterio, setCuvMinisterio] = useState('')
+  const [errorCuv, setErrorCuv] = useState('')
 
   const evaluacion = useMemo(() => validarEstructuraRips(paquete), [paquete])
   const codConsulta = paquete.usuarios[0]?.servicios.consultas[0]?.codConsulta ?? ''
@@ -76,7 +80,26 @@ export function RipsValidationPanel() {
   const cambiarCodConsulta = (valor: string) => {
     setGuardadoExitoso(false)
     setErrorGuardado('')
+    setCuvMinisterio('')
+    setErrorCuv('')
     setPaquete((prev) => actualizarCodConsulta(prev, valor))
+  }
+
+  const handleArchivoMinisterio = async (archivo: File | null) => {
+    setErrorCuv('')
+    setCuvMinisterio('')
+    if (!archivo) return
+    setLeyendoCuv(true)
+    try {
+      const resultado = await procesarArchivoResultadosMSPS(archivo, paquete.numFactura)
+      if (!resultado.success || !resultado.cuv) {
+        setErrorCuv(resultado.error ?? 'No se pudo leer el CUV.')
+        return
+      }
+      setCuvMinisterio(resultado.cuv)
+    } finally {
+      setLeyendoCuv(false)
+    }
   }
 
   const handleValidarYGuardar = async () => {
@@ -185,6 +208,39 @@ export function RipsValidationPanel() {
         {errorGuardado && (
           <p className="text-sm text-red-700" role="alert">
             {errorGuardado}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <label htmlFor="archivo-resultados-msps" className="label-field">
+          Archivo de resultados del Ministerio
+        </label>
+        <input
+          id="archivo-resultados-msps"
+          type="file"
+          accept=".txt,text/plain"
+          disabled={leyendoCuv}
+          onChange={(event) => {
+            const archivo = event.target.files?.[0] ?? null
+            void handleArchivoMinisterio(archivo)
+            event.target.value = ''
+          }}
+          className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-dental-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Guarde el paquete y luego elija ResultadosMSPS_{paquete.numFactura}_[ID]_A_CUV.txt. El CUV queda en ese registro local.
+        </p>
+        {leyendoCuv && <p className="mt-2 text-sm text-slate-600">Leyendo el archivo…</p>}
+        {cuvMinisterio && (
+          <div className="mt-3 rounded-r-lg border-l-4 border-emerald-500 bg-emerald-50 p-4">
+            <p className="text-sm font-medium text-emerald-800">Aprobado por el Ministerio. CUV guardado.</p>
+            <p className="mt-1 break-all font-mono text-xs text-emerald-900">{cuvMinisterio}</p>
+          </div>
+        )}
+        {errorCuv && (
+          <p className="mt-2 text-sm text-red-700" role="alert">
+            {errorCuv}
           </p>
         )}
       </div>

@@ -2,6 +2,7 @@ import { db } from '@/db/database'
 import type { EstadoValidacionRips, LocalRipsRecord } from '@/db/localRipsDatabase'
 import type { RipsTransaction } from '@/types/rips'
 import { validarEstructuraRips, type PaqueteRIPS } from '@/utils/ripsValidator'
+import { normalizarCuv } from '../../shared/cuvResultadosMSPS.js'
 
 export interface GuardarRipsLocalInput {
   id?: number
@@ -50,7 +51,7 @@ export async function guardarRipsLocal(input: GuardarRipsLocalInput): Promise<{
   } else {
     const estructura = validarEstructuraRips(paquete)
     errors = estructura.errors
-    estado = estructura.isValid ? 'VALIDO' : 'RECHAZADO'
+    estado = estructura.isValid ? 'VALIDO_LOCAL' : 'RECHAZADO'
   }
 
   const previous = input.id != null ? await db.ripsRecords.get(input.id) : undefined
@@ -62,12 +63,14 @@ export async function guardarRipsLocal(input: GuardarRipsLocalInput): Promise<{
     payloadJson,
     estadoValidacion: estado,
     cuv: input.cuv ?? previous?.cuv,
+    mensajeRespuesta: previous?.mensajeRespuesta,
+    fechaValidacionCentral: previous?.fechaValidacionCentral,
     createdAt: previous?.createdAt ?? new Date(),
   }
   const id = await db.ripsRecords.put(record)
   return {
     record: { ...record, id },
-    isValid: estado === 'VALIDO',
+    isValid: estado === 'VALIDO_LOCAL' || estado === 'VALIDO' || estado === 'APROBADO_MSPS',
     errors,
   }
 }
@@ -133,7 +136,7 @@ export async function guardarYValidarRipsLocalmente(
     numDocumentoIdObligado: paquete.numDocumentoIdObligado,
     tipoNota: paquete.tipoNota,
     payloadJson: JSON.stringify(paquete, null, 2),
-    estadoValidacion: errors.length === 0 ? 'VALIDO' : 'RECHAZADO',
+    estadoValidacion: errors.length === 0 ? 'VALIDO_LOCAL' : 'RECHAZADO',
     createdAt: new Date(),
   }
   await db.ripsRecords.add(record)
@@ -146,7 +149,18 @@ export async function guardarYValidarRipsLocalmente(
 export async function asignarCuvRipsLocal(id: number, cuv: string): Promise<LocalRipsRecord | undefined> {
   const current = await db.ripsRecords.get(id)
   if (!current) return undefined
-  const next = { ...current, cuv }
+  const cuvOficial = normalizarCuv(cuv)
+  const next = {
+    ...current,
+    cuv: cuvOficial ?? cuv,
+    ...(cuvOficial
+      ? {
+          estadoValidacion: 'APROBADO_MSPS' as const,
+          mensajeRespuesta: 'Validado y CUV asignado exitosamente.',
+          fechaValidacionCentral: new Date(),
+        }
+      : {}),
+  }
   await db.ripsRecords.put(next)
   return next
 }
