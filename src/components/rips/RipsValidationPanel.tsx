@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ClipboardCheck } from 'lucide-react'
 import { procesarArchivoResultadosMSPS } from '@/services/cuvProcessor'
 import { guardarYValidarRipsLocalmente } from '@/services/localRipsStore'
@@ -84,6 +84,24 @@ export function RipsValidationPanel() {
     setErrorCuv('')
     setPaquete((prev) => actualizarCodConsulta(prev, valor))
   }
+
+  useEffect(() => {
+    const alAplicar = (event: Event) => {
+      const detail = (event as CustomEvent<{ success?: boolean; cuv?: string; error?: string; numFactura?: string }>).detail
+      if (!detail) return
+      const facturaEvento = String(detail.numFactura ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+      const facturaPanel = paquete.numFactura.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+      if (facturaEvento && facturaEvento !== facturaPanel) return
+      if (detail.success && detail.cuv) {
+        setErrorCuv('')
+        setCuvMinisterio(detail.cuv)
+        return
+      }
+      if (detail.error) setErrorCuv(detail.error)
+    }
+    window.addEventListener('rips-cuv-aplicado', alAplicar)
+    return () => window.removeEventListener('rips-cuv-aplicado', alAplicar)
+  }, [paquete.numFactura])
 
   const handleArchivoMinisterio = async (archivo: File | null) => {
     setErrorCuv('')

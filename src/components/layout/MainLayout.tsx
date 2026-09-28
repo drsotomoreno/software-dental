@@ -3,10 +3,12 @@ import { APP_NAME } from '@/constants/branding'
 import { TopNavbar } from './TopNavbar'
 import { BackupReminderBanner } from './BackupReminderBanner'
 import { useAutoBackup } from '@/hooks/useAutoBackup'
+import { useResultadosMSPSWatcher } from '@/hooks/useResultadosMSPSWatcher'
 import { useAuth } from '@/contexts/AuthContext'
 
 export function MainLayout() {
   useAutoBackup()
+  useResultadosMSPSWatcher()
   const { isTrialLimited } = useAuth()
 
   return (

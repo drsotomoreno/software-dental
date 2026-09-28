@@ -26,6 +26,11 @@ import {
   enviarPaqueteAlMinisterio,
   obtenerSesionMinisterio,
 } from '../services/ministerioPaquete.js'
+import {
+  estadoWatcherResultadosMSPS,
+  listarResultadosMSPSPendientes,
+  marcarResultadoMSPSAplicado,
+} from '../services/mspsResultadosWatcher.js'
 
 const router = Router()
 
@@ -354,6 +359,25 @@ router.post('/ministerio/paquete', async (req, res, next) => {
   } catch (error) {
     next(error)
   }
+})
+
+/**
+ * GET /api/rips/resultados-msps
+ * Archivos de la carpeta del Ministerio que todavía no se escribieron en Dexie.
+ */
+router.get('/resultados-msps', (_req, res) => {
+  const estado = estadoWatcherResultadosMSPS()
+  res.json({
+    success: true,
+    activo: estado.activo,
+    directorio: estado.directorio,
+    pendientes: listarResultadosMSPSPendientes(),
+  })
+})
+
+router.post('/resultados-msps/:id/aplicado', (req, res) => {
+  const ok = marcarResultadoMSPSAplicado(req.params.id)
+  res.status(ok ? 200 : 404).json({ success: ok })
 })
 
 router.get('/validador/:id', async (req, res, next) => {

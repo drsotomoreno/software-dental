@@ -12,6 +12,7 @@ export async function leerArchivoResultadosMSPS(filePath) {
   const lectura = interpretarResultadosMSPS(contenido, nombre)
   return {
     ...lectura,
+    contenido,
     numFactura: facturaDesdeNombreResultados(nombre),
     nombre,
   }
