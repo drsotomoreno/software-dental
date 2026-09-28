@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Link } from 'react-router-dom'
 import { db } from '@/db/database'
 import { RequirePermission } from '@/components/auth/RequirePermission'
-import { RipsExportForm } from '@/components/rips'
+import { RipsExportForm, RipsValidationPanel } from '@/components/rips'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import type { ClinicalRecord } from '@/types/clinicalRecord'
@@ -96,6 +96,8 @@ export function RipsExportPage() {
           para interoperabilidad clínica.
         </p>
       </div>
+
+      <RipsValidationPanel />
 
       <div className="card space-y-4">
         <h2 className="text-base font-semibold text-slate-800">
