@@ -1,6 +1,13 @@
 import { Router } from 'express'
-import { submitRipsToMinsalud } from '../services/minsaludRipsClient.js'
-import { saveCuvRecord, getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
+import { transmitirFevRips } from '../controllers/ripsMotor.controller.js'
+import { generarRipsDesdeBaseDatos, generarRipsJson } from '../services/RipsJsonGenerator.js'
+import {
+  encolarPaquetesRips,
+  listarAuditoria,
+  listarCola,
+  obtenerTrabajo,
+} from '../services/ripsTransmissionQueue.js'
+import { getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
 import {
@@ -10,6 +17,20 @@ import {
 } from '../services/ripsTemporalStore.js'
 import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.controller.js'
 import { getMonthlyRipsStatus, runMonthlyRipsJob } from '../controllers/monthlyRips.controller.js'
+import {
+  guardarRipsValidador,
+  listarRipsValidador,
+  obtenerRipsValidador,
+} from '../services/ripsValidadorStore.js'
+import {
+  enviarPaqueteAlMinisterio,
+  obtenerSesionMinisterio,
+} from '../services/ministerioPaquete.js'
+import {
+  estadoWatcherResultadosMSPS,
+  listarResultadosMSPSPendientes,
+  marcarResultadoMSPSAplicado,
+} from '../services/mspsResultadosWatcher.js'
 
 const router = Router()
 
@@ -32,69 +53,89 @@ router.get('/mensual/estado', getMonthlyRipsStatus)
 router.post('/mensual/enviar', runMonthlyRipsJob)
 
 /**
- * POST /api/rips/validate
- * Valida localmente y radica ante MinSalud; persiste CUV si es aprobado.
+ * POST /api/rips/generar
+ * Convierte atenciones odontológicas (base clínica o cuerpo) al JSON Res. 2275.
+ * No devuelve el paquete si el esquema falla.
  */
-router.post('/validate', async (req, res, next) => {
+router.post('/generar', async (req, res, next) => {
   try {
-    const { rips, metadatos, invoice } = req.body ?? {}
-
-    if (!rips) {
-      return res.status(400).json({ success: false, error: 'El cuerpo debe incluir el objeto rips.' })
-    }
-
-    const result = await submitRipsToMinsalud({ rips, metadatos })
-
-    if (!result.success) {
-      return res.status(422).json({
-        success: false,
-        approved: false,
-        source: result.source,
-        localIssues: result.localIssues ?? [],
-        ministryErrors: result.ministryErrors ?? [],
-      })
-    }
-
-    const cuvRecord = await saveCuvRecord({
-      cuv: result.cuv,
-      numFactura: rips.numFactura,
-      numDocumentoIdObligado: rips.numDocumentoIdObligado,
-      status: 'approved',
-      procesoId: result.procesoId,
-      fechaRadicacion: result.fechaRadicacion,
-      estado: result.estado,
-      source: result.source,
-      metadatos: { ...metadatos, ...result.metadatos },
-      clinicalRecordIds: metadatos?.clinicalRecordIds ?? [],
-      patientUuid: metadatos?.patientUuid ?? null,
-    })
-
-    let dianXml = null
-    if (invoice) {
-      dianXml = buildDianHealthInvoiceXml({
-        cuv: result.cuv,
-        numFactura: rips.numFactura,
-        ...invoice,
-      })
-      cuvRecord.dianXmlGenerated = true
-    }
-
-    res.json({
-      success: true,
-      approved: true,
-      cuv: result.cuv,
-      procesoId: result.procesoId,
-      fechaRadicacion: result.fechaRadicacion,
-      estado: result.estado,
-      source: result.source,
-      localWarnings: result.localIssues ?? [],
-      cuvRecordId: cuvRecord.id,
-      dianXml,
-    })
+    const body = req.body ?? {}
+    const result = body.clinicId
+      ? await generarRipsDesdeBaseDatos(body)
+      : generarRipsJson(body)
+    return res.status(result.ok ? 200 : 422).json(result)
   } catch (error) {
     next(error)
   }
 })
+
+/**
+ * POST /api/rips/cola
+ * Encola paquetes para transmisión asíncrona al MUV. Body: { paquetes: [{ rips, metadatos }] }
+ * o un solo { rips, metadatos }.
+ */
+router.post('/cola', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const paquetes = Array.isArray(body.paquetes)
+      ? body.paquetes
+      : body.rips
+        ? [{ rips: body.rips, metadatos: body.metadatos, credenciales: body.credenciales }]
+        : []
+    const jobs = await encolarPaquetesRips(paquetes)
+    return res.status(202).json({ success: true, accepted: jobs.length, jobs })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * GET /api/rips/cola
+ * Estado de la cola de transmisión.
+ */
+router.get('/cola', async (req, res, next) => {
+  try {
+    const jobs = await listarCola({ limit: Number(req.query.limit ?? 50) })
+    return res.json({ success: true, jobs })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * GET /api/rips/cola/:id
+ */
+router.get('/cola/:id', async (req, res, next) => {
+  try {
+    const job = await obtenerTrabajo(req.params.id)
+    if (!job) return res.status(404).json({ success: false, error: 'Trabajo no encontrado.' })
+    return res.json({ success: true, job })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * GET /api/rips/auditoria
+ * Bitácora de cada encolado, intento, reintento y resultado ante el MUV.
+ */
+router.get('/auditoria', async (req, res, next) => {
+  try {
+    const logs = await listarAuditoria({
+      jobId: req.query.jobId ? String(req.query.jobId) : undefined,
+      limit: Number(req.query.limit ?? 100),
+    })
+    return res.json({ success: true, logs })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * POST /api/rips/validate
+ * SISPRO → CargarFevRips (CUV) → proveedor (CUFE + pdfUrl).
+ */
+router.post('/validate', transmitirFevRips)
 
 /**
  * POST /api/rips/validate-local
@@ -247,6 +288,103 @@ router.post('/temporales', async (req, res, next) => {
     })
 
     res.json({ success: true, record })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * POST /api/rips/validador
+ * Guarda el JSON del formulario y lo mapea al paquete que exige el validador.
+ */
+router.post('/validador', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    if (!body.usuarios && !body.documento) {
+      return res.status(400).json({
+        success: false,
+        error: 'El cuerpo debe incluir el documento RIPS con usuarios.',
+      })
+    }
+    const result = await guardarRipsValidador(body)
+    return res.status(result.validacion.valido ? 200 : 422).json({
+      success: result.validacion.valido,
+      ...result,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/validador', async (req, res, next) => {
+  try {
+    const clinicId = typeof req.query.clinicId === 'string' ? req.query.clinicId : undefined
+    const registros = await listarRipsValidador(clinicId)
+    return res.json({ success: true, registros })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * POST /api/rips/ministerio/token
+ * LoginSISPRO contra el ambiente activo. Reutiliza el token si le quedan más de 5 minutos.
+ * Body: { tipoUsuario, documento, nit }
+ */
+router.post('/ministerio/token', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const sesion = await obtenerSesionMinisterio(body.tipoUsuario, body.documento, body.nit)
+    return res.json({ token: sesion.token, expiresAt: sesion.expiresAt })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * POST /api/rips/ministerio/paquete
+ * CargarFevRips con { rips, xmlFevFile }. Ante TOT003 renueva la sesión una vez.
+ * Body: { xmlFev, jsonRips, credenciales: { tipoUsuario, documento, nit } }
+ */
+router.post('/ministerio/paquete', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const credenciales = body.credenciales ?? {}
+    const result = await enviarPaqueteAlMinisterio(body.xmlFev, body.jsonRips, {
+      tipoUsuario: credenciales.tipoUsuario,
+      documento: credenciales.documento,
+      nit: credenciales.nit,
+    })
+    return res.json(result)
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * GET /api/rips/resultados-msps
+ * Archivos de la carpeta del Ministerio que todavía no se escribieron en Dexie.
+ */
+router.get('/resultados-msps', (_req, res) => {
+  const estado = estadoWatcherResultadosMSPS()
+  res.json({
+    success: true,
+    activo: estado.activo,
+    directorio: estado.directorio,
+    pendientes: listarResultadosMSPSPendientes(),
+  })
+})
+
+router.post('/resultados-msps/:id/aplicado', (req, res) => {
+  const ok = marcarResultadoMSPSAplicado(req.params.id)
+  res.status(ok ? 200 : 404).json({ success: ok })
+})
+
+router.get('/validador/:id', async (req, res, next) => {
+  try {
+    const result = await obtenerRipsValidador(req.params.id)
+    if (!result) return res.status(404).json({ success: false, error: 'No se encontró el RIPS.' })
+    return res.json({ success: true, ...result })
   } catch (error) {
     next(error)
   }

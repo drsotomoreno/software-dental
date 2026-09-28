@@ -49,6 +49,8 @@ export interface BackupDataTables {
   rdaConsents?: unknown[]
   rdaExternalHistories?: unknown[]
   ripsTemporales?: unknown[]
+  ripsValidador?: unknown[]
+  ripsRecords?: unknown[]
 }
 
 export interface BackupPayload {

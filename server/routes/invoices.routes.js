@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
+import { empaquetarConCuv } from '../services/FacturacionService.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
 import { parseRepsCode } from '../../shared/repsCode.js'
 
@@ -138,30 +139,52 @@ router.post('/provider/test', (req, res) => {
 
 /**
  * POST /api/invoices/provider/emit
- * Envía la factura al proveedor y devuelve CUFE + URL de QR DIAN.
+ * Empaqueta la FEV solo si ya existe CUV y devuelve CUFE + pdfUrl del proveedor.
  */
-router.post('/provider/emit', (req, res) => {
-  const apiKey = String(req.body?.apiKey ?? '').trim()
-  const invoice = req.body?.invoice ?? {}
-  const invoiceNumber = String(invoice.invoiceNumber ?? '').trim()
-  if (apiKey.length < 8 || !invoiceNumber) {
-    return res.status(400).json({
-      success: false,
-      error: 'Se requieren clave de conexión y número de factura.',
+router.post('/provider/emit', async (req, res, next) => {
+  try {
+    const apiKey = String(req.body?.apiKey ?? '').trim()
+    const invoice = req.body?.invoice ?? {}
+    const invoiceNumber = String(invoice.invoiceNumber ?? invoice.numFactura ?? '').trim()
+    const cuv = String(invoice.cuv ?? req.body?.cuv ?? '').trim()
+    if (!cuv) {
+      return res.status(400).json({
+        success: false,
+        error: 'El CUV es obligatorio para empaquetar la factura electrónica.',
+      })
+    }
+    if (apiKey.length < 8 || !invoiceNumber) {
+      return res.status(400).json({
+        success: false,
+        error: 'Se requieren clave de conexión y número de factura.',
+      })
+    }
+
+    const billing = await empaquetarConCuv({
+      cuv,
+      invoice: { ...invoice, invoiceNumber },
+      provider: req.body?.provider,
     })
+    if (!billing.success) {
+      return res.status(400).json({ success: false, error: billing.error })
+    }
+
+    const qrUrl = `https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=${encodeURIComponent(billing.cufe)}`
+
+    return res.json({
+      success: true,
+      status: 'EXITOSO',
+      cuv: billing.cuv,
+      cufe: billing.cufe,
+      pdfUrl: billing.pdfUrl,
+      qrUrl,
+      provider: billing.provider,
+      invoiceNumber,
+      message: 'Factura enviada al proveedor. CUFE y PDF listos para el ticket de 80 mm.',
+    })
+  } catch (error) {
+    next(error)
   }
-
-  const seed = `${apiKey.slice(0, 4)}-${invoiceNumber}-${invoice.issueDate ?? ''}-${invoice.amount ?? 0}`
-  const cufe = Buffer.from(seed).toString('hex').toUpperCase().padEnd(96, 'A').slice(0, 96)
-  const qrUrl = `https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=${encodeURIComponent(cufe)}`
-
-  return res.json({
-    success: true,
-    cufe,
-    qrUrl,
-    invoiceNumber,
-    message: 'Factura enviada al proveedor. CUFE y QR listos para el ticket de 80 mm.',
-  })
 })
 
 /**

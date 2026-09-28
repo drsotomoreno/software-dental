@@ -41,12 +41,17 @@ export interface DianInvoicePayload {
 export interface RipsValidateSuccessResponse {
   success: true
   approved: true
+  status: 'EXITOSO'
   cuv: string
+  cufe: string
+  pdfUrl: string
+  provider?: 'alanube' | 'majim-e'
   procesoId?: string
   fechaRadicacion?: string
   estado?: string
   source: 'sandbox' | 'minsalud' | 'local'
   localWarnings?: import('./rips').RipsValidationIssue[]
+  notificaciones?: Array<{ codigo: string; descripcion: string; mensaje: string; clase?: string }>
   cuvRecordId: string
   dianXml?: string
 }

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { config, hasMinsaludCredentials } from '../config.js'
 import { isMailConfigured, mailTransportLabel } from '../services/mailer.js'
+import { resolveMuvAmbiente } from '../services/muvAmbiente.js'
 
 const router = Router()
 
@@ -11,6 +12,8 @@ router.get('/', async (_req, res) => {
     minsalud: {
       sandbox: config.minsalud.sandbox,
       credentialsConfigured: hasMinsaludCredentials(),
+      ambiente: resolveMuvAmbiente().id,
+      apiBaseUrl: resolveMuvAmbiente().apiBaseUrl,
     },
     mail: {
       configured: await isMailConfigured(),

@@ -3,9 +3,7 @@
  * Tras el dictado (CIE-10 + CUPS), Obligado_FEV genera FEV+RIPS;
  * No_Obligado guarda RIPS pendiente con numFactura = null.
  */
-import { submitRipsToMinsalud } from './minsaludRipsClient.js'
-import { buildDianHealthInvoiceXml } from './dianFeXmlBuilder.js'
-import { saveCuvRecord } from './cuvRepository.js'
+import { ejecutarFlujoOficial } from '../controllers/ripsMotor.controller.js'
 import { saveTemporaryRipsRecord } from './ripsTemporalStore.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
 import {
@@ -109,66 +107,44 @@ export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user })
     }
   }
 
-  const ministryResult = await submitRipsToMinsalud({ rips: payload, metadatos: mergedMetadatos })
-  if (!ministryResult.success) {
+  const flujo = await ejecutarFlujoOficial({
+    rips: payload,
+    invoice,
+    metadatos: mergedMetadatos,
+  })
+  if (!flujo.success) {
     return {
       ok: false,
       success: false,
       route: 'generarFEV_y_RIPS',
       perfilFiscal,
-      error: 'No se pudo radicar el RIPS ante MinSalud.',
-      localIssues: ministryResult.localIssues ?? localIssues,
-      ministryErrors: ministryResult.ministryErrors ?? [],
-      source: ministryResult.source,
+      error: flujo.error ?? 'No se pudo radicar el RIPS ante MinSalud.',
+      localIssues: flujo.localIssues ?? localIssues,
+      ministryErrors: flujo.ministryErrors ?? [],
+      source: flujo.source,
+      cuv: flujo.cuv ?? null,
     }
-  }
-
-  const cuvRecord = await saveCuvRecord({
-    cuv: ministryResult.cuv,
-    numFactura: payload.numFactura,
-    numDocumentoIdObligado: payload.numDocumentoIdObligado,
-    status: 'approved',
-    procesoId: ministryResult.procesoId,
-    fechaRadicacion: ministryResult.fechaRadicacion,
-    estado: ministryResult.estado,
-    source: ministryResult.source,
-    metadatos: { ...mergedMetadatos, ...ministryResult.metadatos },
-    clinicalRecordIds: mergedMetadatos.clinicalRecordIds ?? [],
-    patientUuid: mergedMetadatos.patientUuid ?? null,
-  })
-
-  let dianXml = null
-  if (invoice) {
-    dianXml = buildDianHealthInvoiceXml({
-      cuv: ministryResult.cuv,
-      numFactura: payload.numFactura,
-      nitEmisor: invoice.nitEmisor,
-      razonSocialEmisor: invoice.razonSocialEmisor,
-      nitAdquiriente: invoice.nitAdquiriente,
-      razonSocialAdquiriente: invoice.razonSocialAdquiriente,
-      issueDate: invoice.issueDate,
-      payableAmount: invoice.payableAmount,
-      lines: invoice.lines ?? [],
-      codPrestadorReps: invoice.codPrestadorReps,
-    })
-    cuvRecord.dianXmlGenerated = true
   }
 
   return {
     ok: true,
     success: true,
     approved: true,
+    status: flujo.status,
     route: 'generarFEV_y_RIPS',
     perfilFiscal,
     numFactura: payload.numFactura,
-    cuv: ministryResult.cuv,
-    cuvRecordId: cuvRecord.id,
-    procesoId: ministryResult.procesoId,
-    fechaRadicacion: ministryResult.fechaRadicacion,
-    estado: ministryResult.estado,
-    source: ministryResult.source,
-    localIssues: ministryResult.localIssues ?? [],
-    dianXml,
+    cuv: flujo.cuv,
+    cufe: flujo.cufe,
+    pdfUrl: flujo.pdfUrl,
+    cuvRecordId: flujo.cuvRecordId,
+    procesoId: flujo.procesoId,
+    fechaRadicacion: flujo.fechaRadicacion,
+    estado: flujo.estado,
+    source: flujo.source,
+    provider: flujo.provider,
+    localIssues: flujo.localWarnings ?? [],
+    dianXml: flujo.dianXml,
     rips: payload,
   }
 }

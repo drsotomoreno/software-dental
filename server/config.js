@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
+import { hostMuvPorAmbiente, normalizarAmbiente } from '../shared/ministerioSesion.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const port = Number(process.env.PORT ?? 3000)
@@ -44,15 +45,22 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   minsalud: {
     sandbox: process.env.MINSALUD_SANDBOX !== 'false',
+    ambiente: process.env.MINSALUD_AMBIENTE ?? 'pruebas',
     apiBaseUrl: (process.env.MINSALUD_API_BASE_URL ?? '').replace(/\/$/, ''),
     authUrl: process.env.MINSALUD_AUTH_URL ?? '',
-    validatePath: process.env.MINSALUD_VALIDATE_URL ?? '/api/v1/rips/validar',
+    authPath: '/api/Auth/LoginSISPRO',
+    validatePath: process.env.MINSALUD_VALIDATE_URL ?? '/api/PaquetesFevRips/CargarFevRips',
     clientId: process.env.MINSALUD_CLIENT_ID ?? '',
     clientSecret: process.env.MINSALUD_CLIENT_SECRET ?? '',
     username: process.env.MINSALUD_USERNAME ?? '',
     password: process.env.MINSALUD_PASSWORD ?? '',
     nit: process.env.MINSALUD_NIT ?? '',
+    tipoDocumento: process.env.MINSALUD_TIPO_DOCUMENTO ?? 'CC',
+    numDocumento: process.env.MINSALUD_NUM_DOCUMENTO ?? '',
+    codPrestadorReps: process.env.MINSALUD_COD_PRESTADOR_REPS ?? '',
+    tipoPrestador: 'independiente',
   },
+  fevProvider: (process.env.FEV_PROVIDER ?? 'alanube').toLowerCase(),
   dian: {
     softwareId: process.env.DIAN_SOFTWARE_ID ?? 'SOFTWARE-DENTAL-EMR',
     technicalKey: process.env.DIAN_TECHNICAL_KEY ?? '',
@@ -88,13 +96,20 @@ export const config = {
   },
 }
 
-/** Credenciales completas para modo producción contra el API del ministerio. */
+/**
+ * Hay credenciales de Mi Seguridad Social y un host de MUV.
+ * Sin MINSALUD_API_BASE_URL, pruebas usa stage-fevrips y producción el MUV real.
+ */
 export function hasMinsaludCredentials() {
-  const { clientId, clientSecret, username, password, apiBaseUrl } = config.minsalud
-  return Boolean(
-    apiBaseUrl &&
-      ((clientId && clientSecret) || (username && password)),
-  )
+  const { clientId, clientSecret, username, password, apiBaseUrl, ambiente } = config.minsalud
+  const id = normalizarAmbiente(ambiente)
+  const porAmbiente =
+    id === 'produccion'
+      ? process.env.MINSALUD_API_BASE_URL_PRODUCCION
+      : process.env.MINSALUD_API_BASE_URL_PRUEBAS
+  const host = String(porAmbiente || apiBaseUrl || hostMuvPorAmbiente(id)).replace(/\/$/, '')
+  const hasAuth = Boolean((clientId && clientSecret) || (username && password))
+  return Boolean(host && hasAuth)
 }
 
 export default config

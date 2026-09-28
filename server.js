@@ -17,6 +17,8 @@ import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
 import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
 import { startMonthlyRipsCron } from './server/jobs/monthlyRipsCron.js'
+import { startRipsTransmissionWorker } from './server/services/ripsTransmissionQueue.js'
+import { iniciarWatcherResultadosMSPS } from './server/services/mspsResultadosWatcher.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -134,6 +136,10 @@ const httpServer = app.listen(config.port, '0.0.0.0', () => {
     `[RIPS API] Modo MinSalud: ${config.minsalud.sandbox ? 'SANDBOX (local)' : 'PRODUCCIÓN'}`,
   )
   void startMonthlyRipsCron()
+  startRipsTransmissionWorker()
+  if (process.env.MSPS_RESULTADOS_DIR) {
+    iniciarWatcherResultadosMSPS(process.env.MSPS_RESULTADOS_DIR)
+  }
 })
 
 httpServer.timeout = 5 * 60 * 1000

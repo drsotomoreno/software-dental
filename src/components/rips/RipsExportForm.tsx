@@ -31,6 +31,7 @@ import {
   downloadDianXml,
   validateRipsWithMinistry,
 } from '@/services/ripsApiService'
+import { guardarYValidarRipsLocalmente, paqueteDesdeRipsOficial } from '@/services/localRipsStore'
 import { saveTemporaryRips } from '@/services/ripsTemporalService'
 import { getBillingModalitySettings } from '@/services/billingModalityService'
 import {
@@ -233,21 +234,29 @@ export function RipsExportForm({
 
   const handleExport = () => {
     if (!canExport) return
-    downloadRipsJson(result.rips, suggestRipsFilename(metadata.numFactura))
-    const first = sources[0]
-    void saveTemporaryRips({
-      clinicId: professional.clinicId || professional.id,
-      patientId: first ? String(first.patient.id) : null,
-      professionalId: professional.id,
-      clinicalRecordId: first ? String(first.record.id ?? '') : null,
-      numDocumentoIdObligado: result.rips.numDocumentoIdObligado,
-      numFactura: normalizeRipsNumFactura(result.rips.numFactura),
-      perfilFiscal,
-      status: 'ready',
-      ripsJson: result.rips,
+    void guardarYValidarRipsLocalmente(paqueteDesdeRipsOficial(result.rips)).then((guardado) => {
+      if (!guardado.success) {
+        setMinistryErrors(guardado.errors.map((message) => ({ message })))
+        setValidateMessage('El paquete no se exportó. Corrija la validación local.')
+        setExported(false)
+        return
+      }
+      downloadRipsJson(result.rips, suggestRipsFilename(metadata.numFactura))
+      const first = sources[0]
+      void saveTemporaryRips({
+        clinicId: professional.clinicId || professional.id,
+        patientId: first ? String(first.patient.id) : null,
+        professionalId: professional.id,
+        clinicalRecordId: first ? String(first.record.id ?? '') : null,
+        numDocumentoIdObligado: result.rips.numDocumentoIdObligado,
+        numFactura: normalizeRipsNumFactura(result.rips.numFactura),
+        perfilFiscal,
+        status: 'ready',
+        ripsJson: result.rips,
+      })
+      setExported(true)
+      onExported?.()
     })
-    setExported(true)
-    onExported?.()
   }
 
   const handleValidateMinistry = async () => {
@@ -581,6 +590,16 @@ export function RipsExportForm({
             Proceso: {cuvResult.procesoId ?? '—'} · Fuente: {cuvResult.source} · Estado:{' '}
             {cuvResult.estado ?? 'APROBADO'}
           </p>
+          {cuvResult.notificaciones && cuvResult.notificaciones.length > 0 && (
+            <ul className="mt-3 space-y-1 text-xs text-emerald-900">
+              {cuvResult.notificaciones.map((item) => (
+                <li key={`${item.codigo}-${item.descripcion}`}>
+                  <span className="font-semibold">{item.codigo}: </span>
+                  {item.descripcion}
+                </li>
+              ))}
+            </ul>
+          )}
           {cuvResult.dianXml && (
             <button
               type="button"
