@@ -56,8 +56,6 @@ const distIndex = path.join(distDir, 'index.html')
 const hasFrontendBuild = existsSync(distIndex)
 const isProduction = process.env.NODE_ENV === 'production'
 
-await ensureSuperAdmin()
-
 export { config, DATABASE_URL }
 
 if (isProduction) {
@@ -123,19 +121,47 @@ if (isProduction) {
 
 app.use(errorHandler)
 
-const httpServer = app.listen(config.port, '0.0.0.0', () => {
-  console.log(`[RIPS API] App y API en http://0.0.0.0:${config.port}`)
+async function bootAfterListen() {
+  try {
+    await ensureSuperAdmin()
+  } catch (error) {
+    console.error(
+      '[Auth] SuperAdmin no quedó listo; el servidor sigue en línea:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+  void mailTransportLabel()
+    .then((label) => {
+      console.log(`[Auth] Correo transaccional: ${label} (${config.appPublicUrl})`)
+    })
+    .catch((error) => {
+      console.error(
+        '[Auth] No se pudo describir el correo:',
+        error instanceof Error ? error.message : error,
+      )
+    })
+  void startMonthlyRipsCron().catch((error) => {
+    console.error(
+      '[RIPS mensual] No se pudo armar el cron:',
+      error instanceof Error ? error.message : error,
+    )
+  })
+}
+
+// Abrir el puerto antes de PostgreSQL. Si la base no responde, Render
+// igual tiene un proceso escuchando y deja de devolver 502.
+const port = Number(process.env.PORT) || config.port || 3000
+const httpServer = app.listen(port, '0.0.0.0', () => {
+  console.log(`[RIPS API] App y API en http://0.0.0.0:${port}`)
   console.log(`[config] DATABASE_URL=${DATABASE_URL.replace(/:([^:@/]+)@/, ':***@')}`)
   console.log(`[Auth] SuperAdmin exento: ${config.superAdmin.email}`)
-  void mailTransportLabel().then((label) => {
-    console.log(`[Auth] Correo transaccional: ${label} (${config.appPublicUrl})`)
-  })
   console.log(
     `[RIPS API] Modo MinSalud: ${config.minsalud.sandbox ? 'SANDBOX (local)' : 'PRODUCCIÓN'}`,
   )
-  void startMonthlyRipsCron()
+  void bootAfterListen()
 })
 
+httpServer.keepAliveTimeout = 120_000
+httpServer.headersTimeout = 125_000
 httpServer.timeout = 5 * 60 * 1000
-httpServer.headersTimeout = 6 * 60 * 1000
 httpServer.requestTimeout = 5 * 60 * 1000

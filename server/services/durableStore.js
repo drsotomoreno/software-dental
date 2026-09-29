@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import '../config.js'
+import { DATABASE_URL } from '../config.js'
 
 const STORE_KEY = 'subscription-users'
 const require = createRequire(import.meta.url)
@@ -24,19 +24,52 @@ function loadPgPool() {
   return PoolCtor
 }
 
+/** Host interno de Render (dpg-…-a, sin dominio): no habla TLS. Forzar SSL deja el socket colgado. */
+export function postgresSslOption(connectionString) {
+  try {
+    const host = new URL(connectionString).hostname
+    if (!host || host === 'localhost' || host === '127.0.0.1' || !host.includes('.')) return false
+    return { rejectUnauthorized: false }
+  } catch {
+    return false
+  }
+}
+
+let postgresRetryAt = 0
+
+function postgresCoolingDown() {
+  return Date.now() < postgresRetryAt
+}
+
+function markPostgresUnavailable(error) {
+  postgresRetryAt = Date.now() + 20_000
+  console.error(
+    '[store] PostgreSQL no disponible, se usa archivo local:',
+    error instanceof Error ? error.message : error,
+  )
+}
+
 function getPool() {
   if (pool !== undefined) return pool
   const Pool = loadPgPool()
-  const url = process.env.DATABASE_URL
+  const url = DATABASE_URL
   if (!Pool || !url) {
     pool = null
     return null
   }
-  const local = /localhost|127\.0\.0\.1/.test(url)
   pool = new Pool({
     connectionString: url,
     max: 2,
-    ssl: local ? false : { rejectUnauthorized: false },
+    connectionTimeoutMillis: 8_000,
+    idleTimeoutMillis: 20_000,
+    ssl: postgresSslOption(url),
+  })
+  // Sin este listener, node-pg emite 'error' en un cliente inactivo y Node apaga el proceso.
+  pool.on('error', (err) => {
+    console.error(
+      '[store] Cliente PostgreSQL inactivo desconectado:',
+      err instanceof Error ? err.message : err,
+    )
   })
   return pool
 }
@@ -61,6 +94,7 @@ async function readJsonFile(filePath) {
 }
 
 async function readPostgresJson(storeKey) {
+  if (postgresCoolingDown()) return null
   const db = getPool()
   if (!db) return null
   try {
@@ -76,10 +110,7 @@ async function readPostgresJson(storeKey) {
       client.release()
     }
   } catch (error) {
-    console.error(
-      '[store] PostgreSQL no disponible, se usa archivo local:',
-      error instanceof Error ? error.message : error,
-    )
+    markPostgresUnavailable(error)
     return null
   }
 }
@@ -156,6 +187,7 @@ export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
   await mkdir(dirname(filePath), { recursive: true })
   await writeFile(filePath, JSON.stringify(value, null, 2), 'utf8')
 
+  if (postgresCoolingDown()) return
   const db = getPool()
   if (!db) return
   try {
@@ -177,17 +209,14 @@ export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
       client.release()
     }
   } catch (error) {
-    console.error(
-      '[store] No se pudo persistir el perfil en PostgreSQL; se conserva el archivo local:',
-      error instanceof Error ? error.message : error,
-    )
+    markPostgresUnavailable(error)
   }
 }
 
 /** Lectura con fusionador propio (no usar mergeDurableStores de usuarios/sesiones). */
 export async function readDurableJsonWithMerge(filePath, fallback, storeKey, mergeFn) {
   const fileValue = await readJsonFile(filePath)
-  const pgValue = await readPostgresJson(storeKey)
+  const pgValue = postgresCoolingDown() ? null : await readPostgresJson(storeKey)
   const base = fallback && typeof fallback === 'object' ? fallback : {}
 
   if (pgValue && fileValue && typeof mergeFn === 'function') {
@@ -206,6 +235,7 @@ export async function writeDurableJsonWithMerge(filePath, value, storeKey, merge
   await mkdir(dirname(filePath), { recursive: true })
   await writeFile(filePath, JSON.stringify(value, null, 2), 'utf8')
 
+  if (postgresCoolingDown()) return
   const db = getPool()
   if (!db) return
   try {
@@ -228,9 +258,6 @@ export async function writeDurableJsonWithMerge(filePath, value, storeKey, merge
       client.release()
     }
   } catch (error) {
-    console.error(
-      '[store] No se pudo persistir el almacén en PostgreSQL; se conserva el archivo local:',
-      error instanceof Error ? error.message : error,
-    )
+    markPostgresUnavailable(error)
   }
 }

@@ -3,18 +3,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const port = Number(process.env.PORT ?? 3000)
+const port = Number(process.env.PORT) || 3000
 
 const LOCAL_DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/software_dental'
-/** Postgres interno de Render: mismo host, rol nuevo (el anterior ya no puede iniciar sesión). */
-const RENDER_DATABASE_URL =
-  'postgresql://mihistoriadentaldb_lf6q_user:WOZaagLgcA7I9XiARazTLJ1i58sTf3dI@dpg-da8vcphsrm7s73an9hi0-a/software_dental'
-const STALE_DATABASE_USER = 'software_dental_user'
 
 function resolveDatabaseUrl(fromEnv = process.env.DATABASE_URL) {
-  if (fromEnv?.includes(STALE_DATABASE_USER)) return RENDER_DATABASE_URL
-  if (fromEnv !== undefined && fromEnv !== null) return fromEnv
-  return process.env.NODE_ENV === 'production' ? RENDER_DATABASE_URL : LOCAL_DATABASE_URL
+  const trimmed = typeof fromEnv === 'string' ? fromEnv.trim() : ''
+  return trimmed || LOCAL_DATABASE_URL
 }
 
 function redactDatabaseUrl(url) {
@@ -27,15 +22,8 @@ function redactDatabaseUrl(url) {
   }
 }
 
-/** URL de PostgreSQL requerida por la aplicación (local o producción). */
+/** URL de PostgreSQL: la de Render (DATABASE_URL) o el Postgres local de desarrollo. */
 export const DATABASE_URL = resolveDatabaseUrl()
-
-if (
-  process.env.DATABASE_URL?.includes(STALE_DATABASE_USER) ||
-  (process.env.NODE_ENV === 'production' && !process.env.DATABASE_URL)
-) {
-  process.env.DATABASE_URL = DATABASE_URL
-}
 
 export const config = {
   port,
