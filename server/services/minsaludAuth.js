@@ -44,6 +44,35 @@ export function credencialesCompletas(credenciales) {
 }
 
 /**
+ * Credenciales corporativas del prestador autenticado.
+ * El NIT de la clínica (o del doctor, si es el titular) identifica la transmisión.
+ * @param {object} [user]
+ * @param {object} [clinica]
+ */
+function textoPresente(value) {
+  const trimmed = String(value ?? '').trim()
+  return trimmed || undefined
+}
+
+export function credencialesCorporativasDesdeSesion(user, clinica) {
+  const nitObligado =
+    textoPresente(user?.nitObligado) ??
+    textoPresente(user?.providerNit) ??
+    textoPresente(clinica?.nitObligado) ??
+    textoPresente(clinica?.providerNit) ??
+    ''
+  const tipoExplicito = textoPresente(user?.tipoUsuario) ?? textoPresente(clinica?.tipoUsuario) ?? ''
+  const tipoUsuario = tipoExplicito || (soloDigitos(nitObligado) ? 'NIT' : String(user?.documentType || '').trim())
+  const numeroDocumento =
+    textoPresente(user?.numeroDocumento) ??
+    ((tipoUsuario.toUpperCase() === 'NIT' ? nitObligado : '') ||
+      textoPresente(user?.documentNumber) ||
+      textoPresente(clinica?.documentNumber) ||
+      '')
+  return normalizarCredencialesPrestador({ tipoUsuario, numeroDocumento, nitObligado })
+}
+
+/**
  * Credenciales del usuario que ejecuta la transacción.
  * El NIT del prestador puede venir del perfil o, en último término, del RIPS.
  * @param {object} [user]

@@ -1,5 +1,10 @@
+import { randomBytes } from 'node:crypto'
 import { config } from '../config.js'
-import { obtenerTokenMultiusuario } from './minsaludAuth.js'
+import {
+  credencialesCompletas,
+  credencialesCorporativasDesdeSesion,
+  obtenerTokenMultiusuario,
+} from './minsaludAuth.js'
 import { normalizeRipsNumFactura } from '../../shared/fiscalProfile.js'
 
 /** Ambiente de pruebas FEV-RIPS cuando no hay URL propia en la configuración. */
@@ -43,6 +48,63 @@ export function prepararPayloadTransmision(rips, metadatos = {}) {
       numNota: null,
     },
   }
+}
+
+function cuvSandbox() {
+  const segment = () => randomBytes(4).toString('hex').toUpperCase()
+  return `CUV-${segment()}-${segment()}-${segment()}`
+}
+
+/**
+ * Cierra el envío de la historia con el prestador de la sesión.
+ * No usa credenciales enviadas por el navegador.
+ *
+ * @param {{ user: object, clinica?: object, payloadRips: object, xmlFev?: string }} params
+ * @returns {Promise<{ status: number, body: object }>}
+ */
+export async function transmitirRipsDeLaSesion({ user, clinica, payloadRips, xmlFev }) {
+  if (!payloadRips || typeof payloadRips !== 'object') {
+    return { status: 400, body: { success: false, error: 'El cuerpo debe incluir payloadRips.' } }
+  }
+
+  const credencialesPrestador = credencialesCorporativasDesdeSesion(user, clinica)
+  if (!credencialesCompletas(credencialesPrestador)) {
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error:
+          'El perfil del prestador autenticado no tiene NIT para transmitir al Ministerio. Complételo en el perfil de la clínica.',
+      },
+    }
+  }
+
+  const preparado = prepararPayloadTransmision(payloadRips)
+  if (config.minsalud.sandbox) {
+    const esSinFactura = preparado.esSinFactura
+    return {
+      status: 200,
+      body: {
+        success: true,
+        data: {
+          estado: 'APROBADO',
+          CUV: cuvSandbox(),
+          ProcesoId: `PROC-${Date.now()}`,
+          source: 'sandbox',
+        },
+        mensaje: esSinFactura
+          ? 'RIPS sin factura (RS) transmitido exitosamente.'
+          : 'FEV + RIPS transmitidos exitosamente.',
+      },
+    }
+  }
+
+  const resultado = await transmitirRipsMultiusuario(
+    preparado.payloadRips,
+    credencialesPrestador,
+    preparado.esSinFactura ? undefined : xmlFev,
+  )
+  return { status: resultado.success ? 200 : 400, body: resultado }
 }
 
 /**
