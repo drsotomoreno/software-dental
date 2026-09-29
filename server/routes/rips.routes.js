@@ -31,6 +31,126 @@ router.get('/mensual/estado', getMonthlyRipsStatus)
  */
 router.post('/mensual/enviar', runMonthlyRipsJob)
 
+function formatProcesarError(result) {
+  const local = (result.localIssues ?? [])
+    .filter((issue) => issue.level === 'error')
+    .map((issue) => issue.message)
+  const ministry = (result.ministryErrors ?? []).map((issue) => issue.message)
+  const messages = [...local, ...ministry].filter(Boolean)
+  return messages.slice(0, 3).join(' ') || 'No se pudo procesar el RIPS.'
+}
+
+/**
+ * POST /api/rips/procesar
+ * Cierre de atención: FEV tradicional (tipoNota null) o RIPS sin factura (tipoNota RS).
+ */
+router.post('/procesar', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const tipoNotaRaw =
+      body.tipoNota == null || String(body.tipoNota).trim() === ''
+        ? null
+        : String(body.tipoNota).trim().toUpperCase()
+
+    if (tipoNotaRaw && !['RS', 'NC', 'ND'].includes(tipoNotaRaw)) {
+      return res.status(400).json({
+        success: false,
+        error: 'tipoNota debe ser RS, NC, ND o null.',
+        estadoValidacion: 'RECHAZADO',
+      })
+    }
+
+    const esSinFactura = tipoNotaRaw === 'RS'
+    const numDocumentoIdObligado = String(body.numDocumentoIdObligado ?? '').replace(/\D/g, '')
+    const numFactura = esSinFactura
+      ? null
+      : body.numFactura == null || String(body.numFactura).trim() === ''
+        ? null
+        : String(body.numFactura).trim()
+    const numNota =
+      tipoNotaRaw == null
+        ? null
+        : body.numNota == null || String(body.numNota).trim() === ''
+          ? null
+          : String(body.numNota).trim()
+
+    if (!numDocumentoIdObligado) {
+      return res.status(400).json({
+        success: false,
+        error: 'NIT del prestador es obligatorio.',
+        estadoValidacion: 'RECHAZADO',
+      })
+    }
+    if (esSinFactura && !numNota) {
+      return res.status(400).json({
+        success: false,
+        error: 'numNota es obligatorio para RIPS sin factura (RS).',
+        estadoValidacion: 'RECHAZADO',
+      })
+    }
+    if (!esSinFactura && !tipoNotaRaw && !numFactura) {
+      return res.status(400).json({
+        success: false,
+        error: 'numFactura es obligatorio cuando la atención se asocia a FEV.',
+        estadoValidacion: 'RECHAZADO',
+      })
+    }
+
+    const rips = {
+      numDocumentoIdObligado,
+      numFactura,
+      tipoNota: tipoNotaRaw,
+      numNota,
+      usuarios: Array.isArray(body.usuarios) ? body.usuarios : [],
+    }
+
+    const result = await submitRipsToMinsalud({
+      rips,
+      metadatos: {
+        allowNullNumFactura: esSinFactura,
+        esRipsTemporal: esSinFactura,
+        tipoNota: tipoNotaRaw,
+      },
+    })
+
+    if (!result.success) {
+      return res.status(422).json({
+        success: false,
+        error: formatProcesarError(result),
+        estadoValidacion: 'RECHAZADO',
+        localIssues: result.localIssues ?? [],
+        ministryErrors: result.ministryErrors ?? [],
+      })
+    }
+
+    await saveCuvRecord({
+      cuv: result.cuv,
+      numFactura: rips.numFactura,
+      numNota: rips.numNota,
+      tipoNota: rips.tipoNota,
+      numDocumentoIdObligado: rips.numDocumentoIdObligado,
+      status: 'approved',
+      procesoId: result.procesoId,
+      fechaRadicacion: result.fechaRadicacion,
+      estado: result.estado,
+      source: result.source,
+      metadatos: result.metadatos ?? {},
+    })
+
+    res.json({
+      success: true,
+      cuv: result.cuv,
+      procesoId: result.procesoId,
+      fechaRadicacion: result.fechaRadicacion,
+      estado: result.estado,
+      estadoValidacion: 'APROBADO_MSPS',
+      source: result.source,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 /**
  * POST /api/rips/validate
  * Valida localmente y radica ante MinSalud; persiste CUV si es aprobado.
