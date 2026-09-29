@@ -11,6 +11,15 @@ import type { ImplantFdiQuadrant } from '@/constants/implantPlanning'
 /** Tipo de certeza diagnóstica CIE-10 */
 export type DiagnosisCertainty = 'impresion' | 'confirmado' | 'repetido'
 
+/** Tratamiento sugerido desde el numeral 4, con código CUPS */
+export interface DiagnosisRecommendedTreatment {
+  id: string
+  procedure: string
+  cupsCode: string
+  /** Ítems del plan creados al pasar este tratamiento al plan y al presupuesto */
+  transferredPlanItemIds?: string[]
+}
+
 /** Diagnóstico CIE-10 — codificación obligatoria RIPS */
 export interface Cie10Diagnosis {
   code: string
@@ -21,6 +30,8 @@ export interface Cie10Diagnosis {
   source?: 'odontograma' | 'manual' | 'odontograma_suplementario'
   /** Piezas dentales FDI asociadas (si proviene del odontograma) */
   affectedTeeth?: number[]
+  /** Tratamientos recomendados para agilizar el plan y el presupuesto */
+  recommendedTreatments?: DiagnosisRecommendedTreatment[]
 }
 
 /** Fases del plan de tratamiento odontológico */

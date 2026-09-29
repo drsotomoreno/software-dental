@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ClinicalRecordFormData, Cie10Diagnosis } from '@/types/clinicalRecord'
 import type { Patient, PatientFormData } from '@/types/patient'
 import { addTreatmentPlanItemToBudget, calcClinicalBudgetSummaryWithTax } from '@/utils/budget'
+import { applyRecommendedTreatmentTransfer } from '@/utils/diagnosisRecommendedTreatment'
 import { createEmptyClinicalForm } from './ClinicalHistoryForm'
 import { ChiefComplaintSection } from './ChiefComplaintSection'
 import { VitalAlertsSection } from './VitalAlertsSection'
@@ -74,6 +75,11 @@ export function RapidValuationForm({
     [form.budgetItems],
   )
 
+  const transferRecommendedTreatment = (diagnosisCode: string, recommendationId: string) => {
+    const patch = applyRecommendedTreatmentTransfer(form, diagnosisCode, recommendationId)
+    if (patch) update(patch)
+  }
+
   const moveTreatmentPlanItemToBudget = (itemId: string) => {
     const planItem = form.treatmentPlan.find((item) => item.id === itemId)
     if (!planItem) return
@@ -128,6 +134,8 @@ export function RapidValuationForm({
 
       <Cie10DiagnosisSearchSection
         diagnoses={form.diagnoses}
+        treatmentPlan={form.treatmentPlan}
+        budgetItems={form.budgetItems}
         enableToothSelection
         onAddDiagnosis={(code, description, affectedTeeth) => {
           if (form.diagnoses.some((item) => item.code === code)) return
@@ -149,6 +157,7 @@ export function RapidValuationForm({
         onRemoveDiagnosis={(code) =>
           update({ diagnoses: form.diagnoses.filter((item) => item.code !== code) })
         }
+        onTransferRecommendedTreatment={transferRecommendedTreatment}
         disabled={disabled}
       />
 

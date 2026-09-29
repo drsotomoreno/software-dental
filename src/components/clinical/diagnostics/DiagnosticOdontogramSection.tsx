@@ -1,6 +1,12 @@
 import { useMemo, useState } from 'react'
 import { Stethoscope } from 'lucide-react'
-import type { Cie10Diagnosis, DiagnosisCertainty } from '@/types/clinicalRecord'
+import type {
+  BudgetLineItem,
+  Cie10Diagnosis,
+  DiagnosisCertainty,
+  DiagnosisRecommendedTreatment,
+  TreatmentPlanItem,
+} from '@/types/clinicalRecord'
 import type { ClinicalDiagnosticChart, ClinicalDiagnosticToothEntry } from '@/types/clinicalDiagnosticChart'
 import {
   getDiagnosisChartColor,
@@ -17,6 +23,7 @@ import {
 } from '@/constants/clinicalHistorySections'
 import { useCatalogMeta, useCatalogSearch } from '@/hooks/useCatalogSearch'
 import { VoiceDictationButton } from '@/components/voice'
+import { DiagnosisRecommendedTreatmentFields } from '@/components/clinical/DiagnosisRecommendedTreatmentFields'
 
 function isAdditionalDiagnosis(diagnosis: Cie10Diagnosis): boolean {
   return diagnosis.source === 'manual' && !(diagnosis.affectedTeeth?.length)
@@ -29,11 +36,14 @@ function isQuickAssignableDiagnosis(diagnosis: Cie10Diagnosis): boolean {
 interface DiagnosticOdontogramSectionProps {
   value: ClinicalDiagnosticChart
   diagnoses: Cie10Diagnosis[]
+  treatmentPlan?: TreatmentPlanItem[]
+  budgetItems?: BudgetLineItem[]
   onChange: (value: ClinicalDiagnosticChart) => void
   onEnsureDiagnosis?: (payload: { code: string; description: string; toothId: string }) => void
   onAddAdditionalDiagnosis?: (code: string, description: string) => void
   onUpdateDiagnosis?: (code: string, patch: Partial<Cie10Diagnosis>) => void
   onRemoveAdditionalDiagnosis?: (code: string) => void
+  onTransferRecommendedTreatment?: (diagnosisCode: string, recommendationId: string) => void
   disabled?: boolean
 }
 
@@ -47,11 +57,14 @@ function toVisualPlan(entries: ClinicalDiagnosticToothEntry[]): RehabTreatmentPl
 export function DiagnosticOdontogramSection({
   value,
   diagnoses,
+  treatmentPlan = [],
+  budgetItems = [],
   onChange,
   onEnsureDiagnosis,
   onAddAdditionalDiagnosis,
   onUpdateDiagnosis,
   onRemoveAdditionalDiagnosis,
+  onTransferRecommendedTreatment,
   disabled = false,
 }: DiagnosticOdontogramSectionProps) {
   const chart = normalizeClinicalDiagnosticChart(value)
@@ -65,7 +78,26 @@ export function DiagnosticOdontogramSection({
   const filteredCie10 = cie10Results ?? []
   const filteredAdditionalCie10 = additionalCie10Results ?? []
   const additionalDiagnoses = diagnoses.filter(isAdditionalDiagnosis)
+  const toothDiagnoses = diagnoses.filter((diagnosis) => (diagnosis.affectedTeeth?.length ?? 0) > 0)
   const quickAssignableDiagnoses = diagnoses.filter(isQuickAssignableDiagnosis)
+
+  const renderRecommendedTreatments = (diagnosis: Cie10Diagnosis) => {
+    if (!onUpdateDiagnosis || !onTransferRecommendedTreatment) return null
+    return (
+      <DiagnosisRecommendedTreatmentFields
+        diagnosis={diagnosis}
+        treatmentPlan={treatmentPlan}
+        budgetItems={budgetItems}
+        disabled={disabled}
+        onChange={(recommendedTreatments: DiagnosisRecommendedTreatment[]) =>
+          onUpdateDiagnosis(diagnosis.code, { recommendedTreatments })
+        }
+        onTransfer={(recommendationId) =>
+          onTransferRecommendedTreatment(diagnosis.code, recommendationId)
+        }
+      />
+    )
+  }
 
   const visualPlan = useMemo(() => toVisualPlan(chart.entries), [chart.entries])
   const selectedEntry = chart.entries.find((entry) => entry.dienteId === selectedToothId)
@@ -378,6 +410,29 @@ export function DiagnosticOdontogramSection({
         </footer>
       </div>
 
+      {toothDiagnoses.length > 0 && (
+        <div>
+          <h4 className="label-field mb-1">Diagnósticos por pieza</h4>
+          <p className="mb-3 text-xs text-slate-500">
+            Recomiende el tratamiento y su código CUPS para copiarlo al plan y al presupuesto.
+          </p>
+          <ul className="space-y-2">
+            {toothDiagnoses.map((diagnosis) => (
+              <li key={diagnosis.code} className="space-y-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono font-medium text-dental-700">{diagnosis.code}</span>
+                  <span>— {diagnosis.description}</span>
+                  <span className="text-xs text-slate-500">
+                    Piezas {(diagnosis.affectedTeeth ?? []).join(', ')}
+                  </span>
+                </div>
+                {renderRecommendedTreatments(diagnosis)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div>
         <h4 className="label-field mb-1">Diagnosticos Adicionales</h4>
         <p className="mb-3 text-xs text-slate-500">
@@ -443,8 +498,9 @@ export function DiagnosticOdontogramSection({
             {additionalDiagnoses.map((diagnosis) => (
               <li
                 key={diagnosis.code}
-                className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm"
+                className="space-y-2 rounded-lg bg-slate-50 px-3 py-2 text-sm"
               >
+                <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono font-medium text-dental-700">{diagnosis.code}</span>
                 <span>— {diagnosis.description}</span>
                 {!disabled ? (
@@ -494,6 +550,8 @@ export function DiagnosticOdontogramSection({
                     </span>
                   </>
                 )}
+                </div>
+                {renderRecommendedTreatments(diagnosis)}
               </li>
             ))}
           </ul>
