@@ -17,6 +17,7 @@ import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
 import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
 import { startMonthlyRipsCron } from './server/jobs/monthlyRipsCron.js'
+import { startCuvWatcher } from './server/services/cuvWatcher.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -134,6 +135,7 @@ const httpServer = app.listen(config.port, '0.0.0.0', () => {
     `[RIPS API] Modo MinSalud: ${config.minsalud.sandbox ? 'SANDBOX (local)' : 'PRODUCCIÓN'}`,
   )
   void startMonthlyRipsCron()
+  void startCuvWatcher()
 })
 
 httpServer.timeout = 5 * 60 * 1000

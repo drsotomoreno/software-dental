@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { config, hasMinsaludCredentials } from '../config.js'
 import { getMinsaludAccessToken } from './minsaludAuth.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
+import { transmitirRipsMultiusuario } from './ministerioService.js'
 
 /**
  * Genera CUV simulado para entorno sandbox / desarrollo local.
@@ -85,6 +86,49 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
       fechaRadicacion: new Date().toISOString(),
       estado: 'APROBADO',
       metadatos,
+    }
+  }
+
+  const sinFactura =
+    rips.numFactura == null ||
+    String(rips.numFactura).trim() === '' ||
+    String(rips.tipoNota ?? '').trim().toUpperCase() === 'RS'
+  const xmlFev = metadatos.xmlFev ?? metadatos.xmlFevFile
+
+  if (sinFactura || xmlFev) {
+    const resultado = await transmitirRipsMultiusuario(
+      rips,
+      {
+        tipoUsuario: metadatos.tipoUsuario,
+        tipoDocumento: metadatos.tipoDocumento,
+        numeroDocumento: metadatos.numeroDocumento,
+        nitObligado: metadatos.nitObligado || rips.numDocumentoIdObligado,
+        clave: metadatos.clave,
+      },
+      sinFactura ? undefined : xmlFev,
+    )
+
+    if (!resultado.success) {
+      return {
+        success: false,
+        source: 'minsalud',
+        localIssues: resultado.localIssues?.length ? resultado.localIssues : localIssues,
+        ministryErrors: resultado.ministryErrors ?? [],
+        error: resultado.error,
+        raw: resultado.data,
+      }
+    }
+
+    return {
+      success: true,
+      source: 'minsalud',
+      localIssues: localIssues.filter((issue) => issue.level === 'warning'),
+      cuv: resultado.data.cuv,
+      procesoId: resultado.data.procesoId,
+      fechaRadicacion: resultado.data.fechaRadicacion,
+      estado: resultado.data.estado,
+      metadatos,
+      raw: resultado.data.raw,
     }
   }
 

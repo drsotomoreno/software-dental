@@ -50,8 +50,12 @@ export const config = {
     clientId: process.env.MINSALUD_CLIENT_ID ?? '',
     clientSecret: process.env.MINSALUD_CLIENT_SECRET ?? '',
     username: process.env.MINSALUD_USERNAME ?? '',
-    password: process.env.MINSALUD_PASSWORD ?? '',
+    password: process.env.MINSALUD_PASSWORD ?? process.env.MINSALUD_CLAVE ?? '',
     nit: process.env.MINSALUD_NIT ?? '',
+    tipoDocumento: process.env.MINSALUD_TIPO_DOCUMENTO ?? '',
+    numeroDocumento: process.env.MINSALUD_NUMERO_DOCUMENTO ?? '',
+    /** RE, PIN, PINx o PIE. No usar NIT aquí: NIT es el tipo de documento. */
+    tipoUsuario: process.env.MINSALUD_TIPO_USUARIO ?? '',
   },
   dian: {
     softwareId: process.env.DIAN_SOFTWARE_ID ?? 'SOFTWARE-DENTAL-EMR',
@@ -90,11 +94,12 @@ export const config = {
 
 /** Credenciales completas para modo producción contra el API del ministerio. */
 export function hasMinsaludCredentials() {
-  const { clientId, clientSecret, username, password, apiBaseUrl } = config.minsalud
-  return Boolean(
-    apiBaseUrl &&
-      ((clientId && clientSecret) || (username && password)),
-  )
+  const { clientId, clientSecret, username, password, apiBaseUrl, nit, numeroDocumento } = config.minsalud
+  const document = numeroDocumento || username || nit
+  const sispro = Boolean(password && document && nit)
+  const oauth = Boolean(apiBaseUrl && clientId && clientSecret)
+  const legacy = Boolean(apiBaseUrl && username && password)
+  return sispro || oauth || legacy
 }
 
 export default config

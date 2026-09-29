@@ -55,3 +55,9 @@ export async function getCuvById(id) {
   const records = await readAll()
   return records.find((r) => r.id === id) ?? null
 }
+
+export async function findCuvByCode(cuv) {
+  if (!cuv) return null
+  const records = await readAll()
+  return records.find((record) => record.cuv === cuv) ?? null
+}
