@@ -1,5 +1,9 @@
 import { Router } from 'express'
 import { submitRipsToMinsalud } from '../services/minsaludRipsClient.js'
+import {
+  resolveSubscriptionSession,
+  sessionHintFromRequest,
+} from '../services/subscriptionAuthStore.js'
 import { saveCuvRecord, getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
@@ -12,6 +16,11 @@ import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.co
 import { getMonthlyRipsStatus, runMonthlyRipsJob } from '../controllers/monthlyRips.controller.js'
 
 const router = Router()
+
+function bearerToken(req) {
+  const authHeader = req.headers.authorization ?? ''
+  return authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+}
 
 /**
  * POST /api/rips/evolucion-dictada
@@ -37,13 +46,19 @@ router.post('/mensual/enviar', runMonthlyRipsJob)
  */
 router.post('/validate', async (req, res, next) => {
   try {
-    const { rips, metadatos, invoice } = req.body ?? {}
+    const { rips, metadatos, invoice, credenciales } = req.body ?? {}
 
     if (!rips) {
       return res.status(400).json({ success: false, error: 'El cuerpo debe incluir el objeto rips.' })
     }
 
-    const result = await submitRipsToMinsalud({ rips, metadatos })
+    const session = await resolveSubscriptionSession(bearerToken(req), sessionHintFromRequest(req))
+    const result = await submitRipsToMinsalud({
+      rips,
+      metadatos,
+      user: session?.user ?? null,
+      credenciales,
+    })
 
     if (!result.success) {
       return res.status(422).json({

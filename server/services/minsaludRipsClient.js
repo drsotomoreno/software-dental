@@ -1,6 +1,10 @@
 import { randomBytes } from 'node:crypto'
 import { config, hasMinsaludCredentials } from '../config.js'
-import { getMinsaludAccessToken } from './minsaludAuth.js'
+import {
+  credencialesCompletas,
+  getMinsaludAccessToken,
+  resolverCredencialesPrestador,
+} from './minsaludAuth.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
 
 /**
@@ -46,8 +50,10 @@ function normalizeMinistryErrors(payload) {
  * @param {object} params
  * @param {object} params.rips - Paquete JSON RIPS Res. 2275
  * @param {object} [params.metadatos] - Metadatos de trazabilidad (UUID paciente, IDs clínicos)
+ * @param {object} [params.user] - Prestador que ejecuta la transacción
+ * @param {{ tipoUsuario?: string, numeroDocumento?: string, nitObligado?: string }} [params.credenciales]
  */
-export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
+export async function submitRipsToMinsalud({ rips, metadatos = {}, user, credenciales } = {}) {
   const localIssues = validateRipsPackageLocally(rips, {
     crossValidateAgeSex: true,
     perfilFiscal: metadatos.perfilFiscal,
@@ -63,7 +69,10 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     }
   }
 
-  const useSandbox = config.minsalud.sandbox || !hasMinsaludCredentials()
+  const credencialesPrestador = resolverCredencialesPrestador({ user, rips, metadatos, credenciales })
+  const useSandbox =
+    config.minsalud.sandbox ||
+    (!credencialesCompletas(credencialesPrestador) && !hasMinsaludCredentials())
 
   if (useSandbox) {
     const ministryErrors = simulateMinistryCrossValidation(rips)
@@ -88,7 +97,7 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     }
   }
 
-  const token = await getMinsaludAccessToken()
+  const token = await getMinsaludAccessToken(credencialesPrestador)
   const { apiBaseUrl, validatePath, nit } = config.minsalud
   const url = `${apiBaseUrl}${validatePath}`
 
@@ -107,7 +116,7 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
       'Content-Type': 'application/json',
       Accept: 'application/json',
       Authorization: `Bearer ${token}`,
-      'X-NIT-Prestador': nit || rips.numDocumentoIdObligado,
+      'X-NIT-Prestador': credencialesPrestador.nitObligado || nit || rips.numDocumentoIdObligado,
     },
     body: JSON.stringify(payload),
   })

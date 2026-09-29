@@ -52,6 +52,7 @@ export const config = {
     username: process.env.MINSALUD_USERNAME ?? '',
     password: process.env.MINSALUD_PASSWORD ?? '',
     nit: process.env.MINSALUD_NIT ?? '',
+    tipoUsuario: process.env.MINSALUD_TIPO_USUARIO ?? '',
   },
   dian: {
     softwareId: process.env.DIAN_SOFTWARE_ID ?? 'SOFTWARE-DENTAL-EMR',
