@@ -26,14 +26,58 @@ async function writeAll(records) {
 }
 
 /**
- * Persiste de forma segura un CUV aprobado por el Ministerio.
+ * RIPS sin factura (tipoNota RS) se identifica por numNota.
+ * El resto de transacciones se identifica por numFactura.
+ * @param {object} entry
+ * @returns {{ campo: 'numNota' | 'numFactura', valor: string }}
+ */
+export function resolveCuvLookupKey(entry) {
+  const tipoNota = String(entry?.tipoNota ?? '').trim().toUpperCase()
+  if (tipoNota === 'RS') {
+    return { campo: 'numNota', valor: String(entry?.numNota ?? '').trim() }
+  }
+  const numFactura = entry?.numFactura == null ? '' : String(entry.numFactura).trim()
+  return { campo: 'numFactura', valor: numFactura }
+}
+
+function sameCuvIdentity(item, campo, valor) {
+  if (!valor) return false
+  if (campo === 'numNota') {
+    return (
+      String(item?.tipoNota ?? '').trim().toUpperCase() === 'RS' &&
+      String(item?.numNota ?? '').trim() === valor
+    )
+  }
+  if (String(item?.tipoNota ?? '').trim().toUpperCase() === 'RS') return false
+  return item?.numFactura === valor
+}
+
+/**
+ * Guarda o actualiza un CUV. En RIPS sin factura la clave es numNota; si no, numFactura.
  * @param {object} entry
  */
 export async function saveCuvRecord(entry) {
   const records = await readAll()
+  const { campo, valor } = resolveCuvLookupKey(entry)
+  const index = records.findIndex((item) => sameCuvIdentity(item, campo, valor))
+  const now = new Date().toISOString()
+
+  if (index >= 0) {
+    const updated = {
+      ...records[index],
+      ...entry,
+      id: records[index].id,
+      createdAt: records[index].createdAt,
+      updatedAt: now,
+    }
+    records[index] = updated
+    await writeAll(records)
+    return updated
+  }
+
   const record = {
     id: randomUUID(),
-    createdAt: new Date().toISOString(),
+    createdAt: now,
     ...entry,
   }
   records.unshift(record)
@@ -44,6 +88,20 @@ export async function saveCuvRecord(entry) {
 export async function getCuvByFactura(numFactura) {
   const records = await readAll()
   return records.find((r) => r.numFactura === numFactura && r.status === 'approved') ?? null
+}
+
+export async function getCuvByNota(numNota) {
+  const nota = String(numNota ?? '').trim()
+  if (!nota) return null
+  const records = await readAll()
+  return (
+    records.find(
+      (r) =>
+        r.status === 'approved' &&
+        String(r.tipoNota ?? '').trim().toUpperCase() === 'RS' &&
+        String(r.numNota ?? '').trim() === nota,
+    ) ?? null
+  )
 }
 
 export async function listCuvRecords({ limit = 50 } = {}) {

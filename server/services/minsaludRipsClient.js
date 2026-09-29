@@ -1,7 +1,131 @@
 import { randomBytes } from 'node:crypto'
 import { config, hasMinsaludCredentials } from '../config.js'
+import { isRipsSinFactura } from '../../shared/ripsStructureValidation.js'
 import { getMinsaludAccessToken } from './minsaludAuth.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
+
+/** Ambiente de pruebas SISPRO cuando no hay MINSALUD_API_BASE_URL. */
+const MSPS_STAGE_BASE_URL = 'https://stage-fevrips.sispro.gov.co'
+
+function ministerioMultipartUrl() {
+  const base = (config.minsalud.apiBaseUrl || MSPS_STAGE_BASE_URL).replace(/\/$/, '')
+  const path = process.env.MINSALUD_MULTIPART_VALIDATE_URL || '/api/v1/validar'
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`
+}
+
+/**
+ * Arma el FormData del Ministerio. RIPS sin factura (RS) adjunta solo el JSON.
+ * @param {string} jsonRips
+ * @param {string | null} tipoNota
+ * @param {string | null} xmlFev
+ */
+export function buildMinisterioFormData(jsonRips, tipoNota = null, xmlFev = null) {
+  const formData = new FormData()
+  if (isRipsSinFactura(tipoNota)) {
+    formData.append(
+      'rips',
+      new Blob([jsonRips], { type: 'application/json' }),
+      'rips_sin_factura.json',
+    )
+    return formData
+  }
+
+  if (!xmlFev) {
+    const error = new Error('Se requiere el XML de la FEV para esta modalidad.')
+    error.code = 'FEV_XML_REQUIRED'
+    throw error
+  }
+
+  formData.append('fev', new Blob([xmlFev], { type: 'application/xml' }), 'factura.xml')
+  formData.append('rips', new Blob([jsonRips], { type: 'application/json' }), 'rips.json')
+  return formData
+}
+
+/**
+ * Envía el paquete al Ministerio. Si es RIPS sin factura (RS), solo envía el JSON.
+ * @param {string | object} jsonRips
+ * @param {{ tipoUsuario?: string, documento?: string, nit?: string }} [credenciales]
+ * @param {string | null} [tipoNota]
+ * @param {string | null} [xmlFev]
+ */
+export async function enviarPaqueteAlMinisterio(
+  jsonRips,
+  credenciales = {},
+  tipoNota = null,
+  xmlFev = null,
+) {
+  try {
+    const token = await getMinsaludAccessToken()
+    if (!token) {
+      return {
+        success: false,
+        error: 'No hay credenciales del Ministerio para obtener el token.',
+        ministryErrors: [],
+      }
+    }
+
+    const jsonText = typeof jsonRips === 'string' ? jsonRips : JSON.stringify(jsonRips)
+    const formData = buildMinisterioFormData(jsonText, tipoNota, xmlFev)
+    const response = await fetch(ministerioMultipartUrl(), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'X-NIT-Prestador': credenciales?.nit || config.minsalud.nit || '',
+      },
+      body: formData,
+    })
+
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      const message =
+        (typeof data?.message === 'string' && data.message) ||
+        (typeof data?.Message === 'string' && data.Message) ||
+        `El Ministerio respondió HTTP ${response.status}.`
+      return {
+        success: false,
+        error: message,
+        data,
+        httpStatus: response.status,
+        source: 'minsalud',
+        ministryErrors: normalizeMinistryErrors(data),
+      }
+    }
+
+    const cuv = data.CUV ?? data.cuv ?? data.CodigoUnicoValidacion
+    const approved =
+      data.ResultState === true ||
+      data.resultState === true ||
+      data.estado === 'APROBADO' ||
+      Boolean(cuv)
+
+    if (!approved) {
+      return {
+        success: false,
+        error: 'El Ministerio no aprobó el paquete.',
+        data,
+        source: 'minsalud',
+        ministryErrors: normalizeMinistryErrors(data),
+      }
+    }
+
+    return {
+      success: true,
+      data,
+      source: 'minsalud',
+      cuv,
+      procesoId: data.ProcesoId ?? data.procesoId,
+      fechaRadicacion: data.FechaRadicacion ?? data.fechaRadicacion ?? new Date().toISOString(),
+      estado: data.Estado ?? data.estado ?? 'APROBADO',
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error?.message || 'No se pudo enviar el paquete al Ministerio.',
+      ministryErrors: [],
+    }
+  }
+}
 
 /**
  * Genera CUV simulado para entorno sandbox / desarrollo local.
@@ -48,11 +172,12 @@ function normalizeMinistryErrors(payload) {
  * @param {object} [params.metadatos] - Metadatos de trazabilidad (UUID paciente, IDs clínicos)
  */
 export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
+  const esSinFactura = isRipsSinFactura(rips?.tipoNota)
   const localIssues = validateRipsPackageLocally(rips, {
     crossValidateAgeSex: true,
     perfilFiscal: metadatos.perfilFiscal,
-    esRipsTemporal: metadatos.esRipsTemporal,
-    allowNullNumFactura: metadatos.allowNullNumFactura,
+    esRipsTemporal: metadatos.esRipsTemporal || esSinFactura,
+    allowNullNumFactura: metadatos.allowNullNumFactura || esSinFactura,
   })
   if (hasBlockingValidationErrors(localIssues)) {
     return {
@@ -85,6 +210,39 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
       fechaRadicacion: new Date().toISOString(),
       estado: 'APROBADO',
       metadatos,
+    }
+  }
+
+  const xmlFev = metadatos.xmlFev ?? null
+  if (esSinFactura || xmlFev) {
+    const packed = await enviarPaqueteAlMinisterio(
+      JSON.stringify(rips),
+      { nit: metadatos.nit || rips.numDocumentoIdObligado },
+      esSinFactura ? 'RS' : (rips?.tipoNota ?? null),
+      esSinFactura ? null : xmlFev,
+    )
+    if (!packed.success) {
+      return {
+        success: false,
+        source: packed.source ?? 'minsalud',
+        httpStatus: packed.httpStatus,
+        localIssues,
+        ministryErrors: packed.ministryErrors ?? [],
+        error: packed.error,
+        raw: packed.data,
+      }
+    }
+
+    return {
+      success: true,
+      source: 'minsalud',
+      localIssues: localIssues.filter((i) => i.level === 'warning'),
+      cuv: packed.cuv,
+      procesoId: packed.procesoId,
+      fechaRadicacion: packed.fechaRadicacion,
+      estado: packed.estado,
+      metadatos,
+      raw: packed.data,
     }
   }
 

@@ -9,7 +9,9 @@ export interface RipsTransaction {
    * (Res. 2275 — el campo debe existir en el JSON con valor null).
    */
   numFactura: string | null
+  /** null en FEV; "NC"/"ND" en notas; "RS" en RIPS sin factura (numFactura null y numNota obligatorio). */
   tipoNota: string | null
+  /** Consecutivo interno. Obligatorio cuando tipoNota es "RS". */
   numNota: string | null
   usuarios: RipsUsuario[]
   /** CUV MinSalud asociado a esta transacción (marca blanca / FEV) */
