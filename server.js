@@ -21,6 +21,19 @@ import { startMonthlyRipsCron } from './server/jobs/monthlyRipsCron.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 
+process.on('unhandledRejection', (reason) => {
+  console.error(
+    '[RIPS API] Promesa rechazada; el proceso sigue en línea:',
+    reason instanceof Error ? reason.stack || reason.message : reason,
+  )
+})
+process.on('uncaughtException', (error) => {
+  console.error(
+    '[RIPS API] Excepción no capturada; el proceso sigue en línea:',
+    error instanceof Error ? error.stack || error.message : error,
+  )
+})
+
 app.use(
   cors({
     origin(origin, callback) {
@@ -54,7 +67,7 @@ app.use('/api', authRoutes)
 const distDir = path.join(__dirname, 'dist')
 const distIndex = path.join(distDir, 'index.html')
 const hasFrontendBuild = existsSync(distIndex)
-const isProduction = process.env.NODE_ENV === 'production'
+const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true'
 
 export { config, DATABASE_URL }
 

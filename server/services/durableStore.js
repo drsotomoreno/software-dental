@@ -49,6 +49,31 @@ function markPostgresUnavailable(error) {
   )
 }
 
+function poolConfig(url) {
+  const ssl = postgresSslOption(url)
+  const common = {
+    max: 2,
+    connectionTimeoutMillis: 8_000,
+    idleTimeoutMillis: 20_000,
+    ssl,
+  }
+  try {
+    const parsed = new URL(url)
+    // Campos sueltos: si se pasa connectionString, pg vuelve a activar SSL
+    // cuando la URL trae sslmode y anula el ssl: false del host interno.
+    return {
+      ...common,
+      user: decodeURIComponent(parsed.username),
+      password: decodeURIComponent(parsed.password),
+      host: parsed.hostname,
+      port: parsed.port ? Number(parsed.port) : 5432,
+      database: decodeURIComponent(parsed.pathname.replace(/^\//, '')),
+    }
+  } catch {
+    return { ...common, connectionString: url, ssl: false }
+  }
+}
+
 function getPool() {
   if (pool !== undefined) return pool
   const Pool = loadPgPool()
@@ -57,13 +82,7 @@ function getPool() {
     pool = null
     return null
   }
-  pool = new Pool({
-    connectionString: url,
-    max: 2,
-    connectionTimeoutMillis: 8_000,
-    idleTimeoutMillis: 20_000,
-    ssl: postgresSslOption(url),
-  })
+  pool = new Pool(poolConfig(url))
   // Sin este listener, node-pg emite 'error' en un cliente inactivo y Node apaga el proceso.
   pool.on('error', (err) => {
     console.error(
