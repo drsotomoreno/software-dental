@@ -46,7 +46,7 @@ router.post('/mensual/enviar', runMonthlyRipsJob)
  */
 router.post('/validate', async (req, res, next) => {
   try {
-    const { rips, metadatos, invoice, credenciales } = req.body ?? {}
+    const { rips, metadatos, invoice, credenciales, xmlFev } = req.body ?? {}
 
     if (!rips) {
       return res.status(400).json({ success: false, error: 'El cuerpo debe incluir el objeto rips.' })
@@ -58,6 +58,7 @@ router.post('/validate', async (req, res, next) => {
       metadatos,
       user: session?.user ?? null,
       credenciales,
+      xmlFev: xmlFev ?? invoice?.xmlFev ?? invoice?.xml,
     })
 
     if (!result.success) {

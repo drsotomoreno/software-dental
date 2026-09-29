@@ -46,7 +46,7 @@ export const config = {
     sandbox: process.env.MINSALUD_SANDBOX !== 'false',
     apiBaseUrl: (process.env.MINSALUD_API_BASE_URL ?? '').replace(/\/$/, ''),
     authUrl: process.env.MINSALUD_AUTH_URL ?? '',
-    validatePath: process.env.MINSALUD_VALIDATE_URL ?? '/api/v1/rips/validar',
+    validatePath: process.env.MINSALUD_VALIDATE_URL ?? '/api/v1/validar',
     clientId: process.env.MINSALUD_CLIENT_ID ?? '',
     clientSecret: process.env.MINSALUD_CLIENT_SECRET ?? '',
     username: process.env.MINSALUD_USERNAME ?? '',

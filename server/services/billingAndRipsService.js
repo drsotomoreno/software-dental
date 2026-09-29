@@ -114,6 +114,7 @@ export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user })
     metadatos: mergedMetadatos,
     user,
     credenciales: metadatos.credenciales,
+    xmlFev: metadatos.xmlFev ?? invoice?.xmlFev ?? invoice?.xml,
   })
   if (!ministryResult.success) {
     return {
