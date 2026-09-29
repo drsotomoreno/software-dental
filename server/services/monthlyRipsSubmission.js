@@ -11,6 +11,7 @@ import {
   markTemporaryRipsSubmitted,
 } from './ripsTemporalStore.js'
 import { groupPendingRipsByOdontologo } from './monthlyRipsPackage.js'
+import { prepararRipsSinFactura } from './fevRipsProtocol.js'
 import { PERFIL_FISCAL_NO_OBLIGADO } from '../../shared/fiscalProfile.js'
 
 const OUT_DIR = join(config.dataDir, 'rips-mensuales')
@@ -107,13 +108,15 @@ export async function enviarRipsMensuales(options = {}) {
 
     const results = []
     for (const pkg of packages) {
-      const filePath = await writePackageFile(period, pkg)
+      const rips = prepararRipsSinFactura(pkg.rips)
+      const filePath = await writePackageFile(period, { ...pkg, rips })
       const entry = {
         odontologoId: pkg.odontologoId,
         professionalId: pkg.professionalId,
         clinicId: pkg.clinicId,
         recordIds: pkg.recordIds,
-        usuarios: pkg.rips.usuarios.length,
+        usuarios: rips.usuarios.length,
+        numNota: rips.numNota,
         numFactura: null,
         filePath,
         submitted: false,
@@ -125,7 +128,7 @@ export async function enviarRipsMensuales(options = {}) {
       }
 
       const ministry = await submitRipsToMinsalud({
-        rips: pkg.rips,
+        rips,
         metadatos: {
           perfilFiscal: PERFIL_FISCAL_NO_OBLIGADO,
           esRipsTemporal: true,
@@ -152,7 +155,7 @@ export async function enviarRipsMensuales(options = {}) {
       await saveCuvRecord({
         cuv: ministry.cuv,
         numFactura: null,
-        numDocumentoIdObligado: pkg.rips.numDocumentoIdObligado,
+        numDocumentoIdObligado: rips.numDocumentoIdObligado,
         status: 'approved',
         procesoId: ministry.procesoId,
         fechaRadicacion: ministry.fechaRadicacion,
