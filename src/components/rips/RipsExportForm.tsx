@@ -31,6 +31,7 @@ import {
   downloadDianXml,
   validateRipsWithMinistry,
 } from '@/services/ripsApiService'
+import { CuvNotifierPanel } from '@/components/rips/CuvNotifierPanel'
 import { saveTemporaryRips } from '@/services/ripsTemporalService'
 import { getBillingModalitySettings } from '@/services/billingModalityService'
 import {
@@ -549,6 +550,8 @@ export function RipsExportForm({
           />
         </div>
       </div>
+
+      {metadata.numFactura ? <CuvNotifierPanel numFactura={metadata.numFactura} /> : null}
 
       {result.issues.length > 0 && (
         <RipsValidationList issues={result.issues} errors={errors} warnings={warnings} />
