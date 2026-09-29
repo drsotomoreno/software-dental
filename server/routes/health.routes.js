@@ -11,6 +11,9 @@ router.get('/', async (_req, res) => {
     minsalud: {
       sandbox: config.minsalud.sandbox,
       credentialsConfigured: hasMinsaludCredentials(),
+      apiBaseUrl: config.minsalud.apiBaseUrl,
+      authPath: '/api/v1/auth',
+      validatePath: config.minsalud.validatePath,
     },
     mail: {
       configured: await isMailConfigured(),

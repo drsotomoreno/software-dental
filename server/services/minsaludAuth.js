@@ -1,59 +1,85 @@
-import { config, hasMinsaludCredentials } from '../config.js'
+import { config, MSPS_STAGE_URL } from '../config.js'
 
-let cachedToken = null
-let tokenExpiresAt = 0
+/** Vigencia informada por SISPRO: 2 horas. Se recorta 5 minutos por desfase de reloj. */
+const TOKEN_TTL_MS = 115 * 60 * 1000
+/** Reutilizar el token solo si le quedan más de 5 minutos. */
+const TOKEN_REUSE_MARGIN_MS = 5 * 60 * 1000
+
+/** @type {Map<string, { token: string, expiresAt: number }>} */
+const tokenCaches = new Map()
+
+export function minsaludApiBaseUrl() {
+  return (config.minsalud.apiBaseUrl || MSPS_STAGE_URL).replace(/\/$/, '')
+}
+
+/** Endpoint oficial de autenticación del validador de RIPS (ambiente de pruebas). */
+export function minsaludAuthEndpoint() {
+  const configured = String(config.minsalud.authUrl ?? '').trim()
+  if (configured) return configured.replace(/\/$/, '')
+  return `${minsaludApiBaseUrl()}/api/v1/auth`
+}
+
+function cacheKey(tipoUsuario, numeroDocumento, nitObligado) {
+  return `${tipoUsuario}|${numeroDocumento}|${nitObligado}`
+}
 
 /**
- * Obtiene token de autenticación técnica para el API SISPRO/PISIS.
- * Soporta client_credentials OAuth2 o usuario/contraseña según configuración.
+ * Autenticación real ante el servicio del Ministerio de Salud (vigencia de token: 2 horas).
+ * @param {string} tipoUsuario
+ * @param {string} numeroDocumento
+ * @param {string} nitObligado
+ * @returns {Promise<string>}
  */
-export async function getMinsaludAccessToken() {
-  if (cachedToken && Date.now() < tokenExpiresAt - 60_000) {
-    return cachedToken
+export async function obtenerTokenRealMinisterio(tipoUsuario, numeroDocumento, nitObligado) {
+  const ahora = Date.now()
+  const key = cacheKey(tipoUsuario, numeroDocumento, nitObligado)
+  const tokenCache = tokenCaches.get(key)
+
+  if (tokenCache && tokenCache.expiresAt > ahora + TOKEN_REUSE_MARGIN_MS) {
+    return tokenCache.token
   }
 
-  if (!hasMinsaludCredentials()) {
-    return null
-  }
-
-  const { apiBaseUrl, authUrl, clientId, clientSecret, username, password } = config.minsalud
-  const tokenUrl = authUrl || `${apiBaseUrl}/oauth/token`
-
-  const body = clientId && clientSecret
-    ? new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        client_secret: clientSecret,
-        scope: 'rips.validar',
-      })
-    : new URLSearchParams({
-        grant_type: 'password',
-        username,
-        password,
-        scope: 'rips.validar',
-      })
-
-  const response = await fetch(tokenUrl, {
+  const response = await fetch(minsaludAuthEndpoint(), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      tipoUsuario,
+      numeroDocumento,
+      nitObligado,
+    }),
   })
 
+  const data = await response.json().catch(() => ({}))
   if (!response.ok) {
-    const text = await response.text()
-    const error = new Error('Autenticación MinSalud fallida')
-    error.status = 502
-    error.details = text
-    throw error
+    const mensaje = data?.mensaje || data?.message || response.statusText
+    throw new Error(`Fallo de autenticación con el MSPS: ${mensaje}`)
   }
 
-  const data = await response.json()
-  cachedToken = data.access_token
-  tokenExpiresAt = Date.now() + (data.expires_in ?? 3600) * 1000
-  return cachedToken
+  const token = data.token || data.access_token
+  if (!token) {
+    throw new Error('Fallo de autenticación con el MSPS: la respuesta no incluye token')
+  }
+
+  tokenCaches.set(key, {
+    token,
+    expiresAt: ahora + TOKEN_TTL_MS,
+  })
+  return token
+}
+
+/**
+ * Token técnico con las credenciales configuradas del prestador.
+ * @returns {Promise<string|null>}
+ */
+export async function getMinsaludAccessToken() {
+  const { tipoUsuario, numeroDocumento, nit } = config.minsalud
+  if (!tipoUsuario || !numeroDocumento || !nit) return null
+  return obtenerTokenRealMinisterio(tipoUsuario, numeroDocumento, nit)
 }
 
 export function clearMinsaludTokenCache() {
-  cachedToken = null
-  tokenExpiresAt = 0
+  tokenCaches.clear()
 }

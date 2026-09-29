@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import cors from 'cors'
-import { config, DATABASE_URL } from './server/config.js'
+import { config, DATABASE_URL, hasMinsaludCredentials } from './server/config.js'
 import { errorHandler } from './server/middleware/errorHandler.js'
 import healthRoutes from './server/routes/health.routes.js'
 import ripsRoutes from './server/routes/rips.routes.js'
@@ -130,9 +130,11 @@ const httpServer = app.listen(config.port, '0.0.0.0', () => {
   void mailTransportLabel().then((label) => {
     console.log(`[Auth] Correo transaccional: ${label} (${config.appPublicUrl})`)
   })
-  console.log(
-    `[RIPS API] Modo MinSalud: ${config.minsalud.sandbox ? 'SANDBOX (local)' : 'PRODUCCIÓN'}`,
-  )
+  const destinoMinsalud =
+    config.minsalud.sandbox || !hasMinsaludCredentials()
+      ? 'SANDBOX (local)'
+      : config.minsalud.apiBaseUrl
+  console.log(`[RIPS API] Modo MinSalud: ${destinoMinsalud}`)
   void startMonthlyRipsCron()
 })
 

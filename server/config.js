@@ -37,6 +37,9 @@ if (
   process.env.DATABASE_URL = DATABASE_URL
 }
 
+/** Ambiente de pruebas (staging) del validador FEV-RIPS / SISPRO. */
+export const MSPS_STAGE_URL = 'https://stage-fevrips.sispro.gov.co'
+
 export const config = {
   port,
   nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -44,14 +47,16 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   minsalud: {
     sandbox: process.env.MINSALUD_SANDBOX !== 'false',
-    apiBaseUrl: (process.env.MINSALUD_API_BASE_URL ?? '').replace(/\/$/, ''),
+    apiBaseUrl: (process.env.MINSALUD_API_BASE_URL ?? MSPS_STAGE_URL).replace(/\/$/, ''),
     authUrl: process.env.MINSALUD_AUTH_URL ?? '',
-    validatePath: process.env.MINSALUD_VALIDATE_URL ?? '/api/v1/rips/validar',
+    validatePath: process.env.MINSALUD_VALIDATE_PATH ?? process.env.MINSALUD_VALIDATE_URL ?? '/api/v1/validar',
+    tipoUsuario: process.env.MINSALUD_TIPO_USUARIO ?? '',
+    numeroDocumento: process.env.MINSALUD_NUMERO_DOCUMENTO ?? process.env.MINSALUD_USERNAME ?? '',
+    nit: process.env.MINSALUD_NIT ?? '',
     clientId: process.env.MINSALUD_CLIENT_ID ?? '',
     clientSecret: process.env.MINSALUD_CLIENT_SECRET ?? '',
     username: process.env.MINSALUD_USERNAME ?? '',
     password: process.env.MINSALUD_PASSWORD ?? '',
-    nit: process.env.MINSALUD_NIT ?? '',
   },
   dian: {
     softwareId: process.env.DIAN_SOFTWARE_ID ?? 'SOFTWARE-DENTAL-EMR',
@@ -88,13 +93,10 @@ export const config = {
   },
 }
 
-/** Credenciales completas para modo producción contra el API del ministerio. */
+/** Identidad exigida por POST /api/v1/auth del validador FEV-RIPS. */
 export function hasMinsaludCredentials() {
-  const { clientId, clientSecret, username, password, apiBaseUrl } = config.minsalud
-  return Boolean(
-    apiBaseUrl &&
-      ((clientId && clientSecret) || (username && password)),
-  )
+  const { tipoUsuario, numeroDocumento, nit } = config.minsalud
+  return Boolean(tipoUsuario && numeroDocumento && nit)
 }
 
 export default config
