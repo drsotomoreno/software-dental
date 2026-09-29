@@ -11,6 +11,7 @@ import { config, DATABASE_URL } from './server/config.js'
 import { errorHandler } from './server/middleware/errorHandler.js'
 import healthRoutes from './server/routes/health.routes.js'
 import ripsRoutes from './server/routes/rips.routes.js'
+import cuvRoutes from './server/routes/cuv.routes.js'
 import invoicesRoutes from './server/routes/invoices.routes.js'
 import authRoutes from './server/routes/auth.routes.js'
 import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
@@ -47,6 +48,7 @@ app.use(express.urlencoded({ extended: true, limit: '250mb' }))
 
 app.use('/api/health', healthRoutes)
 app.use('/api/rips', ripsRoutes)
+app.use('/api/cuv', cuvRoutes)
 app.use('/api/invoices', invoicesRoutes)
 app.use('/api/sync', clinicalSyncRoutes)
 app.use('/api', authRoutes)
