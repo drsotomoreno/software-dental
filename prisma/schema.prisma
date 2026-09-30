@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Configuración MUV de un profesional independiente.
+/// Las credenciales SISPRO viven solo como bytea AES-256-GCM; nunca en claro.
+model PrestadorMuvConfig {
+  id                   String   @id @default(uuid()) @db.Uuid
+  prestadorId          String   @unique @map("prestador_id")
+  providerType         String   @default("profesional_independiente") @map("provider_type") @db.VarChar(32)
+  repsCode             String   @map("reps_code") @db.VarChar(12)
+  nit                  String   @db.VarChar(11)
+  tipoDocumento        String   @map("tipo_documento") @db.VarChar(4)
+  ambiente             String   @default("sandbox") @db.VarChar(16)
+  apiBaseUrl           String?  @map("api_base_url")
+  authUrl              String?  @map("auth_url")
+  validatePath         String?  @map("validate_path")
+  activo               Boolean  @default(true)
+  encryptionKeyVersion Int      @default(1) @map("encryption_key_version")
+  encryptionAlgorithm  String   @default("AES-256-GCM") @map("encryption_algorithm") @db.VarChar(32)
+
+  sisproUsuarioCipher      Bytes? @map("sispro_usuario_cipher")
+  sisproClaveCipher        Bytes? @map("sispro_clave_cipher")
+  sisproClientIdCipher     Bytes? @map("sispro_client_id_cipher")
+  sisproClientSecretCipher Bytes? @map("sispro_client_secret_cipher")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("prestador_muv_configs")
+}
