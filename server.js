@@ -21,6 +21,19 @@ import { startMonthlyRipsCron } from './server/jobs/monthlyRipsCron.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 
+process.on('unhandledRejection', (reason) => {
+  console.error(
+    '[RIPS API] Promesa rechazada; el proceso sigue en línea:',
+    reason instanceof Error ? reason.stack || reason.message : reason,
+  )
+})
+process.on('uncaughtException', (error) => {
+  console.error(
+    '[RIPS API] Excepción no capturada; el proceso sigue en línea:',
+    error instanceof Error ? error.stack || error.message : error,
+  )
+})
+
 app.use(
   cors({
     origin(origin, callback) {
@@ -54,18 +67,11 @@ app.use('/api', authRoutes)
 const distDir = path.join(__dirname, 'dist')
 const distIndex = path.join(distDir, 'index.html')
 const hasFrontendBuild = existsSync(distIndex)
-const isProduction = process.env.NODE_ENV === 'production'
-
-await ensureSuperAdmin()
+const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true'
 
 export { config, DATABASE_URL }
 
-if (isProduction) {
-  if (!hasFrontendBuild) {
-    console.error(
-      '[RIPS API] Falta dist/index.html. En Render el Build Command debe ser: npm run build',
-    )
-  }
+function mountStaticFrontend() {
   app.use(
     express.static(distDir, {
       setHeaders(res, filePath) {
@@ -80,7 +86,20 @@ if (isProduction) {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
     res.sendFile(distIndex)
   })
-} else {
+}
+
+if (isProduction) {
+  if (!hasFrontendBuild) {
+    console.error(
+      '[RIPS API] Falta dist/index.html. En Render el Build Command debe ser: npm run build',
+    )
+  }
+  mountStaticFrontend()
+}
+
+app.use(errorHandler)
+
+async function mountViteDev() {
   try {
     const { readFileSync } = await import('node:fs')
     const { createServer: createViteServer } = await import('vite')
@@ -100,6 +119,7 @@ if (isProduction) {
         next(error)
       }
     })
+    app.use(errorHandler)
     console.log('[RIPS API] Frontend de desarrollo: Vite (no se usa dist/ hasta NODE_ENV=production).')
   } catch (error) {
     if (hasFrontendBuild) {
@@ -107,11 +127,8 @@ if (isProduction) {
         '[RIPS API] Vite no arrancó; se sirve dist/ (puede estar desactualizado).',
         error?.message ?? error,
       )
-      app.use(express.static(distDir))
-      app.get('/{*splat}', (req, res, next) => {
-        if (req.path.startsWith('/api')) return next()
-        res.sendFile(distIndex)
-      })
+      mountStaticFrontend()
+      app.use(errorHandler)
     } else {
       console.error(
         '[RIPS API] No se encontró dist/index.html ni Vite. Ejecuta "npm run build" o "npm run dev".',
@@ -121,21 +138,51 @@ if (isProduction) {
   }
 }
 
-app.use(errorHandler)
+if (!isProduction) {
+  void mountViteDev()
+}
 
-const httpServer = app.listen(config.port, '0.0.0.0', () => {
-  console.log(`[RIPS API] App y API en http://0.0.0.0:${config.port}`)
+async function bootAfterListen() {
+  try {
+    await ensureSuperAdmin()
+  } catch (error) {
+    console.error(
+      '[Auth] SuperAdmin no quedó listo; el servidor sigue en línea:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+  void mailTransportLabel()
+    .then((label) => {
+      console.log(`[Auth] Correo transaccional: ${label} (${config.appPublicUrl})`)
+    })
+    .catch((error) => {
+      console.error(
+        '[Auth] No se pudo describir el correo:',
+        error instanceof Error ? error.message : error,
+      )
+    })
+  void startMonthlyRipsCron().catch((error) => {
+    console.error(
+      '[RIPS mensual] No se pudo armar el cron:',
+      error instanceof Error ? error.message : error,
+    )
+  })
+}
+
+// Abrir el puerto antes de PostgreSQL. Si la base no responde, Render
+// igual tiene un proceso escuchando y deja de devolver 502.
+const port = Number(process.env.PORT) || config.port || 3000
+const httpServer = app.listen(port, '0.0.0.0', () => {
+  console.log(`[RIPS API] App y API en http://0.0.0.0:${port}`)
   console.log(`[config] DATABASE_URL=${DATABASE_URL.replace(/:([^:@/]+)@/, ':***@')}`)
   console.log(`[Auth] SuperAdmin exento: ${config.superAdmin.email}`)
-  void mailTransportLabel().then((label) => {
-    console.log(`[Auth] Correo transaccional: ${label} (${config.appPublicUrl})`)
-  })
   console.log(
     `[RIPS API] Modo MinSalud: ${config.minsalud.sandbox ? 'SANDBOX (local)' : 'PRODUCCIÓN'}`,
   )
-  void startMonthlyRipsCron()
+  void bootAfterListen()
 })
 
+httpServer.keepAliveTimeout = 120_000
+httpServer.headersTimeout = 125_000
 httpServer.timeout = 5 * 60 * 1000
-httpServer.headersTimeout = 6 * 60 * 1000
 httpServer.requestTimeout = 5 * 60 * 1000
