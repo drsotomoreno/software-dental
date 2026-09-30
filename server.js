@@ -71,12 +71,7 @@ const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER
 
 export { config, DATABASE_URL }
 
-if (isProduction) {
-  if (!hasFrontendBuild) {
-    console.error(
-      '[RIPS API] Falta dist/index.html. En Render el Build Command debe ser: npm run build',
-    )
-  }
+function mountStaticFrontend() {
   app.use(
     express.static(distDir, {
       setHeaders(res, filePath) {
@@ -91,7 +86,20 @@ if (isProduction) {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
     res.sendFile(distIndex)
   })
-} else {
+}
+
+if (isProduction) {
+  if (!hasFrontendBuild) {
+    console.error(
+      '[RIPS API] Falta dist/index.html. En Render el Build Command debe ser: npm run build',
+    )
+  }
+  mountStaticFrontend()
+}
+
+app.use(errorHandler)
+
+async function mountViteDev() {
   try {
     const { readFileSync } = await import('node:fs')
     const { createServer: createViteServer } = await import('vite')
@@ -111,6 +119,7 @@ if (isProduction) {
         next(error)
       }
     })
+    app.use(errorHandler)
     console.log('[RIPS API] Frontend de desarrollo: Vite (no se usa dist/ hasta NODE_ENV=production).')
   } catch (error) {
     if (hasFrontendBuild) {
@@ -118,11 +127,8 @@ if (isProduction) {
         '[RIPS API] Vite no arrancó; se sirve dist/ (puede estar desactualizado).',
         error?.message ?? error,
       )
-      app.use(express.static(distDir))
-      app.get('/{*splat}', (req, res, next) => {
-        if (req.path.startsWith('/api')) return next()
-        res.sendFile(distIndex)
-      })
+      mountStaticFrontend()
+      app.use(errorHandler)
     } else {
       console.error(
         '[RIPS API] No se encontró dist/index.html ni Vite. Ejecuta "npm run build" o "npm run dev".',
@@ -132,7 +138,9 @@ if (isProduction) {
   }
 }
 
-app.use(errorHandler)
+if (!isProduction) {
+  void mountViteDev()
+}
 
 async function bootAfterListen() {
   try {

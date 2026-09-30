@@ -24,11 +24,21 @@ function loadPgPool() {
   return PoolCtor
 }
 
-/** Host interno de Render (dpg-…-a, sin dominio): no habla TLS. Forzar SSL deja el socket colgado. */
+/**
+ * El host interno de Render (dpg-…-a, sin dominio) no habla TLS.
+ * sslmode en la URL no se reenvía al pool: pg lo interpretaría y el handshake
+ * dejaría el arranque colgado. Fuera de ese host se usa SSL sin verificar CA.
+ */
 export function postgresSslOption(connectionString) {
   try {
     const host = new URL(connectionString).hostname
-    if (!host || host === 'localhost' || host === '127.0.0.1' || !host.includes('.')) return false
+    const internal =
+      !host ||
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      !host.includes('.') ||
+      /^dpg-[a-z0-9-]+$/i.test(host)
+    if (internal) return false
     return { rejectUnauthorized: false }
   } catch {
     return false
@@ -59,8 +69,8 @@ function poolConfig(url) {
   }
   try {
     const parsed = new URL(url)
-    // Campos sueltos: si se pasa connectionString, pg vuelve a activar SSL
-    // cuando la URL trae sslmode y anula el ssl: false del host interno.
+    // No se pasa connectionString: un sslmode=require ahí vuelve a encender SSL
+    // y anula el bypass del host interno de Render.
     return {
       ...common,
       user: decodeURIComponent(parsed.username),
