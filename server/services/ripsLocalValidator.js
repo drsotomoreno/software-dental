@@ -3,7 +3,13 @@
  * Replica reglas críticas de Res. 2275 / Documento Técnico RIPS JSON.
  */
 
-import { validateRipsStructureSyntax } from '../../shared/ripsStructureValidation.js'
+import { allowsNullNumFactura, normalizeRipsNumFactura } from '../../shared/fiscalProfile.js'
+import {
+  consultaOdontologiaGeneralInvalida,
+  isRipsSinFactura,
+  validateRipsNumNotaSinFactura,
+  validateRipsStructureSyntax,
+} from '../../shared/ripsStructureValidation.js'
 
 function pushError(errors, field, message, extra = {}) {
   errors.push({ level: 'error', field, message, ...extra })
@@ -134,4 +140,47 @@ function getAgeYears(birthDate) {
 
 export function hasBlockingValidationErrors(issues) {
   return issues.some((issue) => issue.level === 'error')
+}
+
+/**
+ * Reglas de encabezado para RIPS sin factura (tipoNota RS) y FEV.
+ * Si tipoNota es RS, numFactura no es obligatorio y numNota sí lo es.
+ * @param {object} data
+ * @param {{ perfilFiscal?: unknown, allowNullNumFactura?: boolean, esRipsTemporal?: boolean }} [context]
+ * @returns {{ isValid: boolean, errors: string[] }}
+ */
+export function validarRipsSinFactura(data, context = {}) {
+  const errors = []
+
+  if (!String(data?.numDocumentoIdObligado ?? '').trim()) {
+    errors.push('El NIT del obligado (numDocumentoIdObligado) es obligatorio.')
+  }
+
+  if (isRipsSinFactura(data?.tipoNota)) {
+    const notaCheck = validateRipsNumNotaSinFactura(data?.numNota)
+    if (!notaCheck.valid) errors.push(notaCheck.message)
+  } else if (
+    !allowsNullNumFactura(context.perfilFiscal, {
+      allowNullNumFactura: context.allowNullNumFactura,
+      esRipsTemporal: context.esRipsTemporal,
+      tipoNota: data?.tipoNota,
+    }) &&
+    !normalizeRipsNumFactura(data?.numFactura)
+  ) {
+    errors.push('El número de factura es obligatorio para transacciones con FEV.')
+  }
+
+  ;(data?.usuarios ?? []).forEach((usuario, uIndex) => {
+    ;(usuario?.servicios?.consultas ?? []).forEach((consulta, cIndex) => {
+      if (!consultaOdontologiaGeneralInvalida(consulta?.codConsulta)) return
+      errors.push(
+        `Usuario [${uIndex}], Consulta [${cIndex}]: Las consultas de odontología general deben usar subcategorías terminadas en .03.`,
+      )
+    })
+  })
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+  }
 }

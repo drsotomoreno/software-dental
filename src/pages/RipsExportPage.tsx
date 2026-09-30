@@ -85,7 +85,8 @@ export function RipsExportPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Exportación RIPS</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Genere el JSON RIPS, valídelo ante MinSalud y obtenga el CUV para la FEV-DIAN.
+          Genere el JSON RIPS, valídelo ante MinSalud y obtenga el CUV para la FEV-DIAN, o
+          transmita RIPS sin factura (tipoNota RS) con el número de nota interno.
           Seleccione historias clínicas firmadas para incluir consultas y procedimientos odontológicos.
         </p>
         <p className="mt-2 text-xs text-slate-500">

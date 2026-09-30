@@ -4,7 +4,7 @@ import type {
   RipsValidateResponse,
   RipsCuvStoredRecord,
 } from '@/types/ripsCuv'
-import type { RipsTransaction } from '@/types/rips'
+import type { RipsTransaction, RipsUsuario } from '@/types/rips'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import type { FiscalProfile } from '@/utils/fiscalProfile'
 
@@ -61,6 +61,35 @@ export async function validateRipsWithMinistry(
   })
 
   return parseJson<RipsValidateResponse>(response)
+}
+
+export interface EnviarPaqueteRipsPayload {
+  numDocumentoIdObligado: string
+  numFactura: string | null
+  tipoNota: 'RS' | null
+  numNota: string | null
+  usuarios: RipsUsuario[]
+}
+
+export interface EnviarPaqueteRipsResponse {
+  success: boolean
+  cuv?: string
+  error?: string
+  errors?: string[]
+  source?: string
+}
+
+/** Radica FEV+RIPS o solo el JSON cuando tipoNota es RS. */
+export async function enviarPaqueteRips(
+  payload: EnviarPaqueteRipsPayload,
+): Promise<EnviarPaqueteRipsResponse> {
+  const response = await fetch(`${API_BASE}/enviar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...identityHeaders() },
+    body: JSON.stringify(payload),
+  })
+
+  return parseJson<EnviarPaqueteRipsResponse>(response)
 }
 
 export type FiscalBillingRoute = 'generarFEV_y_RIPS' | 'guardarRIPS_Pendiente'

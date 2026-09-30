@@ -31,6 +31,7 @@ import {
   downloadDianXml,
   validateRipsWithMinistry,
 } from '@/services/ripsApiService'
+import { RipsModeSelectorPanel, type RipsModoTransmision } from '@/components/rips/RipsModeSelectorPanel'
 import { saveTemporaryRips } from '@/services/ripsTemporalService'
 import { getBillingModalitySettings } from '@/services/billingModalityService'
 import {
@@ -162,7 +163,21 @@ export function RipsExportForm({
   )
   const noObligado = isNoObligadoFev(perfilFiscal)
 
+  const esRipsSinFactura = metadata.tipoNota === 'RS'
+
   useEffect(() => {
+    if (esRipsSinFactura) {
+      setMetadata((prev) => {
+        if (prev.numFactura == null && prev.esRipsTemporal && prev.fevReferencia == null) return prev
+        return {
+          ...prev,
+          numFactura: null,
+          fevReferencia: undefined,
+          esRipsTemporal: true,
+        }
+      })
+      return
+    }
     if (noObligado) {
       setMetadata((prev) => {
         if (prev.numFactura == null && prev.perfilFiscal === perfilFiscal && prev.esRipsTemporal) {
@@ -193,7 +208,7 @@ export function RipsExportForm({
         esRipsTemporal: false,
       }
     })
-  }, [invoices, sources, sourceKey, noObligado, perfilFiscal])
+  }, [invoices, sources, sourceKey, noObligado, perfilFiscal, esRipsSinFactura])
 
   const update = (patch: Partial<RipsExportMetadata>) => {
     setMetadata((prev) => {
@@ -285,9 +300,12 @@ export function RipsExportForm({
           ? `${firstPatient.documentType} ${firstPatient.documentNumber}`
           : undefined,
         perfilFiscal,
-        esRipsTemporal: noObligado || normalizeRipsNumFactura(result.rips.numFactura) == null,
+        esRipsTemporal:
+          esRipsSinFactura ||
+          noObligado ||
+          normalizeRipsNumFactura(result.rips.numFactura) == null,
       },
-      invoice: noObligado
+      invoice: esRipsSinFactura || noObligado
         ? undefined
         : {
             nitEmisor: metadata.numDocumentoIdObligado,
@@ -387,46 +405,42 @@ export function RipsExportForm({
         )}
       </div>
 
+      <RipsModeSelectorPanel
+        nitInicial={metadata.numDocumentoIdObligado}
+        numFacturaInicial={metadata.numFactura ?? ''}
+        numNotaInicial={metadata.numNota || 'NOTA-RS-001'}
+        usuarios={result.rips.usuarios}
+        bloqueado={!canExport}
+        aviso={
+          !canExport
+            ? 'Seleccione historias firmadas y corrija los errores locales antes de transmitir.'
+            : undefined
+        }
+        onModoChange={(modo: RipsModoTransmision) => {
+          if (!modo.esSinFactura && modo.numFactura) invoiceTouchedRef.current = true
+          update({
+            numDocumentoIdObligado: modo.numDocumentoIdObligado,
+            numFactura: modo.numFactura,
+            tipoNota: modo.tipoNota,
+            numNota: modo.numNota,
+            esRipsTemporal: modo.esSinFactura || noObligado,
+            fevReferencia: modo.esSinFactura ? undefined : metadata.fevReferencia,
+          })
+        }}
+      />
+
       <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label className="label-field">NIT prestador (obligado a reportar)</label>
-          <input
-            value={metadata.numDocumentoIdObligado}
-            onChange={(e) => update({ numDocumentoIdObligado: e.target.value })}
-            placeholder="900123456"
-            className="input-field font-mono"
-          />
-        </div>
-        <div>
-          <label className="label-field">Nº factura electrónica (FEV)</label>
-          <input
-            value={metadata.numFactura ?? ''}
-            disabled={noObligado}
-            onChange={(e) => {
-              invoiceTouchedRef.current = true
-              update({ numFactura: e.target.value.trim() ? e.target.value : null })
-            }}
-            placeholder={noObligado ? 'null — No obligado a FEV' : 'FV12345'}
-            className="input-field font-mono"
-          />
-          <p className="mt-1 text-[10px] text-slate-500">
-            {noObligado
-              ? 'Perfil No_Obligado: el JSON RIPS se almacena y radica con numFactura en null.'
-              : 'Formato Prefijo + Número (sin espacios ni guiones). Debe coincidir 1:1 con la FEV DIAN.'}
-            {!noObligado && metadata.numFactura
-              ? ' Si hay factura electrónica del paciente, se completa sola.'
-              : ''}
-          </p>
-        </div>
-        <div>
-          <label className="label-field">Referencia FEV (validación 1:1)</label>
-          <input
-            value={metadata.fevReferencia ?? ''}
-            onChange={(e) => update({ fevReferencia: e.target.value || undefined })}
-            placeholder={metadata.numFactura || 'Igual que numFactura'}
-            className="input-field font-mono"
-          />
-        </div>
+        {!esRipsSinFactura && (
+          <div>
+            <label className="label-field">Referencia FEV (validación 1:1)</label>
+            <input
+              value={metadata.fevReferencia ?? ''}
+              onChange={(e) => update({ fevReferencia: e.target.value || undefined })}
+              placeholder={metadata.numFactura || 'Igual que numFactura'}
+              className="input-field font-mono"
+            />
+          </div>
+        )}
         <div>
           <label className="label-field">Código REPS prestador</label>
           <input
@@ -630,7 +644,8 @@ export function RipsExportForm({
       </div>
 
       <p className="text-xs text-slate-500">
-        Resolución 2275 de 2023 — RIPS JSON como soporte de la FEV en salud. El MUV valida que el{' '}
+        Resolución 2275 de 2023 — RIPS JSON como soporte de la FEV en salud. Con tipoNota RS se
+        radica el JSON sin XML de factura y el CUV queda asociado a numNota. El MUV valida que el{' '}
         <strong>codConsulta</strong> coincida con la especialidad THS del prestador declarada en REPS.
         La validación se realiza mediante el API en{' '}
         <code className="font-mono">http://localhost:3000</code> (proxy /api en desarrollo). En sandbox

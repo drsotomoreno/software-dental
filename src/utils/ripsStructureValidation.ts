@@ -1,8 +1,10 @@
 import type { RipsExportMetadata, RipsTransaction, RipsValidationIssue } from '@/types/rips'
 import { allowsNullNumFactura } from '@/utils/fiscalProfile'
 import {
+  isRipsSinFactura,
   validateRipsCodPrestador,
   validateRipsFevNumero,
+  validateRipsNumNotaSinFactura,
   validateRipsStructureSyntax,
 } from '../../shared/ripsStructureValidation.js'
 
@@ -10,10 +12,15 @@ export {
   RIPS_COD_PRESTADOR_PATTERN,
   RIPS_DATETIME_PATTERN,
   RIPS_FEV_NUMERO_PATTERN,
+  RIPS_NUM_NOTA_RS_PATTERN,
+  TIPO_NOTA_RIPS_SIN_FACTURA,
+  consultaOdontologiaGeneralInvalida,
+  isRipsSinFactura,
   validateRipsAttentionDateTime,
   validateRipsCodPrestador,
   validateRipsFevNumero,
   validateRipsIdentificationDocument,
+  validateRipsNumNotaSinFactura,
   validateRipsStructureSyntax,
 } from '../../shared/ripsStructureValidation.js'
 
@@ -55,9 +62,11 @@ export function validateRipsMetadataStructure(
   context: Omit<RipsStructureValidationContext, 'codPrestador' | 'fevReferencia'> = {},
 ): RipsValidationIssue[] {
   const issues: RipsValidationIssue[] = []
+  const esSinFactura = isRipsSinFactura(metadata.tipoNota)
   const allowNull = allowsNullNumFactura(context.perfilFiscal ?? metadata.perfilFiscal, {
-    allowNullNumFactura: context.allowNullNumFactura,
+    allowNullNumFactura: context.allowNullNumFactura || esSinFactura,
     esRipsTemporal: context.esRipsTemporal,
+    tipoNota: metadata.tipoNota,
   })
 
   const facturaCheck = validateRipsFevNumero(metadata.numFactura, {
@@ -68,7 +77,12 @@ export function validateRipsMetadataStructure(
     issues.push({ level: 'error', field: 'numFactura', message: facturaCheck.message! })
   }
 
-  if (metadata.tipoNota) {
+  if (esSinFactura) {
+    const notaCheck = validateRipsNumNotaSinFactura(metadata.numNota)
+    if (!notaCheck.valid) {
+      issues.push({ level: 'error', field: 'numNota', message: notaCheck.message! })
+    }
+  } else if (metadata.tipoNota) {
     const notaCheck = validateRipsFevNumero(metadata.numNota, { label: 'numNota' })
     if (!notaCheck.valid) {
       issues.push({ level: 'error', field: 'numNota', message: notaCheck.message! })

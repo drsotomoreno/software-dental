@@ -66,6 +66,10 @@ export interface RipsCuvStoredRecord {
   id: string
   cuv: string
   numFactura: string | null
+  /** "RS" cuando el CUV corresponde a un RIPS sin factura. */
+  tipoNota?: string | null
+  /** Clave de búsqueda del CUV cuando tipoNota es RS. */
+  numNota?: string | null
   numDocumentoIdObligado: string
   status: 'approved' | 'rejected' | 'pending'
   procesoId?: string
@@ -75,4 +79,5 @@ export interface RipsCuvStoredRecord {
   patientUuid?: string | null
   clinicalRecordIds?: string[]
   createdAt: string
+  updatedAt?: string
 }
