@@ -7,9 +7,36 @@ import {
   SUPERADMIN_EMAIL,
   type ApiSubscriptionUser,
 } from '@/services/apiAuthService'
-import { PAID_PLANS, TRIAL_DAYS } from '../../shared/subscriptionPlans.js'
+import { PAID_PLANS, TRIAL_DAYS, TTC_MESSAGE_PACKAGES } from '../../shared/subscriptionPlans.js'
 
-export { PAID_PLANS, TRIAL_DAYS }
+export { PAID_PLANS, TRIAL_DAYS, TTC_MESSAGE_PACKAGES }
+
+export interface TitularProducts {
+  titular: {
+    id: string
+    nombre: string
+    email: string
+    documentNumber: string
+    clinicName: string
+    isSelf: boolean
+  }
+  plan: {
+    id: string | null
+    estado_pago: ApiSubscriptionUser['estado_pago']
+    fecha_vencimiento: string | null
+  }
+  packages: NonNullable<ApiSubscriptionUser['messagePackages']>
+  canPurchase: boolean
+}
+
+function snapshotFromPayload(payload: Record<string, unknown>): TitularProducts {
+  const titular = (payload.titular ?? {}) as TitularProducts['titular']
+  const plan = (payload.plan ?? {}) as TitularProducts['plan']
+  const packages = Array.isArray(payload.packages)
+    ? (payload.packages as TitularProducts['packages'])
+    : []
+  return { titular, plan, packages, canPurchase: payload.canPurchase !== false }
+}
 
 function identityHeaders(auth = getStoredApiAuth()) {
   return {
@@ -121,6 +148,50 @@ export async function changeOwnPassword(input: { currentPassword: string; newPas
     return { ok: false as const, error: String(payload.error || 'No se pudo actualizar la contraseña.') }
   }
   return { ok: true as const }
+}
+
+export async function fetchTitularProducts() {
+  const { response, payload } = await authFetch('/api/subscription/account')
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      error: String(payload.error || 'No se pudo leer la suscripción del titular.'),
+    }
+  }
+  if (payload.user) persistUser(payload.user as ApiSubscriptionUser)
+  return { ok: true as const, ...snapshotFromPayload(payload) }
+}
+
+export async function purchaseTitularPlan(planId: string) {
+  const { response, payload } = await authFetch('/api/subscription/account/plan', {
+    method: 'POST',
+    body: JSON.stringify({ planId }),
+  })
+  if (!response.ok) {
+    return { ok: false as const, error: String(payload.error || 'No se pudo adquirir el plan.') }
+  }
+  if (payload.user) persistUser(payload.user as ApiSubscriptionUser)
+  return {
+    ok: true as const,
+    message: String(payload.message || 'Plan adquirido.'),
+    ...snapshotFromPayload(payload),
+  }
+}
+
+export async function purchaseTitularMessagePackage(packageId: string) {
+  const { response, payload } = await authFetch('/api/subscription/account/package', {
+    method: 'POST',
+    body: JSON.stringify({ packageId }),
+  })
+  if (!response.ok) {
+    return { ok: false as const, error: String(payload.error || 'No se pudo adquirir el paquete.') }
+  }
+  if (payload.user) persistUser(payload.user as ApiSubscriptionUser)
+  return {
+    ok: true as const,
+    message: String(payload.message || 'Paquete adquirido.'),
+    ...snapshotFromPayload(payload),
+  }
 }
 
 export async function activatePaidPlan(planId: string) {

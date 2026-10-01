@@ -5,8 +5,11 @@ import { forgotPassword, resetPassword } from '../controllers/authPassword.contr
 import { requestRegisterCode, verifyRegisterCode } from '../controllers/authRegister.controller.js'
 import { getMailSettings, updateMailSettings } from '../controllers/authMailSettings.controller.js'
 import {
+  buyTitularMessagePackage,
+  buyTitularPlan,
   choosePaidPlan,
   getSubscriptionStatus,
+  getTitularProducts,
   requestRethusTrial,
 } from '../controllers/subscription.controller.js'
 import {
@@ -234,6 +237,9 @@ router.post('/auth/register/verify', verifyRegisterCode)
 router.get('/auth/mail-settings', getMailSettings)
 router.put('/auth/mail-settings', updateMailSettings)
 router.get('/subscription', getSubscriptionStatus)
+router.get('/subscription/account', getTitularProducts)
+router.post('/subscription/account/plan', buyTitularPlan)
+router.post('/subscription/account/package', buyTitularMessagePackage)
 router.post('/subscription/trial', requestRethusTrial)
 router.post('/subscription/plan', choosePaidPlan)
 

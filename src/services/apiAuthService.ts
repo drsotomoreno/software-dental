@@ -44,6 +44,15 @@ export interface ApiSubscriptionUser {
   prestadorVerifiedAt?: string | null
   trialLimited?: boolean
   trialLimits?: { maxPatients: number; maxVoiceNotesPerField: number } | null
+  messagePackages?: Array<{
+    id: string
+    packageId: string
+    name: string
+    messages: number
+    purchasedAt: string | null
+    expiresAt: string | null
+    status: 'activo' | 'vencido'
+  }>
   createdAt?: string
   updatedAt?: string
 }

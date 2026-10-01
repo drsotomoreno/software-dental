@@ -14,6 +14,16 @@ declare module '../../shared/subscriptionPlans.js' {
   export const TRIAL_DAYS: number
   export const PAID_PLAN_DAYS: number
   export const TRIAL_SEAT_LIMIT: number
+  export const TTC_MESSAGE_PACKAGES: Array<{
+    id: string
+    name: string
+    messages: number
+    priceLabel: string
+    period: string
+    validityDays: number
+    blurb: string
+  }>
+  export const TTC_MESSAGE_PACKAGE_IDS: string[]
   export const PLAN_SEAT_LIMITS: Record<string, number>
   export function seatLimitForAccount(account?: {
     plan?: string | null
