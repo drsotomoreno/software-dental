@@ -16,6 +16,12 @@ import { getEffectiveRole, getStoredApiAuth, mapApiUserToAuthUser } from '@/serv
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
 import { seatLimitForAccount, planDisplayName } from '../../shared/subscriptionPlans.js'
 import {
+  belongsToClinic,
+  canRemoveClinicMember,
+  canonicalOwnerId,
+  textId,
+} from '../../shared/clinicOwnership.js'
+import {
   createClinicMember,
   deleteClinicMember,
   fetchClinicUsers,
@@ -285,12 +291,28 @@ export async function listAppUsers(): Promise<UserProfile[]> {
     }
     return api.users
   }
-  const { clinicId, isSuperAdmin } = currentClinicScope()
+  const { clinicId } = currentClinicScope()
   const all = await db.users.toArray()
-  const scoped = isSuperAdmin || !clinicId
-    ? all
-    : all.filter((user) => String(user.clinicId || user.id) === String(clinicId))
-  return scoped.sort((a, b) => {
+  const ownerId = canonicalOwnerId(all, clinicId)
+  const scoped = ownerId ? all.filter((user) => belongsToClinic(user, ownerId)) : []
+  const normalized = scoped.map((user) => ({
+    ...user,
+    clinicId: ownerId || user.clinicId,
+    isClinicOwner: textId(user.id) === ownerId,
+  }))
+  for (const user of normalized) {
+    const previous = all.find((item) => item.id === user.id)
+    if (
+      previous &&
+      (previous.isClinicOwner !== user.isClinicOwner || textId(previous.clinicId) !== textId(user.clinicId))
+    ) {
+      await db.users.update(user.id, {
+        isClinicOwner: user.isClinicOwner,
+        clinicId: user.clinicId,
+      })
+    }
+  }
+  return normalized.sort((a, b) => {
     const left = `${a.lastName} ${a.firstName}`.toLowerCase()
     const right = `${b.lastName} ${b.firstName}`.toLowerCase()
     return left.localeCompare(right, 'es')
@@ -419,7 +441,12 @@ export async function updateAppUser(
   const nextPatch: Partial<UserProfile> = { ...patch }
 
   if (nextPatch.role !== undefined) {
-    if (current?.isClinicOwner) {
+    const clinicUsers = await db.users.toArray()
+    const ownerId = canonicalOwnerId(
+      clinicUsers,
+      current?.clinicId || currentClinicScope().clinicId,
+    )
+    if (current && textId(current.id) === ownerId) {
       nextPatch.role = 'admin'
     } else {
       const roleResult = sanitizeAssignableRole(nextPatch.role, gate.actorRole)
@@ -505,19 +532,29 @@ export async function resetAppUserPassword(
 
   const api = await resetClinicMemberPassword(userId, newPassword)
   if (api.ok) {
-    await seedUserCredentials(userId, newPassword)
-    await db.users.update(userId, { accessEnabled: true })
+    try {
+      await seedUserCredentials(userId, newPassword)
+      await db.users.update(userId, { accessEnabled: true })
+    } catch (error) {
+      console.error('La clave quedó guardada en el servidor:', error)
+    }
     return { ok: true }
   }
-  if (getStoredApiAuth()?.token) {
+  const localOnly = !getStoredApiAuth()?.token || api.status === 404
+  if (!localOnly) {
     return { ok: false, error: api.error }
   }
 
   const user = await db.users.get(userId)
-  if (!user) return { ok: false, error: 'Usuario no encontrado.' }
+  if (!user) return { ok: false, error: api.error || 'Usuario no encontrado.' }
 
-  await seedUserCredentials(userId, newPassword)
-  await db.users.update(userId, { accessEnabled: true })
+  try {
+    await seedUserCredentials(userId, newPassword)
+    await db.users.update(userId, { accessEnabled: true })
+  } catch (error) {
+    console.error(error)
+    return { ok: false, error: 'No se pudo asignar la contraseña.' }
+  }
   return { ok: true }
 }
 
@@ -537,23 +574,26 @@ export async function deleteAppUser(
     await db.userCredentials.delete(userId)
     const sessions = await db.sessions.where('userId').equals(userId).toArray()
     await Promise.all(sessions.map((s) => db.sessions.delete(s.id)))
-    await db.users.update(userId, { accessEnabled: false })
+    await db.users.update(userId, { accessEnabled: false, isClinicOwner: false })
     return { ok: true }
-  }
-  if (getStoredApiAuth()?.token) {
-    return { ok: false, error: api.error }
   }
 
   const user = await db.users.get(userId)
-  if (!user) return { ok: false, error: 'Usuario no encontrado.' }
-  if (user.isClinicOwner) {
-    return { ok: false, error: 'No puede eliminar al titular de la clínica.' }
+  const clinicUsers = await db.users.toArray()
+  const ownerId = canonicalOwnerId(clinicUsers, user?.clinicId || currentClinicScope().clinicId)
+  const decision = canRemoveClinicMember(actingUserId, user, ownerId)
+  if (!user) {
+    return { ok: false, error: api.error || 'Usuario no encontrado.' }
+  }
+  if (!decision.ok) return { ok: false, error: decision.error }
+  if (getStoredApiAuth()?.token && api.status !== 404) {
+    return { ok: false, error: api.error }
   }
 
   await db.userCredentials.delete(userId)
   const sessions = await db.sessions.where('userId').equals(userId).toArray()
   await Promise.all(sessions.map((s) => db.sessions.delete(s.id)))
-  await db.users.update(userId, { accessEnabled: false })
+  await db.users.update(userId, { accessEnabled: false, isClinicOwner: false })
   return { ok: true }
 }
 

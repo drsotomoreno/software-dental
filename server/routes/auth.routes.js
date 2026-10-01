@@ -9,6 +9,7 @@ import {
   getSubscriptionStatus,
   requestRethusTrial,
 } from '../controllers/subscription.controller.js'
+import { textId } from '../../shared/clinicOwnership.js'
 import {
   changeOwnPassword,
   confirmSubscriptionPayment,
@@ -303,6 +304,31 @@ router.post('/clinic/users', async (req, res) => {
   }
 })
 
+router.put('/clinic/users/:id/password', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const result = await resetClinicUserPassword({
+      token,
+      hint: sessionHintFromRequest(req),
+      userId: textId(req.params.id) || textId(body.userId),
+      newPassword: body.password ?? body.newPassword,
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true })
+  } catch (error) {
+    console.error('[Auth] Error en PUT /clinic/users/:id/password:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo asignar la contraseña.',
+    })
+  }
+})
+
 router.put('/clinic/users/:id', async (req, res) => {
   try {
     const authHeader = req.headers.authorization ?? ''
@@ -311,7 +337,7 @@ router.put('/clinic/users/:id', async (req, res) => {
     const result = await updateClinicUser({
       token,
       hint: sessionHintFromRequest(req),
-      userId: req.params.id,
+      userId: textId(req.params.id) || textId(body.userId),
       patch: body,
     })
     if (!result.ok) {
@@ -324,27 +350,6 @@ router.put('/clinic/users/:id', async (req, res) => {
   }
 })
 
-router.put('/clinic/users/:id/password', async (req, res) => {
-  try {
-    const authHeader = req.headers.authorization ?? ''
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
-    const body = req.body && typeof req.body === 'object' ? req.body : {}
-    const result = await resetClinicUserPassword({
-      token,
-      hint: sessionHintFromRequest(req),
-      userId: req.params.id,
-      newPassword: body.password ?? body.newPassword,
-    })
-    if (!result.ok) {
-      return res.status(result.status).json({ success: false, ok: false, error: result.error })
-    }
-    return res.json({ success: true, ok: true })
-  } catch (error) {
-    console.error('[Auth] Error en PUT /clinic/users/:id/password:', error)
-    return res.status(500).json({ success: false, ok: false, error: 'No se pudo asignar la contraseña.' })
-  }
-})
-
 router.delete('/clinic/users/:id', async (req, res) => {
   try {
     const authHeader = req.headers.authorization ?? ''
@@ -352,7 +357,7 @@ router.delete('/clinic/users/:id', async (req, res) => {
     const result = await deleteClinicUser({
       token,
       hint: sessionHintFromRequest(req),
-      userId: req.params.id,
+      userId: textId(req.params.id),
     })
     if (!result.ok) {
       return res.status(result.status).json({ success: false, ok: false, error: result.error })

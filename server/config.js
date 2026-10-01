@@ -45,7 +45,7 @@ export const config = {
     softwareId: process.env.DIAN_SOFTWARE_ID ?? 'SOFTWARE-DENTAL-EMR',
     technicalKey: process.env.DIAN_TECHNICAL_KEY ?? '',
   },
-  dataDir: join(__dirname, 'data'),
+  dataDir: process.env.DATA_DIR || join(__dirname, 'data'),
   appPublicUrl: (
     process.env.APP_PUBLIC_URL ||
     (process.env.NODE_ENV === 'production'

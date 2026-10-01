@@ -7,6 +7,7 @@ import {
   SUPERADMIN_EMAIL,
   type ApiSubscriptionUser,
 } from '@/services/apiAuthService'
+import { belongsToClinic, canonicalOwnerId, textId } from '../../shared/clinicOwnership.js'
 import { PAID_PLANS, TRIAL_DAYS } from '../../shared/subscriptionPlans.js'
 
 export { PAID_PLANS, TRIAL_DAYS }
@@ -24,14 +25,17 @@ function identityHeaders(auth = getStoredApiAuth()) {
 
 async function authFetch(url: string, init?: RequestInit) {
   const auth = getStoredApiAuth()
+  const headers = new Headers(init?.headers)
+  headers.set('Accept', 'application/json')
+  if (init?.body != null && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  for (const [key, value] of Object.entries(identityHeaders(auth))) {
+    if (value) headers.set(key, value)
+  }
   const response = await fetch(url, {
     ...init,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...identityHeaders(auth),
-      ...(init?.headers ?? {}),
-    },
+    headers,
   })
   const payload = await response.json().catch(() => ({}))
   return { response, payload }
@@ -149,14 +153,36 @@ export function mapClinicMemberToProfile(
 ): import('@/types/user').UserProfile {
   const mapped = mapApiUserToAuthUser(user, '')
   const { sessionId: _sessionId, ...profile } = mapped
+  void _sessionId
   return {
     ...profile,
     email: user.email || '',
     phone: user.phone || profile.phone || '',
-    clinicId: user.clinicId || user.id,
-    isClinicOwner: user.isClinicOwner === true || String(user.clinicId || user.id) === String(user.id),
+    clinicId: user.clinicId || '',
+    isClinicOwner:
+      user.isClinicOwner === true ||
+      (Boolean(user.clinicId) && String(user.clinicId) === String(user.id)),
     accessEnabled: user.accessEnabled !== false,
   }
+}
+
+export function presentClinicRoster<T extends { id?: string; clinicId?: string; isClinicOwner?: boolean }>(
+  users: T[],
+  clinicIdHint?: string,
+): T[] {
+  const hint =
+    clinicIdHint ||
+    users.find((user) => user.isClinicOwner)?.id ||
+    users.find((user) => user.clinicId)?.clinicId
+  const ownerId = canonicalOwnerId(users, hint)
+  if (!ownerId) return users
+  return users
+    .filter((user) => belongsToClinic(user, ownerId))
+    .map((user) => ({
+      ...user,
+      clinicId: ownerId,
+      isClinicOwner: textId(user.id) === ownerId,
+    }))
 }
 
 export async function fetchClinicUsers() {
@@ -170,7 +196,7 @@ export async function fetchClinicUsers() {
   }
   const seats = (payload.seats ?? null) as ClinicSeatSnapshot | null
   const users = Array.isArray(payload.users)
-    ? (payload.users as ApiSubscriptionUser[]).map(mapClinicMemberToProfile)
+    ? presentClinicRoster((payload.users as ApiSubscriptionUser[]).map(mapClinicMemberToProfile))
     : []
   return { ok: true as const, users, seats }
 }
@@ -215,7 +241,7 @@ export async function resetClinicMemberPassword(userId: string, password: string
     `/api/clinic/users/${encodeURIComponent(userId)}/password`,
     {
       method: 'PUT',
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ password, userId }),
     },
   )
   if (!response.ok) {
