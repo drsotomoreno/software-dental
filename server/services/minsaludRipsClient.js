@@ -1,6 +1,10 @@
 import { randomBytes } from 'node:crypto'
 import { config, hasMinsaludCredentials } from '../config.js'
-import { getMinsaludAccessToken } from './minsaludAuth.js'
+import {
+  credencialesCompletas,
+  resolverCredencialesPrestador,
+} from './minsaludAuth.js'
+import { prepararPayloadTransmision, transmitirRipsMultiusuario } from './ministerioService.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
 
 /**
@@ -46,8 +50,11 @@ function normalizeMinistryErrors(payload) {
  * @param {object} params
  * @param {object} params.rips - Paquete JSON RIPS Res. 2275
  * @param {object} [params.metadatos] - Metadatos de trazabilidad (UUID paciente, IDs clínicos)
+ * @param {object} [params.user] - Prestador que ejecuta la transacción
+ * @param {{ tipoUsuario?: string, numeroDocumento?: string, nitObligado?: string }} [params.credenciales]
+ * @param {string} [params.xmlFev] - XML de la FEV cuando el paquete va ligado a factura
  */
-export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
+export async function submitRipsToMinsalud({ rips, metadatos = {}, user, credenciales, xmlFev } = {}) {
   const localIssues = validateRipsPackageLocally(rips, {
     crossValidateAgeSex: true,
     perfilFiscal: metadatos.perfilFiscal,
@@ -63,7 +70,10 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     }
   }
 
-  const useSandbox = config.minsalud.sandbox || !hasMinsaludCredentials()
+  const credencialesPrestador = resolverCredencialesPrestador({ user, rips, metadatos, credenciales })
+  const useSandbox =
+    config.minsalud.sandbox ||
+    (!credencialesCompletas(credencialesPrestador) && !hasMinsaludCredentials())
 
   if (useSandbox) {
     const ministryErrors = simulateMinistryCrossValidation(rips)
@@ -88,43 +98,29 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     }
   }
 
-  const token = await getMinsaludAccessToken()
-  const { apiBaseUrl, validatePath, nit } = config.minsalud
-  const url = `${apiBaseUrl}${validatePath}`
+  const { payloadRips, esSinFactura } = prepararPayloadTransmision(rips, metadatos)
+  const transmision = await transmitirRipsMultiusuario(
+    payloadRips,
+    credencialesPrestador,
+    esSinFactura ? undefined : xmlFev,
+  )
 
-  const payload = {
-    rips,
-    metadatos: {
-      ...metadatos,
-      nitObligado: rips.numDocumentoIdObligado,
-      numFactura: rips.numFactura,
-    },
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
-      'X-NIT-Prestador': nit || rips.numDocumentoIdObligado,
-    },
-    body: JSON.stringify(payload),
-  })
-
-  const data = await response.json().catch(() => ({}))
-
-  if (!response.ok) {
+  if (!transmision.success) {
+    const raw = transmision.error
+    const ministryErrors = normalizeMinistryErrors(raw)
     return {
       success: false,
       source: 'minsalud',
-      httpStatus: response.status,
       localIssues,
-      ministryErrors: normalizeMinistryErrors(data),
-      raw: data,
+      ministryErrors:
+        ministryErrors.length > 0
+          ? ministryErrors
+          : [{ message: typeof raw === 'string' ? raw : 'No se pudo transmitir el paquete al Ministerio.' }],
+      raw,
     }
   }
 
+  const data = transmision.data ?? {}
   const approved =
     data.ResultState === true ||
     data.resultState === true ||
@@ -137,6 +133,7 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
       source: 'minsalud',
       localIssues,
       ministryErrors: normalizeMinistryErrors(data),
+      mensaje: transmision.mensaje,
       raw: data,
     }
   }
@@ -149,6 +146,7 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     procesoId: data.ProcesoId ?? data.procesoId,
     fechaRadicacion: data.FechaRadicacion ?? data.fechaRadicacion ?? new Date().toISOString(),
     estado: data.Estado ?? data.estado ?? 'APROBADO',
+    mensaje: transmision.mensaje,
     metadatos,
     raw: data,
   }

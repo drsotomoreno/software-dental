@@ -1,5 +1,11 @@
 import { Router } from 'express'
 import { submitRipsToMinsalud } from '../services/minsaludRipsClient.js'
+import {
+  findSubscriptionUserById,
+  resolveSubscriptionSession,
+  sessionHintFromRequest,
+} from '../services/subscriptionAuthStore.js'
+import { transmitirRipsDeLaSesion } from '../services/ministerioService.js'
 import { saveCuvRecord, getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
@@ -12,6 +18,11 @@ import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.co
 import { getMonthlyRipsStatus, runMonthlyRipsJob } from '../controllers/monthlyRips.controller.js'
 
 const router = Router()
+
+function bearerToken(req) {
+  const authHeader = req.headers.authorization ?? ''
+  return authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+}
 
 /**
  * POST /api/rips/evolucion-dictada
@@ -32,18 +43,55 @@ router.get('/mensual/estado', getMonthlyRipsStatus)
 router.post('/mensual/enviar', runMonthlyRipsJob)
 
 /**
+ * POST /api/rips/transmitir
+ * Al cerrar la historia y enviar, usa el prestador de la sesión autenticada.
+ */
+router.post('/transmitir', async (req, res) => {
+  try {
+    const { payloadRips, rips, xmlFev } = req.body ?? {}
+    const session = await resolveSubscriptionSession(bearerToken(req), sessionHintFromRequest(req))
+    if (!session?.user) {
+      return res.status(401).json({ success: false, error: 'Sesión inválida o expirada.' })
+    }
+
+    const clinicId = String(session.user.clinicId || session.user.id || '')
+    const clinica =
+      clinicId && clinicId !== String(session.user.id)
+        ? await findSubscriptionUserById(clinicId)
+        : session.user
+
+    const { status, body } = await transmitirRipsDeLaSesion({
+      user: session.user,
+      clinica,
+      payloadRips: payloadRips ?? rips,
+      xmlFev,
+    })
+    return res.status(status).json(body)
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err?.message || 'No se pudo transmitir el RIPS.' })
+  }
+})
+
+/**
  * POST /api/rips/validate
  * Valida localmente y radica ante MinSalud; persiste CUV si es aprobado.
  */
 router.post('/validate', async (req, res, next) => {
   try {
-    const { rips, metadatos, invoice } = req.body ?? {}
+    const { rips, metadatos, invoice, credenciales, xmlFev } = req.body ?? {}
 
     if (!rips) {
       return res.status(400).json({ success: false, error: 'El cuerpo debe incluir el objeto rips.' })
     }
 
-    const result = await submitRipsToMinsalud({ rips, metadatos })
+    const session = await resolveSubscriptionSession(bearerToken(req), sessionHintFromRequest(req))
+    const result = await submitRipsToMinsalud({
+      rips,
+      metadatos,
+      user: session?.user ?? null,
+      credenciales,
+      xmlFev: xmlFev ?? invoice?.xmlFev ?? invoice?.xml,
+    })
 
     if (!result.success) {
       return res.status(422).json({

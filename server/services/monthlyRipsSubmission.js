@@ -5,6 +5,8 @@ import { mkdir, open, readFile, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { config } from '../config.js'
 import { submitRipsToMinsalud } from './minsaludRipsClient.js'
+import { findSubscriptionUserById } from './subscriptionAuthStore.js'
+import { credencialesCompletas, credencialesDesdeUsuario } from './minsaludAuth.js'
 import { saveCuvRecord } from './cuvRepository.js'
 import {
   listPendingRipsWithoutInvoice,
@@ -124,19 +126,38 @@ export async function enviarRipsMensuales(options = {}) {
         continue
       }
 
-      const ministry = await submitRipsToMinsalud({
-        rips: pkg.rips,
-        metadatos: {
-          perfilFiscal: PERFIL_FISCAL_NO_OBLIGADO,
-          esRipsTemporal: true,
-          allowNullNumFactura: true,
-          origen: 'cron-mensual',
-          period,
-          professionalId: pkg.professionalId,
-          clinicId: pkg.clinicId,
-          recordIds: pkg.recordIds,
-        },
+      const profesional = await findSubscriptionUserById(pkg.professionalId)
+      const clinica = await findSubscriptionUserById(pkg.clinicId)
+      const credenciales = credencialesDesdeUsuario(profesional, {
+        tipoUsuario: profesional?.documentType || clinica?.documentType,
+        numeroDocumento: profesional?.documentNumber || clinica?.documentNumber,
+        nitObligado: profesional?.providerNit || clinica?.providerNit || pkg.rips?.numDocumentoIdObligado,
       })
+      let ministry
+      try {
+        ministry = await submitRipsToMinsalud({
+          rips: pkg.rips,
+          user: profesional || clinica,
+          credenciales: credencialesCompletas(credenciales) ? credenciales : undefined,
+          metadatos: {
+            perfilFiscal: PERFIL_FISCAL_NO_OBLIGADO,
+            esRipsTemporal: true,
+            allowNullNumFactura: true,
+            origen: 'cron-mensual',
+            period,
+            professionalId: pkg.professionalId,
+            clinicId: pkg.clinicId,
+            recordIds: pkg.recordIds,
+          },
+        })
+      } catch (error) {
+        results.push({
+          ...entry,
+          ok: false,
+          error: error instanceof Error ? error.message : 'No se pudo autenticar el prestador ante el Ministerio.',
+        })
+        continue
+      }
 
       if (!ministry.success) {
         results.push({

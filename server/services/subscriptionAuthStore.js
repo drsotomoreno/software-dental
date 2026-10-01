@@ -1925,6 +1925,15 @@ export async function deleteClinicUser({ token, hint, userId }) {
   return { ok: true, user: publicClinicUser(store.users[index]), seats: clinicSeatSnapshot(store, clinicId) }
 }
 
+/** Usuario público por id, para radicar con las credenciales de quien hizo la transacción. */
+export async function findSubscriptionUserById(userId) {
+  const id = String(userId ?? '').trim()
+  if (!id) return null
+  const store = await loadStore()
+  const user = store.users.find((item) => item.id === id)
+  return user ? sanitizeUser(user) : null
+}
+
 export async function selectPaidPlan({ token, planId, hint }) {
   const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {

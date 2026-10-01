@@ -73,6 +73,7 @@ import {
 import { isEvolutionNoteImmutable } from '@/types/evolutionNote'
 import { validateEvolutionNote } from '@/utils/evolutionNoteValidation'
 import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
+import { enviarHistoriaCerradaAlMinisterio } from '@/services/clinicalHistorySend'
 import type { RipsShieldMismatch } from '@/types/consultationCheckout'
 import { RipsShieldModal } from '@/components/rips/RipsShieldModal'
 import {
@@ -1292,10 +1293,16 @@ export function PatientDetailPage() {
         details: `Paciente ${patient.documentType} ${patient.documentNumber} — usuario ${user.email}`,
       })
 
+      const savedRecord = await db.clinicalRecords.get(recordId)
+      const envioMinisterio = savedRecord
+        ? await enviarHistoriaCerradaAlMinisterio(savedRecord, patient, user)
+        : ''
+
       setMessage(
         'Atención cerrada para facturación. Las evoluciones firmadas quedaron bloqueadas como folio (Res. 1995/1999). Odontograma, plan y exámenes siguen editables. Hash: ' +
           contentHash.slice(0, 16) +
-          '…',
+          '…' +
+          envioMinisterio,
       )
       return { ok: true as const }
     } catch {
@@ -2071,7 +2078,7 @@ export function PatientDetailPage() {
       <SignConfirmationModal
         open={showSignConfirm}
         title="Cerrar atención y firmar evoluciones"
-        description="Se firmarán las evoluciones completas (folios inmutables, Res. 1995/1999) y se guardará un snapshot para facturación/RIPS. El odontograma, los datos demográficos, el plan futuro y los exámenes del expediente no se bloquean. Las correcciones de un folio firmado se hacen con notas de aclaración."
+        description="Se firmarán las evoluciones completas (folios inmutables, Res. 1995/1999), se guardará un snapshot para facturación/RIPS y se enviará al Ministerio con el prestador de esta sesión. El odontograma, los datos demográficos, el plan futuro y los exámenes del expediente no se bloquean. Las correcciones de un folio firmado se hacen con notas de aclaración."
         userEmail={user?.email ?? ''}
         onConfirm={executeSignAndLock}
         onCancel={() => setShowSignConfirm(false)}
