@@ -105,7 +105,8 @@ export const CLINICAL_HISTORY_PRINT_SECTIONS: ClinicalHistoryPrintSection[] = [
   },
 ]
 
-export const CLINICAL_SECTION_TITLE_CLASS = 'text-base font-bold text-dental-700'
+export const CLINICAL_SECTION_TITLE_CLASS =
+  'inline-block rounded-xl bg-dental-600 px-4 py-2 text-base font-semibold text-white shadow-sm'
 
 export const CLINICAL_HISTORY_PAGE_TITLE_CLASS = 'text-2xl font-bold text-dental-700'
 
