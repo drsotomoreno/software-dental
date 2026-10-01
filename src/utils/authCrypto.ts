@@ -1,7 +1,7 @@
 const PBKDF2_ITERATIONS = 120_000
 
-function bufferToHex(buffer: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buffer))
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
 }
@@ -37,8 +37,8 @@ export async function hashPassword(
     256,
   )
   return {
-    hash: bufferToHex(derived),
-    salt: bufferToHex(salt.buffer),
+    hash: bytesToHex(new Uint8Array(derived)),
+    salt: bytesToHex(salt),
   }
 }
 

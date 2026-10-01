@@ -17,6 +17,13 @@ import {
   normalizePerfilFiscal,
 } from '../../shared/fiscalProfile.js'
 import { parseRepsCodeWithDane } from './repsDane.js'
+import {
+  alignClinicOwnership,
+  belongsToClinic,
+  canonicalOwnerId,
+  isRecordedOwner,
+  textId,
+} from '../../shared/clinicOwnership.js'
 
 
 
@@ -207,7 +214,9 @@ function migrateUser(user) {
 
 async function loadStore() {
   const parsed = await readDurableJson(USERS_FILE, emptyStore())
-  const users = (Array.isArray(parsed.users) ? parsed.users : []).map(migrateUser)
+  const users = (Array.isArray(parsed.users) ? parsed.users : [])
+    .filter((user) => user && typeof user === 'object')
+    .map(migrateUser)
   const sessionsByToken = new Map()
   for (const session of Array.isArray(parsed.sessions) ? parsed.sessions : []) {
     if (session?.token) sessionsByToken.set(session.token, session)
@@ -232,11 +241,13 @@ async function loadStore() {
 async function saveStore(store) {
   try {
     await writeDurableJson(USERS_FILE, store)
+    return true
   } catch (error) {
     console.error(
       '[Auth] No se pudo guardar el almacén de usuarios; las sesiones en memoria se conservan:',
       error instanceof Error ? error.message : error,
     )
+    return false
   }
 }
 
@@ -575,12 +586,24 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
     store.users[userIndex] = currentUser
   }
 
-  if (!currentUser.clinicId) {
-    currentUser = { ...currentUser, clinicId: currentUser.id, updatedAt: new Date().toISOString() }
-    store.users[userIndex] = currentUser
-  }
-
-  if (!masterLogin && String(currentUser.clinicId || currentUser.id) === String(currentUser.id) && !isSuperAdminUser(currentUser)) {
+  if (!currentUser.clinicId && !masterLogin && !isSuperAdminUser(currentUser)) {
+    const role = normalizeRole(currentUser.rol)
+    const staffRole = role === 'odontologo' || role === 'recepcion'
+    if (!staffRole) {
+      currentUser = {
+        ...currentUser,
+        clinicId: currentUser.id,
+        rol: 'admin',
+        accessEnabled: currentUser.accessEnabled !== false,
+        updatedAt: new Date().toISOString(),
+      }
+      store.users[userIndex] = currentUser
+    }
+  } else if (
+    !masterLogin &&
+    isRecordedOwner(currentUser) &&
+    !isSuperAdminUser(currentUser)
+  ) {
     currentUser = { ...currentUser, rol: 'admin', accessEnabled: true, updatedAt: new Date().toISOString() }
     store.users[userIndex] = currentUser
   }
@@ -1179,7 +1202,7 @@ function sanitizeUser(user) {
     legalName: institution ? user.legalName ?? '' : '',
     providerType: normalizeProviderType(user.providerType),
     clinicId: user.clinicId || user.id,
-    isClinicOwner: String(user.clinicId || user.id) === String(user.id),
+    isClinicOwner: isRecordedOwner(user),
     accessEnabled: user.accessEnabled !== false && Boolean(user.passwordHash),
     phone: user.phone ?? '',
     perfilFiscal: normalizePerfilFiscal(user.perfilFiscal),
@@ -1574,12 +1597,29 @@ export async function listAllSubscriptionUsers() {
 }
 
 function clinicIdOf(user) {
-  return String(user?.clinicId || user?.id || '')
+  return textId(user?.clinicId || user?.id)
 }
 
 function isClinicOwner(user) {
-  if (!user?.id) return false
-  return String(user.id) === clinicIdOf(user)
+  return isRecordedOwner(user)
+}
+
+function findUserIndex(users, userId) {
+  const id = textId(userId)
+  if (!id || !Array.isArray(users)) return -1
+  return users.findIndex((item) => item && textId(item.id) === id)
+}
+
+function findMemberIndex(users, userId, documentNumber) {
+  const byId = findUserIndex(users, userId)
+  if (byId !== -1) return byId
+  const doc = normalizeDocumentNumber(documentNumber)
+  if (!doc || !Array.isArray(users)) return -1
+  return users.findIndex((item) => item && normalizeDocumentNumber(item.documentNumber) === doc)
+}
+
+function actorClinicId(store, actor) {
+  return canonicalOwnerId(store?.users, clinicIdOf(actor))
 }
 
 function canManageClinicTeam(user) {
@@ -1590,8 +1630,10 @@ function canManageClinicTeam(user) {
 }
 
 function usersInClinic(store, clinicId) {
-  const id = String(clinicId)
-  return store.users.filter((item) => clinicIdOf(item) === id)
+  const id = textId(clinicId)
+  return (Array.isArray(store?.users) ? store.users : []).filter(
+    (item) => item && belongsToClinic(item, id),
+  )
 }
 
 function hasClinicAccess(user) {
@@ -1599,7 +1641,9 @@ function hasClinicAccess(user) {
 }
 
 function clinicSeatSnapshot(store, clinicId) {
-  const owner = store.users.find((item) => item.id === clinicId) || null
+  const owner = (Array.isArray(store.users) ? store.users : []).find(
+    (item) => item && textId(item.id) === textId(clinicId),
+  ) || null
   const members = usersInClinic(store, clinicId).filter(hasClinicAccess)
   const maxSeats = owner ? seatLimitForAccount(owner) : seatLimitForAccount({})
   return {
@@ -1635,8 +1679,10 @@ export async function listClinicUsers({ token, hint }) {
     }
   }
   const store = await loadStore()
-  const clinicId = clinicIdOf(session.user)
-  const ownerIndex = store.users.findIndex((item) => item.id === clinicId)
+  const clinicId = actorClinicId(store, session.user)
+  const changed = alignClinicOwnership(store.users, clinicId)
+  const ownerIndex = findUserIndex(store.users, clinicId)
+  let ownerChanged = changed
   if (
     ownerIndex !== -1 &&
     !isSuperAdminUser(store.users[ownerIndex]) &&
@@ -1646,10 +1692,12 @@ export async function listClinicUsers({ token, hint }) {
       ...store.users[ownerIndex],
       rol: 'admin',
       clinicId,
+      isClinicOwner: true,
       updatedAt: new Date().toISOString(),
     }
-    await saveStore(store)
+    ownerChanged = true
   }
+  if (ownerChanged) await saveStore(store)
   const seats = clinicSeatSnapshot(store, clinicId)
   const users = usersInClinic(store, clinicId).map(publicClinicUser)
   return { ok: true, users, seats }
@@ -1708,8 +1756,9 @@ export async function createClinicUser({ token, hint, member }) {
   }
 
   const store = await loadStore()
-  const clinicId = clinicIdOf(session.user)
-  const owner = store.users.find((item) => item.id === clinicId) || store.users.find((item) => item.id === session.user.id)
+  const clinicId = actorClinicId(store, session.user)
+  const owner = store.users.find((item) => item && textId(item.id) === clinicId)
+    || store.users.find((item) => item && textId(item.id) === textId(session.user.id))
   if (!owner) {
     return { ok: false, status: 404, error: 'No se encontró la cuenta de la clínica.' }
   }
@@ -1751,6 +1800,7 @@ export async function createClinicUser({ token, hint, member }) {
     documentNumber,
     rethusNumber: isAuxiliar ? '' : String(member?.rethusNumber ?? '').trim(),
     clinicId,
+    isClinicOwner: false,
     clinicName: owner.clinicName || member?.clinicName || '',
     legalName: owner.legalName || '',
     providerType: owner.providerType || 'profesional_independiente',
@@ -1775,7 +1825,7 @@ export async function createClinicUser({ token, hint, member }) {
   }
 }
 
-export async function updateClinicUser({ token, hint, userId, patch }) {
+export async function updateClinicUser({ token, hint, userId, patch, documentNumber: lookupDocument }) {
   const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
@@ -1784,17 +1834,19 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     return { ok: false, status: 403, error: 'Solo el administrador de la clínica puede editar colaboradores.' }
   }
   const store = await loadStore()
-  const clinicId = clinicIdOf(session.user)
-  const index = store.users.findIndex((item) => item.id === userId)
+  const clinicId = actorClinicId(store, session.user)
+  const incoming = patch && typeof patch === 'object' ? { ...patch } : {}
+  const memberDocument = lookupDocument || incoming.lookupDocumentNumber
+  delete incoming.lookupDocumentNumber
+  const index = findMemberIndex(store.users, userId, memberDocument)
   if (index === -1) {
     return { ok: false, status: 404, error: 'Usuario no encontrado.' }
   }
   const current = store.users[index]
-  if (clinicIdOf(current) !== clinicId && !isSuperAdminUser(session.user)) {
+  if (!belongsToClinic(current, clinicId) && !isSuperAdminUser(session.user)) {
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
   }
 
-  const incoming = patch && typeof patch === 'object' ? { ...patch } : {}
   let firstName = String(incoming.firstName ?? current.firstName ?? '').trim()
   let lastName = String(incoming.lastName ?? current.lastName ?? '').trim()
   const documentNumber = incoming.documentNumber !== undefined
@@ -1813,7 +1865,8 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
   }
 
   let role = current.rol
-  if (isClinicOwner(current) && !isSuperAdminUser(current)) {
+  const targetIsOwner = textId(current.id) === textId(clinicId)
+  if (targetIsOwner && !isSuperAdminUser(current)) {
     role = 'admin'
   } else if (incoming.role !== undefined || incoming.rol !== undefined) {
     const requested = normalizeRole(incoming.role ?? incoming.rol)
@@ -1852,6 +1905,9 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     documentNumber: documentNumber || current.documentNumber,
     rethusNumber: incoming.rethusNumber !== undefined ? String(incoming.rethusNumber).trim() : current.rethusNumber,
     rol: role,
+    ...(belongsToClinic(current, clinicId)
+      ? { clinicId, isClinicOwner: targetIsOwner }
+      : {}),
     thsSpecialty: incoming.thsSpecialty ?? current.thsSpecialty,
     updatedAt: new Date().toISOString(),
   }
@@ -1859,7 +1915,7 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
   return { ok: true, user: publicClinicUser(store.users[index]) }
 }
 
-export async function resetClinicUserPassword({ token, hint, userId, newPassword }) {
+export async function resetClinicUserPassword({ token, hint, userId, newPassword, documentNumber }) {
   const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
@@ -1867,30 +1923,37 @@ export async function resetClinicUserPassword({ token, hint, userId, newPassword
   if (!canManageClinicTeam(session.user)) {
     return { ok: false, status: 403, error: 'Solo el administrador de la clínica puede asignar contraseñas.' }
   }
-  const password = String(newPassword ?? '')
+  const password = String(newPassword ?? '').trim()
   if (password.length < 8) {
     return { ok: false, status: 400, error: 'La contraseña debe tener al menos 8 caracteres.' }
   }
   const store = await loadStore()
-  const clinicId = clinicIdOf(session.user)
-  const index = store.users.findIndex((item) => item.id === userId)
+  const clinicId = actorClinicId(store, session.user)
+  const index = findMemberIndex(store.users, userId, documentNumber)
   if (index === -1) {
     return { ok: false, status: 404, error: 'Usuario no encontrado.' }
   }
-  if (clinicIdOf(store.users[index]) !== clinicId && !isSuperAdminUser(session.user)) {
+  const current = store.users[index]
+  if (!current || typeof current !== 'object') {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+  if (!belongsToClinic(current, clinicId) && !isSuperAdminUser(session.user)) {
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
   }
   store.users[index] = {
-    ...store.users[index],
+    ...current,
     passwordHash: hashPasswordSha256(password),
     accessEnabled: true,
     updatedAt: new Date().toISOString(),
   }
-  await saveStore(store)
+  const saved = await saveStore(store)
+  if (!saved) {
+    return { ok: false, status: 500, error: 'No se pudo guardar la contraseña. Intente de nuevo.' }
+  }
   return { ok: true }
 }
 
-export async function deleteClinicUser({ token, hint, userId }) {
+export async function deleteClinicUser({ token, hint, userId, documentNumber }) {
   const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
@@ -1898,30 +1961,42 @@ export async function deleteClinicUser({ token, hint, userId }) {
   if (!canManageClinicTeam(session.user)) {
     return { ok: false, status: 403, error: 'Solo el administrador de la clínica puede eliminar colaboradores.' }
   }
-  if (String(userId) === String(session.user.id)) {
+  if (textId(userId) && textId(userId) === textId(session.user.id)) {
     return { ok: false, status: 400, error: 'No puede eliminar su propio usuario.' }
   }
   const store = await loadStore()
-  const clinicId = clinicIdOf(session.user)
-  const index = store.users.findIndex((item) => item.id === userId)
+  const clinicId = actorClinicId(store, session.user)
+  const index = findMemberIndex(store.users, userId, documentNumber)
   if (index === -1) {
     return { ok: false, status: 404, error: 'Usuario no encontrado.' }
   }
   const target = store.users[index]
-  if (clinicIdOf(target) !== clinicId && !isSuperAdminUser(session.user)) {
+  if (!target || typeof target !== 'object') {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+  if (!belongsToClinic(target, clinicId) && !isSuperAdminUser(session.user)) {
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
   }
-  if (isClinicOwner(target)) {
+  if (textId(target.id) === textId(session.user.id)) {
+    return { ok: false, status: 400, error: 'No puede eliminar su propio usuario.' }
+  }
+  if (textId(target.id) === textId(clinicId)) {
     return { ok: false, status: 400, error: 'No puede eliminar al titular de la clínica.' }
   }
   store.users[index] = {
     ...target,
+    isClinicOwner: false,
     passwordHash: '',
     accessEnabled: false,
     updatedAt: new Date().toISOString(),
   }
-  store.sessions = store.sessions.filter((item) => item.userId !== userId)
-  await saveStore(store)
+  store.sessions = (Array.isArray(store.sessions) ? store.sessions : []).filter(
+    (item) => item && textId(item.userId) !== textId(target.id),
+  )
+  const saved = await saveStore(store)
+  if (!saved) {
+    return { ok: false, status: 500, error: 'No se pudo guardar la baja del colaborador. Intente de nuevo.' }
+  }
   return { ok: true, user: publicClinicUser(store.users[index]), seats: clinicSeatSnapshot(store, clinicId) }
 }
 

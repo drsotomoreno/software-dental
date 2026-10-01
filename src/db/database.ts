@@ -935,28 +935,14 @@ export async function seedDemoData(): Promise<void> {
     ])
   }
 
-  const adminExists = await db.users.get('user-demo-admin')
-  if (!adminExists) {
-    await db.users.add({
-      id: 'user-demo-admin',
-      email: 'admin@clinica.co',
-      firstName: 'Carlos',
-      lastName: 'Administrador',
-      documentType: 'CC',
-      documentNumber: '9876543210',
-      role: 'admin',
-      clinicName: 'Clínica Dental Sonrisa',
-      clinicId: 'user-demo-admin',
-      isClinicOwner: true,
-      providerNit: '900123456-1',
-      repsCode: '6800103898-01',
-      repsStatus: 'activo',
-      perfilFiscal: 'Obligado_FEV',
-    })
+  // No volver a crear al administrador demo si la base ya tiene cuentas:
+  // eso dejaba un segundo titular junto a la clínica real.
+  if (await db.users.get('user-demo-001')) {
+    await ensureUserCredentials('user-demo-001', DEMO_DEFAULT_PASSWORD)
   }
-
-  await ensureUserCredentials('user-demo-001', DEMO_DEFAULT_PASSWORD)
-  await ensureUserCredentials('user-demo-admin', DEMO_DEFAULT_PASSWORD)
+  if (await db.users.get('user-demo-admin')) {
+    await ensureUserCredentials('user-demo-admin', DEMO_DEFAULT_PASSWORD)
+  }
 
   await seedDefaultColumns()
   await seedCatalogsIfEmpty()

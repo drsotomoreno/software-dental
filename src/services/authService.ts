@@ -16,11 +16,18 @@ import { getEffectiveRole, getStoredApiAuth, mapApiUserToAuthUser } from '@/serv
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
 import { seatLimitForAccount, planDisplayName } from '../../shared/subscriptionPlans.js'
 import {
+  attachRosterToOwner,
+  documentDigits,
+  resolveAccountOwnerId,
+  textId,
+} from '../../shared/clinicOwnership.js'
+import {
   createClinicMember,
   deleteClinicMember,
   fetchClinicUsers,
   resetClinicMemberPassword,
   updateClinicMember,
+  type ClinicSeatSnapshot,
 } from '@/services/subscriptionService'
 
 export async function getStoredSessionToken(): Promise<string | null> {
@@ -275,26 +282,127 @@ async function ensureRemainingUserManager(excludeUserId?: string): Promise<strin
   return 'Debe existir el titular administrador de esta clínica.'
 }
 
-export async function listAppUsers(): Promise<UserProfile[]> {
-  const gate = await requireUserManager()
-  if (!gate.ok) return []
-  const api = await fetchClinicUsers()
-  if (api.ok) {
-    for (const user of api.users) {
-      await db.users.put(user)
-    }
-    return api.users
-  }
-  const { clinicId, isSuperAdmin } = currentClinicScope()
-  const all = await db.users.toArray()
-  const scoped = isSuperAdmin || !clinicId
-    ? all
-    : all.filter((user) => String(user.clinicId || user.id) === String(clinicId))
-  return scoped.sort((a, b) => {
+function sessionMember(): UserProfile | null {
+  const apiUser = getStoredApiAuth()?.user
+  if (!apiUser?.id) return null
+  const mapped = mapApiUserToAuthUser(apiUser, '')
+  const { sessionId: _sessionId, ...profile } = mapped
+  void _sessionId
+  return profile
+}
+
+function sortRoster(users: UserProfile[]): UserProfile[] {
+  return [...users].sort((a, b) => {
     const left = `${a.lastName} ${a.firstName}`.toLowerCase()
     const right = `${b.lastName} ${b.firstName}`.toLowerCase()
     return left.localeCompare(right, 'es')
   })
+}
+
+function serverDoesNotHaveUser(result: { status?: number; error?: string }): boolean {
+  return result.status === 404 || /no encontrado/i.test(result.error || '')
+}
+
+/**
+ * Una sola cuenta en esta pantalla: el titular es quien inició sesión si ya es
+ * titular, y el resto (incluido el administrador demo) queda como colaborador.
+ */
+export async function loadClinicTeam(): Promise<{ users: UserProfile[]; seats: ClinicSeatSnapshot | null }> {
+  const gate = await requireUserManager()
+  if (!gate.ok) return { users: [], seats: null }
+
+  let api: Awaited<ReturnType<typeof fetchClinicUsers>>
+  try {
+    api = await fetchClinicUsers()
+  } catch (error) {
+    console.error(error)
+    api = { ok: false, status: 0, error: 'No se pudo listar el equipo de la clínica.' }
+  }
+
+  const local = await db.users.toArray()
+  const session = sessionMember()
+  const byId = new Map<string, UserProfile>()
+  for (const user of local) {
+    const id = textId(user.id)
+    if (id) byId.set(id, user)
+  }
+  if (api.ok) {
+    for (const user of api.users) {
+      const id = textId(user.id)
+      if (!id) continue
+      const previous = byId.get(id)
+      byId.set(id, previous ? { ...previous, ...user, id } : { ...user, id })
+    }
+  }
+
+  let combined = [...byId.values()]
+  let ownerId = resolveAccountOwnerId(combined, session)
+  if (
+    ownerId &&
+    session &&
+    textId(session.id) === ownerId &&
+    !combined.some((user) => textId(user.id) === ownerId)
+  ) {
+    combined = [...combined, session]
+  }
+  if (!ownerId && session) ownerId = textId(session.id)
+
+  const roster = combined.map((user) => ({ ...user }))
+  if (ownerId) attachRosterToOwner(roster, ownerId)
+
+  for (const user of roster) {
+    const previous = local.find((item) => textId(item.id) === textId(user.id))
+    try {
+      if (!previous) {
+        await db.users.put(user)
+        continue
+      }
+      if (
+        previous.isClinicOwner !== user.isClinicOwner ||
+        textId(previous.clinicId) !== textId(user.clinicId)
+      ) {
+        await db.users.update(user.id, {
+          isClinicOwner: user.isClinicOwner,
+          clinicId: user.clinicId,
+        })
+      }
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  return {
+    users: sortRoster(roster),
+    seats: api.ok ? api.seats ?? null : null,
+  }
+}
+
+export async function listAppUsers(): Promise<UserProfile[]> {
+  const team = await loadClinicTeam()
+  return team.users
+}
+
+async function revokeLocalAccess(userId: string, ownerId: string): Promise<void> {
+  const all = await db.users.toArray()
+  const target = all.find((user) => textId(user.id) === textId(userId))
+  const doc = documentDigits(target?.documentNumber)
+  const ids = new Set<string>()
+  if (textId(userId)) ids.add(textId(userId))
+  if (doc) {
+    for (const user of all) {
+      if (documentDigits(user.documentNumber) === doc) ids.add(textId(user.id))
+    }
+  }
+  for (const id of ids) {
+    if (!id || id === textId(ownerId)) continue
+    await db.userCredentials.delete(id)
+    const sessions = await db.sessions.where('userId').equals(id).toArray()
+    await Promise.all(sessions.map((session) => db.sessions.delete(session.id)))
+    const row = await db.users.get(id)
+    if (row) {
+      await db.users.update(id, { accessEnabled: false, isClinicOwner: false })
+    }
+  }
 }
 
 export async function createAppUser(
@@ -419,7 +527,9 @@ export async function updateAppUser(
   const nextPatch: Partial<UserProfile> = { ...patch }
 
   if (nextPatch.role !== undefined) {
-    if (current?.isClinicOwner) {
+    const clinicUsers = await db.users.toArray()
+    const ownerId = resolveAccountOwnerId(clinicUsers, sessionMember() || currentUserScope())
+    if (current && textId(current.id) === ownerId) {
       nextPatch.role = 'admin'
     } else {
       const roleResult = sanitizeAssignableRole(nextPatch.role, gate.actorRole)
@@ -479,15 +589,17 @@ export async function updateAppUser(
     role: nextPatch.role,
     rethusNumber: nextPatch.rethusNumber,
     thsSpecialty: nextPatch.thsSpecialty,
+    lookupDocumentNumber: current?.documentNumber,
   })
   if (api.ok) {
     await db.users.put(api.user)
     return { ok: true }
   }
-  if (getStoredApiAuth()?.token) {
+  const localEditable = !getStoredApiAuth()?.token || serverDoesNotHaveUser(api)
+  if (!localEditable) {
     return { ok: false, error: api.error }
   }
-  if (!current) return { ok: false, error: 'Usuario no encontrado.' }
+  if (!current) return { ok: false, error: api.error || 'Usuario no encontrado.' }
 
   await db.users.update(userId, nextPatch)
   return { ok: true }
@@ -503,22 +615,43 @@ export async function resetAppUserPassword(
   const passwordError = validatePasswordStrength(newPassword)
   if (passwordError) return { ok: false, error: passwordError }
 
-  const api = await resetClinicMemberPassword(userId, newPassword)
+  const existing = await db.users.get(userId)
+  const api = await resetClinicMemberPassword(userId, newPassword, existing?.documentNumber)
   if (api.ok) {
-    await seedUserCredentials(userId, newPassword)
-    await db.users.update(userId, { accessEnabled: true })
+    try {
+      await seedUserCredentials(userId, newPassword)
+      await db.users.update(userId, { accessEnabled: true })
+    } catch (error) {
+      console.error('La clave quedó guardada en el servidor:', error)
+    }
     return { ok: true }
   }
-  if (getStoredApiAuth()?.token) {
+  const localOnly = !getStoredApiAuth()?.token || serverDoesNotHaveUser(api)
+  if (!localOnly) {
     return { ok: false, error: api.error }
   }
 
-  const user = await db.users.get(userId)
-  if (!user) return { ok: false, error: 'Usuario no encontrado.' }
+  const user = existing || (await db.users.get(userId))
+  if (!user) return { ok: false, error: api.error || 'Usuario no encontrado.' }
 
-  await seedUserCredentials(userId, newPassword)
-  await db.users.update(userId, { accessEnabled: true })
+  try {
+    await seedUserCredentials(userId, newPassword)
+    await db.users.update(userId, { accessEnabled: true })
+  } catch (error) {
+    console.error(error)
+    return { ok: false, error: 'No se pudo asignar la contraseña.' }
+  }
   return { ok: true }
+}
+
+function currentUserScope(): { id?: string; clinicId?: string; email?: string; documentNumber?: string } {
+  const scope = currentClinicScope()
+  return {
+    id: scope.apiAuth?.user?.id,
+    clinicId: scope.clinicId,
+    email: scope.apiAuth?.user?.email,
+    documentNumber: scope.apiAuth?.user?.documentNumber,
+  }
 }
 
 export async function deleteAppUser(
@@ -528,32 +661,39 @@ export async function deleteAppUser(
   const gate = await requireUserManager()
   if (!gate.ok) return gate
 
-  if (userId === actingUserId) {
+  if (textId(userId) && textId(userId) === textId(actingUserId)) {
     return { ok: false, error: 'No puede eliminar su propio usuario.' }
   }
 
-  const api = await deleteClinicMember(userId)
-  if (api.ok) {
-    await db.userCredentials.delete(userId)
-    const sessions = await db.sessions.where('userId').equals(userId).toArray()
-    await Promise.all(sessions.map((s) => db.sessions.delete(s.id)))
-    await db.users.update(userId, { accessEnabled: false })
-    return { ok: true }
-  }
-  if (getStoredApiAuth()?.token) {
-    return { ok: false, error: api.error }
-  }
-
-  const user = await db.users.get(userId)
-  if (!user) return { ok: false, error: 'Usuario no encontrado.' }
-  if (user.isClinicOwner) {
+  const clinicUsers = await db.users.toArray()
+  const user =
+    clinicUsers.find((item) => textId(item.id) === textId(userId)) ||
+    (await db.users.get(userId))
+  const ownerId = resolveAccountOwnerId(clinicUsers, sessionMember() || currentUserScope())
+  if (user && textId(user.id) === textId(ownerId)) {
     return { ok: false, error: 'No puede eliminar al titular de la clínica.' }
   }
 
-  await db.userCredentials.delete(userId)
-  const sessions = await db.sessions.where('userId').equals(userId).toArray()
-  await Promise.all(sessions.map((s) => db.sessions.delete(s.id)))
-  await db.users.update(userId, { accessEnabled: false })
+  let api: { ok: true } | { ok: false; status?: number; error: string }
+  try {
+    api = await deleteClinicMember(userId, user?.documentNumber)
+  } catch (error) {
+    console.error(error)
+    api = { ok: false, status: 0, error: 'No se pudo eliminar el colaborador.' }
+  }
+  if (api.ok) {
+    await revokeLocalAccess(user?.id || userId, ownerId)
+    return { ok: true }
+  }
+
+  if (!user) {
+    return { ok: false, error: api.error || 'Usuario no encontrado.' }
+  }
+  if (getStoredApiAuth()?.token && !serverDoesNotHaveUser(api)) {
+    return { ok: false, error: api.error }
+  }
+
+  await revokeLocalAccess(user.id, ownerId)
   return { ok: true }
 }
 

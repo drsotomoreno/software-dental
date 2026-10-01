@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { db } from '@/db/database'
 import { RequirePermission } from '@/components/auth/RequirePermission'
 import { useAuth } from '@/contexts/AuthContext'
@@ -7,11 +7,11 @@ import { upsertProfessionalFromUser } from '@/services/dentalServiceCatalogServi
 import {
   createAppUser,
   deleteAppUser,
-  listAppUsers,
+  loadClinicTeam,
   resetAppUserPassword,
   updateAppUser,
 } from '@/services/authService'
-import { fetchClinicUsers, type ClinicSeatSnapshot } from '@/services/subscriptionService'
+import { type ClinicSeatSnapshot } from '@/services/subscriptionService'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { UserProfile, UserRole } from '@/types/user'
 import {
@@ -20,6 +20,7 @@ import {
   USERS_MANAGE_DENIED,
   canManageClinicTeam,
 } from '@/utils/permissions'
+import { resolveAccountOwnerId, textId } from '../../shared/clinicOwnership.js'
 import {
   DocumentIdentityField,
   RegulatoryIdentityAdminExtras,
@@ -98,15 +99,17 @@ export function UsersManagementPage() {
 
   const canManage = canManageClinicTeam(currentUser)
   const seatsExhausted = Boolean(seats && seats.max != null && seats.used >= seats.max)
+  const ownerId = useMemo(
+    () => resolveAccountOwnerId(users ?? [], currentUser),
+    [users, currentUser],
+  )
+  const isTitularRow = (user: Pick<UserProfile, 'id'>) =>
+    Boolean(ownerId) && textId(user.id) === ownerId
 
   const reloadUsers = useCallback(async () => {
-    const api = await fetchClinicUsers()
-    if (api.ok) {
-      setUsers(api.users)
-      setSeats(api.seats)
-      return
-    }
-    setUsers(await listAppUsers())
+    const team = await loadClinicTeam()
+    setUsers(team.users)
+    setSeats(team.seats)
   }, [])
 
   useEffect(() => {
@@ -219,7 +222,14 @@ export function UsersManagementPage() {
       showErr(USERS_MANAGE_DENIED)
       return
     }
-    const result = await resetAppUserPassword(resetUserId, newPassword)
+    let result: { ok: true } | { ok: false; error: string }
+    try {
+      result = await resetAppUserPassword(resetUserId, newPassword)
+    } catch (error) {
+      console.error(error)
+      showErr('No se pudo asignar la contraseña.')
+      return
+    }
     if (!result.ok) {
       showErr(result.error)
       return
@@ -260,7 +270,7 @@ export function UsersManagementPage() {
 
   const handleRoleChange = async (u: UserProfile, role: UserRole) => {
     if (!canManage) return
-    if (u.isClinicOwner) return
+    if (isTitularRow(u)) return
     if (assignableRoleValue(u.role) === role) return
     const result = await updateAppUser(u.id, { role })
     if (!result.ok) {
@@ -370,7 +380,7 @@ export function UsersManagementPage() {
                       </td>
                       <td className="px-3 py-2 font-mono text-xs text-slate-600">
                         {u.documentType} {u.documentNumber}
-                        {u.isClinicOwner ? (
+                        {isTitularRow(u) ? (
                           <span className="ml-2 rounded bg-dental-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-dental-700">
                             Titular
                           </span>
@@ -385,8 +395,8 @@ export function UsersManagementPage() {
                       <td className="px-3 py-2 font-mono text-xs text-slate-600">{u.phone || '—'}</td>
                       <td className="px-3 py-2">
                         <select
-                          value={u.isClinicOwner ? 'admin' : assignableRoleValue(u.role)}
-                          disabled={!canManage || u.isClinicOwner}
+                          value={isTitularRow(u) ? 'admin' : assignableRoleValue(u.role)}
+                          disabled={!canManage || isTitularRow(u)}
                           onChange={(event) =>
                             handleRoleChange(u, event.target.value as UserRole)
                           }
@@ -420,10 +430,10 @@ export function UsersManagementPage() {
                           >
                             Restablecer clave
                           </button>
-                          {u.id !== currentUser?.id && !u.isClinicOwner && u.accessEnabled === false && (
+                          {u.id !== currentUser?.id && !isTitularRow(u) && u.accessEnabled === false && (
                             <span className="text-xs text-slate-400">Acceso cancelado</span>
                           )}
-                          {u.id !== currentUser?.id && !u.isClinicOwner && u.accessEnabled !== false && (
+                          {u.id !== currentUser?.id && !isTitularRow(u) && u.accessEnabled !== false && (
                             <button
                               type="button"
                               onClick={() => handleDelete(u)}
@@ -473,7 +483,7 @@ export function UsersManagementPage() {
               <UserFields
                 values={editForm}
                 onChange={(patch) => setEditForm({ ...editForm, ...patch })}
-                lockOwnerRole={Boolean(editingUser.isClinicOwner)}
+                lockOwnerRole={isTitularRow(editingUser)}
               />
               <div className="flex gap-2">
                 <button type="submit" className="btn-primary">
