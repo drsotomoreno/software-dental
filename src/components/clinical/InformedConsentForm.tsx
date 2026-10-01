@@ -12,17 +12,21 @@ import {
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
 import { DigitalSignatureCanvas } from '@/components/signature'
+import { FIRST_VISIT_CONSULTATION_CONSENT_NOTICE } from '@/utils/informedConsentRequirement'
 
 interface InformedConsentFormProps {
   data: InformedConsent
   onChange: (data: InformedConsent) => void
   disabled?: boolean
+  /** False cuando la atención solo incluye consultas de primera vez. */
+  required?: boolean
 }
 
 export function InformedConsentForm({
   data,
   onChange,
   disabled = false,
+  required = true,
 }: InformedConsentFormProps) {
   const [activeConsentId, setActiveConsentId] = useState<ConsentTemplateId | null>(null)
   const [pickerValue, setPickerValue] = useState('')
@@ -66,9 +70,21 @@ export function InformedConsentForm({
         )}
       </h3>
       <p className="mb-4 text-xs text-slate-500">
-        Seleccione uno o más consentimientos según el procedimiento a realizar. El paciente debe
-        leer y aceptar el texto correspondiente antes de firmar.
+        {required
+          ? 'Seleccione uno o más consentimientos según el procedimiento a realizar. El paciente debe leer y aceptar el texto correspondiente antes de firmar.'
+          : 'Esta atención solo incluye consultas de primera vez.'}
       </p>
+      <div
+        className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
+          required
+            ? 'border-slate-200 bg-slate-50 text-slate-700'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-950'
+        }`}
+      >
+        {FIRST_VISIT_CONSULTATION_CONSENT_NOTICE}
+        {!required &&
+          ' Puede cerrar la atención sin seleccionar un consentimiento ni recoger firmas.'}
+      </div>
 
       {!disabled && (
         <div className="mb-4 flex flex-wrap items-end gap-2">
@@ -134,7 +150,9 @@ export function InformedConsentForm({
         </>
       ) : (
         <p className="mb-4 text-sm text-slate-500">
-          No hay consentimientos seleccionados. Elija al menos uno del menú.
+          {required
+            ? 'No hay consentimientos seleccionados. Elija al menos uno del menú.'
+            : 'No hay consentimientos seleccionados. No son obligatorios para una consulta de primera vez.'}
         </p>
       )}
 
@@ -147,8 +165,8 @@ export function InformedConsentForm({
           className="mt-0.5 rounded border-slate-300 text-dental-600 focus:ring-dental-500"
         />
         <span className="text-sm text-slate-700">
-          El paciente ha leído y acepta el(los) consentimiento(s) informado(s) seleccionado(s){' '}
-          <span className="text-red-500">*</span>
+          El paciente ha leído y acepta el(los) consentimiento(s) informado(s) seleccionado(s)
+          {required ? <span className="text-red-500"> *</span> : null}
         </span>
       </label>
 

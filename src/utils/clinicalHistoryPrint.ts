@@ -7,6 +7,11 @@ import {
 } from '@/constants/clinicalHistorySections'
 import { CONSENT_TEMPLATES } from '@/constants/consentTemplates'
 import {
+  clinicalRecordRequiresInformedConsent,
+  FIRST_VISIT_CONSULTATION_CONSENT_NOTICE,
+  informedConsentCaptureStarted,
+} from '@/utils/informedConsentRequirement'
+import {
   DIAGNOSIS_CERTAINTY_LABELS,
   PAYMENT_METHOD_LABELS,
   TREATMENT_PHASE_LABELS,
@@ -724,6 +729,17 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
 
 function buildConsentSection(data: ClinicalRecordFormData): string {
   const consent = data.informedConsent
+  if (
+    !clinicalRecordRequiresInformedConsent(data) &&
+    !informedConsentCaptureStarted(consent)
+  ) {
+    return `
+    <section class="print-section">
+      <h2>${printSectionHeading('consentimiento')}</h2>
+      <p>${FIRST_VISIT_CONSULTATION_CONSENT_NOTICE}</p>
+    </section>`
+  }
+
   const selectedConsents = consent.selectedConsentIds
     .map((id) => CONSENT_TEMPLATES.find((template) => template.id === id)?.label ?? id)
     .join(', ')

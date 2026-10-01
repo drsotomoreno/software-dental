@@ -14,6 +14,7 @@ import {
   addTreatmentPlanItemToBudget,
   calcClinicalBudgetSummaryWithTax,
 } from '@/utils/budget'
+import { clinicalRecordRequiresInformedConsent } from '@/utils/informedConsentRequirement'
 
 function syncClinicalDataFromAnnexes(data: ClinicalRecordFormData): ClinicalRecordFormData {
   return syncClinicalDataFromOrthodonticsAnnex(syncClinicalDataFromEndodonticsAnnex(data))
@@ -415,6 +416,7 @@ export function ClinicalHistoryForm({
         data={form.informedConsent}
         onChange={(informedConsent: InformedConsent) => update({ informedConsent })}
         disabled={snapshotLocked}
+        required={clinicalRecordRequiresInformedConsent(form)}
       />
         </div>
       )}
