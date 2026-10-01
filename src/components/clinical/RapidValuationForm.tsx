@@ -105,7 +105,7 @@ export function RapidValuationForm({
             value={patientData}
             onChange={onPatientDataChange}
             disabled={disabled}
-            sectionTitle="1. Datos de Identificación del Paciente"
+            sectionTitle="Datos de Identificación del Paciente"
             patientRecord={patient}
             canRequestExternalHistory={!disabled}
           />
