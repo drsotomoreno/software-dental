@@ -5,7 +5,14 @@ import { join } from 'node:path'
 import { config } from '../config.js'
 import { claimRethusForUser } from './rethusRegistry.js'
 import { verifyAndClaimPrestador } from './prestadorRegistry.js'
-import { PAID_PLAN_IDS, PAID_PLAN_DAYS, TRIAL_DAYS, seatLimitForAccount, planDisplayName } from '../../shared/subscriptionPlans.js'
+import {
+  PAID_PLAN_IDS,
+  PAID_PLAN_DAYS,
+  TRIAL_DAYS,
+  TTC_MESSAGE_PACKAGES,
+  seatLimitForAccount,
+  planDisplayName,
+} from '../../shared/subscriptionPlans.js'
 import { readDurableJson, writeDurableJson } from './durableStore.js'
 import { splitPersonName, composeLegalName } from '../../shared/personName.js'
 import { formatNitInput, validateProviderNit } from '../../shared/nit.js'
@@ -1194,9 +1201,32 @@ function sanitizeUser(user) {
     trialLimited,
     trialLimits: trialLimited ? { maxPatients: 1, maxVoiceNotesPerField: 1 } : null,
     prestadorVerifiedAt: user.prestadorVerifiedAt ?? null,
+    messagePackages: normalizeMessagePackages(user.messagePackages),
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   }
+}
+
+function normalizeMessagePackages(list) {
+  if (!Array.isArray(list)) return []
+  const now = Date.now()
+  return list
+    .map((item) => {
+      if (!item || typeof item !== 'object' || !item.id) return null
+      const expiresAt = item.expiresAt || null
+      const expired = Boolean(expiresAt) && new Date(expiresAt).getTime() <= now
+      const messages = Number(item.messages)
+      return {
+        id: String(item.id),
+        packageId: String(item.packageId || ''),
+        name: String(item.name || 'Paquete de mensajes TTC'),
+        messages: Number.isFinite(messages) ? messages : 0,
+        purchasedAt: item.purchasedAt || null,
+        expiresAt,
+        status: expired ? 'vencido' : 'activo',
+      }
+    })
+    .filter(Boolean)
 }
 
 function normalizeDocumentNumber(value) {
@@ -1958,5 +1988,144 @@ export async function selectPaidPlan({ token, planId, hint }) {
   await saveStore(store)
   return { ok: true, user: sanitizeUser(updated) }
 }
+
+function titularProductSnapshot(owner, actorId) {
+  const safe = sanitizeUser(refreshPaymentStatus(owner))
+  return {
+    titular: {
+      id: safe.id,
+      nombre: safe.nombre,
+      email: safe.email || '',
+      documentNumber: safe.documentNumber || '',
+      clinicName: safe.clinicName || '',
+      isSelf: String(safe.id) === String(actorId),
+    },
+    plan: {
+      id: safe.plan ?? null,
+      estado_pago: safe.estado_pago,
+      fecha_vencimiento: safe.fecha_vencimiento ?? null,
+    },
+    packages: safe.messagePackages ?? [],
+    user: String(safe.id) === String(actorId) ? safe : undefined,
+  }
+}
+
+async function loadTitularAccount(session, { requireManager = false } = {}) {
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+  if (requireManager && !canManageClinicTeam(session.user)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Solo el titular de la clínica puede comprar planes y paquetes.',
+    }
+  }
+  const store = await loadStore()
+  const clinicId = clinicIdOf(session.user)
+  const index = store.users.findIndex((item) => item.id === clinicId)
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'No se encontró la cuenta del titular.' }
+  }
+  return {
+    ok: true,
+    store,
+    index,
+    owner: store.users[index],
+    actorId: session.user.id,
+    canPurchase: canManageClinicTeam(session.user),
+  }
+}
+
+export async function readTitularProducts({ token, hint }) {
+  const session = await resolveSubscriptionSession(token, hint)
+  const loaded = await loadTitularAccount(session)
+  if (!loaded.ok) return loaded
+  return {
+    ok: true,
+    canPurchase: loaded.canPurchase,
+    ...titularProductSnapshot(loaded.owner, loaded.actorId),
+  }
+}
+
+export async function purchaseTitularPlan({ token, planId, hint }) {
+  const session = await resolveSubscriptionSession(token, hint)
+  const loaded = await loadTitularAccount(session, { requireManager: true })
+  if (!loaded.ok) return loaded
+
+  const plan = String(planId ?? '').trim().toLowerCase()
+  if (!PAID_PLAN_IDS.includes(plan)) {
+    return { ok: false, status: 400, error: 'Seleccione un plan de suscripción válido.' }
+  }
+  if (isPaymentExempt(loaded.owner)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'La cuenta del titular está exenta y no requiere comprar un plan.',
+    }
+  }
+
+  const now = new Date().toISOString()
+  const updated = {
+    ...loaded.owner,
+    plan,
+    estado_pago: 'activo',
+    fecha_vencimiento: addDays(new Date(), PAID_PLAN_DAYS),
+    updatedAt: now,
+  }
+  loaded.store.users[loaded.index] = updated
+  await saveStore(loaded.store)
+  return {
+    ok: true,
+    message: `Plan ${planDisplayName(plan, 'activo')} adquirido para el titular. Vence el ${formatProductDate(updated.fecha_vencimiento)}.`,
+    ...titularProductSnapshot(updated, loaded.actorId),
+  }
+}
+
+export async function purchaseTitularMessagePackage({ token, packageId, hint }) {
+  const session = await resolveSubscriptionSession(token, hint)
+  const loaded = await loadTitularAccount(session, { requireManager: true })
+  if (!loaded.ok) return loaded
+
+  const pack = TTC_MESSAGE_PACKAGES.find((item) => item.id === String(packageId ?? '').trim())
+  if (!pack) {
+    return { ok: false, status: 400, error: 'Seleccione un paquete de mensajes TTC válido.' }
+  }
+
+  const now = new Date()
+  const entry = {
+    id: randomUUID(),
+    packageId: pack.id,
+    name: pack.name,
+    messages: pack.messages,
+    purchasedAt: now.toISOString(),
+    expiresAt: addDays(now, pack.validityDays),
+  }
+  const updated = {
+    ...loaded.owner,
+    messagePackages: [
+      ...(Array.isArray(loaded.owner.messagePackages) ? loaded.owner.messagePackages : []),
+      entry,
+    ],
+    updatedAt: now.toISOString(),
+  }
+  loaded.store.users[loaded.index] = updated
+  await saveStore(loaded.store)
+  return {
+    ok: true,
+    message: `${pack.name} adquirido. Vence el ${formatProductDate(entry.expiresAt)}.`,
+    ...titularProductSnapshot(updated, loaded.actorId),
+  }
+}
+
+function formatProductDate(iso) {
+  if (!iso) return 'sin fecha'
+  return new Date(iso).toLocaleDateString('es-CO', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
 
 

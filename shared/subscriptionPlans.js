@@ -77,6 +77,39 @@ export const TRIAL_DAYS = 7
 export const PAID_PLAN_DAYS = 30
 export const TRIAL_SEAT_LIMIT = 2
 
+/** Paquetes adicionales de mensajes TTC. La vigencia corre desde la compra. */
+export const TTC_MESSAGE_PACKAGES = [
+  {
+    id: 'ttc-150',
+    name: 'Mensajes TTC 150',
+    messages: 150,
+    priceLabel: '$25.000',
+    period: 'COP',
+    validityDays: 30,
+    blurb: '150 mensajes TTC para recordatorios y avisos a pacientes.',
+  },
+  {
+    id: 'ttc-500',
+    name: 'Mensajes TTC 500',
+    messages: 500,
+    priceLabel: '$70.000',
+    period: 'COP',
+    validityDays: 30,
+    blurb: '500 mensajes TTC para consultas con más volumen de avisos.',
+  },
+  {
+    id: 'ttc-1500',
+    name: 'Mensajes TTC 1.500',
+    messages: 1500,
+    priceLabel: '$180.000',
+    period: 'COP',
+    validityDays: 30,
+    blurb: '1.500 mensajes TTC para clínicas de alto volumen.',
+  },
+]
+
+export const TTC_MESSAGE_PACKAGE_IDS = TTC_MESSAGE_PACKAGES.map((item) => item.id)
+
 export const PLAN_SEAT_LIMITS = Object.fromEntries(
   PAID_PLANS.map((plan) => [plan.id, plan.maxSeats]),
 )
