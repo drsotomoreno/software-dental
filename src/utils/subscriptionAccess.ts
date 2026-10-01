@@ -11,6 +11,9 @@ export function isSubscriptionCurrent(user?: ApiSubscriptionUser | null): boolea
 export function userNeedsWelcome(user?: ApiSubscriptionUser | null): boolean {
   if (!user) return false
   if (isApiSuperAdmin(user) || user.estado_pago === 'exento') return false
+  const rol = String(user.rol ?? '').toLowerCase()
+  if (rol === 'recepcion' || rol === 'auxiliar') return false
+  if (user.isClinicOwner === false) return false
   return !isSubscriptionCurrent(user)
 }
 

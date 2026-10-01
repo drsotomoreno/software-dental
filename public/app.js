@@ -63,7 +63,6 @@
     return (
       email === MASTER_EMAIL ||
       rol === 'superadmin' ||
-      user.estado_pago === 'exento' ||
       localStorage.getItem(ROLE_KEY) === 'superadmin'
     )
   }
@@ -478,10 +477,14 @@
     }
 
     try {
+      const identifier = String(email || '').trim()
+      const loginBody = identifier.includes('@')
+        ? { email: identifier.toLowerCase(), password }
+        : { documentNumber: identifier.replace(/\D/g, ''), password }
       const { response, payload } = await apiFetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(loginBody),
       })
 
       const masterAccess =

@@ -293,7 +293,7 @@ export function UsersManagementPage() {
             <p className="mt-1 text-sm text-slate-600">
               El titular de la cuenta es administrador. Los colaboradores pueden tener otro rol.
               Para un auxiliar (personal administrativo) solo se piden cédula, correo y teléfono:
-              no tienen ReTHUS ni código REPS. El acceso es por cédula y contraseña.
+              no tienen ReTHUS ni código REPS. Su contraseña es la cédula, solo dígitos.
             </p>
           </div>
           {canManage && (
@@ -413,12 +413,18 @@ export function UsersManagementPage() {
                           <button
                             type="button"
                             onClick={() => {
+                              if (u.role === 'recepcion') {
+                                const cedula = String(u.documentNumber ?? '').replace(/\D/g, '')
+                                setResetUserId(u.id)
+                                setNewPassword(cedula)
+                                return
+                              }
                               setResetUserId(u.id)
                               setNewPassword('')
                             }}
                             className="text-xs font-medium text-slate-600 hover:underline"
                           >
-                            Restablecer clave
+                            {u.role === 'recepcion' ? 'Restaurar clave (cédula)' : 'Restablecer clave'}
                           </button>
                           {u.id !== currentUser?.id && !u.isClinicOwner && u.accessEnabled === false && (
                             <span className="text-xs text-slate-400">Acceso cancelado</span>
@@ -496,19 +502,29 @@ export function UsersManagementPage() {
             }}
           >
             <form onSubmit={handleResetPassword} className="space-y-4">
-              <p className="text-sm text-slate-600">
-                Ingrese la nueva contraseña para el usuario seleccionado (mínimo 8 caracteres). Si
-                su acceso estaba cancelado, esta clave lo rehabilita.
-              </p>
-              <div>
-                <label className="label-field">Nueva contraseña</label>
-                <PasswordInput
-                  required
-                  minLength={8}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                />
-              </div>
+              {users?.find((item) => item.id === resetUserId)?.role === 'recepcion' ? (
+                <p className="text-sm text-slate-600">
+                  La contraseña de la auxiliar vuelve a ser su cédula
+                  {newPassword ? ` ${newPassword}` : ''}, sin puntos ni espacios. Si el acceso estaba
+                  cancelado, esta acción lo rehabilita.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-600">
+                    Ingrese la nueva contraseña para el usuario seleccionado (mínimo 8 caracteres). Si
+                    su acceso estaba cancelado, esta clave lo rehabilita.
+                  </p>
+                  <div>
+                    <label className="label-field">Nueva contraseña</label>
+                    <PasswordInput
+                      required
+                      minLength={8}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
               <div className="flex gap-2">
                 <button type="submit" className="btn-primary">
                   Restablecer
@@ -746,7 +762,7 @@ function UserFields({
         </>
       )}
 
-      {includePassword && (
+      {includePassword && !isAuxiliar && (
         <div className="sm:col-span-2">
           <label className="label-field">Contraseña temporal</label>
           <PasswordInput
@@ -759,6 +775,12 @@ function UserFields({
             El administrador de la clínica asigna esta clave. El colaborador la usa junto con su
             cédula, sin verificación externa.
           </p>
+        </div>
+      )}
+      {includePassword && isAuxiliar && (
+        <div className="sm:col-span-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          La contraseña de la auxiliar es su cédula, solo dígitos. Con esa misma cédula inicia
+          sesión. No se guarda otra clave, para que el acceso no dependa de una contraseña distinta.
         </div>
       )}
     </div>

@@ -62,7 +62,7 @@ export function isApiSuperAdmin(user: ApiSubscriptionUser | null | undefined): b
   if (!user) return false
   const email = String(user.email ?? '').trim().toLowerCase()
   const rol = String(user.rol ?? '').trim().toLowerCase()
-  return email === SUPERADMIN_EMAIL || rol === 'superadmin' || user.estado_pago === 'exento'
+  return email === SUPERADMIN_EMAIL || rol === 'superadmin'
 }
 
 export function grantMasterLocalSession(token?: string): { token: string; user: ApiSubscriptionUser } {
@@ -274,7 +274,10 @@ export function mapApiUserToAuthUser(
     lastName,
     documentType: user.documentType || 'CC',
     documentNumber: user.documentNumber || '',
-    role: user.isClinicOwner && user.rol !== 'superadmin' ? 'admin' : mapApiRoleToUserRole(user.rol),
+    role:
+      user.isClinicOwner && user.rol !== 'superadmin' && user.rol !== 'recepcion'
+        ? 'admin'
+        : mapApiRoleToUserRole(user.rol),
     clinicName: user.clinicName || '',
     legalName: user.providerType === 'institucion' ? user.legalName || '' : '',
     providerType: user.providerType === 'institucion' ? 'institucion' : 'profesional_independiente',
