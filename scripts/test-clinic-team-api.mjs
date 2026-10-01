@@ -165,5 +165,20 @@ const deleteFalso = await api('/api/clinic/users/falso-titular', {
 })
 assert.equal(deleteFalso.status, 200, JSON.stringify(deleteFalso.payload))
 
+const missingId = await api('/api/clinic/users/user-demo-001', {
+  method: 'DELETE',
+  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({}),
+})
+assert.equal(missingId.status, 404, JSON.stringify(missingId.payload))
+assert.match(missingId.payload.error, /no encontrado/i)
+
+const byDocument = await api('/api/clinic/users/user-demo-001', {
+  method: 'DELETE',
+  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ documentNumber: '1096538381' }),
+})
+assert.equal(byDocument.status, 200, JSON.stringify(byDocument.payload))
+
 server.close()
 console.log('clinic team api ok')

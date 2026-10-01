@@ -102,6 +102,78 @@ export function alignClinicOwnership(users, ownerId) {
   return changed
 }
 
+export function documentDigits(value) {
+  return textId(value).replace(/\D/g, '')
+}
+
+/** Misma persona por id, correo o cédula. */
+export function samePerson(user, other) {
+  if (!user || !other) return false
+  const leftId = textId(user.id)
+  const rightId = textId(other.id)
+  if (leftId && rightId && leftId === rightId) return true
+  const leftEmail = textId(user.email).toLowerCase()
+  const rightEmail = textId(other.email).toLowerCase()
+  if (leftEmail && rightEmail && leftEmail === rightEmail) return true
+  const leftDoc = documentDigits(user.documentNumber)
+  const rightDoc = documentDigits(other.documentNumber)
+  return Boolean(leftDoc && rightDoc && leftDoc === rightDoc)
+}
+
+/**
+ * Titular de la cuenta que está en pantalla.
+ * Si quien inició sesión ya es titular, esa persona gana aunque haya otro
+ * registro marcado como titular (por ejemplo el usuario demo).
+ */
+export function resolveAccountOwnerId(users, session) {
+  const list = (Array.isArray(users) ? users : []).filter((user) => textId(user?.id))
+  const member = list.find((user) => samePerson(user, session))
+  const role = textId(member?.rol || member?.role).toLowerCase()
+  if (
+    member &&
+    (isRecordedOwner(member) || member.isClinicOwner === true || role === 'superadmin')
+  ) {
+    return textId(member.id)
+  }
+  const hint = textId(session?.clinicId || member?.clinicId || session?.id)
+  const ownerId = canonicalOwnerId(list, hint)
+  if (ownerId && list.some((user) => textId(user.id) === ownerId)) return ownerId
+  if (member) return textId(member.id)
+  return ownerId
+}
+
+/**
+ * Deja un solo titular y mueve a toda la lista a esa clínica.
+ * Sirve para la cuenta que el navegador está mostrando, no para mezclar clínicas del servidor.
+ * @returns {boolean} true si modificó algún registro
+ */
+export function attachRosterToOwner(users, ownerId) {
+  const owner = textId(ownerId)
+  if (!owner || !Array.isArray(users)) return false
+  let changed = false
+  for (const user of users) {
+    if (!user || !textId(user.id)) continue
+    const shouldOwn = textId(user.id) === owner
+    if (textId(user.clinicId) !== owner) {
+      user.clinicId = owner
+      changed = true
+    }
+    if (Boolean(user.isClinicOwner) !== shouldOwn) {
+      user.isClinicOwner = shouldOwn
+      changed = true
+    }
+    if (shouldOwn) {
+      const role = textId(user.rol || user.role).toLowerCase()
+      if (role && role !== 'superadmin' && role !== 'admin') {
+        if (user.rol != null) user.rol = 'admin'
+        if (user.role != null) user.role = 'admin'
+        changed = true
+      }
+    }
+  }
+  return changed
+}
+
 export function canRemoveClinicMember(actorId, target, ownerId) {
   if (!target) return { ok: false, error: 'Usuario no encontrado.' }
   if (textId(actorId) && textId(actorId) === textId(target.id)) {

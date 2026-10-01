@@ -313,6 +313,7 @@ router.put('/clinic/users/:id/password', async (req, res) => {
       token,
       hint: sessionHintFromRequest(req),
       userId: textId(req.params.id) || textId(body.userId),
+      documentNumber: body.documentNumber || body.lookupDocumentNumber,
       newPassword: body.password ?? body.newPassword,
     })
     if (!result.ok) {
@@ -338,6 +339,7 @@ router.put('/clinic/users/:id', async (req, res) => {
       token,
       hint: sessionHintFromRequest(req),
       userId: textId(req.params.id) || textId(body.userId),
+      documentNumber: body.lookupDocumentNumber,
       patch: body,
     })
     if (!result.ok) {
@@ -354,10 +356,12 @@ router.delete('/clinic/users/:id', async (req, res) => {
   try {
     const authHeader = req.headers.authorization ?? ''
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
     const result = await deleteClinicUser({
       token,
       hint: sessionHintFromRequest(req),
       userId: textId(req.params.id),
+      documentNumber: body.documentNumber,
     })
     if (!result.ok) {
       return res.status(result.status).json({ success: false, ok: false, error: result.error })

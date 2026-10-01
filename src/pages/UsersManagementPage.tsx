@@ -7,11 +7,11 @@ import { upsertProfessionalFromUser } from '@/services/dentalServiceCatalogServi
 import {
   createAppUser,
   deleteAppUser,
-  listAppUsers,
+  loadClinicTeam,
   resetAppUserPassword,
   updateAppUser,
 } from '@/services/authService'
-import { fetchClinicUsers, type ClinicSeatSnapshot } from '@/services/subscriptionService'
+import { type ClinicSeatSnapshot } from '@/services/subscriptionService'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { UserProfile, UserRole } from '@/types/user'
 import {
@@ -20,7 +20,7 @@ import {
   USERS_MANAGE_DENIED,
   canManageClinicTeam,
 } from '@/utils/permissions'
-import { canonicalOwnerId, textId } from '../../shared/clinicOwnership.js'
+import { resolveAccountOwnerId, textId } from '../../shared/clinicOwnership.js'
 import {
   DocumentIdentityField,
   RegulatoryIdentityAdminExtras,
@@ -99,24 +99,17 @@ export function UsersManagementPage() {
 
   const canManage = canManageClinicTeam(currentUser)
   const seatsExhausted = Boolean(seats && seats.max != null && seats.used >= seats.max)
-  const ownerId = useMemo(() => {
-    const hinted =
-      users?.find((user) => user.isClinicOwner)?.id ||
-      currentUser?.clinicId ||
-      currentUser?.id
-    return canonicalOwnerId(users ?? [], hinted)
-  }, [users, currentUser?.clinicId, currentUser?.id])
+  const ownerId = useMemo(
+    () => resolveAccountOwnerId(users ?? [], currentUser),
+    [users, currentUser],
+  )
   const isTitularRow = (user: Pick<UserProfile, 'id'>) =>
     Boolean(ownerId) && textId(user.id) === ownerId
 
   const reloadUsers = useCallback(async () => {
-    const api = await fetchClinicUsers()
-    if (api.ok) {
-      setUsers(api.users)
-      setSeats(api.seats)
-      return
-    }
-    setUsers(await listAppUsers())
+    const team = await loadClinicTeam()
+    setUsers(team.users)
+    setSeats(team.seats)
   }, [])
 
   useEffect(() => {

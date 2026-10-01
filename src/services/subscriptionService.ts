@@ -236,12 +236,16 @@ export async function updateClinicMember(userId: string, patch: Record<string, u
   return { ok: true as const, user: mapClinicMemberToProfile(payload.user) }
 }
 
-export async function resetClinicMemberPassword(userId: string, password: string) {
+export async function resetClinicMemberPassword(
+  userId: string,
+  password: string,
+  documentNumber?: string,
+) {
   const { response, payload } = await authFetch(
     `/api/clinic/users/${encodeURIComponent(userId)}/password`,
     {
       method: 'PUT',
-      body: JSON.stringify({ password, userId }),
+      body: JSON.stringify({ password, userId, documentNumber: documentNumber || '' }),
     },
   )
   if (!response.ok) {
@@ -254,9 +258,10 @@ export async function resetClinicMemberPassword(userId: string, password: string
   return { ok: true as const }
 }
 
-export async function deleteClinicMember(userId: string) {
+export async function deleteClinicMember(userId: string, documentNumber?: string) {
   const { response, payload } = await authFetch(`/api/clinic/users/${encodeURIComponent(userId)}`, {
     method: 'DELETE',
+    body: JSON.stringify({ documentNumber: documentNumber || '' }),
   })
   if (!response.ok) {
     return {

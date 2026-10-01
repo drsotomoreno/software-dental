@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import {
   alignClinicOwnership,
+  attachRosterToOwner,
   belongsToClinic,
   canRemoveClinicMember,
   canonicalOwnerId,
   isRecordedOwner,
+  resolveAccountOwnerId,
   textId,
 } from '../shared/clinicOwnership.js'
 
@@ -76,5 +78,48 @@ assert.equal(pointed.find((user) => user.id === 'col-2').isClinicOwner, false)
 assert.equal(pointed.find((user) => user.id === 'owner-real').clinicId, 'owner-real')
 assert.equal(pointed.find((user) => user.id === 'owner-real').isClinicOwner, true)
 assert.equal(canRemoveClinicMember('owner-real', pointed.find((user) => user.id === 'col-2'), 'owner-real').ok, true)
+
+const session = {
+  id: 'mauricio-1',
+  email: 'doctormauriciosoto@gmail.com',
+  documentNumber: '79904628',
+  clinicId: 'mauricio-1',
+  isClinicOwner: true,
+  rol: 'superadmin',
+}
+const account = mixed.map((user) => ({ ...user }))
+assert.equal(resolveAccountOwnerId(account, session), 'mauricio-1')
+attachRosterToOwner(account, 'mauricio-1')
+assert.equal(account.filter((user) => user.isClinicOwner).length, 1)
+assert.equal(account.find((user) => user.id === 'mauricio-1').isClinicOwner, true)
+assert.equal(account.find((user) => user.id === 'user-demo-admin').isClinicOwner, false)
+assert.equal(account.find((user) => user.id === 'user-demo-admin').clinicId, 'mauricio-1')
+assert.equal(account.find((user) => user.id === 'user-demo-001').clinicId, 'mauricio-1')
+assert.equal(
+  canRemoveClinicMember('mauricio-1', account.find((user) => user.id === 'user-demo-001'), 'mauricio-1').ok,
+  true,
+)
+assert.equal(
+  canRemoveClinicMember('mauricio-1', account.find((user) => user.id === 'user-demo-admin'), 'mauricio-1').ok,
+  true,
+)
+assert.equal(canRemoveClinicMember('mauricio-1', account.find((user) => user.id === 'mauricio-1'), 'mauricio-1').ok, false)
+
+const staffSession = { id: 'leydi-1', clinicId: 'user-demo-admin', rol: 'recepcion' }
+assert.equal(resolveAccountOwnerId(mixed, staffSession), 'user-demo-admin')
+
+const withIdentity = mixed.map((user) =>
+  user.id === 'mauricio-1'
+    ? { ...user, email: 'doctormauriciosoto@gmail.com', documentNumber: '79904628' }
+    : { ...user },
+)
+assert.equal(
+  resolveAccountOwnerId(withIdentity, { id: 'otro-id', email: 'doctormauriciosoto@gmail.com' }),
+  'mauricio-1',
+)
+assert.equal(
+  resolveAccountOwnerId(withIdentity, { id: 'otro-id', documentNumber: '79904628' }),
+  'mauricio-1',
+)
 
 console.log('clinic ownership ok')

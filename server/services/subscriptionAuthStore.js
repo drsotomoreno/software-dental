@@ -1610,6 +1610,14 @@ function findUserIndex(users, userId) {
   return users.findIndex((item) => item && textId(item.id) === id)
 }
 
+function findMemberIndex(users, userId, documentNumber) {
+  const byId = findUserIndex(users, userId)
+  if (byId !== -1) return byId
+  const doc = normalizeDocumentNumber(documentNumber)
+  if (!doc || !Array.isArray(users)) return -1
+  return users.findIndex((item) => item && normalizeDocumentNumber(item.documentNumber) === doc)
+}
+
 function actorClinicId(store, actor) {
   return canonicalOwnerId(store?.users, clinicIdOf(actor))
 }
@@ -1817,7 +1825,7 @@ export async function createClinicUser({ token, hint, member }) {
   }
 }
 
-export async function updateClinicUser({ token, hint, userId, patch }) {
+export async function updateClinicUser({ token, hint, userId, patch, documentNumber: lookupDocument }) {
   const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
@@ -1827,7 +1835,10 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
   }
   const store = await loadStore()
   const clinicId = actorClinicId(store, session.user)
-  const index = findUserIndex(store.users, userId)
+  const incoming = patch && typeof patch === 'object' ? { ...patch } : {}
+  const memberDocument = lookupDocument || incoming.lookupDocumentNumber
+  delete incoming.lookupDocumentNumber
+  const index = findMemberIndex(store.users, userId, memberDocument)
   if (index === -1) {
     return { ok: false, status: 404, error: 'Usuario no encontrado.' }
   }
@@ -1836,7 +1847,6 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
   }
 
-  const incoming = patch && typeof patch === 'object' ? { ...patch } : {}
   let firstName = String(incoming.firstName ?? current.firstName ?? '').trim()
   let lastName = String(incoming.lastName ?? current.lastName ?? '').trim()
   const documentNumber = incoming.documentNumber !== undefined
@@ -1905,7 +1915,7 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
   return { ok: true, user: publicClinicUser(store.users[index]) }
 }
 
-export async function resetClinicUserPassword({ token, hint, userId, newPassword }) {
+export async function resetClinicUserPassword({ token, hint, userId, newPassword, documentNumber }) {
   const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
@@ -1919,7 +1929,7 @@ export async function resetClinicUserPassword({ token, hint, userId, newPassword
   }
   const store = await loadStore()
   const clinicId = actorClinicId(store, session.user)
-  const index = findUserIndex(store.users, userId)
+  const index = findMemberIndex(store.users, userId, documentNumber)
   if (index === -1) {
     return { ok: false, status: 404, error: 'Usuario no encontrado.' }
   }
@@ -1943,7 +1953,7 @@ export async function resetClinicUserPassword({ token, hint, userId, newPassword
   return { ok: true }
 }
 
-export async function deleteClinicUser({ token, hint, userId }) {
+export async function deleteClinicUser({ token, hint, userId, documentNumber }) {
   const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
@@ -1956,7 +1966,7 @@ export async function deleteClinicUser({ token, hint, userId }) {
   }
   const store = await loadStore()
   const clinicId = actorClinicId(store, session.user)
-  const index = findUserIndex(store.users, userId)
+  const index = findMemberIndex(store.users, userId, documentNumber)
   if (index === -1) {
     return { ok: false, status: 404, error: 'Usuario no encontrado.' }
   }
@@ -1966,6 +1976,9 @@ export async function deleteClinicUser({ token, hint, userId }) {
   }
   if (!belongsToClinic(target, clinicId) && !isSuperAdminUser(session.user)) {
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
+  }
+  if (textId(target.id) === textId(session.user.id)) {
+    return { ok: false, status: 400, error: 'No puede eliminar su propio usuario.' }
   }
   if (textId(target.id) === textId(clinicId)) {
     return { ok: false, status: 400, error: 'No puede eliminar al titular de la clínica.' }
@@ -1978,7 +1991,7 @@ export async function deleteClinicUser({ token, hint, userId }) {
     updatedAt: new Date().toISOString(),
   }
   store.sessions = (Array.isArray(store.sessions) ? store.sessions : []).filter(
-    (item) => item && textId(item.userId) !== textId(userId),
+    (item) => item && textId(item.userId) !== textId(target.id),
   )
   const saved = await saveStore(store)
   if (!saved) {
