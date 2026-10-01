@@ -23,47 +23,41 @@ export type Permission =
 /** Roles canónicos del sistema (API y RBAC). */
 export type CanonicalRole = 'superadmin' | 'admin' | 'odontologo' | 'recepcion'
 
+/**
+ * Acceso completo de la clínica. El auxiliar hereda esta lista salvo las
+ * exclusiones de `AUXILIAR_DENIED_PERMISSIONS`.
+ */
+const FULL_ACCESS_PERMISSIONS: Permission[] = [
+  'patients.read',
+  'patients.write',
+  'clinical.read',
+  'clinical.write',
+  'clinical.sign',
+  'odontogram.write',
+  'agenda.read',
+  'agenda.write',
+  'export.rips',
+  'export.fhir',
+  'export.portability',
+  'prices.manage',
+  'invoices.read',
+  'profile.edit',
+  'audit.read',
+  'users.manage',
+  'backups.manage',
+  'catalogs.manage',
+]
+
+/**
+ * Regla general del auxiliar (usuarios actuales y nuevos): acceso a toda la
+ * historia y al resto de la operación, sin cerrar ni firmar evoluciones y
+ * sin gestionar usuarios.
+ */
+const AUXILIAR_DENIED_PERMISSIONS = new Set<Permission>(['clinical.sign', 'users.manage'])
+
 const ROLE_PERMISSIONS: Record<CanonicalRole, Permission[]> = {
-  superadmin: [
-    'patients.read',
-    'patients.write',
-    'clinical.read',
-    'clinical.write',
-    'clinical.sign',
-    'odontogram.write',
-    'agenda.read',
-    'agenda.write',
-    'export.rips',
-    'export.fhir',
-    'export.portability',
-    'prices.manage',
-    'invoices.read',
-    'profile.edit',
-    'audit.read',
-    'users.manage',
-    'backups.manage',
-    'catalogs.manage',
-  ],
-  admin: [
-    'patients.read',
-    'patients.write',
-    'clinical.read',
-    'clinical.write',
-    'clinical.sign',
-    'odontogram.write',
-    'agenda.read',
-    'agenda.write',
-    'export.rips',
-    'export.fhir',
-    'export.portability',
-    'prices.manage',
-    'invoices.read',
-    'profile.edit',
-    'audit.read',
-    'users.manage',
-    'backups.manage',
-    'catalogs.manage',
-  ],
+  superadmin: [...FULL_ACCESS_PERMISSIONS],
+  admin: [...FULL_ACCESS_PERMISSIONS],
   odontologo: [
     'patients.read',
     'patients.write',
@@ -78,14 +72,9 @@ const ROLE_PERMISSIONS: Record<CanonicalRole, Permission[]> = {
     'invoices.read',
     'profile.edit',
   ],
-  recepcion: [
-    'patients.read',
-    'patients.write',
-    'agenda.read',
-    'agenda.write',
-    'invoices.read',
-    'profile.edit',
-  ],
+  recepcion: FULL_ACCESS_PERMISSIONS.filter(
+    (permission) => !AUXILIAR_DENIED_PERMISSIONS.has(permission),
+  ),
 }
 
 export const ROLE_LABELS: Record<CanonicalRole, string> = {

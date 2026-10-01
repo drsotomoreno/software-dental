@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useAuth } from '@/contexts/AuthContext'
 import { getStoredApiAuth, type ApiSubscriptionUser } from '@/services/apiAuthService'
 
 const STATUS_LABELS: Record<string, string> = {
@@ -34,11 +35,18 @@ function fmtDate(iso?: string | null) {
 }
 
 export function AdminSubscriptionUsersPage() {
+  const { hasRole } = useAuth()
+  const isSuperAdmin =
+    hasRole('superadmin') || localStorage.getItem('doctorSEO_rol') === 'superadmin'
   const [users, setUsers] = useState<SubUser[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (!isSuperAdmin) {
+      setLoading(false)
+      return
+    }
     const auth = getStoredApiAuth()
     if (!auth?.token) {
       setError('Inicie sesión como administrador.')
@@ -58,7 +66,15 @@ export function AdminSubscriptionUsersPage() {
       })
       .catch(() => setError('No se pudo conectar con el servidor.'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [isSuperAdmin])
+
+  if (!isSuperAdmin) {
+    return (
+      <div className="card border-amber-200 bg-amber-50 text-sm text-amber-900">
+        Solo el superadministrador puede ver el listado global de cuentas.
+      </div>
+    )
+  }
 
   return (
     <div>

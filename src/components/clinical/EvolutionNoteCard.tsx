@@ -22,6 +22,8 @@ interface EvolutionNoteCardProps {
   patientId?: string
   parentRecordId?: string
   allowAddendums?: boolean
+  /** Cerrar o firmar la evolución. El auxiliar puede redactarla, no firmarla. */
+  canSign?: boolean
   onChange: (patch: Partial<EvolutionNote>) => void
   onRemove: () => void
   onSign: () => void
@@ -35,6 +37,7 @@ export function EvolutionNoteCard({
   patientId = '',
   parentRecordId,
   allowAddendums = true,
+  canSign = true,
   onChange,
   onRemove,
   onSign,
@@ -99,7 +102,7 @@ export function EvolutionNoteCard({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {!readOnly && !isAddendum && (
+          {canSign && !readOnly && !isAddendum && (
             <button
               type="button"
               onClick={onSign}
@@ -117,7 +120,7 @@ export function EvolutionNoteCard({
               Eliminar
             </button>
           )}
-          {immutable && allowAddendums && (
+          {canSign && immutable && allowAddendums && (
             <button
               type="button"
               onClick={onAddAddendum}
@@ -165,18 +168,20 @@ export function EvolutionNoteCard({
                 className="input-field min-h-[8rem] resize-y"
               />
             </div>
-            <DigitalSignatureCanvas
-              onSignatureChange={(result) =>
-                onChange({
-                  professionalSignatureDataUrl: result?.dataUrl,
-                  professionalSignatureMeta: result?.metadata,
-                })
-              }
-              disabled={readOnly}
-              width={480}
-              height={160}
-            />
-            {!readOnly && (
+            {canSign && (
+              <DigitalSignatureCanvas
+                onSignatureChange={(result) =>
+                  onChange({
+                    professionalSignatureDataUrl: result?.dataUrl,
+                    professionalSignatureMeta: result?.metadata,
+                  })
+                }
+                disabled={readOnly}
+                width={480}
+                height={160}
+              />
+            )}
+            {canSign && !readOnly && (
               <button type="button" onClick={onSign} className="btn-primary text-xs">
                 Firmar nota aclaratoria
               </button>

@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import { DigitalSignatureCanvas } from '@/components/signature/DigitalSignatureCanvas'
 import { SignConfirmationModal } from '@/components/signature/SignConfirmationModal'
+import { useAuth } from '@/contexts/AuthContext'
 import { confirmUserPassword } from '@/services/authService'
 import {
   computeEvolutionAddendumContentHash,
@@ -30,6 +31,8 @@ export function EvolutionNoteAddendumPanel({
   parentRecordId,
   user,
 }: EvolutionNoteAddendumPanelProps) {
+  const { can } = useAuth()
+  const canSignEvolution = can('clinical.sign')
   const addendums = useLiveQuery(
     () =>
       db.evolutionNoteAddendums
@@ -74,6 +77,12 @@ export function EvolutionNoteAddendumPanel({
   }
 
   const handleConfirmSign = async (password: string) => {
+    if (!canSignEvolution) {
+      return {
+        ok: false as const,
+        error: 'El auxiliar puede consultar la evolución, pero no firmar notas aclaratorias.',
+      }
+    }
     const valid = await confirmUserPassword(user.id, password)
     if (!valid) {
       return {
@@ -136,13 +145,15 @@ export function EvolutionNoteAddendumPanel({
         <p className="text-xs font-medium text-amber-900">
           Evolución firmada — inmutable (Res. 1995/1999)
         </p>
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          className="btn-secondary text-xs"
-        >
-          {expanded ? 'Cancelar' : 'Agregar Nota de Aclaración'}
-        </button>
+        {canSignEvolution && (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="btn-secondary text-xs"
+          >
+            {expanded ? 'Cancelar' : 'Agregar Nota de Aclaración'}
+          </button>
+        )}
       </div>
 
       {addendums && addendums.length > 0 && (
@@ -170,7 +181,7 @@ export function EvolutionNoteAddendumPanel({
         </ul>
       )}
 
-      {expanded && (
+      {canSignEvolution && expanded && (
         <form onSubmit={handlePrepareSign} className="mt-3 space-y-2 border-t border-amber-200 pt-3">
           <div>
             <label className="label-field">Motivo de la aclaratoria</label>

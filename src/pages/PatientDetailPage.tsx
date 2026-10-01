@@ -1691,8 +1691,8 @@ export function PatientDetailPage() {
 
         {!canViewClinical && (
           <div className="card mt-4 border-amber-200 bg-amber-50 text-sm text-amber-900">
-            Su rol de recepción permite consultar y actualizar datos básicos del paciente. El acceso a
-            historia clínica, odontograma y diagnósticos está restringido.
+            No tiene permiso para consultar la historia clínica. Puede ver y actualizar los datos de
+            identificación del paciente.
           </div>
         )}
 

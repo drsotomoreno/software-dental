@@ -1,4 +1,5 @@
 import type { UserProfile } from '@/types/user'
+import { normalizeRole } from '@/utils/permissions'
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
 
 /**
@@ -11,8 +12,8 @@ export function getProfessionalSignBlocker(
   if (!professional) {
     return 'No hay un profesional autenticado para firmar.'
   }
-  if (professional.role === 'recepcion') {
-    return 'El personal de recepción no puede firmar historias clínicas ni soportes de RIPS.'
+  if (normalizeRole(professional.role) === 'recepcion') {
+    return 'El auxiliar no puede cerrar ni firmar evoluciones ni soportes de RIPS.'
   }
   const result = validateProfessionalDocumentNumber(professional.documentNumber)
   return result.valid ? null : (result.message ?? 'Falta el número de documento (cédula / ReTHUS).')
