@@ -14,6 +14,7 @@ import {
   addTreatmentPlanItemToBudget,
   calcClinicalBudgetSummaryWithTax,
 } from '@/utils/budget'
+import { applyRecommendedTreatmentTransfer } from '@/utils/diagnosisRecommendedTreatment'
 
 function syncClinicalDataFromAnnexes(data: ClinicalRecordFormData): ClinicalRecordFormData {
   return syncClinicalDataFromOrthodonticsAnnex(syncClinicalDataFromEndodonticsAnnex(data))
@@ -247,6 +248,11 @@ export function ClinicalHistoryForm({
     [form.budgetItems],
   )
 
+  const transferRecommendedTreatment = (diagnosisCode: string, recommendationId: string) => {
+    const patch = applyRecommendedTreatmentTransfer(form, diagnosisCode, recommendationId)
+    if (patch) update(patch)
+  }
+
   const moveTreatmentPlanItemToBudget = (itemId: string) => {
     const planItem = form.treatmentPlan.find((item) => item.id === itemId)
     if (!planItem) return
@@ -304,6 +310,8 @@ export function ClinicalHistoryForm({
         <DiagnosticOdontogramSection
           value={form.diagnosticChart}
           diagnoses={form.diagnoses}
+          treatmentPlan={form.treatmentPlan}
+          budgetItems={form.budgetItems}
           onChange={(diagnosticChart) => update({ diagnosticChart })}
           onEnsureDiagnosis={({ code, description, toothId }) => {
             const toothNumber = Number(toothId)
@@ -348,6 +356,7 @@ export function ClinicalHistoryForm({
           onRemoveAdditionalDiagnosis={(code) => {
             update({ diagnoses: form.diagnoses.filter((diagnosis) => diagnosis.code !== code) })
           }}
+          onTransferRecommendedTreatment={transferRecommendedTreatment}
           disabled={livingLocked}
         />
       )}

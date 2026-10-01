@@ -396,6 +396,20 @@ function buildOdontogramSection(odontogram?: OdontogramData | null): string {
     </section>`
 }
 
+function formatRecommendedTreatmentsHtml(
+  diagnosis: ClinicalRecordFormData['diagnoses'][number],
+): string {
+  const treatments = diagnosis.recommendedTreatments ?? []
+  if (treatments.length === 0) return ''
+  const lines = treatments
+    .map(
+      (treatment) =>
+        `${escapeHtml(treatment.procedure)} (${escapeHtml(treatment.cupsCode)})`,
+    )
+    .join('; ')
+  return `<br />Tratamiento recomendado: ${lines}`
+}
+
 function buildDiagnosticChartSection(data: ClinicalRecordFormData): string {
   const summary = formatClinicalDiagnosticChartSummary(
     normalizeClinicalDiagnosticChart(data.diagnosticChart),
@@ -406,7 +420,7 @@ function buildDiagnosticChartSection(data: ClinicalRecordFormData): string {
     .filter((diagnosis) => !(diagnosis.affectedTeeth?.length))
     .map(
       (diagnosis) =>
-        `<li><strong>${escapeHtml(diagnosis.code)}</strong> — ${escapeHtml(diagnosis.description)} (${escapeHtml(diagnosis.type)}, ${escapeHtml(DIAGNOSIS_CERTAINTY_LABELS[diagnosis.certainty])})</li>`,
+        `<li><strong>${escapeHtml(diagnosis.code)}</strong> — ${escapeHtml(diagnosis.description)} (${escapeHtml(diagnosis.type)}, ${escapeHtml(DIAGNOSIS_CERTAINTY_LABELS[diagnosis.certainty])})${formatRecommendedTreatmentsHtml(diagnosis)}</li>`,
     )
     .join('')
 
@@ -417,7 +431,7 @@ function buildDiagnosticChartSection(data: ClinicalRecordFormData): string {
     )
     .map(
       (diagnosis) =>
-        `<li><strong>${escapeHtml(diagnosis.code)}</strong> — ${escapeHtml(diagnosis.description)} (${escapeHtml(diagnosis.type)}, ${escapeHtml(DIAGNOSIS_CERTAINTY_LABELS[diagnosis.certainty])})${diagnosis.affectedTeeth?.length ? ` · Piezas: ${diagnosis.affectedTeeth.join(', ')}` : ''}</li>`,
+        `<li><strong>${escapeHtml(diagnosis.code)}</strong> — ${escapeHtml(diagnosis.description)} (${escapeHtml(diagnosis.type)}, ${escapeHtml(DIAGNOSIS_CERTAINTY_LABELS[diagnosis.certainty])})${diagnosis.affectedTeeth?.length ? ` · Piezas: ${diagnosis.affectedTeeth.join(', ')}` : ''}${formatRecommendedTreatmentsHtml(diagnosis)}</li>`,
     )
     .join('')
 
