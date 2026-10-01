@@ -6,7 +6,6 @@ import {
   RDA_OTP_RETRY_MS,
   formatRetryCountdown,
 } from '@/constants/rdaExternalHistory'
-import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   getLatestRdaConsentForPatient,
@@ -263,14 +262,12 @@ export function ExternalHistoryRdaPanel({
           onClick={() => setExpanded((value) => !value)}
           className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left"
           aria-expanded={expanded}
+          aria-label={expanded ? 'Ocultar historial externo' : 'Mostrar historial externo'}
         >
-          <div>
-            <h3 className={CLINICAL_SECTION_TITLE_CLASS}>Solicitar Historial Externo (RDA)</h3>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Consulta interoperable al Minsalud. El OTP se envía al teléfono de contacto del
-              paciente.
-            </p>
-          </div>
+          <p className="text-xs text-slate-500">
+            Consulta interoperable al Minsalud. El OTP se envía al teléfono de contacto del
+            paciente.
+          </p>
           <ChevronDown
             className={`h-4 w-4 shrink-0 text-slate-400 transition ${expanded ? 'rotate-180' : ''}`}
             aria-hidden
