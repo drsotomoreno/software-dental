@@ -327,10 +327,14 @@ export function validateRipsStructureSyntax(rips, context = {}) {
   const fechaGeneracion = context.fechaGeneracion ?? new Date()
   const convenioFechaInicio = context.convenioFechaInicio
   const numFactura = normalizeRipsNumFactura(rips?.numFactura)
-  const allowNullNumFactura = allowsNullNumFactura(context.perfilFiscal, {
-    allowNullNumFactura: context.allowNullNumFactura,
-    esRipsTemporal: context.esRipsTemporal,
-  })
+  const tipoNota = String(rips?.tipoNota ?? '').trim().toUpperCase() || null
+  const esRipsSinFactura = tipoNota === 'RS'
+  const allowNullNumFactura =
+    esRipsSinFactura ||
+    allowsNullNumFactura(context.perfilFiscal, {
+      allowNullNumFactura: context.allowNullNumFactura,
+      esRipsTemporal: context.esRipsTemporal,
+    })
   const fevReferencia = normalizeRipsNumFactura(context.fevReferencia) ?? numFactura
 
   const facturaCheck = validateRipsFevNumero(numFactura, {
@@ -346,15 +350,26 @@ export function validateRipsStructureSyntax(rips, context = {}) {
     )
   }
 
-  if (rips?.tipoNota) {
+  if (esRipsSinFactura) {
+    if (numFactura) {
+      pushError(
+        'numFactura',
+        'En RIPS sin factura (tipoNota RS) numFactura debe ser null.',
+      )
+    }
     const notaCheck = validateRipsFevNumero(rips?.numNota, { label: 'numNota' })
     if (!notaCheck.valid) {
       pushError('numNota', notaCheck.message)
     }
-  } else if (rips?.numNota?.trim()) {
+  } else if (tipoNota) {
+    const notaCheck = validateRipsFevNumero(rips?.numNota, { label: 'numNota' })
+    if (!notaCheck.valid) {
+      pushError('numNota', notaCheck.message)
+    }
+  } else if (String(rips?.numNota ?? '').trim()) {
     pushError(
       'numNota',
-      'numNota solo debe informarse cuando tipoNota está definido (nota crédito/débito).',
+      'numNota solo debe informarse cuando tipoNota está definido (RS, nota crédito o débito).',
     )
   }
 

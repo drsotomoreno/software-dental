@@ -18,6 +18,8 @@ import {
 
   ExternalHistoryRdaPanel,
 
+  CierreAtencionRips,
+
   createEmptyClinicalForm,
 
 } from '@/components/clinical'
@@ -2029,6 +2031,16 @@ export function PatientDetailPage() {
             {saving ? 'Guardando...' : 'Guardar valoración'}
           </button>
         </div>
+      )}
+
+      {!isArchiveView && !showRapidValuation && patient && clinicalData && user && (
+        <CierreAtencionRips
+          patient={patient}
+          professional={user}
+          clinicalData={clinicalData}
+          clinicalRecordId={viewingRecord?.id}
+          disabled={saving || !can('clinical.sign')}
+        />
       )}
 
       {!isArchiveView && !showRapidValuation && (

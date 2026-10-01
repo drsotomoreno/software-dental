@@ -55,10 +55,14 @@ export function validateRipsMetadataStructure(
   context: Omit<RipsStructureValidationContext, 'codPrestador' | 'fevReferencia'> = {},
 ): RipsValidationIssue[] {
   const issues: RipsValidationIssue[] = []
-  const allowNull = allowsNullNumFactura(context.perfilFiscal ?? metadata.perfilFiscal, {
-    allowNullNumFactura: context.allowNullNumFactura,
-    esRipsTemporal: context.esRipsTemporal,
-  })
+  const tipoNota = String(metadata.tipoNota ?? '').trim().toUpperCase() || null
+  const esRipsSinFactura = tipoNota === 'RS'
+  const allowNull =
+    esRipsSinFactura ||
+    allowsNullNumFactura(context.perfilFiscal ?? metadata.perfilFiscal, {
+      allowNullNumFactura: context.allowNullNumFactura,
+      esRipsTemporal: context.esRipsTemporal,
+    })
 
   const facturaCheck = validateRipsFevNumero(metadata.numFactura, {
     label: 'numFactura',
@@ -66,9 +70,15 @@ export function validateRipsMetadataStructure(
   })
   if (!facturaCheck.valid) {
     issues.push({ level: 'error', field: 'numFactura', message: facturaCheck.message! })
+  } else if (esRipsSinFactura && metadata.numFactura) {
+    issues.push({
+      level: 'error',
+      field: 'numFactura',
+      message: 'En RIPS sin factura (tipoNota RS) numFactura debe ser null.',
+    })
   }
 
-  if (metadata.tipoNota) {
+  if (tipoNota) {
     const notaCheck = validateRipsFevNumero(metadata.numNota, { label: 'numNota' })
     if (!notaCheck.valid) {
       issues.push({ level: 'error', field: 'numNota', message: notaCheck.message! })
