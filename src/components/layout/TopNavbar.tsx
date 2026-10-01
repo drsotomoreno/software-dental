@@ -34,6 +34,8 @@ interface TopNavItem {
   to: string
   permission: Permission
   row: NavRow
+  /** Panel global de cuentas. No forma parte del acceso del auxiliar ni de la clínica. */
+  superadminOnly?: boolean
   isActive?: (pathname: string) => boolean
 }
 
@@ -129,6 +131,7 @@ const TOP_NAV_ITEMS: TopNavItem[] = [
     label: 'Suscripciones',
     to: '/admin/usuarios',
     permission: 'audit.read',
+    superadminOnly: true,
     row: 2,
   },
 ]
@@ -156,7 +159,7 @@ export function TopNavbar() {
 
   const navigate = useNavigate()
 
-  const { user, logout, can } = useAuth()
+  const { user, logout, can, hasRole } = useAuth()
 
   const location = useLocation()
 
@@ -182,7 +185,11 @@ export function TopNavbar() {
     navigate('/login')
   }
 
-  const visibleItems = TOP_NAV_ITEMS.filter((item) => can(item.permission))
+  const isSuperAdmin =
+    hasRole('superadmin') || localStorage.getItem('doctorSEO_rol') === 'superadmin'
+  const visibleItems = TOP_NAV_ITEMS.filter(
+    (item) => can(item.permission) && (!item.superadminOnly || isSuperAdmin),
+  )
   const primaryRow = visibleItems.filter((item) => item.row === 1)
   const secondaryRow = visibleItems.filter((item) => item.row === 2)
 

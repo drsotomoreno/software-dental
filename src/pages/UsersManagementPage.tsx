@@ -292,8 +292,9 @@ export function UsersManagementPage() {
             <h1 className="text-2xl font-bold text-slate-900">Gestión de Usuarios</h1>
             <p className="mt-1 text-sm text-slate-600">
               El titular de la cuenta es administrador. Los colaboradores pueden tener otro rol.
-              Para un auxiliar (personal administrativo) solo se piden cédula, correo y teléfono:
-              no tienen ReTHUS ni código REPS. El acceso es por cédula y contraseña.
+              El auxiliar accede a toda la historia y al resto de la operación, pero no puede
+              cerrar ni firmar evoluciones ni gestionar usuarios. Solo se piden cédula, correo y
+              teléfono: no tienen ReTHUS ni código REPS. El acceso es por cédula y contraseña.
             </p>
           </div>
           {canManage && (
@@ -571,7 +572,8 @@ function UserFields({
           </p>
         ) : isAuxiliar ? (
           <p className="mt-1 text-xs text-slate-500">
-            Personal administrativo: no se solicita ReTHUS ni código REPS.
+            Accede a toda la historia y al resto de la clínica. No cierra ni firma evoluciones y
+            no gestiona usuarios. No se solicita ReTHUS ni código REPS.
           </p>
         ) : null}
       </div>

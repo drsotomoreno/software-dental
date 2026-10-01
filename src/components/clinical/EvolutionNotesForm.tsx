@@ -54,7 +54,8 @@ export function EvolutionNotesForm({
   allowAddendums = true,
   allowNewNotes = true,
 }: EvolutionNotesFormProps) {
-  const { user } = useAuth()
+  const { user, can } = useAuth()
+  const canSignEvolution = can('clinical.sign')
   const [blockedMessage, setBlockedMessage] = useState('')
   const [shieldMismatches, setShieldMismatches] = useState<RipsShieldMismatch[]>([])
 
@@ -111,6 +112,10 @@ export function EvolutionNotesForm({
   }
 
   const signNote = async (id: string) => {
+    if (!canSignEvolution) {
+      showBlocked('El auxiliar puede completar la evolución, pero no cerrarla ni firmarla.')
+      return
+    }
     const note = notes.find((item) => item.id === id)
     if (!note || isEvolutionNoteImmutable(note)) {
       showBlocked(EVOLUTION_NOTE_IMMUTABILITY_MESSAGE)
@@ -188,6 +193,12 @@ export function EvolutionNotesForm({
             elimina; use «Agregar Nota de Aclaración». El odontograma y el resto del expediente
             siguen abiertos.
           </p>
+          {!canSignEvolution && (
+            <p className="mt-2 text-xs text-amber-800">
+              Puede consultar y completar toda la evolución. Cerrarla y firmarla corresponde al
+              odontólogo o a la administración.
+            </p>
+          )}
         </div>
         {canAddNote && (
           <button type="button" onClick={addNote} className="btn-primary shrink-0 text-sm">
@@ -230,6 +241,7 @@ export function EvolutionNotesForm({
               parentRecordId={parentRecordId}
               patientId={patientId}
               allowAddendums={allowAddendums}
+              canSign={canSignEvolution}
               onChange={(patch) => updateNote(note.id, patch)}
               onRemove={() => removeNote(note.id)}
               onSign={() => signNote(note.id)}
