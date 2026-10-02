@@ -5,6 +5,7 @@ import type { ScheduleBlock } from '@/types/scheduleBlock'
 import {
   generateTimeSlots,
   getAppointmentPosition,
+  isLunchHourSlot,
   SCHEDULER_START_HOUR,
   SCHEDULER_END_HOUR,
   SCHEDULER_SLOT_MINUTES,
@@ -122,7 +123,9 @@ export function DentalScheduler({
             {timeSlots.map((slot) => (
               <div
                 key={slot}
-                className="flex items-start justify-end border-b border-slate-100 pr-2 text-[10px] text-slate-400"
+                className={`flex items-start justify-end border-b border-slate-100 pr-2 text-[10px] text-slate-400 ${
+                  isLunchHourSlot(slot) ? 'agenda-lunch-slot' : ''
+                }`}
                 style={{ height: SLOT_HEIGHT_PX }}
               >
                 {slot.endsWith(':00') ? slot : ''}
@@ -139,6 +142,7 @@ export function DentalScheduler({
               {/* Celdas clicables */}
               {timeSlots.map((slot) => {
                 const blocked = isSlotBlocked(date, slot, col.id, blocks)
+                const lunch = isLunchHourSlot(slot)
                 return (
                   <button
                     key={slot}
@@ -154,9 +158,13 @@ export function DentalScheduler({
                     className={`absolute w-full border-b border-slate-100 transition ${
                       blocked
                         ? 'cursor-not-allowed bg-black/5'
-                        : blockMode
-                          ? 'hover:bg-black/10'
-                          : 'hover:bg-dental-50/60'
+                        : lunch
+                          ? blockMode
+                            ? 'agenda-lunch-slot hover:bg-black/10'
+                            : 'agenda-lunch-slot hover:bg-dental-50/60'
+                          : blockMode
+                            ? 'hover:bg-black/10'
+                            : 'hover:bg-dental-50/60'
                     }`}
                     style={{
                       top: `${(timeSlots.indexOf(slot) / totalSlots) * 100}%`,
