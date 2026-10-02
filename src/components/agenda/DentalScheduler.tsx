@@ -35,9 +35,7 @@ interface DentalSchedulerProps {
   onSlotContextMenu?: (event: MouseEvent, selection: SlotSelection) => void
   onBlockClick?: (block: ScheduleBlock) => void
   onSlotPress?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
-  onSlotPointerDown?: (event: PointerEvent<HTMLButtonElement>, selection: SlotSelection) => void
-  onSlotPointerMove?: (event: PointerEvent<HTMLButtonElement>) => void
-  onSlotPointerUp?: (event: PointerEvent<HTMLButtonElement>) => void
+  onColumnPointerDown?: (event: PointerEvent<HTMLElement>) => void
 }
 const SLOT_HEIGHT_PX = 48
 const totalSlots =
@@ -57,9 +55,7 @@ export function DentalScheduler({
   onSlotContextMenu,
   onBlockClick,
   onSlotPress,
-  onSlotPointerDown,
-  onSlotPointerMove,
-  onSlotPointerUp,
+  onColumnPointerDown,
 }: DentalSchedulerProps) {
   const timeSlots = useMemo(() => generateTimeSlots(), [])
 
@@ -110,11 +106,6 @@ export function DentalScheduler({
             Modo bloqueo activo — clic en un horario para bloquear
           </span>
         )}
-        {selectionMode && (
-          <span className="rounded-full bg-dental-100 px-2 py-0.5 text-[10px] font-medium text-dental-800">
-            Selección múltiple — marque casillas y aplique el cambio en bloque
-          </span>
-        )}
       </div>
 
       <div className={`overflow-x-auto ${selectionMode ? 'select-none' : ''}`}>
@@ -153,8 +144,10 @@ export function DentalScheduler({
           {columns.map((col) => (
             <div
               key={col.id}
+              data-agenda-column="true"
               className="relative border-r border-slate-200"
               style={{ height: timelineHeight }}
+              onPointerDown={onColumnPointerDown}
             >
               {/* Celdas clicables */}
               {timeSlots.map((slot) => {
@@ -189,9 +182,6 @@ export function DentalScheduler({
                       if (selectionMode || blocked) return
                       onSlotContextMenu?.(event, selection)
                     }}
-                    onPointerDown={(event) => onSlotPointerDown?.(event, selection)}
-                    onPointerMove={(event) => onSlotPointerMove?.(event)}
-                    onPointerUp={(event) => onSlotPointerUp?.(event)}
                   />
                 )
               })}

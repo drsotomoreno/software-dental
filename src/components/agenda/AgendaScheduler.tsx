@@ -57,11 +57,12 @@ import { generateTimeSlots } from '@/constants/procedures'
 import {
   mergeBlockInputs,
   parseSlotKey,
-  rectangleSlots,
   rewriteBlocksForSlotSelection,
+  selectionFromMouseGesture,
   selectionToBlockInputs,
   singleContiguousRange,
-  slotKey,
+  SLOT_DRAG_THRESHOLD_PX,
+  slotFromClientPoint,
   type AgendaSlotRef,
 } from '@/utils/agendaSlotSelection'
 import { markAppointmentNoShow } from '@/utils/appointmentNoShow'
@@ -169,15 +170,7 @@ export function AgendaScheduler() {
   timeSlotsRef.current = timeSlots
   const slotAxesRef = useRef(slotAxes)
   slotAxesRef.current = slotAxes
-  const suppressClickRef = useRef(false)
-  const dragRef = useRef<{
-    pointerId: number
-    origin: AgendaSlotRef
-    startX: number
-    startY: number
-    moved: boolean
-    base: Set<string>
-  } | null>(null)
+  const gestureCleanupRef = useRef<(() => void) | null>(null)
 
   const openRescheduleModal = useCallback((appointment: Appointment) => {
     setEditingAppointment(appointment)
@@ -418,116 +411,122 @@ export function AgendaScheduler() {
     clearSlotSelection()
   }, [clearSlotSelection])
 
-  const addRectangle = useCallback((origin: AgendaSlotRef, target: AgendaSlotRef, base: Set<string>) => {
-    const next = new Set(base)
-    for (const item of rectangleSlots(origin, target, timeSlotsRef.current, slotAxesRef.current)) {
-      next.add(slotKey(item))
-    }
-    setSelectedKeys(next)
-    anchorRef.current = origin
-  }, [])
-
-  const toggleSlot = useCallback((slot: AgendaSlotRef, base: Set<string>) => {
-    const key = slotKey(slot)
-    const next = new Set(base)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    anchorRef.current = slot
-    setSelectedKeys(next)
-  }, [])
-
-  const slotFromPoint = (x: number, y: number): AgendaSlotRef | null => {
-    const stack = document.elementsFromPoint(x, y)
-    for (const element of stack) {
-      const marker = (element as HTMLElement).closest?.('[data-agenda-slot]')?.getAttribute('data-agenda-slot')
-      if (!marker) continue
-      const parsed = parseSlotKey(marker)
-      if (parsed) return parsed
-    }
-    return null
-  }
-
   const handleSlotPress = useCallback(
-    (event: MouseEvent<HTMLButtonElement>, slot: AgendaSlotRef) => {
-      if (suppressClickRef.current) {
-        suppressClickRef.current = false
-        return
-      }
-      const multi = selectionModeRef.current || event.shiftKey || event.metaKey || event.ctrlKey
-      if (!multi) {
-        handleSlotClick(slot)
-        return
-      }
-      if (!selectionModeRef.current) setSelectionMode(true)
-      if (event.shiftKey) {
-        const origin = anchorRef.current ?? slot
-        addRectangle(origin, slot, selectedKeysRef.current)
-        return
-      }
-      toggleSlot(slot, selectedKeysRef.current)
+    (_event: MouseEvent<HTMLButtonElement>, slot: AgendaSlotRef) => {
+      if (selectionModeRef.current) return
+      handleSlotClick(slot)
     },
-    [addRectangle, handleSlotClick, toggleSlot],
+    [handleSlotClick],
   )
 
-  const handleSlotPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>, slot: AgendaSlotRef) => {
-    if (event.button !== 0) return
-    const multi = selectionModeRef.current || event.shiftKey || event.metaKey || event.ctrlKey
-    if (!multi) return
-    dragRef.current = {
+  const handleColumnPointerDown = useCallback((event: PointerEvent<HTMLElement>) => {
+    if (event.button !== 0 && event.button !== 2) return
+    if (event.button === 2 && !selectionModeRef.current) return
+
+    const origin = slotFromClientPoint(event.clientX, event.clientY)
+    if (!origin) return
+
+    gestureCleanupRef.current?.()
+
+    const gesture = {
       pointerId: event.pointerId,
-      origin: slot,
+      button: event.button === 2 ? 'right' as const : 'left' as const,
+      origin,
       startX: event.clientX,
       startY: event.clientY,
       moved: false,
       base: new Set(selectedKeysRef.current),
     }
-    event.currentTarget.setPointerCapture(event.pointerId)
+    anchorRef.current = origin
+
+    const paint = (target: AgendaSlotRef, moved: boolean) => {
+      const keys = selectionFromMouseGesture({
+        button: gesture.button,
+        moved,
+        selectionMode: selectionModeRef.current || moved,
+        origin: gesture.origin,
+        target,
+        selectedKeys: gesture.base,
+        timeSlots: timeSlotsRef.current,
+        axes: slotAxesRef.current,
+      })
+      if (!keys) return false
+      setSelectedKeys(new Set(keys))
+      return true
+    }
+
+    const stopSelecting = () => {
+      document.querySelector('.agenda-scheduler-root')?.classList.remove('agenda-selecting')
+    }
+
+    const suppressFollowingClick = () => {
+      const stop = (clickEvent: Event) => {
+        const target = clickEvent.target
+        if (!(target instanceof Element)) return
+        if (!target.closest('[data-agenda-column]')) return
+        clickEvent.preventDefault()
+        clickEvent.stopPropagation()
+      }
+      window.addEventListener('click', stop, true)
+      window.addEventListener('auxclick', stop, true)
+      window.setTimeout(() => {
+        window.removeEventListener('click', stop, true)
+        window.removeEventListener('auxclick', stop, true)
+      }, 400)
+    }
+
+    const move = (pointerEvent: globalThis.PointerEvent) => {
+      if (pointerEvent.pointerId !== gesture.pointerId) return
+      const distance = Math.hypot(pointerEvent.clientX - gesture.startX, pointerEvent.clientY - gesture.startY)
+      if (distance < SLOT_DRAG_THRESHOLD_PX) return
+      gesture.moved = true
+      document.querySelector('.agenda-scheduler-root')?.classList.add('agenda-selecting')
+      const target = slotFromClientPoint(pointerEvent.clientX, pointerEvent.clientY)
+      if (!target) return
+      pointerEvent.preventDefault()
+      paint(target, true)
+    }
+
+    const finish = (pointerEvent: globalThis.PointerEvent) => {
+      if (pointerEvent.pointerId !== gesture.pointerId) return
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      gestureCleanupRef.current = null
+      stopSelecting()
+
+      if (gesture.moved) {
+        const target = slotFromClientPoint(pointerEvent.clientX, pointerEvent.clientY) ?? gesture.origin
+        paint(target, true)
+        setSelectionMode(true)
+        suppressFollowingClick()
+        return
+      }
+
+      const changed = paint(gesture.origin, false)
+      if (changed) {
+        setSelectionMode(true)
+        suppressFollowingClick()
+      }
+    }
+
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+    gestureCleanupRef.current = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      stopSelecting()
+    }
+
+    if (event.button === 2) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
   }, [])
 
-  const handleSlotPointerMove = useCallback(
-    (event: PointerEvent<HTMLButtonElement>) => {
-      const drag = dragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY)
-      if (distance < 8) return
-      const target = slotFromPoint(event.clientX, event.clientY)
-      if (!target) return
-      drag.moved = true
-      if (!selectionModeRef.current) setSelectionMode(true)
-      event.preventDefault()
-      addRectangle(drag.origin, target, drag.base)
-    },
-    [addRectangle],
-  )
-
-  const handleSlotPointerUp = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    const drag = dragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    dragRef.current = null
-    if (drag.moved) {
-      suppressClickRef.current = true
-      anchorRef.current = drag.origin
-      return
-    }
-    suppressClickRef.current = true
-    if (!selectionModeRef.current) setSelectionMode(true)
-    if (event.shiftKey) {
-      const origin = anchorRef.current ?? drag.origin
-      addRectangle(origin, drag.origin, drag.base)
-      return
-    }
-    toggleSlot(drag.origin, drag.base)
-  }, [addRectangle, toggleSlot])
-
-  useEffect(() => {
-    if (!selectionMode) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      exitSelectionMode()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [selectionMode, exitSelectionMode])
+  useEffect(() => () => gestureCleanupRef.current?.(), [])
 
   useEffect(() => {
     setSelectedKeys(new Set())
@@ -778,9 +777,7 @@ export function AgendaScheduler() {
                 selectionMode={selectionMode}
                 selectedKeys={selectedKeys}
                 onSlotPress={handleSlotPress}
-                onSlotPointerDown={handleSlotPointerDown}
-                onSlotPointerMove={handleSlotPointerMove}
-                onSlotPointerUp={handleSlotPointerUp}
+                onColumnPointerDown={handleColumnPointerDown}
               />
             )}
 
@@ -803,9 +800,7 @@ export function AgendaScheduler() {
                   selectionMode={selectionMode}
                   selectedKeys={selectedKeys}
                   onSlotPress={handleSlotPress}
-                  onSlotPointerDown={handleSlotPointerDown}
-                  onSlotPointerMove={handleSlotPointerMove}
-                  onSlotPointerUp={handleSlotPointerUp}
+                  onColumnPointerDown={handleColumnPointerDown}
                 />
               ))}
 
