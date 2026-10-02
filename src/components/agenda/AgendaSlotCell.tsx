@@ -3,6 +3,7 @@ import type { MouseEvent } from 'react'
 interface AgendaSlotCellProps {
   blocked: boolean
   blockMode: boolean
+  lunch?: boolean
   selected: boolean
   selectionMode: boolean
   top: string
@@ -19,6 +20,7 @@ interface AgendaSlotCellProps {
 export function AgendaSlotCell({
   blocked,
   blockMode,
+  lunch = false,
   selected,
   selectionMode,
   top,
@@ -43,12 +45,16 @@ export function AgendaSlotCell({
       onMouseEnter={onMouseEnter}
       className={`absolute w-full scroll-mt-48 border-b border-slate-100 transition ${
         selectionMode
-          ? 'cursor-cell hover:bg-dental-100/80'
+          ? `cursor-cell hover:bg-dental-100/80 ${lunch && !blocked ? 'agenda-lunch-slot' : ''}`
           : blocked
             ? 'cursor-not-allowed bg-black/5'
-            : blockMode
-              ? 'hover:bg-black/10'
-              : 'hover:bg-dental-50/60'
+            : lunch
+              ? blockMode
+                ? 'agenda-lunch-slot hover:bg-black/10'
+                : 'agenda-lunch-slot hover:bg-dental-50/60'
+              : blockMode
+                ? 'hover:bg-black/10'
+                : 'hover:bg-dental-50/60'
       } ${selected ? 'bg-dental-100/70' : ''}`}
       style={{ top, height }}
     />

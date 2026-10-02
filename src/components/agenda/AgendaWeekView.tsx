@@ -7,6 +7,7 @@ import type { ScheduleBlock } from '@/types/scheduleBlock'
 import {
   generateTimeSlots,
   getAppointmentPosition,
+  isLunchHourSlot,
   SCHEDULER_END_HOUR,
   SCHEDULER_START_HOUR,
   SCHEDULER_SLOT_MINUTES,
@@ -169,7 +170,9 @@ export function AgendaWeekView({
             {timeSlots.map((slot) => (
               <div
                 key={slot}
-                className="flex items-start justify-end border-b border-slate-100 pr-1 text-[10px] text-slate-400"
+                className={`flex items-start justify-end border-b border-slate-100 pr-1 text-[10px] text-slate-400 ${
+                  isLunchHourSlot(slot) ? 'agenda-lunch-slot' : ''
+                }`}
                 style={{ height: SLOT_HEIGHT_PX }}
               >
                 {slot.endsWith(':00') ? slot : ''}
@@ -193,11 +196,13 @@ export function AgendaWeekView({
                     const blocked = isSlotBlocked(day, slot, column.id, blocks)
                     const selection = { columnId: column.id, date: day, startTime: slot }
                     const selected = selectedKeys?.has(slotKey(selection)) ?? false
+                    const lunch = isLunchHourSlot(slot)
                     return (
                       <AgendaSlotCell
                         key={slot}
                         blocked={blocked}
                         blockMode={blockMode}
+                        lunch={lunch}
                         selected={selected}
                         selectionMode={selectionMode}
                         top={`${(timeSlots.indexOf(slot) / totalSlots) * 100}%`}

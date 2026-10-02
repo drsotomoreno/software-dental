@@ -5,6 +5,7 @@ import type { ScheduleBlock } from '@/types/scheduleBlock'
 import {
   generateTimeSlots,
   getAppointmentPosition,
+  isLunchHourSlot,
   SCHEDULER_START_HOUR,
   SCHEDULER_END_HOUR,
   SCHEDULER_SLOT_MINUTES,
@@ -139,7 +140,9 @@ export function DentalScheduler({
             {timeSlots.map((slot) => (
               <div
                 key={slot}
-                className="flex items-start justify-end border-b border-slate-100 pr-2 text-[10px] text-slate-400"
+                className={`flex items-start justify-end border-b border-slate-100 pr-2 text-[10px] text-slate-400 ${
+                  isLunchHourSlot(slot) ? 'agenda-lunch-slot' : ''
+                }`}
                 style={{ height: SLOT_HEIGHT_PX }}
               >
                 {slot.endsWith(':00') ? slot : ''}
@@ -158,11 +161,13 @@ export function DentalScheduler({
                 const blocked = isSlotBlocked(date, slot, col.id, blocks)
                 const selection = { columnId: col.id, date, startTime: slot }
                 const selected = selectedKeys?.has(slotKey(selection)) ?? false
+                const lunch = isLunchHourSlot(slot)
                 return (
                   <AgendaSlotCell
                     key={slot}
                     blocked={blocked}
                     blockMode={blockMode}
+                    lunch={lunch}
                     selected={selected}
                     selectionMode={selectionMode}
                     top={`${(timeSlots.indexOf(slot) / totalSlots) * 100}%`}
