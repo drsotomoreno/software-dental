@@ -41,7 +41,7 @@ export function AgendaSlotCell({
       onContextMenu={onContextMenu}
       onMouseDown={onMouseDown}
       onMouseEnter={onMouseEnter}
-      className={`absolute w-full border-b border-slate-100 transition ${
+      className={`absolute w-full scroll-mt-48 border-b border-slate-100 transition ${
         selectionMode
           ? 'cursor-cell hover:bg-dental-100/80'
           : blocked

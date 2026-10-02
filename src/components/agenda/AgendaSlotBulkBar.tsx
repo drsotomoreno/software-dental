@@ -31,7 +31,7 @@ export function AgendaSlotBulkBar({
   onExit,
 }: AgendaSlotBulkBarProps) {
   return (
-    <div className="card border-dental-200 bg-dental-50/80">
+    <div className="card sticky top-2 z-40 border-dental-200 bg-dental-50/95 shadow-md backdrop-blur-sm">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
           <p className="text-sm font-semibold text-dental-900">
