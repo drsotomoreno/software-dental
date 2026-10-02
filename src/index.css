@@ -145,6 +145,11 @@
     @apply bg-black text-white;
   }
 
+  /* Gris pastel muy claro. Marca el almuerzo sin impedir usar la casilla. */
+  .agenda-lunch-slot {
+    background-color: #f3f4f6;
+  }
+
   .agenda-whatsapp-btn {
     @apply inline-flex items-center gap-1 rounded-md bg-[#25D366] font-medium text-white shadow-sm transition hover:bg-[#1ebe57];
   }
