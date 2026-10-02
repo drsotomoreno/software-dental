@@ -37,9 +37,7 @@ interface AgendaWeekViewProps {
   onSlotContextMenu?: (event: MouseEvent, selection: SlotSelection) => void
   onBlockClick?: (block: ScheduleBlock) => void
   onSlotPress?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
-  onSlotPointerDown?: (event: PointerEvent<HTMLButtonElement>, selection: SlotSelection) => void
-  onSlotPointerMove?: (event: PointerEvent<HTMLButtonElement>) => void
-  onSlotPointerUp?: (event: PointerEvent<HTMLButtonElement>) => void
+  onColumnPointerDown?: (event: PointerEvent<HTMLElement>) => void
 }
 
 const SLOT_HEIGHT_PX = 40
@@ -63,9 +61,7 @@ export function AgendaWeekView({
   onSlotContextMenu,
   onBlockClick,
   onSlotPress,
-  onSlotPointerDown,
-  onSlotPointerMove,
-  onSlotPointerUp,
+  onColumnPointerDown,
 }: AgendaWeekViewProps) {
   const timeSlots = useMemo(() => generateTimeSlots(), [])
 
@@ -189,8 +185,10 @@ export function AgendaWeekView({
               return (
                 <div
                   key={`${day}-${column.id}-timeline`}
+                  data-agenda-column="true"
                   className="relative border-r border-slate-200"
                   style={{ height: timelineHeight }}
+                  onPointerDown={onColumnPointerDown}
                 >
                   {timeSlots.map((slot) => {
                     const blocked = isSlotBlocked(day, slot, column.id, blocks)
@@ -222,9 +220,6 @@ export function AgendaWeekView({
                           if (selectionMode || blocked) return
                           onSlotContextMenu?.(event, selection)
                         }}
-                        onPointerDown={(event) => onSlotPointerDown?.(event, selection)}
-                        onPointerMove={(event) => onSlotPointerMove?.(event)}
-                        onPointerUp={(event) => onSlotPointerUp?.(event)}
                       />
                     )
                   })}

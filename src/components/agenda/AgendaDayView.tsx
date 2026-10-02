@@ -18,9 +18,7 @@ interface AgendaDayViewProps {
   onSlotContextMenu?: (event: MouseEvent, selection: SlotSelection) => void
   onBlockClick?: (block: ScheduleBlock) => void
   onSlotPress?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
-  onSlotPointerDown?: (event: PointerEvent<HTMLButtonElement>, selection: SlotSelection) => void
-  onSlotPointerMove?: (event: PointerEvent<HTMLButtonElement>) => void
-  onSlotPointerUp?: (event: PointerEvent<HTMLButtonElement>) => void
+  onColumnPointerDown?: (event: PointerEvent<HTMLElement>) => void
 }
 
 /** Vista diaria — scheduler por sillas/consultorios. */
@@ -37,9 +35,7 @@ export function AgendaDayView({
   onSlotContextMenu,
   onBlockClick,
   onSlotPress,
-  onSlotPointerDown,
-  onSlotPointerMove,
-  onSlotPointerUp,
+  onColumnPointerDown,
 }: AgendaDayViewProps) {
   const dayAppointments = useMemo(
     () => appointments.filter((apt) => apt.startTime.startsWith(date)),
@@ -66,9 +62,7 @@ export function AgendaDayView({
         onSlotContextMenu={onSlotContextMenu}
         onBlockClick={onBlockClick}
         onSlotPress={onSlotPress}
-        onSlotPointerDown={onSlotPointerDown}
-        onSlotPointerMove={onSlotPointerMove}
-        onSlotPointerUp={onSlotPointerUp}
+        onColumnPointerDown={onColumnPointerDown}
       />
     </div>
   )

@@ -74,6 +74,60 @@ export function rectangleSlots(
   return slots
 }
 
+/** Un clic tembloroso sigue siendo clic. El arrastre empieza al salir de la casilla. */
+export const SLOT_DRAG_THRESHOLD_PX = 10
+
+export interface MouseGestureInput {
+  button: 'left' | 'right'
+  moved: boolean
+  selectionMode: boolean
+  origin: AgendaSlotRef
+  target: AgendaSlotRef
+  selectedKeys: ReadonlySet<string>
+  timeSlots: string[]
+  axes: SlotAxis[]
+}
+
+/**
+ * Selección con el mouse, como en una tabla.
+ * El botón izquierdo marca una casilla o, si se arrastra, el rectángulo.
+ * El botón derecho suma o quita sin borrar el resto.
+ * Null conserva la acción normal del clic (cita o bloqueo).
+ */
+export function selectionFromMouseGesture(input: MouseGestureInput): string[] | null {
+  if (input.button === 'right' && !input.selectionMode) return null
+  if (input.button === 'left' && !input.moved && !input.selectionMode) return null
+
+  if (!input.moved) {
+    const key = slotKey(input.origin)
+    if (input.button === 'left') return [key]
+    const next = new Set(input.selectedKeys)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    return [...next]
+  }
+
+  const rectangle = rectangleSlots(input.origin, input.target, input.timeSlots, input.axes).map(slotKey)
+  if (input.button === 'left') return rectangle
+
+  const next = new Set(input.selectedKeys)
+  for (const key of rectangle) next.add(key)
+  return [...next]
+}
+
+/** Casilla bajo el cursor, aunque haya una cita o un bloqueo encima. */
+export function slotFromClientPoint(x: number, y: number): AgendaSlotRef | null {
+  if (typeof document === 'undefined') return null
+  const nodes = document.querySelectorAll<HTMLElement>('[data-agenda-slot]')
+  for (const node of nodes) {
+    const rect = node.getBoundingClientRect()
+    if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) continue
+    const parsed = parseSlotKey(node.getAttribute('data-agenda-slot') ?? '')
+    if (parsed) return parsed
+  }
+  return null
+}
+
 function groupSlotMinutes(slots: AgendaSlotRef[]): Map<string, Map<string, number[]>> {
   const grouped = new Map<string, Map<string, number[]>>()
   for (const slot of slots) {

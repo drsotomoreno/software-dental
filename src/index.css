@@ -150,6 +150,18 @@
     background-color: #f3f4f6;
   }
 
+  /* Casilla marcada, como una celda seleccionada en una tabla. */
+  .agenda-slot-selected {
+    background-color: rgb(186 230 253 / 0.72);
+    box-shadow: inset 0 0 0 2px #0369a1;
+  }
+
+  .agenda-scheduler-root.agenda-selecting,
+  .agenda-scheduler-root.agenda-selecting * {
+    user-select: none;
+    cursor: cell;
+  }
+
   .agenda-whatsapp-btn {
     @apply inline-flex items-center gap-1 rounded-md bg-[#25D366] font-medium text-white shadow-sm transition hover:bg-[#1ebe57];
   }
