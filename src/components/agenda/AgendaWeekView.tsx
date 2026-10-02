@@ -20,7 +20,9 @@ import {
 import { getChairDisplayStyle } from '@/utils/scheduleColumnStyles'
 import { SchedulerAppointmentCard } from './SchedulerAppointmentCard'
 import { BlockedSlotOverlay } from './BlockedSlotOverlay'
+import { AgendaSlotCell, AgendaSlotSelectionHighlight } from './AgendaSlotCell'
 import type { SlotSelection } from './CreateAppointmentModal'
+import { slotKey } from '@/utils/agendaSlotSelection'
 
 interface AgendaWeekViewProps {
   weekDays: string[]
@@ -28,11 +30,16 @@ interface AgendaWeekViewProps {
   appointments: Appointment[]
   blocks: ScheduleBlock[]
   blockMode?: boolean
+  selectionMode?: boolean
+  selectedKeys?: ReadonlySet<string>
   onSlotClick: (selection: SlotSelection) => void
   onAppointmentClick?: (appointment: Appointment) => void
   onAppointmentContextMenu?: (event: MouseEvent, appointment: Appointment) => void
   onSlotContextMenu?: (event: MouseEvent, selection: SlotSelection) => void
   onBlockClick?: (block: ScheduleBlock) => void
+  onSlotMouseDown?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
+  onSlotMouseEnter?: (selection: SlotSelection) => void
+  consumeSuppressedSlotClick?: () => boolean
 }
 
 const SLOT_HEIGHT_PX = 40
@@ -49,11 +56,16 @@ export function AgendaWeekView({
   appointments,
   blocks,
   blockMode = false,
+  selectionMode = false,
+  selectedKeys,
   onSlotClick,
   onAppointmentClick,
   onAppointmentContextMenu,
   onSlotContextMenu,
   onBlockClick,
+  onSlotMouseDown,
+  onSlotMouseEnter,
+  consumeSuppressedSlotClick,
 }: AgendaWeekViewProps) {
   const timeSlots = useMemo(() => generateTimeSlots(), [])
 
@@ -97,7 +109,7 @@ export function AgendaWeekView({
         })}
       </div>
 
-      <div className="overflow-x-auto">
+      <div className={`overflow-x-auto ${selectionMode ? 'select-none' : ''}`}>
         <div
           className="agenda-week-grid grid min-w-max"
           style={{
@@ -182,53 +194,50 @@ export function AgendaWeekView({
                 >
                   {timeSlots.map((slot) => {
                     const blocked = isSlotBlocked(day, slot, column.id, blocks)
+                    const selection = { columnId: column.id, date: day, startTime: slot }
+                    const selected = selectedKeys?.has(slotKey(selection)) ?? false
                     const lunch = isLunchHourSlot(slot)
                     return (
-                      <button
+                      <AgendaSlotCell
                         key={slot}
-                        type="button"
-                        onClick={() =>
-                          onSlotClick({ columnId: column.id, date: day, startTime: slot })
+                        blocked={blocked}
+                        blockMode={blockMode}
+                        lunch={lunch}
+                        selected={selected}
+                        selectionMode={selectionMode}
+                        top={`${(timeSlots.indexOf(slot) / totalSlots) * 100}%`}
+                        height={`${(1 / totalSlots) * 100}%`}
+                        slotMarker={slotKey(selection)}
+                        ariaLabel={
+                          selectionMode
+                            ? `Seleccionar ${day} ${column.name} a las ${slot}`
+                            : blocked
+                              ? `Horario bloqueado ${day} ${column.name} ${slot}`
+                              : `Crear cita el ${day} en ${column.name} a las ${slot}`
                         }
-                        onContextMenu={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          if (!blocked) {
-                            onSlotContextMenu?.(e, {
-                              columnId: column.id,
-                              date: day,
-                              startTime: slot,
-                            })
-                          }
+                        onClick={() => {
+                          if (consumeSuppressedSlotClick?.()) return
+                          if (selectionMode) return
+                          onSlotClick(selection)
                         }}
-                        className={`absolute w-full border-b border-slate-100 transition ${
-                          blocked
-                            ? 'cursor-not-allowed bg-black/5'
-                            : lunch
-                              ? blockMode
-                                ? 'agenda-lunch-slot hover:bg-black/10'
-                                : 'agenda-lunch-slot hover:bg-dental-50/60'
-                              : blockMode
-                                ? 'hover:bg-black/10'
-                                : 'hover:bg-dental-50/60'
-                        }`}
-                        style={{
-                          top: `${(timeSlots.indexOf(slot) / totalSlots) * 100}%`,
-                          height: `${(1 / totalSlots) * 100}%`,
+                        onContextMenu={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          if (selectionMode || blocked) return
+                          onSlotContextMenu?.(event, selection)
                         }}
-                        aria-label={
-                          blocked
-                            ? `Horario bloqueado ${day} ${column.name} ${slot}`
-                            : `Crear cita el ${day} en ${column.name} a las ${slot}`
-                        }
+                        onMouseDown={(event) => onSlotMouseDown?.(event, selection)}
+                        onMouseEnter={() => onSlotMouseEnter?.(selection)}
                       />
                     )
                   })}
 
-                  <BlockedSlotOverlay
-                    segments={getBlockSegmentsForColumn(day, column.id, blocks)}
-                    onBlockClick={onBlockClick}
-                  />
+                  <div className={selectionMode ? 'pointer-events-none' : undefined}>
+                    <BlockedSlotOverlay
+                      segments={getBlockSegmentsForColumn(day, column.id, blocks)}
+                      onBlockClick={onBlockClick}
+                    />
+                  </div>
 
                   {dayColumnAppointments.map((apt) => {
                     const pos = getAppointmentPosition(apt.startTime, apt.endTime)
@@ -238,7 +247,7 @@ export function AgendaWeekView({
                         className="pointer-events-none absolute z-20 w-full px-0.5"
                         style={{ top: pos.top, height: pos.height }}
                       >
-                        <div className="pointer-events-auto h-full">
+                        <div className={selectionMode ? 'pointer-events-none h-full' : 'pointer-events-auto h-full'}>
                           <SchedulerAppointmentCard
                             appointment={apt}
                             columnName={column.name}
@@ -251,6 +260,16 @@ export function AgendaWeekView({
                       </div>
                     )
                   })}
+
+                  <AgendaSlotSelectionHighlight
+                    timeSlots={timeSlots}
+                    totalSlots={totalSlots}
+                    selectedTimes={timeSlots.filter((slot) =>
+                      selectedKeys?.has(
+                        slotKey({ columnId: column.id, date: day, startTime: slot }),
+                      ),
+                    )}
+                  />
                 </div>
               )
             }),

@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback, type MouseEvent } from 'react'
+import { useMemo, useState, useEffect, useCallback, useRef, type MouseEvent } from 'react'
 import {
   addDays,
   addMonths,
@@ -23,6 +23,7 @@ import { CreateAppointmentModal, type SlotSelection } from './CreateAppointmentM
 import { BlockSlotModal } from './BlockSlotModal'
 import { AgendaCitasList } from './AgendaCitasList'
 import { AgendaContextMenu, type AgendaContextMenuItem } from './AgendaContextMenu'
+import { AgendaSlotBulkBar } from './AgendaSlotBulkBar'
 import { AppointmentDetailPanel } from './AppointmentDetailPanel'
 import { ColumnManager } from './ColumnManager'
 import { db } from '@/db/database'
@@ -43,7 +44,18 @@ import { useAppointmentsRange } from '@/hooks/useAppointments'
 import { useScheduleBlocks } from '@/hooks/useScheduleBlocks'
 import type { Appointment } from '@/types/appointment'
 import type { ScheduleBlock } from '@/types/scheduleBlock'
-import { findBlockAtSlot } from '@/utils/scheduleBlocks'
+import { findBlockAtSlot, isSlotBlocked } from '@/utils/scheduleBlocks'
+import { generateTimeSlots } from '@/constants/procedures'
+import {
+  mergeBlockInputs,
+  parseSlotKey,
+  rectangleSlots,
+  rewriteBlocksForSlotSelection,
+  selectionToBlockInputs,
+  singleContiguousRange,
+  slotKey,
+  type AgendaSlotRef,
+} from '@/utils/agendaSlotSelection'
 import { markAppointmentNoShow } from '@/utils/appointmentNoShow'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -54,6 +66,11 @@ export function AgendaScheduler() {
   const [modalOpen, setModalOpen] = useState(false)
   const [blockModalOpen, setBlockModalOpen] = useState(false)
   const [blockMode, setBlockMode] = useState(false)
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
+  const [bulkReason, setBulkReason] = useState('')
+  const [bulkSaving, setBulkSaving] = useState(false)
+  const [bulkError, setBulkError] = useState('')
   const [slotSelection, setSlotSelection] = useState<SlotSelection | null>(null)
   const [blockSelection, setBlockSelection] = useState<SlotSelection | null>(null)
   const [blockModalType, setBlockModalType] = useState<'full_day' | 'time_range'>('time_range')
@@ -124,7 +141,34 @@ export function AgendaScheduler() {
     isLoading: blocksLoading,
     createBlock,
     deleteBlock,
+    applyBlockRewrite,
   } = useScheduleBlocks(dateRange.start, dateRange.end)
+
+  const timeSlots = useMemo(() => generateTimeSlots(), [])
+  const slotAxes = useMemo(() => {
+    if (activeView === 'week') {
+      return weekDays.flatMap((day) => columns.map((column) => ({ date: day, columnId: column.id })))
+    }
+    return columns.map((column) => ({ date: currentDate, columnId: column.id }))
+  }, [activeView, weekDays, columns, currentDate])
+
+  const selectedKeysRef = useRef(selectedKeys)
+  selectedKeysRef.current = selectedKeys
+  const selectionModeRef = useRef(selectionMode)
+  selectionModeRef.current = selectionMode
+  const anchorRef = useRef<AgendaSlotRef | null>(null)
+  const timeSlotsRef = useRef(timeSlots)
+  timeSlotsRef.current = timeSlots
+  const slotAxesRef = useRef(slotAxes)
+  slotAxesRef.current = slotAxes
+  const suppressClickRef = useRef(false)
+  const dragRef = useRef<{
+    active: boolean
+    moved: boolean
+    origin: AgendaSlotRef
+    before: Set<string>
+    additive: boolean
+  } | null>(null)
 
   const openRescheduleModal = useCallback((appointment: Appointment) => {
     setEditingAppointment(appointment)
@@ -323,6 +367,188 @@ export function AgendaScheduler() {
     setModalOpen(true)
   }
 
+  const selectedSlots = useMemo(() => {
+    const slots: AgendaSlotRef[] = []
+    for (const key of selectedKeys) {
+      const slot = parseSlotKey(key)
+      if (slot && timeSlots.includes(slot.startTime)) slots.push(slot)
+    }
+    return slots
+  }, [selectedKeys, timeSlots])
+
+  const blockedSelectionCount = useMemo(
+    () =>
+      selectedSlots.filter((slot) =>
+        isSlotBlocked(slot.date, slot.startTime, slot.columnId, blocks),
+      ).length,
+    [selectedSlots, blocks],
+  )
+
+  const contiguousRange = useMemo(
+    () => singleContiguousRange(selectedSlots),
+    [selectedSlots],
+  )
+
+  const selectionSummary = useMemo(() => {
+    return selectionToBlockInputs(selectedSlots).map((input) => {
+      const columnName = columns.find((column) => column.id === input.columnId)?.name ?? 'Silla'
+      const when = format(parseISO(`${input.date}T12:00:00`), "EEE d MMM", { locale: es })
+      return `${when} · ${columnName} · ${input.startTime}–${input.endTime}`
+    })
+  }, [selectedSlots, columns])
+
+  const clearSlotSelection = useCallback(() => {
+    setSelectedKeys(new Set())
+    anchorRef.current = null
+    setBulkError('')
+  }, [])
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false)
+    setBulkReason('')
+    clearSlotSelection()
+  }, [clearSlotSelection])
+
+  const consumeSuppressedSlotClick = useCallback(() => {
+    if (!suppressClickRef.current) return false
+    suppressClickRef.current = false
+    return true
+  }, [])
+
+  const handleSlotMouseDown = useCallback((event: MouseEvent<HTMLButtonElement>, slot: AgendaSlotRef) => {
+    if (event.button !== 0) return
+    const gesture = selectionModeRef.current || event.shiftKey || event.metaKey || event.ctrlKey
+    if (!gesture) return
+
+    event.preventDefault()
+    if (!selectionModeRef.current) setSelectionMode(true)
+    suppressClickRef.current = true
+    setBulkError('')
+
+    if (event.shiftKey) {
+      const origin = anchorRef.current ?? slot
+      const next = new Set(selectedKeysRef.current)
+      for (const item of rectangleSlots(origin, slot, timeSlotsRef.current, slotAxesRef.current)) {
+        next.add(slotKey(item))
+      }
+      if (!anchorRef.current) anchorRef.current = slot
+      setSelectedKeys(next)
+      dragRef.current = null
+      return
+    }
+
+    anchorRef.current = slot
+    dragRef.current = {
+      active: true,
+      moved: false,
+      origin: slot,
+      before: new Set(selectedKeysRef.current),
+      additive: event.metaKey || event.ctrlKey,
+    }
+  }, [])
+
+  const handleSlotMouseEnter = useCallback((slot: AgendaSlotRef) => {
+    const drag = dragRef.current
+    if (!drag?.active) return
+    drag.moved = true
+    const next = new Set(drag.additive ? drag.before : [])
+    for (const item of rectangleSlots(drag.origin, slot, timeSlotsRef.current, slotAxesRef.current)) {
+      next.add(slotKey(item))
+    }
+    setSelectedKeys(next)
+  }, [])
+
+  useEffect(() => {
+    const finishDrag = () => {
+      const drag = dragRef.current
+      if (drag?.active) {
+        drag.active = false
+        if (!drag.moved) {
+          const key = slotKey(drag.origin)
+          const next = new Set(drag.before)
+          if (next.has(key)) next.delete(key)
+          else next.add(key)
+          setSelectedKeys(next)
+        }
+      }
+      if (suppressClickRef.current) {
+        window.setTimeout(() => {
+          suppressClickRef.current = false
+        }, 0)
+      }
+    }
+
+    window.addEventListener('mouseup', finishDrag)
+    return () => window.removeEventListener('mouseup', finishDrag)
+  }, [])
+
+  useEffect(() => {
+    if (!selectionMode) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      exitSelectionMode()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectionMode, exitSelectionMode])
+
+  useEffect(() => {
+    setSelectedKeys(new Set())
+    anchorRef.current = null
+  }, [activeView, currentDate])
+
+  const handleBulkBlock = async () => {
+    if (selectedSlots.length === 0) return
+    setBulkSaving(true)
+    setBulkError('')
+    try {
+      const columnIds = columns.map((column) => column.id)
+      const rewrite = rewriteBlocksForSlotSelection(blocks, selectedSlots, columnIds)
+      const created = selectionToBlockInputs(selectedSlots, bulkReason.trim() || undefined)
+      await applyBlockRewrite({
+        deleteIds: rewrite.deleteIds,
+        create: mergeBlockInputs([...rewrite.create, ...created]),
+      })
+      setSelectedBlock(null)
+      clearSlotSelection()
+    } catch {
+      setBulkError('No se pudo bloquear la selección.')
+    } finally {
+      setBulkSaving(false)
+    }
+  }
+
+  const handleBulkUnblock = async () => {
+    if (blockedSelectionCount === 0) return
+    setBulkSaving(true)
+    setBulkError('')
+    try {
+      const columnIds = columns.map((column) => column.id)
+      const rewrite = rewriteBlocksForSlotSelection(blocks, selectedSlots, columnIds)
+      await applyBlockRewrite(rewrite)
+      setSelectedBlock(null)
+      clearSlotSelection()
+    } catch {
+      setBulkError('No se pudo desbloquear la selección.')
+    } finally {
+      setBulkSaving(false)
+    }
+  }
+
+  const handleBulkCreateAppointment = () => {
+    if (!contiguousRange) return
+    setSlotSelection(contiguousRange)
+    setSelectedAppointment(null)
+    setEditingAppointment(null)
+    setModalOpen(true)
+    clearSlotSelection()
+  }
+
+  const handleViewChange = (view: AgendaViewMode) => {
+    setActiveView(view)
+    if (view === 'month') exitSelectionMode()
+  }
+
   const openBlockDayModal = () => {
     setBlockSelection({
       columnId: columns[0]?.id ?? '',
@@ -388,7 +614,7 @@ export function AgendaScheduler() {
     >
       <div className="card">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <AgendaViewTabs activeView={activeView} onChange={setActiveView} />
+          <AgendaViewTabs activeView={activeView} onChange={handleViewChange} />
 
           <div className="flex flex-wrap items-center gap-2">
             {activeView === 'day' && (
@@ -402,6 +628,23 @@ export function AgendaScheduler() {
             <button type="button" onClick={goToday} className="btn-secondary text-xs">
               Hoy
             </button>
+            {activeView !== 'month' && (
+              <button
+                type="button"
+                aria-pressed={selectionMode}
+                onClick={() => {
+                  if (selectionMode) exitSelectionMode()
+                  else setSelectionMode(true)
+                }}
+                className={`text-xs ${
+                  selectionMode
+                    ? 'rounded-lg bg-dental-600 px-3 py-1.5 font-medium text-white'
+                    : 'btn-secondary'
+                }`}
+              >
+                {selectionMode ? 'Selección activa' : 'Seleccionar casillas'}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setBlockMode((prev) => !prev)}
@@ -456,6 +699,24 @@ export function AgendaScheduler() {
         </div>
       )}
 
+      {selectionMode && activeView !== 'month' && (
+        <AgendaSlotBulkBar
+          count={selectedSlots.length}
+          summary={selectionSummary}
+          blockedCount={blockedSelectionCount}
+          reason={bulkReason}
+          saving={bulkSaving}
+          error={bulkError}
+          canCreateAppointment={contiguousRange != null}
+          onReasonChange={setBulkReason}
+          onBlock={() => void handleBulkBlock()}
+          onUnblock={() => void handleBulkUnblock()}
+          onCreateAppointment={handleBulkCreateAppointment}
+          onClear={clearSlotSelection}
+          onExit={exitSelectionMode}
+        />
+      )}
+
       {isLoading ? (
         <div className="card text-center text-slate-500">Cargando agenda...</div>
       ) : (
@@ -478,6 +739,11 @@ export function AgendaScheduler() {
                 onAppointmentContextMenu={handleAppointmentContextMenu}
                 onSlotContextMenu={handleSlotContextMenu}
                 onBlockClick={setSelectedBlock}
+                selectionMode={selectionMode}
+                selectedKeys={selectedKeys}
+                onSlotMouseDown={handleSlotMouseDown}
+                onSlotMouseEnter={handleSlotMouseEnter}
+                consumeSuppressedSlotClick={consumeSuppressedSlotClick}
               />
             )}
 
@@ -498,6 +764,11 @@ export function AgendaScheduler() {
                   onAppointmentContextMenu={handleAppointmentContextMenu}
                   onSlotContextMenu={handleSlotContextMenu}
                   onBlockClick={setSelectedBlock}
+                  selectionMode={selectionMode}
+                  selectedKeys={selectedKeys}
+                  onSlotMouseDown={handleSlotMouseDown}
+                  onSlotMouseEnter={handleSlotMouseEnter}
+                  consumeSuppressedSlotClick={consumeSuppressedSlotClick}
                 />
               ))}
 

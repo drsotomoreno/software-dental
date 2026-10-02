@@ -1,22 +1,26 @@
 import { useMemo } from 'react'
 import type { MouseEvent } from 'react'
+import type { SlotSelection } from './CreateAppointmentModal'
 import type { Appointment } from '@/types/appointment'
 import type { ScheduleBlock } from '@/types/scheduleBlock'
 import { DentalScheduler } from './DentalScheduler'
 import type { ScheduleColumn } from '@/types/appointment'
-import type { SlotSelection } from './CreateAppointmentModal'
-
 interface AgendaDayViewProps {
   date: string
   columns: ScheduleColumn[]
   appointments: Appointment[]
   blocks: ScheduleBlock[]
   blockMode?: boolean
+  selectionMode?: boolean
+  selectedKeys?: ReadonlySet<string>
   onSlotClick: (selection: SlotSelection) => void
   onAppointmentClick?: (appointment: Appointment) => void
   onAppointmentContextMenu?: (event: MouseEvent, appointment: Appointment) => void
   onSlotContextMenu?: (event: MouseEvent, selection: SlotSelection) => void
   onBlockClick?: (block: ScheduleBlock) => void
+  onSlotMouseDown?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
+  onSlotMouseEnter?: (selection: SlotSelection) => void
+  consumeSuppressedSlotClick?: () => boolean
 }
 
 /** Vista diaria — scheduler por sillas/consultorios. */
@@ -26,11 +30,16 @@ export function AgendaDayView({
   appointments,
   blocks,
   blockMode = false,
+  selectionMode = false,
+  selectedKeys,
   onSlotClick,
   onAppointmentClick,
   onAppointmentContextMenu,
   onSlotContextMenu,
   onBlockClick,
+  onSlotMouseDown,
+  onSlotMouseEnter,
+  consumeSuppressedSlotClick,
 }: AgendaDayViewProps) {
   const dayAppointments = useMemo(
     () => appointments.filter((apt) => apt.startTime.startsWith(date)),
@@ -50,11 +59,16 @@ export function AgendaDayView({
         appointments={dayAppointments}
         blocks={dayBlocks}
         blockMode={blockMode}
+        selectionMode={selectionMode}
+        selectedKeys={selectedKeys}
         onSlotClick={onSlotClick}
         onAppointmentClick={onAppointmentClick}
         onAppointmentContextMenu={onAppointmentContextMenu}
         onSlotContextMenu={onSlotContextMenu}
         onBlockClick={onBlockClick}
+        onSlotMouseDown={onSlotMouseDown}
+        onSlotMouseEnter={onSlotMouseEnter}
+        consumeSuppressedSlotClick={consumeSuppressedSlotClick}
       />
     </div>
   )
