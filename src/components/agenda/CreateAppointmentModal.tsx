@@ -19,6 +19,8 @@ export interface SlotSelection {
   columnId: string
   date: string
   startTime: string
+  /** Fin del rango cuando la casilla cubre más de un intervalo. */
+  endTime?: string
 }
 
 interface CreateAppointmentModalProps {
@@ -75,7 +77,7 @@ export function CreateAppointmentModal({
     setAppointmentDate(selection?.date ?? new Date().toISOString().slice(0, 10))
     setStartTime(selection?.startTime ?? '09:00')
     const endMin = timeToMinutes(selection?.startTime ?? '09:00') + 30
-    setEndTime(minutesToTime(endMin))
+    setEndTime(selection?.endTime ?? minutesToTime(endMin))
     setColumnId(selection?.columnId ?? columns[0]?.id ?? '')
     setNotes('')
     setError('')

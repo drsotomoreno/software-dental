@@ -17,7 +17,9 @@ import {
 } from '@/utils/scheduleBlocks'
 import { SchedulerAppointmentCard } from './SchedulerAppointmentCard'
 import { BlockedSlotOverlay } from './BlockedSlotOverlay'
+import { AgendaSlotCell, AgendaSlotSelectionHighlight } from './AgendaSlotCell'
 import type { SlotSelection } from './CreateAppointmentModal'
+import { slotKey } from '@/utils/agendaSlotSelection'
 
 interface DentalSchedulerProps {
   date: string
@@ -25,11 +27,16 @@ interface DentalSchedulerProps {
   appointments: Appointment[]
   blocks: ScheduleBlock[]
   blockMode?: boolean
+  selectionMode?: boolean
+  selectedKeys?: ReadonlySet<string>
   onSlotClick: (selection: SlotSelection) => void
   onAppointmentClick?: (appointment: Appointment) => void
   onAppointmentContextMenu?: (event: MouseEvent, appointment: Appointment) => void
   onSlotContextMenu?: (event: MouseEvent, selection: SlotSelection) => void
   onBlockClick?: (block: ScheduleBlock) => void
+  onSlotMouseDown?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
+  onSlotMouseEnter?: (selection: SlotSelection) => void
+  consumeSuppressedSlotClick?: () => boolean
 }
 const SLOT_HEIGHT_PX = 48
 const totalSlots =
@@ -42,11 +49,16 @@ export function DentalScheduler({
   appointments,
   blocks,
   blockMode = false,
+  selectionMode = false,
+  selectedKeys,
   onSlotClick,
   onAppointmentClick,
   onAppointmentContextMenu,
   onSlotContextMenu,
   onBlockClick,
+  onSlotMouseDown,
+  onSlotMouseEnter,
+  consumeSuppressedSlotClick,
 }: DentalSchedulerProps) {
   const timeSlots = useMemo(() => generateTimeSlots(), [])
 
@@ -92,14 +104,19 @@ export function DentalScheduler({
           <span className="h-2 w-2 rounded-full bg-white" />
           Bloqueado
         </span>
-        {blockMode && (
+        {blockMode && !selectionMode && (
           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
             Modo bloqueo activo — clic en un horario para bloquear
           </span>
         )}
+        {selectionMode && (
+          <span className="rounded-full bg-dental-100 px-2 py-0.5 text-[10px] font-medium text-dental-800">
+            Selección múltiple — marque casillas y aplique el cambio en bloque
+          </span>
+        )}
       </div>
 
-      <div className="overflow-x-auto">
+      <div className={`overflow-x-auto ${selectionMode ? 'select-none' : ''}`}>
         <div
           className="grid min-w-max"
           style={{
@@ -139,44 +156,50 @@ export function DentalScheduler({
               {/* Celdas clicables */}
               {timeSlots.map((slot) => {
                 const blocked = isSlotBlocked(date, slot, col.id, blocks)
+                const selection = { columnId: col.id, date, startTime: slot }
+                const selected = selectedKeys?.has(slotKey(selection)) ?? false
                 return (
-                  <button
+                  <AgendaSlotCell
                     key={slot}
-                    type="button"
-                    onClick={() => onSlotClick({ columnId: col.id, date, startTime: slot })}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      if (!blocked) {
-                        onSlotContextMenu?.(e, { columnId: col.id, date, startTime: slot })
-                      }
-                    }}
-                    className={`absolute w-full border-b border-slate-100 transition ${
-                      blocked
-                        ? 'cursor-not-allowed bg-black/5'
-                        : blockMode
-                          ? 'hover:bg-black/10'
-                          : 'hover:bg-dental-50/60'
-                    }`}
-                    style={{
-                      top: `${(timeSlots.indexOf(slot) / totalSlots) * 100}%`,
-                      height: `${(1 / totalSlots) * 100}%`,
-                    }}
-                    aria-label={
-                      blocked
-                        ? `Horario bloqueado ${slot}`
-                        : blockMode
-                          ? `Bloquear ${col.name} a las ${slot}`
-                          : `Crear cita en ${col.name} a las ${slot}`
+                    blocked={blocked}
+                    blockMode={blockMode}
+                    selected={selected}
+                    selectionMode={selectionMode}
+                    top={`${(timeSlots.indexOf(slot) / totalSlots) * 100}%`}
+                    height={`${(1 / totalSlots) * 100}%`}
+                    slotMarker={slotKey(selection)}
+                    ariaLabel={
+                      selectionMode
+                        ? `Seleccionar ${col.name} a las ${slot}`
+                        : blocked
+                          ? `Horario bloqueado ${slot}`
+                          : blockMode
+                            ? `Bloquear ${col.name} a las ${slot}`
+                            : `Crear cita en ${col.name} a las ${slot}`
                     }
+                    onClick={() => {
+                      if (consumeSuppressedSlotClick?.()) return
+                      if (selectionMode) return
+                      onSlotClick(selection)
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      if (selectionMode || blocked) return
+                      onSlotContextMenu?.(event, selection)
+                    }}
+                    onMouseDown={(event) => onSlotMouseDown?.(event, selection)}
+                    onMouseEnter={() => onSlotMouseEnter?.(selection)}
                   />
                 )
               })}
 
-              <BlockedSlotOverlay
-                segments={getBlockSegmentsForColumn(date, col.id, blocks)}
-                onBlockClick={onBlockClick}
-              />
+              <div className={selectionMode ? 'pointer-events-none' : undefined}>
+                <BlockedSlotOverlay
+                  segments={getBlockSegmentsForColumn(date, col.id, blocks)}
+                  onBlockClick={onBlockClick}
+                />
+              </div>
 
               {/* Citas posicionadas */}
               {(appointmentsByColumn.get(col.id) ?? []).map((apt) => {
@@ -187,7 +210,9 @@ export function DentalScheduler({
                     className="pointer-events-none absolute w-full"
                     style={{ top: pos.top, height: pos.height }}
                   >
-                    <div className="pointer-events-auto relative h-full">
+                    <div
+                      className={`relative h-full ${selectionMode ? 'pointer-events-none' : 'pointer-events-auto'}`}
+                    >
                       <SchedulerAppointmentCard
                         appointment={apt}
                         onClick={onAppointmentClick}
@@ -197,6 +222,14 @@ export function DentalScheduler({
                   </div>
                 )
               })}
+
+              <AgendaSlotSelectionHighlight
+                timeSlots={timeSlots}
+                totalSlots={totalSlots}
+                selectedTimes={timeSlots.filter((slot) =>
+                  selectedKeys?.has(slotKey({ columnId: col.id, date, startTime: slot })),
+                )}
+              />
             </div>
           ))}
         </div>
