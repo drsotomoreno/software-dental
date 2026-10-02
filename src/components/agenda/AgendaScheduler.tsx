@@ -1,4 +1,12 @@
-import { useMemo, useState, useEffect, useCallback, useRef, type MouseEvent } from 'react'
+import {
+  useMemo,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type MouseEvent,
+  type PointerEvent,
+} from 'react'
 import {
   addDays,
   addMonths,
@@ -163,11 +171,12 @@ export function AgendaScheduler() {
   slotAxesRef.current = slotAxes
   const suppressClickRef = useRef(false)
   const dragRef = useRef<{
-    active: boolean
-    moved: boolean
+    pointerId: number
     origin: AgendaSlotRef
-    before: Set<string>
-    additive: boolean
+    startX: number
+    startY: number
+    moved: boolean
+    base: Set<string>
   } | null>(null)
 
   const openRescheduleModal = useCallback((appointment: Appointment) => {
@@ -340,7 +349,7 @@ export function AgendaScheduler() {
     renderCitas()
   }
 
-  const handleSlotClick = (selection: SlotSelection) => {
+  const handleSlotClick = useCallback((selection: SlotSelection) => {
     const existingBlock = findBlockAtSlot(
       selection.date,
       selection.startTime,
@@ -365,7 +374,7 @@ export function AgendaScheduler() {
     setSelectedAppointment(null)
     setEditingAppointment(null)
     setModalOpen(true)
-  }
+  }, [blocks, blockMode])
 
   const selectedSlots = useMemo(() => {
     const slots: AgendaSlotRef[] = []
@@ -409,78 +418,106 @@ export function AgendaScheduler() {
     clearSlotSelection()
   }, [clearSlotSelection])
 
-  const consumeSuppressedSlotClick = useCallback(() => {
-    if (!suppressClickRef.current) return false
-    suppressClickRef.current = false
-    return true
-  }, [])
-
-  const handleSlotMouseDown = useCallback((event: MouseEvent<HTMLButtonElement>, slot: AgendaSlotRef) => {
-    if (event.button !== 0) return
-    const gesture = selectionModeRef.current || event.shiftKey || event.metaKey || event.ctrlKey
-    if (!gesture) return
-
-    event.preventDefault()
-    if (!selectionModeRef.current) setSelectionMode(true)
-    suppressClickRef.current = true
-    setBulkError('')
-
-    if (event.shiftKey) {
-      const origin = anchorRef.current ?? slot
-      const next = new Set(selectedKeysRef.current)
-      for (const item of rectangleSlots(origin, slot, timeSlotsRef.current, slotAxesRef.current)) {
-        next.add(slotKey(item))
-      }
-      if (!anchorRef.current) anchorRef.current = slot
-      setSelectedKeys(next)
-      dragRef.current = null
-      return
-    }
-
-    anchorRef.current = slot
-    dragRef.current = {
-      active: true,
-      moved: false,
-      origin: slot,
-      before: new Set(selectedKeysRef.current),
-      additive: event.metaKey || event.ctrlKey,
-    }
-  }, [])
-
-  const handleSlotMouseEnter = useCallback((slot: AgendaSlotRef) => {
-    const drag = dragRef.current
-    if (!drag?.active) return
-    drag.moved = true
-    const next = new Set(drag.additive ? drag.before : [])
-    for (const item of rectangleSlots(drag.origin, slot, timeSlotsRef.current, slotAxesRef.current)) {
+  const addRectangle = useCallback((origin: AgendaSlotRef, target: AgendaSlotRef, base: Set<string>) => {
+    const next = new Set(base)
+    for (const item of rectangleSlots(origin, target, timeSlotsRef.current, slotAxesRef.current)) {
       next.add(slotKey(item))
     }
     setSelectedKeys(next)
+    anchorRef.current = origin
   }, [])
 
-  useEffect(() => {
-    const finishDrag = () => {
-      const drag = dragRef.current
-      if (drag?.active) {
-        drag.active = false
-        if (!drag.moved) {
-          const key = slotKey(drag.origin)
-          const next = new Set(drag.before)
-          if (next.has(key)) next.delete(key)
-          else next.add(key)
-          setSelectedKeys(next)
-        }
-      }
-      if (suppressClickRef.current) {
-        window.setTimeout(() => {
-          suppressClickRef.current = false
-        }, 0)
-      }
+  const toggleSlot = useCallback((slot: AgendaSlotRef, base: Set<string>) => {
+    const key = slotKey(slot)
+    const next = new Set(base)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    anchorRef.current = slot
+    setSelectedKeys(next)
+  }, [])
+
+  const slotFromPoint = (x: number, y: number): AgendaSlotRef | null => {
+    const stack = document.elementsFromPoint(x, y)
+    for (const element of stack) {
+      const marker = (element as HTMLElement).closest?.('[data-agenda-slot]')?.getAttribute('data-agenda-slot')
+      if (!marker) continue
+      const parsed = parseSlotKey(marker)
+      if (parsed) return parsed
     }
+    return null
+  }
 
-    window.addEventListener('mouseup', finishDrag)
-    return () => window.removeEventListener('mouseup', finishDrag)
+  const handleSlotPress = useCallback(
+    (event: MouseEvent<HTMLButtonElement>, slot: AgendaSlotRef) => {
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false
+        return
+      }
+      const multi = selectionModeRef.current || event.shiftKey || event.metaKey || event.ctrlKey
+      if (!multi) {
+        handleSlotClick(slot)
+        return
+      }
+      if (!selectionModeRef.current) setSelectionMode(true)
+      if (event.shiftKey) {
+        const origin = anchorRef.current ?? slot
+        addRectangle(origin, slot, selectedKeysRef.current)
+        return
+      }
+      toggleSlot(slot, selectedKeysRef.current)
+    },
+    [addRectangle, handleSlotClick, toggleSlot],
+  )
+
+  const handleSlotPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>, slot: AgendaSlotRef) => {
+    if (event.button !== 0) return
+    const multi = selectionModeRef.current || event.shiftKey || event.metaKey || event.ctrlKey
+    if (!multi) return
+    dragRef.current = {
+      pointerId: event.pointerId,
+      origin: slot,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+      base: new Set(selectedKeysRef.current),
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
   }, [])
+
+  const handleSlotPointerMove = useCallback(
+    (event: PointerEvent<HTMLButtonElement>) => {
+      const drag = dragRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+      const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY)
+      if (distance < 8) return
+      const target = slotFromPoint(event.clientX, event.clientY)
+      if (!target) return
+      drag.moved = true
+      if (!selectionModeRef.current) setSelectionMode(true)
+      event.preventDefault()
+      addRectangle(drag.origin, target, drag.base)
+    },
+    [addRectangle],
+  )
+
+  const handleSlotPointerUp = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    dragRef.current = null
+    if (drag.moved) {
+      suppressClickRef.current = true
+      anchorRef.current = drag.origin
+      return
+    }
+    suppressClickRef.current = true
+    if (!selectionModeRef.current) setSelectionMode(true)
+    if (event.shiftKey) {
+      const origin = anchorRef.current ?? drag.origin
+      addRectangle(origin, drag.origin, drag.base)
+      return
+    }
+    toggleSlot(drag.origin, drag.base)
+  }, [addRectangle, toggleSlot])
 
   useEffect(() => {
     if (!selectionMode) return
@@ -734,16 +771,16 @@ export function AgendaScheduler() {
                 appointments={appointments}
                 blocks={blocks}
                 blockMode={blockMode}
-                onSlotClick={handleSlotClick}
                 onAppointmentClick={setSelectedAppointment}
                 onAppointmentContextMenu={handleAppointmentContextMenu}
                 onSlotContextMenu={handleSlotContextMenu}
                 onBlockClick={setSelectedBlock}
                 selectionMode={selectionMode}
                 selectedKeys={selectedKeys}
-                onSlotMouseDown={handleSlotMouseDown}
-                onSlotMouseEnter={handleSlotMouseEnter}
-                consumeSuppressedSlotClick={consumeSuppressedSlotClick}
+                onSlotPress={handleSlotPress}
+                onSlotPointerDown={handleSlotPointerDown}
+                onSlotPointerMove={handleSlotPointerMove}
+                onSlotPointerUp={handleSlotPointerUp}
               />
             )}
 
@@ -759,16 +796,16 @@ export function AgendaScheduler() {
                   appointments={appointments}
                   blocks={blocks}
                   blockMode={blockMode}
-                  onSlotClick={handleSlotClick}
                   onAppointmentClick={setSelectedAppointment}
                   onAppointmentContextMenu={handleAppointmentContextMenu}
                   onSlotContextMenu={handleSlotContextMenu}
                   onBlockClick={setSelectedBlock}
                   selectionMode={selectionMode}
                   selectedKeys={selectedKeys}
-                  onSlotMouseDown={handleSlotMouseDown}
-                  onSlotMouseEnter={handleSlotMouseEnter}
-                  consumeSuppressedSlotClick={consumeSuppressedSlotClick}
+                  onSlotPress={handleSlotPress}
+                  onSlotPointerDown={handleSlotPointerDown}
+                  onSlotPointerMove={handleSlotPointerMove}
+                  onSlotPointerUp={handleSlotPointerUp}
                 />
               ))}
 

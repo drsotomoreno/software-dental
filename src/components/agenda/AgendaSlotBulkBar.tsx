@@ -31,7 +31,7 @@ export function AgendaSlotBulkBar({
   onExit,
 }: AgendaSlotBulkBarProps) {
   return (
-    <div className="card sticky top-2 z-40 border-dental-200 bg-dental-50/95 shadow-md backdrop-blur-sm">
+    <div className="card fixed bottom-3 left-1/2 z-50 w-[min(920px,calc(100%-1.5rem))] -translate-x-1/2 border-dental-200 bg-dental-50/95 shadow-lg backdrop-blur-sm">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
           <p className="text-sm font-semibold text-dental-900">
@@ -40,8 +40,8 @@ export function AgendaSlotBulkBar({
               : `${count} casilla${count === 1 ? '' : 's'} seleccionada${count === 1 ? '' : 's'}`}
           </p>
           <p className="text-xs text-dental-800">
-            Clic marca o quita una casilla. Mayús extiende desde la última. Arrastre cubre un
-            rectángulo. Ctrl suma otro rectángulo.
+            Cada clic marca o quita una casilla, aunque tenga cita. Mayús o el arrastre suman un
+            rectángulo sin borrar lo anterior.
           </p>
           {summary.length > 0 && (
             <ul className="flex flex-wrap gap-1.5 pt-1">

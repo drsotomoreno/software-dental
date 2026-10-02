@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { MouseEvent } from 'react'
+import type { MouseEvent, PointerEvent } from 'react'
 import type { SlotSelection } from './CreateAppointmentModal'
 import type { Appointment } from '@/types/appointment'
 import type { ScheduleBlock } from '@/types/scheduleBlock'
@@ -13,14 +13,14 @@ interface AgendaDayViewProps {
   blockMode?: boolean
   selectionMode?: boolean
   selectedKeys?: ReadonlySet<string>
-  onSlotClick: (selection: SlotSelection) => void
   onAppointmentClick?: (appointment: Appointment) => void
   onAppointmentContextMenu?: (event: MouseEvent, appointment: Appointment) => void
   onSlotContextMenu?: (event: MouseEvent, selection: SlotSelection) => void
   onBlockClick?: (block: ScheduleBlock) => void
-  onSlotMouseDown?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
-  onSlotMouseEnter?: (selection: SlotSelection) => void
-  consumeSuppressedSlotClick?: () => boolean
+  onSlotPress?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
+  onSlotPointerDown?: (event: PointerEvent<HTMLButtonElement>, selection: SlotSelection) => void
+  onSlotPointerMove?: (event: PointerEvent<HTMLButtonElement>) => void
+  onSlotPointerUp?: (event: PointerEvent<HTMLButtonElement>) => void
 }
 
 /** Vista diaria — scheduler por sillas/consultorios. */
@@ -32,14 +32,14 @@ export function AgendaDayView({
   blockMode = false,
   selectionMode = false,
   selectedKeys,
-  onSlotClick,
   onAppointmentClick,
   onAppointmentContextMenu,
   onSlotContextMenu,
   onBlockClick,
-  onSlotMouseDown,
-  onSlotMouseEnter,
-  consumeSuppressedSlotClick,
+  onSlotPress,
+  onSlotPointerDown,
+  onSlotPointerMove,
+  onSlotPointerUp,
 }: AgendaDayViewProps) {
   const dayAppointments = useMemo(
     () => appointments.filter((apt) => apt.startTime.startsWith(date)),
@@ -61,14 +61,14 @@ export function AgendaDayView({
         blockMode={blockMode}
         selectionMode={selectionMode}
         selectedKeys={selectedKeys}
-        onSlotClick={onSlotClick}
         onAppointmentClick={onAppointmentClick}
         onAppointmentContextMenu={onAppointmentContextMenu}
         onSlotContextMenu={onSlotContextMenu}
         onBlockClick={onBlockClick}
-        onSlotMouseDown={onSlotMouseDown}
-        onSlotMouseEnter={onSlotMouseEnter}
-        consumeSuppressedSlotClick={consumeSuppressedSlotClick}
+        onSlotPress={onSlotPress}
+        onSlotPointerDown={onSlotPointerDown}
+        onSlotPointerMove={onSlotPointerMove}
+        onSlotPointerUp={onSlotPointerUp}
       />
     </div>
   )

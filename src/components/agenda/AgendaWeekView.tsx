@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { MouseEvent } from 'react'
+import type { MouseEvent, PointerEvent } from 'react'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import type { Appointment, ScheduleColumn } from '@/types/appointment'
@@ -32,14 +32,14 @@ interface AgendaWeekViewProps {
   blockMode?: boolean
   selectionMode?: boolean
   selectedKeys?: ReadonlySet<string>
-  onSlotClick: (selection: SlotSelection) => void
   onAppointmentClick?: (appointment: Appointment) => void
   onAppointmentContextMenu?: (event: MouseEvent, appointment: Appointment) => void
   onSlotContextMenu?: (event: MouseEvent, selection: SlotSelection) => void
   onBlockClick?: (block: ScheduleBlock) => void
-  onSlotMouseDown?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
-  onSlotMouseEnter?: (selection: SlotSelection) => void
-  consumeSuppressedSlotClick?: () => boolean
+  onSlotPress?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
+  onSlotPointerDown?: (event: PointerEvent<HTMLButtonElement>, selection: SlotSelection) => void
+  onSlotPointerMove?: (event: PointerEvent<HTMLButtonElement>) => void
+  onSlotPointerUp?: (event: PointerEvent<HTMLButtonElement>) => void
 }
 
 const SLOT_HEIGHT_PX = 40
@@ -58,14 +58,14 @@ export function AgendaWeekView({
   blockMode = false,
   selectionMode = false,
   selectedKeys,
-  onSlotClick,
   onAppointmentClick,
   onAppointmentContextMenu,
   onSlotContextMenu,
   onBlockClick,
-  onSlotMouseDown,
-  onSlotMouseEnter,
-  consumeSuppressedSlotClick,
+  onSlotPress,
+  onSlotPointerDown,
+  onSlotPointerMove,
+  onSlotPointerUp,
 }: AgendaWeekViewProps) {
   const timeSlots = useMemo(() => generateTimeSlots(), [])
 
@@ -215,19 +215,16 @@ export function AgendaWeekView({
                               ? `Horario bloqueado ${day} ${column.name} ${slot}`
                               : `Crear cita el ${day} en ${column.name} a las ${slot}`
                         }
-                        onClick={() => {
-                          if (consumeSuppressedSlotClick?.()) return
-                          if (selectionMode) return
-                          onSlotClick(selection)
-                        }}
+                        onClick={(event) => onSlotPress?.(event, selection)}
                         onContextMenu={(event) => {
                           event.preventDefault()
                           event.stopPropagation()
                           if (selectionMode || blocked) return
                           onSlotContextMenu?.(event, selection)
                         }}
-                        onMouseDown={(event) => onSlotMouseDown?.(event, selection)}
-                        onMouseEnter={() => onSlotMouseEnter?.(selection)}
+                        onPointerDown={(event) => onSlotPointerDown?.(event, selection)}
+                        onPointerMove={(event) => onSlotPointerMove?.(event)}
+                        onPointerUp={(event) => onSlotPointerUp?.(event)}
                       />
                     )
                   })}

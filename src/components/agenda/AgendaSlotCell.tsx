@@ -1,4 +1,4 @@
-import type { MouseEvent } from 'react'
+import type { MouseEvent, PointerEvent } from 'react'
 
 interface AgendaSlotCellProps {
   blocked: boolean
@@ -10,10 +10,11 @@ interface AgendaSlotCellProps {
   height: string
   ariaLabel: string
   slotMarker: string
-  onClick: () => void
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void
-  onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void
-  onMouseEnter: () => void
+  onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void
+  onPointerMove: (event: PointerEvent<HTMLButtonElement>) => void
+  onPointerUp: (event: PointerEvent<HTMLButtonElement>) => void
 }
 
 /** Casilla horaria de la grilla. En modo selección el clic marca; si no, abre la acción habitual. */
@@ -29,8 +30,9 @@ export function AgendaSlotCell({
   slotMarker,
   onClick,
   onContextMenu,
-  onMouseDown,
-  onMouseEnter,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
 }: AgendaSlotCellProps) {
   return (
     <button
@@ -41,11 +43,14 @@ export function AgendaSlotCell({
       aria-label={ariaLabel}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      onMouseDown={onMouseDown}
-      onMouseEnter={onMouseEnter}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
       className={`absolute w-full scroll-mt-48 border-b border-slate-100 transition ${
+        selectionMode ? 'z-40 touch-none' : ''
+      } ${
         selectionMode
-          ? `cursor-cell hover:bg-dental-100/80 ${lunch && !blocked ? 'agenda-lunch-slot' : ''}`
+          ? `cursor-cell hover:bg-dental-100/80 ${lunch && !blocked && !selected ? 'agenda-lunch-slot' : ''}`
           : blocked
             ? 'cursor-not-allowed bg-black/5'
             : lunch
