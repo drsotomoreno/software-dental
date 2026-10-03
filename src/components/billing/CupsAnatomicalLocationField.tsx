@@ -1,4 +1,5 @@
 import { FDI_QUADRANT_LABELS, FDI_QUADRANT_ORDER, type ImplantFdiQuadrant } from '@/constants/implantPlanning'
+import { FdiToothSelect } from '@/components/clinical/FdiToothSelect'
 import {
   getCupsLocationRule,
   requiresFdiQuadrant,
@@ -10,6 +11,7 @@ interface CupsAnatomicalLocationFieldProps {
   toothNumber?: number
   fdiQuadrant?: ImplantFdiQuadrant
   arch?: 'superior' | 'inferior'
+  highlightedTeeth?: number[]
   disabled?: boolean
   onToothNumberChange: (toothNumber: number | undefined) => void
   onFdiQuadrantChange: (quadrant: ImplantFdiQuadrant | undefined) => void
@@ -21,6 +23,7 @@ export function CupsAnatomicalLocationField({
   toothNumber,
   fdiQuadrant,
   arch,
+  highlightedTeeth = [],
   disabled = false,
   onToothNumberChange,
   onFdiQuadrantChange,
@@ -97,17 +100,13 @@ export function CupsAnatomicalLocationField({
       <label className="mb-0.5 block text-[10px] text-slate-500">
         Pieza FDI {toothRequired ? '*' : ''}
       </label>
-      <input
-        type="number"
-        min={11}
-        max={85}
+      <FdiToothSelect
+        value={toothNumber}
         disabled={disabled}
-        value={toothNumber ?? ''}
-        onChange={(event) =>
-          onToothNumberChange(event.target.value ? Number(event.target.value) : undefined)
-        }
-        placeholder={toothRequired ? 'Obligatorio' : 'Opcional'}
-        className={`input-field ${toothRequired && !toothNumber ? 'border-amber-400' : ''}`}
+        highlightedTeeth={highlightedTeeth}
+        emptyLabel={toothRequired ? 'Seleccionar pieza…' : 'Opcional'}
+        invalid={toothRequired && !toothNumber}
+        onChange={onToothNumberChange}
       />
       <p className="mt-1 text-[10px] leading-snug text-slate-500">{rule.hint}</p>
     </div>
