@@ -106,7 +106,12 @@ import { useClinicalVoiceRegistry } from '@/hooks/useClinicalVoiceRegistry'
 import { useClinicalAutoSave } from '@/hooks/useClinicalAutoSave'
 import { VoiceClinicalAssistant, type ClinicalVoiceContext } from '@/components/voice'
 import { confirmUserPassword } from '@/services/authService'
-import { createDigitalSignature, validateSignatureCapture } from '@/services/signatureService'
+import { createDigitalSignature } from '@/services/signatureService'
+import {
+  clinicalRecordRequiresInformedConsent,
+  getInformedConsentSignBlocker,
+  informedConsentCaptureStarted,
+} from '@/utils/informedConsentRequirement'
 import { getProfessionalSignBlocker } from '@/utils/professionalSignGate'
 import type { ClinicalHistoryExportFormat } from '@/types/portability'
 import { EXPORT_FORMAT_LABELS } from '@/types/portability'
@@ -975,63 +980,9 @@ export function PatientDetailPage() {
       return false
     }
 
-    if (!clinicalData.informedConsent.selectedConsentIds?.length) {
-
-      setMessage('Debe seleccionar al menos un consentimiento informado según el procedimiento.')
-
-      return false
-
-    }
-
-    if (!clinicalData.informedConsent.textAccepted) {
-
-      setMessage('El paciente debe aceptar el consentimiento informado.')
-
-      return false
-
-    }
-
-    if (!clinicalData.informedConsent.patientSignatureDataUrl) {
-
-      setMessage('La firma del paciente es obligatoria.')
-
-      return false
-
-    }
-
-    if (!clinicalData.informedConsent.professionalSignatureDataUrl) {
-
-      setMessage('La firma del profesional es obligatoria.')
-
-      return false
-
-    }
-
-    const patientSigError = validateSignatureCapture(
-      clinicalData.informedConsent.patientSignatureDataUrl &&
-        clinicalData.informedConsent.patientSignatureMeta
-        ? {
-            dataUrl: clinicalData.informedConsent.patientSignatureDataUrl,
-            metadata: clinicalData.informedConsent.patientSignatureMeta,
-          }
-        : null,
-    )
-    if (patientSigError) {
-      setMessage(patientSigError)
-      return false
-    }
-
-    const professionalSigError = validateSignatureCapture(
-      clinicalData.informedConsent.professionalSignatureDataUrl &&
-        clinicalData.informedConsent.professionalSignatureMeta
-        ? {
-            dataUrl: clinicalData.informedConsent.professionalSignatureDataUrl,
-            metadata: clinicalData.informedConsent.professionalSignatureMeta,
-          }
-        : null,
-    )
-    if (professionalSigError) {
-      setMessage(professionalSigError)
+    const consentBlocker = getInformedConsentSignBlocker(clinicalData)
+    if (consentBlocker) {
+      setMessage(consentBlocker)
       return false
     }
 
@@ -1228,11 +1179,11 @@ export function PatientDetailPage() {
         evolutionNotes: sortedEvolutionNotes,
 
         informedConsent: {
-
           ...normalizedClinicalData.informedConsent,
-
-          signedAt: now,
-
+          ...(clinicalRecordRequiresInformedConsent(normalizedClinicalData) ||
+          informedConsentCaptureStarted(normalizedClinicalData.informedConsent)
+            ? { signedAt: now }
+            : {}),
         },
 
         contentHash,
@@ -1249,26 +1200,34 @@ export function PatientDetailPage() {
 
 
 
-      await createDigitalSignature({
-        recordId: String(recordId),
-        recordType: 'clinical_record',
-        capture: {
-          dataUrl: clinicalData.informedConsent.professionalSignatureDataUrl!,
-          metadata: clinicalData.informedConsent.professionalSignatureMeta!,
-        },
-        contentHash,
-        user,
-        signedByName: professionalName,
-        signedByDocument: user.documentNumber,
-      })
+      if (
+        clinicalData.informedConsent.professionalSignatureDataUrl &&
+        clinicalData.informedConsent.professionalSignatureMeta
+      ) {
+        await createDigitalSignature({
+          recordId: String(recordId),
+          recordType: 'clinical_record',
+          capture: {
+            dataUrl: clinicalData.informedConsent.professionalSignatureDataUrl,
+            metadata: clinicalData.informedConsent.professionalSignatureMeta,
+          },
+          contentHash,
+          user,
+          signedByName: professionalName,
+          signedByDocument: user.documentNumber,
+        })
+      }
 
-      if (clinicalData.informedConsent.patientSignatureDataUrl) {
+      if (
+        clinicalData.informedConsent.patientSignatureDataUrl &&
+        clinicalData.informedConsent.patientSignatureMeta
+      ) {
         await createDigitalSignature({
           recordId: String(recordId),
           recordType: 'consent',
           capture: {
             dataUrl: clinicalData.informedConsent.patientSignatureDataUrl,
-            metadata: clinicalData.informedConsent.patientSignatureMeta!,
+            metadata: clinicalData.informedConsent.patientSignatureMeta,
           },
           contentHash,
           user,

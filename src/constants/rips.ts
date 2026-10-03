@@ -183,6 +183,15 @@ export function isOdontologyConsultationCups(code: string | null | undefined): b
   return digits.length === 6 && RIPS_CONSULTATION_CUPS_SET.has(digits)
 }
 
+/**
+ * Capítulo 89.0.2 — consultas de primera vez (odontología general, otras
+ * especialidades y especialistas). No incluye control (89.0.3) ni urgencias (89.0.7).
+ */
+export function isFirstVisitConsultationCups(code: string | null | undefined): boolean {
+  const digits = String(code ?? '').replace(/\D/g, '')
+  return digits.length === 6 && digits.startsWith('8902')
+}
+
 export const DIAGNOSIS_CERTAINTY_TO_RIPS: Record<DiagnosisCertainty, string> = {
   impresion: '01',
   confirmado: '02',
