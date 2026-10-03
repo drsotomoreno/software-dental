@@ -9,10 +9,10 @@ import {
 } from '@/constants/procedures'
 import type { Appointment, CreateAppointmentInput, ScheduleColumn } from '@/types/appointment'
 import {
-  formatPatientFullName,
-  getPatientRouteId,
-  usePatientsList,
-} from '@/hooks/usePatientsList'
+  agendaPatientRouteId,
+  formatAgendaPatientFullName,
+  useAgendaPatients,
+} from '../core/patientDirectory'
 import { PatientSearchInput } from './PatientSearchInput'
 
 export interface SlotSelection {
@@ -40,7 +40,7 @@ export function CreateAppointmentModal({
   onClose,
   onSubmit,
 }: CreateAppointmentModalProps) {
-  const { patients, isLoading: patientsLoading } = usePatientsList()
+  const { patients, isLoading: patientsLoading } = useAgendaPatients()
   const [patientQuery, setPatientQuery] = useState('')
   const [patientPhone, setPatientPhone] = useState('')
   const [patientId, setPatientId] = useState<string | undefined>()
@@ -84,8 +84,8 @@ export function CreateAppointmentModal({
   }, [isOpen, selection, editingAppointment, columns])
 
   const handleSelectPatient = (patient: (typeof patients)[number]) => {
-    setPatientId(getPatientRouteId(patient))
-    setPatientQuery(formatPatientFullName(patient))
+    setPatientId(agendaPatientRouteId(patient))
+    setPatientQuery(formatAgendaPatientFullName(patient))
     setPatientPhone(patient.phone)
   }
 
@@ -96,8 +96,8 @@ export function CreateAppointmentModal({
   const handleQueryChange = (query: string) => {
     setPatientQuery(query)
     if (!patientId) return
-    const selected = patients.find((patient) => getPatientRouteId(patient) === patientId)
-    if (!selected || formatPatientFullName(selected) !== query.trim()) {
+    const selected = patients.find((patient) => agendaPatientRouteId(patient) === patientId)
+    if (!selected || formatAgendaPatientFullName(selected) !== query.trim()) {
       setPatientId(undefined)
     }
   }

@@ -1,20 +1,21 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { differenceInYears, format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Appointment, ScheduleColumn } from '@/types/appointment'
-import type { Patient } from '@/types/patient'
 import { APPOINTMENT_STATUS_LABELS } from '@/constants/dental'
 import {
   getAppointmentDisplayClasses,
   getProcedureColorClasses,
   PROCEDURE_TYPE_CONFIG,
 } from '@/constants/procedures'
-import { resolveAppointmentPatient } from '@/utils/resolveAppointmentPatient'
-import { ClinicalPrecautionAlertBanner } from '@/components/clinical/ClinicalPrecautionAlertBanner'
-import { usePatientPrecautionAlert } from '@/hooks/usePatientPrecautionAlert'
+import { AgendaPatientAlert } from '../core/AgendaPatientAlert'
+import { useAgendaPrecautionActive } from '../core/clinicalBridge'
+import {
+  useAgendaAppointmentPatient,
+  type AgendaPatientSummary,
+} from '../core/patientDirectory'
 import { WhatsAppReminderButton } from './WhatsAppReminderButton'
 
 interface AppointmentDetailPanelProps {
@@ -30,7 +31,7 @@ interface AppointmentDetailPanelProps {
   }>
 }
 
-const GENDER_LABELS: Record<Patient['gender'], string> = {
+const GENDER_LABELS: Record<AgendaPatientSummary['gender'], string> = {
   M: 'Masculino',
   F: 'Femenino',
   O: 'Otro',
@@ -80,10 +81,7 @@ export function AppointmentDetailPanel({
   const canEditPhone = can('agenda.write')
   const canMarkNoShow = can('agenda.write') && appointment.status !== 'no_asistio'
 
-  const patient = useLiveQuery(
-    () => resolveAppointmentPatient(appointment),
-    [appointment.id, appointment.patientId, appointment.patientPhone],
-  )
+  const patient = useAgendaAppointmentPatient(appointment)
 
   const columnName =
     columns.find((column) => column.id === appointment.columnId)?.name ?? '—'
@@ -94,8 +92,8 @@ export function AppointmentDetailPanel({
       : getProcedureColorClasses(appointment.procedureType)
   const start = parseISO(appointment.startTime)
   const end = parseISO(appointment.endTime)
-  const patientRouteId = patient?.id != null ? String(patient.id) : appointment.patientId
-  const precautionAlert = usePatientPrecautionAlert(patientRouteId)
+  const patientRouteId = patient?.routeId || appointment.patientId
+  const precautionActive = useAgendaPrecautionActive(patientRouteId)
   const canViewClinicalHistory = can('clinical.read') || can('patients.read')
   const age =
     patient?.birthDate != null
@@ -225,9 +223,9 @@ export function AppointmentDetailPanel({
           </div>
         </div>
 
-        {precautionAlert?.active && (
+        {precautionActive && (
           <div className="border-b border-red-200 px-6 py-3">
-            <ClinicalPrecautionAlertBanner alert={precautionAlert} />
+            <AgendaPatientAlert patientRouteId={patientRouteId} />
           </div>
         )}
 

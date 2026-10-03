@@ -15,17 +15,17 @@ import {
 import {
   getBlockSegmentsForColumn,
   isSlotBlocked,
-} from '@/utils/scheduleBlocks'
+} from '../storage/scheduleBlocks'
 import { SchedulerAppointmentCard } from './SchedulerAppointmentCard'
 import { BlockedSlotOverlay } from './BlockedSlotOverlay'
 import { AgendaSlotCell, AgendaSlotSelectionHighlight } from './AgendaSlotCell'
 import type { SlotSelection } from './CreateAppointmentModal'
-import { slotKey } from '@/utils/agendaSlotSelection'
+import { slotKey } from '../storage/agendaSlotSelection'
 import {
   AGENDA_SLOT_NOTES_EVENT,
   noteTextForSlot,
   readSlotNotes,
-} from '@/utils/agendaSlotNotes'
+} from '../storage/agendaSlotNotes'
 
 interface DentalSchedulerProps {
   date: string
