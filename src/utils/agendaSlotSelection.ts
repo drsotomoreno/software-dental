@@ -5,6 +5,7 @@ import {
   SCHEDULER_START_HOUR,
   timeToMinutes,
 } from '@/constants/procedures'
+import type { Appointment } from '@/types/appointment'
 import type { CreateScheduleBlockInput, ScheduleBlock } from '@/types/scheduleBlock'
 
 /** Casilla del scheduler: silla + día + hora de inicio. */
@@ -91,20 +92,15 @@ export interface MouseGestureInput {
 /**
  * Selección con el mouse, como en una tabla.
  * El botón izquierdo marca una casilla o, si se arrastra, el rectángulo.
- * El botón derecho suma o quita sin borrar el resto.
+ * El botón derecho, al arrastrar, suma ese rectángulo.
  * Null conserva la acción normal del clic (cita o bloqueo).
  */
 export function selectionFromMouseGesture(input: MouseGestureInput): string[] | null {
-  if (input.button === 'right' && !input.selectionMode) return null
+  if (input.button === 'right' && !input.moved) return null
   if (input.button === 'left' && !input.moved && !input.selectionMode) return null
 
   if (!input.moved) {
-    const key = slotKey(input.origin)
-    if (input.button === 'left') return [key]
-    const next = new Set(input.selectedKeys)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    return [...next]
+    return [slotKey(input.origin)]
   }
 
   const rectangle = rectangleSlots(input.origin, input.target, input.timeSlots, input.axes).map(slotKey)
@@ -113,6 +109,43 @@ export function selectionFromMouseGesture(input: MouseGestureInput): string[] | 
   const next = new Set(input.selectedKeys)
   for (const key of rectangle) next.add(key)
   return [...next]
+}
+
+/** Citas que ocupan al menos una de las casillas. */
+export function appointmentsCoveringSlots(
+  appointments: Appointment[],
+  slots: AgendaSlotRef[],
+): Appointment[] {
+  const matches: Appointment[] = []
+  const seen = new Set<string>()
+  for (const appointment of appointments) {
+    if (appointment.id == null || appointment.deletedAt) continue
+    const date = appointment.startTime.slice(0, 10)
+    const start = appointment.startTime.slice(11, 16)
+    const end = appointment.endTime.slice(11, 16)
+    const covers = slots.some(
+      (slot) =>
+        slot.date === date &&
+        slot.columnId === appointment.columnId &&
+        slot.startTime >= start &&
+        slot.startTime < end,
+    )
+    const id = String(appointment.id)
+    if (!covers || seen.has(id)) continue
+    seen.add(id)
+    matches.push(appointment)
+  }
+  return matches
+}
+
+/** El clic derecho conserva el rango si cae dentro; si no, deja solo esa casilla. */
+export function selectionForRightClick(
+  clicked: AgendaSlotRef,
+  selectedKeys: ReadonlySet<string>,
+): string[] {
+  const key = slotKey(clicked)
+  if (selectedKeys.has(key)) return [...selectedKeys]
+  return [key]
 }
 
 /** Casilla bajo el cursor, aunque haya una cita o un bloqueo encima. */

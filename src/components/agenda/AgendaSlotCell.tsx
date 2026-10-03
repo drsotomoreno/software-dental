@@ -10,6 +10,7 @@ interface AgendaSlotCellProps {
   height: string
   ariaLabel: string
   slotMarker: string
+  note?: string
   onClick: (event: MouseEvent<HTMLButtonElement>) => void
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void
 }
@@ -25,6 +26,7 @@ export function AgendaSlotCell({
   height,
   ariaLabel,
   slotMarker,
+  note = '',
   onClick,
   onContextMenu,
 }: AgendaSlotCellProps) {
@@ -53,7 +55,13 @@ export function AgendaSlotCell({
                 : 'hover:bg-dental-50/60'
       } ${selected ? 'agenda-slot-selected' : ''}`}
       style={{ top, height }}
-    />
+    >
+      {note && (
+        <span className="pointer-events-none absolute inset-x-1 bottom-0.5 truncate text-left text-[9px] font-semibold text-sky-950">
+          {note}
+        </span>
+      )}
+    </button>
   )
 }
 
