@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { MouseEvent, PointerEvent } from 'react'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -23,6 +23,11 @@ import { BlockedSlotOverlay } from './BlockedSlotOverlay'
 import { AgendaSlotCell, AgendaSlotSelectionHighlight } from './AgendaSlotCell'
 import type { SlotSelection } from './CreateAppointmentModal'
 import { slotKey } from '@/utils/agendaSlotSelection'
+import {
+  AGENDA_SLOT_NOTES_EVENT,
+  noteTextForSlot,
+  readSlotNotes,
+} from '@/utils/agendaSlotNotes'
 
 interface AgendaWeekViewProps {
   weekDays: string[]
@@ -38,6 +43,7 @@ interface AgendaWeekViewProps {
   onBlockClick?: (block: ScheduleBlock) => void
   onSlotPress?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
   onColumnPointerDown?: (event: PointerEvent<HTMLElement>) => void
+  onColumnContextMenu?: (event: MouseEvent<HTMLDivElement>) => void
 }
 
 const SLOT_HEIGHT_PX = 40
@@ -62,8 +68,16 @@ export function AgendaWeekView({
   onBlockClick,
   onSlotPress,
   onColumnPointerDown,
+  onColumnContextMenu,
 }: AgendaWeekViewProps) {
   const timeSlots = useMemo(() => generateTimeSlots(), [])
+  const [slotNotes, setSlotNotes] = useState(() => readSlotNotes())
+
+  useEffect(() => {
+    const refresh = () => setSlotNotes(readSlotNotes())
+    window.addEventListener(AGENDA_SLOT_NOTES_EVENT, refresh)
+    return () => window.removeEventListener(AGENDA_SLOT_NOTES_EVENT, refresh)
+  }, [])
 
   const appointmentsByDayAndColumn = useMemo(() => {
     const map = new Map<string, Appointment[]>()
@@ -189,12 +203,20 @@ export function AgendaWeekView({
                   className="relative border-r border-slate-200"
                   style={{ height: timelineHeight }}
                   onPointerDown={onColumnPointerDown}
+                  onContextMenu={onColumnContextMenu}
                 >
                   {timeSlots.map((slot) => {
                     const blocked = isSlotBlocked(day, slot, column.id, blocks)
                     const selection = { columnId: column.id, date: day, startTime: slot }
                     const selected = selectedKeys?.has(slotKey(selection)) ?? false
                     const lunch = isLunchHourSlot(slot)
+                    const appointmentNote = dayColumnAppointments.find(
+                      (appointment) =>
+                        appointment.startTime.slice(11, 16) <= slot &&
+                        appointment.endTime.slice(11, 16) > slot &&
+                        appointment.notes?.trim(),
+                    )?.notes
+                    const note = appointmentNote?.trim() || noteTextForSlot(slotNotes, selection)
                     return (
                       <AgendaSlotCell
                         key={slot}
@@ -206,6 +228,7 @@ export function AgendaWeekView({
                         top={`${(timeSlots.indexOf(slot) / totalSlots) * 100}%`}
                         height={`${(1 / totalSlots) * 100}%`}
                         slotMarker={slotKey(selection)}
+                        note={note}
                         ariaLabel={
                           selectionMode
                             ? `Seleccionar ${day} ${column.name} a las ${slot}`
@@ -217,7 +240,6 @@ export function AgendaWeekView({
                         onContextMenu={(event) => {
                           event.preventDefault()
                           event.stopPropagation()
-                          if (selectionMode || blocked) return
                           onSlotContextMenu?.(event, selection)
                         }}
                       />

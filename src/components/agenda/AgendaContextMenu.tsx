@@ -21,8 +21,18 @@ export function AgendaContextMenu({ x, y, items, onClose }: AgendaContextMenuPro
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    let ignoreScroll = true
+    const armScroll = window.setTimeout(() => {
+      ignoreScroll = false
+    }, 250)
+
     const handlePointerDown = (event: MouseEvent) => {
       if (menuRef.current?.contains(event.target as Node)) return
+      onClose()
+    }
+
+    const handleScroll = () => {
+      if (ignoreScroll) return
       onClose()
     }
 
@@ -31,12 +41,13 @@ export function AgendaContextMenu({ x, y, items, onClose }: AgendaContextMenuPro
     }
 
     window.addEventListener('mousedown', handlePointerDown)
-    window.addEventListener('scroll', onClose, true)
+    window.addEventListener('scroll', handleScroll, true)
     window.addEventListener('keydown', handleKey)
 
     return () => {
+      window.clearTimeout(armScroll)
       window.removeEventListener('mousedown', handlePointerDown)
-      window.removeEventListener('scroll', onClose, true)
+      window.removeEventListener('scroll', handleScroll, true)
       window.removeEventListener('keydown', handleKey)
     }
   }, [onClose])
@@ -61,6 +72,7 @@ export function AgendaContextMenu({ x, y, items, onClose }: AgendaContextMenuPro
             e.preventDefault()
             e.stopPropagation()
             if (!item.disabled) item.onClick()
+            onClose()
           }}
           className={`agenda-context-menu__item ${
             item.danger ? 'agenda-context-menu__item--danger' : ''

@@ -1,5 +1,5 @@
 import type { MouseEvent, PointerEvent } from 'react'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Appointment, ScheduleColumn } from '@/types/appointment'
 import type { ScheduleBlock } from '@/types/scheduleBlock'
 import {
@@ -21,6 +21,11 @@ import { BlockedSlotOverlay } from './BlockedSlotOverlay'
 import { AgendaSlotCell, AgendaSlotSelectionHighlight } from './AgendaSlotCell'
 import type { SlotSelection } from './CreateAppointmentModal'
 import { slotKey } from '@/utils/agendaSlotSelection'
+import {
+  AGENDA_SLOT_NOTES_EVENT,
+  noteTextForSlot,
+  readSlotNotes,
+} from '@/utils/agendaSlotNotes'
 
 interface DentalSchedulerProps {
   date: string
@@ -36,6 +41,7 @@ interface DentalSchedulerProps {
   onBlockClick?: (block: ScheduleBlock) => void
   onSlotPress?: (event: MouseEvent<HTMLButtonElement>, selection: SlotSelection) => void
   onColumnPointerDown?: (event: PointerEvent<HTMLElement>) => void
+  onColumnContextMenu?: (event: MouseEvent<HTMLDivElement>) => void
 }
 const SLOT_HEIGHT_PX = 48
 const totalSlots =
@@ -56,8 +62,16 @@ export function DentalScheduler({
   onBlockClick,
   onSlotPress,
   onColumnPointerDown,
+  onColumnContextMenu,
 }: DentalSchedulerProps) {
   const timeSlots = useMemo(() => generateTimeSlots(), [])
+  const [slotNotes, setSlotNotes] = useState(() => readSlotNotes())
+
+  useEffect(() => {
+    const refresh = () => setSlotNotes(readSlotNotes())
+    window.addEventListener(AGENDA_SLOT_NOTES_EVENT, refresh)
+    return () => window.removeEventListener(AGENDA_SLOT_NOTES_EVENT, refresh)
+  }, [])
 
   const appointmentsByColumn = useMemo(() => {
     const map = new Map<string, Appointment[]>()
@@ -148,6 +162,7 @@ export function DentalScheduler({
               className="relative border-r border-slate-200"
               style={{ height: timelineHeight }}
               onPointerDown={onColumnPointerDown}
+              onContextMenu={onColumnContextMenu}
             >
               {/* Celdas clicables */}
               {timeSlots.map((slot) => {
@@ -155,6 +170,15 @@ export function DentalScheduler({
                 const selection = { columnId: col.id, date, startTime: slot }
                 const selected = selectedKeys?.has(slotKey(selection)) ?? false
                 const lunch = isLunchHourSlot(slot)
+                const appointmentNote = appointments.find(
+                  (appointment) =>
+                    appointment.columnId === col.id &&
+                    appointment.startTime.slice(0, 10) === date &&
+                    appointment.startTime.slice(11, 16) <= slot &&
+                    appointment.endTime.slice(11, 16) > slot &&
+                    appointment.notes?.trim(),
+                )?.notes
+                const note = appointmentNote?.trim() || noteTextForSlot(slotNotes, selection)
                 return (
                   <AgendaSlotCell
                     key={slot}
@@ -166,6 +190,7 @@ export function DentalScheduler({
                     top={`${(timeSlots.indexOf(slot) / totalSlots) * 100}%`}
                     height={`${(1 / totalSlots) * 100}%`}
                     slotMarker={slotKey(selection)}
+                    note={note}
                     ariaLabel={
                       selectionMode
                         ? `Seleccionar ${col.name} a las ${slot}`
@@ -179,7 +204,6 @@ export function DentalScheduler({
                     onContextMenu={(event) => {
                       event.preventDefault()
                       event.stopPropagation()
-                      if (selectionMode || blocked) return
                       onSlotContextMenu?.(event, selection)
                     }}
                   />

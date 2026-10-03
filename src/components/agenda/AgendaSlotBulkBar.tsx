@@ -38,9 +38,10 @@ export function AgendaSlotBulkBar({
             ? 'Arrastre sobre la grilla'
             : `${count} casilla${count === 1 ? '' : 's'}`}
         </p>
-        <p className="text-xs text-sky-900">
-          Botón izquierdo: un rango, como en una tabla. Botón derecho: suma o quita casillas.
-        </p>
+          <p className="text-xs text-sky-900">
+            Botón izquierdo: un rango, como en una tabla. Botón derecho: menú de las casillas
+            seleccionadas.
+          </p>
         <input
           id="agenda-bulk-reason"
           type="text"
