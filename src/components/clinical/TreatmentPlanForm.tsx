@@ -28,6 +28,7 @@ import {
 } from '@/utils/cupsBillingRules'
 import { CupsQuantityBillingField } from '@/components/billing/CupsQuantityBillingField'
 import { CupsAnatomicalLocationField } from '@/components/billing/CupsAnatomicalLocationField'
+import { FdiToothSelect } from '@/components/clinical/FdiToothSelect'
 
 interface ProcedureOption {
   procedure: string
@@ -60,6 +61,7 @@ export function TreatmentPlanForm({
   onMoveToBudget,
 }: TreatmentPlanFormProps) {
   const [procedureSearch, setProcedureSearch] = useState('')
+  const [catalogToothNumber, setCatalogToothNumber] = useState<number | undefined>()
   const [rowProcedureSearch, setRowProcedureSearch] = useState<Record<string, string>>({})
   const budgetLinkedIds = useMemo(() => new Set(budgetLinkedItemIds), [budgetLinkedItemIds])
 
@@ -159,6 +161,7 @@ export function TreatmentPlanForm({
       phase: DEFAULT_TREATMENT_PHASE,
       procedure: option.procedure,
       cupsCode: option.cupsCode,
+      toothNumber: catalogToothNumber,
       quantity: getDefaultQuantityForCups(option.cupsCode),
       unitPrice: catalogUnitPrice(option.cupsCode),
       patientApproved: 'pendiente',
@@ -233,7 +236,7 @@ export function TreatmentPlanForm({
   const otherItems = treatmentPlan.filter((item) => !item.diagnosisCode)
 
   const renderProcedureFields = (item: TreatmentPlanItem) => {
-    const searchValue = rowProcedureSearch[item.id] ?? item.procedure
+    const searchValue = rowProcedureSearch[item.id] ?? ''
     const options = filterProcedureOptions(searchValue || item.procedure)
 
     return (
@@ -461,6 +464,11 @@ export function TreatmentPlanForm({
             Sugerencia
           </span>
         )}
+        {item.toothNumber ? (
+          <span className="rounded bg-dental-100 px-1.5 py-0.5 text-[10px] font-medium text-dental-800">
+            Pieza {item.toothNumber}
+          </span>
+        ) : null}
       </div>
 
       {renderProcedureFields(item)}
@@ -518,6 +526,7 @@ export function TreatmentPlanForm({
             toothNumber={item.toothNumber}
             fdiQuadrant={item.fdiQuadrant}
             arch={item.arch}
+            highlightedTeeth={toothOptions}
             disabled={disabled}
             onToothNumberChange={(toothNumber) => updateTreatmentItem(item.id, { toothNumber })}
             onFdiQuadrantChange={(fdiQuadrant) => updateTreatmentItem(item.id, { fdiQuadrant })}
@@ -637,35 +646,54 @@ export function TreatmentPlanForm({
             )}
           </div>
 
-          <div>
-            <FieldVoiceHeader
-              label={
-                <>
-                  Buscar en catálogo CUPS
-                  {cupsMeta && (
-                    <span className="ml-1 text-dental-600">
-                      v{cupsMeta.version} ({cupsMeta.recordCount} códigos)
-                    </span>
-                  )}
-                  {' '}/ mis precios
-                </>
-              }
-              targetInputId="plan-catalog-search"
-              disabled={disabled}
-              labelClassName="text-xs text-slate-500"
-              getValue={() => procedureSearch}
-              onValueChange={setProcedureSearch}
-            />
-            <input
-              id="plan-catalog-search"
-              type="search"
-              value={procedureSearch}
-              onChange={(e) => setProcedureSearch(e.target.value)}
-              placeholder="Escriba procedimiento o código CUPS..."
-              className="input-field"
-            />
+          <div className="grid gap-3 sm:grid-cols-12 sm:items-end">
+            <div className="sm:col-span-4">
+              <label htmlFor="plan-catalog-tooth" className="mb-0.5 block text-xs text-slate-500">
+                Diente del procedimiento
+              </label>
+              <FdiToothSelect
+                id="plan-catalog-tooth"
+                value={catalogToothNumber}
+                highlightedTeeth={toothOptions}
+                emptyLabel="Sin pieza específica"
+                onChange={setCatalogToothNumber}
+              />
+            </div>
+            <div className="sm:col-span-8">
+              <FieldVoiceHeader
+                label={
+                  <>
+                    Buscar en catálogo CUPS
+                    {cupsMeta && (
+                      <span className="ml-1 text-dental-600">
+                        v{cupsMeta.version} ({cupsMeta.recordCount} códigos)
+                      </span>
+                    )}
+                    {' '}/ mis precios
+                  </>
+                }
+                targetInputId="plan-catalog-search"
+                disabled={disabled}
+                labelClassName="text-xs text-slate-500"
+                getValue={() => procedureSearch}
+                onValueChange={setProcedureSearch}
+              />
+              <input
+                id="plan-catalog-search"
+                type="search"
+                value={procedureSearch}
+                onChange={(e) => setProcedureSearch(e.target.value)}
+                placeholder="Escriba procedimiento o código CUPS..."
+                className="input-field"
+              />
+            </div>
+            <p className="sm:col-span-12 text-[11px] text-slate-500">
+              {catalogToothNumber
+                ? `Al elegir un código del catálogo, el procedimiento queda en la pieza ${catalogToothNumber}. Puede cambiar el diente antes de agregar otro.`
+                : 'Seleccione el diente si el procedimiento se realiza en una pieza específica. Si no aplica, déjelo en "Sin pieza específica".'}
+            </p>
             {procedureSearch && (
-              <ul className="mt-1 max-h-44 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+              <ul className="sm:col-span-12 max-h-44 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
                 {filteredProcedures.length === 0 ? (
                   <li className="px-3 py-2 text-sm text-slate-500">Sin coincidencias</li>
                 ) : (
@@ -681,6 +709,11 @@ export function TreatmentPlanForm({
                           <span className="ml-2 font-mono text-xs text-slate-500">
                             {option.cupsCode}
                           </span>
+                          {catalogToothNumber ? (
+                            <span className="ml-2 rounded-full bg-dental-100 px-2 py-0.5 text-[11px] font-medium text-dental-800">
+                              Pieza {catalogToothNumber}
+                            </span>
+                          ) : null}
                         </span>
                         {catalogUnitPrice(option.cupsCode) > 0 && (
                           <span className="shrink-0 text-xs font-medium text-dental-700">
