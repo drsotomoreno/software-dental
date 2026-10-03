@@ -236,7 +236,7 @@ export function TreatmentPlanForm({
   const otherItems = treatmentPlan.filter((item) => !item.diagnosisCode)
 
   const renderProcedureFields = (item: TreatmentPlanItem) => {
-    const searchValue = rowProcedureSearch[item.id] ?? item.procedure
+    const searchValue = rowProcedureSearch[item.id] ?? ''
     const options = filterProcedureOptions(searchValue || item.procedure)
 
     return (
