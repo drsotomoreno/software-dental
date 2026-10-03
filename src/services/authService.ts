@@ -74,10 +74,22 @@ export async function authenticateUser(
   if (user.accessEnabled === false) return null
 
   const credentials = await db.userCredentials.get(user.id)
-  if (!credentials) return null
+  const auxiliarPassword =
+    user.role === 'recepcion' ? String(user.documentNumber ?? '').replace(/\D/g, '') : ''
+  const typedDocument = password.replace(/\D/g, '')
+  const auxiliarMatch =
+    auxiliarPassword.length >= 6 &&
+    auxiliarPassword.length <= 12 &&
+    typedDocument === auxiliarPassword
+  if (!credentials && !auxiliarMatch) return null
 
-  const valid = await verifyPassword(password, credentials.passwordHash, credentials.passwordSalt)
-  if (!valid) return null
+  const valid = credentials
+    ? await verifyPassword(password, credentials.passwordHash, credentials.passwordSalt)
+    : false
+  if (!valid && !auxiliarMatch) return null
+  if (auxiliarMatch && !valid) {
+    await seedUserCredentials(user.id, auxiliarPassword)
+  }
 
   const session: AuthSession = {
     id: generateId(),
@@ -304,9 +316,6 @@ export async function createAppUser(
   const gate = await requireUserManager()
   if (!gate.ok) return gate
 
-  const passwordError = validatePasswordStrength(password)
-  if (passwordError) return { ok: false, error: passwordError }
-
   const email = String(data.email ?? '').trim().toLowerCase()
   const documentCheck = validateProfessionalDocumentNumber(data.documentNumber)
   if (!documentCheck.valid) {
@@ -318,6 +327,11 @@ export async function createAppUser(
   if (!roleResult.ok) return roleResult
 
   const isAuxiliar = roleResult.role === 'recepcion'
+  const accessPassword = isAuxiliar ? documentNumber : password
+  if (!isAuxiliar) {
+    const passwordError = validatePasswordStrength(password)
+    if (passwordError) return { ok: false, error: passwordError }
+  }
   let firstName = String(data.firstName ?? '').trim()
   let lastName = String(data.lastName ?? '').trim()
   const phone = staffPhoneDigits(data.phone)
@@ -345,11 +359,11 @@ export async function createAppUser(
     role: roleResult.role,
     rethusNumber: isAuxiliar ? '' : data.rethusNumber?.trim() || '',
     thsSpecialty: data.thsSpecialty,
-    password,
+    password: accessPassword,
   })
   if (api.ok) {
     await db.users.put(api.user)
-    await seedUserCredentials(api.user.id, password)
+    await seedUserCredentials(api.user.id, accessPassword)
     return { ok: true, user: api.user }
   }
   if (getStoredApiAuth()?.token) {
@@ -404,7 +418,7 @@ export async function createAppUser(
   }
 
   await db.users.add(user)
-  await seedUserCredentials(user.id, password)
+  await seedUserCredentials(user.id, accessPassword)
   return { ok: true, user }
 }
 
@@ -482,6 +496,10 @@ export async function updateAppUser(
   })
   if (api.ok) {
     await db.users.put(api.user)
+    if (api.user.role === 'recepcion') {
+      const canonical = String(api.user.documentNumber ?? '').replace(/\D/g, '')
+      if (canonical) await seedUserCredentials(api.user.id, canonical)
+    }
     return { ok: true }
   }
   if (getStoredApiAuth()?.token) {
@@ -500,12 +518,20 @@ export async function resetAppUserPassword(
   const gate = await requireUserManager()
   if (!gate.ok) return gate
 
-  const passwordError = validatePasswordStrength(newPassword)
-  if (passwordError) return { ok: false, error: passwordError }
+  const user = await db.users.get(userId)
+  const auxiliarPassword =
+    user?.role === 'recepcion' ? String(user.documentNumber ?? '').replace(/\D/g, '') : ''
+  const nextPassword = auxiliarPassword || newPassword
+  if (!auxiliarPassword) {
+    const passwordError = validatePasswordStrength(newPassword)
+    if (passwordError) return { ok: false, error: passwordError }
+  } else if (auxiliarPassword.length < 6 || auxiliarPassword.length > 12) {
+    return { ok: false, error: 'La auxiliar no tiene una cédula válida para usar como contraseña.' }
+  }
 
-  const api = await resetClinicMemberPassword(userId, newPassword)
+  const api = await resetClinicMemberPassword(userId, nextPassword)
   if (api.ok) {
-    await seedUserCredentials(userId, newPassword)
+    await seedUserCredentials(userId, nextPassword)
     await db.users.update(userId, { accessEnabled: true })
     return { ok: true }
   }
@@ -513,10 +539,9 @@ export async function resetAppUserPassword(
     return { ok: false, error: api.error }
   }
 
-  const user = await db.users.get(userId)
   if (!user) return { ok: false, error: 'Usuario no encontrado.' }
 
-  await seedUserCredentials(userId, newPassword)
+  await seedUserCredentials(userId, nextPassword)
   await db.users.update(userId, { accessEnabled: true })
   return { ok: true }
 }

@@ -112,8 +112,12 @@ router.post('/login', async (req, res) => {
     await ensureSuperAdmin()
 
     const body = req.body && typeof req.body === 'object' ? req.body : {}
-    const email = String(body.email ?? '').trim().toLowerCase()
-    const documentNumber = String(body.documentNumber ?? body.documento ?? '').replace(/\D/g, '')
+    const identifier = String(body.email ?? body.identifier ?? '').trim()
+    const email = identifier.includes('@') ? identifier.toLowerCase() : ''
+    let documentNumber = String(body.documentNumber ?? body.documento ?? '').replace(/\D/g, '')
+    if (documentNumber.length < 6 && !email) {
+      documentNumber = identifier.replace(/\D/g, '')
+    }
     const password = String(body.password ?? '')
     const hasEmail = Boolean(email.includes('@') && email)
     const hasDocument = documentNumber.length >= 6

@@ -163,8 +163,9 @@ export function LoginPage() {
                 placeholder="Cédula o correo del titular"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Los colaboradores ingresan con su cédula y la clave asignada por el administrador de
-                la clínica. El titular también puede usar su correo.
+                Las auxiliares ingresan con su cédula en los dos campos. Los demás colaboradores usan
+                la cédula y la clave que asignó el administrador. El titular también puede usar su
+                correo.
               </p>
             </div>
             <div>

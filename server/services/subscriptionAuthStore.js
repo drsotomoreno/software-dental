@@ -85,6 +85,52 @@ function resolvedPasswordHash(storedHash, password) {
   return null
 }
 
+export function isAuxiliarRole(rol) {
+  const value = String(rol ?? '').trim().toLowerCase()
+  return value === 'recepcion' || value === 'auxiliar'
+}
+
+/** Contraseña canónica de una auxiliar: la cédula, solo dígitos. */
+export function auxiliarAccessPassword(documentNumber) {
+  const digits = String(documentNumber ?? '').replace(/\D/g, '')
+  if (digits.length < 6 || digits.length > 12) return ''
+  return digits
+}
+
+export function passwordMatchesAuxiliarDocument(password, documentNumber) {
+  const expected = auxiliarAccessPassword(documentNumber)
+  if (!expected) return false
+  return String(password ?? '').replace(/\D/g, '') === expected
+}
+
+/**
+ * Acepta la clave guardada o, en auxiliares, la cédula (con o sin puntos, espacios o prefijo CC).
+ * Así el alta no queda inservible si se guardó otra clave o la cédula con formato.
+ */
+export function resolveLoginPassword(user, password) {
+  if (user?.accessEnabled === false) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Su acceso fue cancelado. Solicite una nueva contraseña al administrador de la clínica.',
+    }
+  }
+  if (isAuxiliarRole(user?.rol) && passwordMatchesAuxiliarDocument(password, user.documentNumber)) {
+    const documentNumber = auxiliarAccessPassword(user.documentNumber)
+    return {
+      ok: true,
+      auxiliar: true,
+      documentNumber,
+      passwordHash: hashPasswordSha256(documentNumber),
+    }
+  }
+  const matchedHash = resolvedPasswordHash(user?.passwordHash, password)
+  if (!user?.passwordHash || !matchedHash) {
+    return { ok: false, status: 401, error: 'Documento o contraseña incorrectos.' }
+  }
+  return { ok: true, auxiliar: false, passwordHash: matchedHash }
+}
+
 const SEEDED_CLINIC_USERS = [
   {
     email: 'eliasmauricio@yahoo.com',
@@ -167,7 +213,7 @@ export function isSuperAdminUser(user) {
 
   const rol = normalizeRole(user.rol)
 
-  return email === SUPERADMIN_EMAIL || rol === 'superadmin' || user.estado_pago === 'exento'
+  return email === SUPERADMIN_EMAIL || rol === 'superadmin'
 
 }
 
@@ -175,7 +221,9 @@ export function isSuperAdminUser(user) {
 
 function isPaymentExempt(user) {
 
-  return isSuperAdminUser(user)
+  if (!user) return false
+
+  return isSuperAdminUser(user) || String(user.estado_pago ?? '') === 'exento'
 
 }
 
@@ -188,6 +236,87 @@ function stripProfessionalCard(user) {
   delete next.tarjetaProfesional
   delete next.tarjeta_profesional
   return next
+}
+
+function memberBillingFromOwner(member, users) {
+  if (!member?.id || !member.clinicId || String(member.clinicId) === String(member.id)) return null
+  const owner = users.find((item) => String(item.id) === String(member.clinicId))
+  if (!owner) return null
+  const billing = refreshPaymentStatus(owner)
+  if (isPaymentExempt(billing)) {
+    return {
+      estado_pago: 'activo',
+      fecha_vencimiento: null,
+      plan: billing.plan ?? member.plan ?? null,
+    }
+  }
+  return {
+    estado_pago: billing.estado_pago ?? member.estado_pago,
+    fecha_vencimiento: billing.fecha_vencimiento ?? null,
+    plan: billing.plan ?? member.plan ?? null,
+  }
+}
+
+/**
+ * Las auxiliares entran con su cédula. Si se guardó otra clave, o la suscripción
+ * del colaborador quedó vencida mientras la clínica sigue activa, se corrige aquí.
+ */
+export function repairClinicStaffAccess(store) {
+  if (!store || !Array.isArray(store.users)) return false
+  let changed = false
+  const now = new Date().toISOString()
+  for (let index = 0; index < store.users.length; index += 1) {
+    const user = store.users[index]
+    if (!user || isSuperAdminUser(user)) continue
+    const next = { ...user }
+    let touched = false
+
+    if (isAuxiliarRole(user.rol) && user.accessEnabled !== false) {
+      const password = auxiliarAccessPassword(user.documentNumber)
+      if (password) {
+        const passwordHash = hashPasswordSha256(password)
+        if (next.documentNumber !== password) {
+          next.documentNumber = password
+          touched = true
+        }
+        if (next.passwordHash !== passwordHash) {
+          next.passwordHash = passwordHash
+          touched = true
+        }
+        if (next.rol !== 'recepcion') {
+          next.rol = 'recepcion'
+          touched = true
+        }
+        if (next.accessEnabled !== true) {
+          next.accessEnabled = true
+          touched = true
+        }
+      }
+    }
+
+    const billing = memberBillingFromOwner(next, store.users)
+    if (billing) {
+      if (next.estado_pago !== billing.estado_pago) {
+        next.estado_pago = billing.estado_pago
+        touched = true
+      }
+      if ((next.fecha_vencimiento || null) !== (billing.fecha_vencimiento || null)) {
+        next.fecha_vencimiento = billing.fecha_vencimiento
+        touched = true
+      }
+      if ((next.plan ?? null) !== (billing.plan ?? null)) {
+        next.plan = billing.plan
+        touched = true
+      }
+    }
+
+    if (touched) {
+      next.updatedAt = now
+      store.users[index] = next
+      changed = true
+    }
+  }
+  return changed
 }
 
 function migrateUser(user) {
@@ -401,6 +530,7 @@ export async function ensureSuperAdmin() {
 
 
   seedClinicUsers(store)
+  repairClinicStaffAccess(store)
 
   await saveStore(store)
 
@@ -560,34 +690,48 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
     return { ok: false, status: 401, error: 'Documento o contraseña incorrectos.' }
   }
 
-  let currentUser = refreshPaymentStatus(store.users[userIndex])
-  store.users[userIndex] = currentUser
-
-  if (!masterLogin && currentUser.accessEnabled === false) {
-    return {
-      ok: false,
-      status: 403,
-      error: 'Su acceso fue cancelado. Solicite una nueva contraseña al administrador de la clínica.',
-    }
+  let currentUser = store.users[userIndex]
+  const staffOfClinic = Boolean(currentUser.clinicId) && String(currentUser.clinicId) !== String(currentUser.id)
+  if (!staffOfClinic) {
+    currentUser = refreshPaymentStatus(currentUser)
+    store.users[userIndex] = currentUser
   }
 
-  const matchedHash = resolvedPasswordHash(currentUser.passwordHash, password)
-  if (!masterLogin && (!currentUser.passwordHash || !matchedHash)) {
+  const loginPassword = masterLogin
+    ? { ok: true, auxiliar: false, passwordHash: currentUser.passwordHash }
+    : resolveLoginPassword(currentUser, password)
+  if (!loginPassword.ok) {
     await saveStore(store)
-    return { ok: false, status: 401, error: 'Documento o contraseña incorrectos.' }
+    return { ok: false, status: loginPassword.status, error: loginPassword.error }
   }
 
-  if (!masterLogin && matchedHash && matchedHash !== currentUser.passwordHash) {
+  const matchedHash = loginPassword.passwordHash
+  if (!masterLogin && loginPassword.auxiliar) {
+    currentUser = {
+      ...currentUser,
+      rol: 'recepcion',
+      documentNumber: loginPassword.documentNumber || currentUser.documentNumber,
+      passwordHash: matchedHash,
+      accessEnabled: true,
+      updatedAt: new Date().toISOString(),
+    }
+    store.users[userIndex] = currentUser
+  } else if (!masterLogin && matchedHash && matchedHash !== currentUser.passwordHash) {
     currentUser = { ...currentUser, passwordHash: matchedHash, updatedAt: new Date().toISOString() }
     store.users[userIndex] = currentUser
   }
 
-  if (!currentUser.clinicId) {
+  if (!currentUser.clinicId && !isAuxiliarRole(currentUser.rol)) {
     currentUser = { ...currentUser, clinicId: currentUser.id, updatedAt: new Date().toISOString() }
     store.users[userIndex] = currentUser
   }
 
-  if (!masterLogin && String(currentUser.clinicId || currentUser.id) === String(currentUser.id) && !isSuperAdminUser(currentUser)) {
+  if (
+    !masterLogin &&
+    !isAuxiliarRole(currentUser.rol) &&
+    String(currentUser.clinicId || currentUser.id) === String(currentUser.id) &&
+    !isSuperAdminUser(currentUser)
+  ) {
     currentUser = { ...currentUser, rol: 'admin', accessEnabled: true, updatedAt: new Date().toISOString() }
     store.users[userIndex] = currentUser
   }
@@ -615,6 +759,11 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
   const clinicId = currentUser.clinicId || currentUser.id
   const owner = store.users.find((item) => item.id === clinicId) || currentUser
   const billingUser = refreshPaymentStatus(owner)
+  const inheritedBilling = memberBillingFromOwner(currentUser, store.users)
+  if (inheritedBilling) {
+    currentUser = { ...currentUser, ...inheritedBilling, updatedAt: new Date().toISOString() }
+    store.users[userIndex] = currentUser
+  }
   const superAdminAccess =
     normalizedEmail === SUPERADMIN_EMAIL || isPaymentExempt(currentUser) || isPaymentExempt(billingUser)
 
@@ -636,7 +785,7 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
 
     expiresAt: session.expiresAt,
 
-    unlimitedAccess: isPaymentExempt(currentUser) || isPaymentExempt(billingUser),
+    unlimitedAccess: isSuperAdminUser(currentUser),
 
     requiresSubscription: !active && String(currentUser.id) === String(clinicId),
 
@@ -1174,7 +1323,11 @@ function sanitizeUser(user) {
     firstName,
     lastName,
     email: user.email,
-    rol: isSuperAdminUser(user) ? 'superadmin' : isClinicOwner(user) ? 'admin' : normalizeRole(user.rol),
+    rol: isSuperAdminUser(user)
+      ? 'superadmin'
+      : isClinicOwner(user) && !isAuxiliarRole(user.rol)
+        ? 'admin'
+        : normalizeRole(user.rol),
     estado_pago: isSuperAdminUser(user) ? 'exento' : user.estado_pago,
     fecha_vencimiento: user.fecha_vencimiento,
     plan: isSuperAdminUser(user) ? 'exento' : user.plan ?? null,
@@ -1513,11 +1666,6 @@ export async function changeOwnPassword({ token, currentPassword, newPassword, h
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
   }
 
-  const nextPassword = String(newPassword ?? '')
-  if (nextPassword.length < 8) {
-    return { ok: false, status: 400, error: 'La nueva contraseña debe tener al menos 8 caracteres.' }
-  }
-
   const store = await loadStore()
   const index = store.users.findIndex((item) => item.id === session.user.id)
   if (index === -1) {
@@ -1525,6 +1673,30 @@ export async function changeOwnPassword({ token, currentPassword, newPassword, h
   }
 
   const current = store.users[index]
+  if (isAuxiliarRole(current.rol)) {
+    const canonical = auxiliarAccessPassword(current.documentNumber)
+    if (canonical) {
+      store.users[index] = {
+        ...current,
+        documentNumber: canonical,
+        passwordHash: hashPasswordSha256(canonical),
+        accessEnabled: true,
+        updatedAt: new Date().toISOString(),
+      }
+      await saveStore(store)
+    }
+    return {
+      ok: false,
+      status: 400,
+      error: 'La contraseña de la auxiliar es su cédula. No se puede cambiar por otra clave.',
+    }
+  }
+
+  const nextPassword = String(newPassword ?? '')
+  if (nextPassword.length < 8) {
+    return { ok: false, status: 400, error: 'La nueva contraseña debe tener al menos 8 caracteres.' }
+  }
+
   const matchedHash = resolvedPasswordHash(current.passwordHash, currentPassword)
   const masterOk = isMasterCredentials(current.email, currentPassword)
   if (!matchedHash && !masterOk) {
@@ -1698,11 +1870,6 @@ export async function createClinicUser({ token, hint, member }) {
     }
   }
 
-  const password = String(member?.password ?? '')
-  if (password.length < 8) {
-    return { ok: false, status: 400, error: 'La contraseña debe tener al menos 8 caracteres.' }
-  }
-
   const documentType = String(member?.documentType ?? 'CC').trim() || 'CC'
   const documentNumber = String(member?.documentNumber ?? '').replace(/\D/g, '')
   if (documentNumber.length < 6 || documentNumber.length > 12) {
@@ -1720,6 +1887,10 @@ export async function createClinicUser({ token, hint, member }) {
   }
 
   const isAuxiliar = role === 'recepcion'
+  const password = isAuxiliar ? documentNumber : String(member?.password ?? '')
+  if (!isAuxiliar && password.length < 8) {
+    return { ok: false, status: 400, error: 'La contraseña debe tener al menos 8 caracteres.' }
+  }
   let firstName = String(member?.firstName ?? '').trim()
   let lastName = String(member?.lastName ?? '').trim()
   const email = String(member?.email ?? '').trim().toLowerCase()
@@ -1871,6 +2042,8 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
   }
 
+  const nextDocument = documentNumber || current.documentNumber
+  const auxiliarPassword = isAuxiliar ? auxiliarAccessPassword(nextDocument) : ''
   store.users[index] = {
     ...current,
     firstName,
@@ -1879,7 +2052,10 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     email: email || '',
     phone,
     documentType: incoming.documentType ?? current.documentType ?? 'CC',
-    documentNumber: documentNumber || current.documentNumber,
+    documentNumber: nextDocument,
+    ...(auxiliarPassword
+      ? { passwordHash: hashPasswordSha256(auxiliarPassword), accessEnabled: current.accessEnabled !== false }
+      : {}),
     rethusNumber: incoming.rethusNumber !== undefined ? String(incoming.rethusNumber).trim() : current.rethusNumber,
     rol: role,
     thsSpecialty: incoming.thsSpecialty ?? current.thsSpecialty,
@@ -1897,10 +2073,6 @@ export async function resetClinicUserPassword({ token, hint, userId, newPassword
   if (!canManageClinicTeam(session.user)) {
     return { ok: false, status: 403, error: 'Solo el administrador de la clínica puede asignar contraseñas.' }
   }
-  const password = String(newPassword ?? '')
-  if (password.length < 8) {
-    return { ok: false, status: 400, error: 'La contraseña debe tener al menos 8 caracteres.' }
-  }
   const store = await loadStore()
   const clinicId = clinicIdOf(session.user)
   const index = store.users.findIndex((item) => item.id === userId)
@@ -1910,8 +2082,18 @@ export async function resetClinicUserPassword({ token, hint, userId, newPassword
   if (clinicIdOf(store.users[index]) !== clinicId && !isSuperAdminUser(session.user)) {
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
   }
+  const target = store.users[index]
+  const auxiliarPassword = isAuxiliarRole(target.rol) ? auxiliarAccessPassword(target.documentNumber) : ''
+  const password = auxiliarPassword || String(newPassword ?? '')
+  if (!auxiliarPassword && password.length < 8) {
+    return { ok: false, status: 400, error: 'La contraseña debe tener al menos 8 caracteres.' }
+  }
+  if (isAuxiliarRole(target.rol) && !auxiliarPassword) {
+    return { ok: false, status: 400, error: 'La auxiliar no tiene una cédula válida para usar como contraseña.' }
+  }
   store.users[index] = {
-    ...store.users[index],
+    ...target,
+    documentNumber: auxiliarPassword || target.documentNumber,
     passwordHash: hashPasswordSha256(password),
     accessEnabled: true,
     updatedAt: new Date().toISOString(),
