@@ -14,6 +14,7 @@ import {
   validateRipsJsonStructure,
   validateRipsMetadataStructure,
 } from './ripsStructureValidation'
+import { treatmentPlanItemsForRipsPayload } from './treatmentPlanRips'
 
 function namesMatch(left: string, right: string): boolean {
   const a = left.trim().toLowerCase()
@@ -207,6 +208,51 @@ export function validateRipsExport(
 
     for (const locationIssue of validateProcedureLocations(
       (record.budgetItems ?? []).map((item) => ({
+        procedure: item.procedure,
+        cupsCode: item.cupsCode,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        toothNumber: item.toothNumber,
+        fdiQuadrant: item.fdiQuadrant,
+        arch: item.arch,
+      })),
+    )) {
+      issues.push({
+        level: locationIssue.level,
+        recordId,
+        patientDocument: patientDoc,
+        field: locationIssue.field,
+        message: locationIssue.message,
+      })
+    }
+
+    const planForRips = treatmentPlanItemsForRipsPayload(record)
+    const planWithoutCups = (record.treatmentPlan ?? []).filter(
+      (item) => (item.procedure ?? '').trim() && !item.cupsCode?.trim(),
+    )
+    if (planWithoutCups.length > 0) {
+      issues.push({
+        level: 'warning',
+        recordId,
+        patientDocument: patientDoc,
+        message: `${planWithoutCups.length} procedimiento(s) del plan de tratamiento sin código CUPS.`,
+      })
+    }
+
+    const invalidPlanCups = planForRips.filter(
+      (item) => item.cupsCode?.trim() && !/^\d{6}$/.test(item.cupsCode.replace(/\D/g, '')),
+    )
+    if (invalidPlanCups.length > 0) {
+      issues.push({
+        level: 'warning',
+        recordId,
+        patientDocument: patientDoc,
+        message: `${invalidPlanCups.length} código(s) CUPS del plan de tratamiento con formato inválido (deben ser 6 dígitos).`,
+      })
+    }
+
+    for (const locationIssue of validateProcedureLocations(
+      planForRips.map((item) => ({
         procedure: item.procedure,
         cupsCode: item.cupsCode,
         quantity: item.quantity,

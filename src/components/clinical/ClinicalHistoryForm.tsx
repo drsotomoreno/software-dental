@@ -379,6 +379,7 @@ export function ClinicalHistoryForm({
         diagnoses={form.diagnoses}
         odontogram={odontogram}
         affectedTeeth={affectedTeeth}
+        specializedAnnexes={form.specializedAnnexes}
         budgetLinkedItemIds={budgetLinkedPlanItemIds}
         disabled={livingLocked}
         onChange={(patch) => update(patch)}

@@ -158,6 +158,7 @@ export function RapidValuationForm({
           treatmentPlanNotes={form.treatmentPlanNotes}
           diagnoses={form.diagnoses}
           odontogram={odontogram}
+          specializedAnnexes={form.specializedAnnexes}
           affectedTeeth={[...new Set(form.diagnoses.flatMap((d) => d.affectedTeeth ?? []))].sort(
             (a, b) => a - b,
           )}

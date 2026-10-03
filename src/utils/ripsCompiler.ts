@@ -4,12 +4,13 @@ import type { EvolutionNote } from '@/types/evolutionNote'
 import type { UserProfile } from '@/types/user'
 import type { RipsExportMetadata, RipsProcedimiento } from '@/types/rips'
 import { DOCUMENT_TYPE_RIPS, RIPS_DEFAULTS, DEMO_PRESTADOR_REPS } from '@/constants/rips'
-import { normalizeCupsCode } from '@/services/catalogService'
+import { isValidCie10Format, normalizeCupsCode } from '@/services/catalogService'
+import { treatmentPlanItemsForRipsPayload } from '@/utils/treatmentPlanRips'
 import { resolveEffectiveCupsForRips } from '@/utils/dentalServiceCatalogRules'
 import { isEvolutionNoteExemptFromRips } from '@/utils/evolutionNoteValidation'
 import { expandEvolutionNoteServices } from '@/utils/evolutionCatalogServices'
 import { calcBillableLineTotal } from '@/utils/cupsBillingRules'
-import { expandBillableLinesForRips } from '@/utils/cupsLocationRules'
+import { expandBillableLinesForRips, type ExpandedRipsBillableLine } from '@/utils/cupsLocationRules'
 
 const CUPS_PATTERN = /^\d{6}$/
 
@@ -40,6 +41,7 @@ export interface RipsCompileOmission {
 
 export interface RipsCompileStats {
   budgetProcedureCount: number
+  treatmentPlanProcedureCount: number
   evolutionEligibleCount: number
   evolutionOmittedCount: number
   omissions: RipsCompileOmission[]
@@ -143,8 +145,16 @@ function buildSingleProcedimiento(
     fdiQuadrant?: string | null
     arch?: 'superior' | 'inferior' | null
   },
+  diagnosisCode?: string,
 ): RipsProcedimiento {
   const normalizedCups = normalizeCupsCode(cupsCode)
+  const lineDiagnosis =
+    diagnosisCode && isValidCie10Format(diagnosisCode)
+      ? normalizeCie10ForRips(diagnosisCode)
+      : ''
+  const principalCode = lineDiagnosis || ctx.principalCode
+  const relatedCode =
+    lineDiagnosis && lineDiagnosis !== ctx.principalCode ? ctx.principalCode : principalCode
 
   return {
     codPrestador: ctx.metadata.codPrestador || DEMO_PRESTADOR_REPS,
@@ -160,10 +170,10 @@ function buildSingleProcedimiento(
     tipoDocumentoIdentificacion:
       DOCUMENT_TYPE_RIPS[ctx.professional.documentType as keyof typeof DOCUMENT_TYPE_RIPS] ?? 'CC',
     numDocumentoIdentificacion: ctx.professional.documentNumber.trim(),
-    codDiagnosticoPrincipal: ctx.principalCode,
+    codDiagnosticoPrincipal: principalCode,
     codDiagnosticoPrincipalCIE11: '',
     nomCodDiagnosticoPrincipalCIE11: '',
-    codDiagnosticoRelacionado: ctx.principalCode,
+    codDiagnosticoRelacionado: relatedCode,
     codComplicacion: null,
     codComplicacionCIE11: '',
     nomComplicacionCIE11: '',
@@ -212,6 +222,47 @@ function buildBudgetProcedimientos(
         fdiQuadrant: item.fdiQuadrant,
         arch: item.arch,
       },
+    ),
+  )
+
+  return {
+    procedimientos,
+    nextConsecutivo: startConsecutivo + procedimientos.length,
+  }
+}
+
+function buildTreatmentPlanProcedimientos(
+  ctx: BuildProcedimientoContext,
+  startConsecutivo: number,
+): { procedimientos: RipsProcedimiento[]; nextConsecutivo: number } {
+  const items = treatmentPlanItemsForRipsPayload(ctx.record)
+  const expanded = expandBillableLinesForRips(
+    items.map((item) => ({
+      procedure: item.procedure,
+      cupsCode: item.cupsCode,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      toothNumber: item.toothNumber,
+      fdiQuadrant: item.fdiQuadrant,
+      arch: item.arch,
+      diagnosisCode: item.diagnosisCode,
+    })),
+  ) as Array<ExpandedRipsBillableLine & { diagnosisCode?: string }>
+
+  const procedimientos = expanded.map((item, index) =>
+    buildSingleProcedimiento(
+      ctx,
+      item.cupsCode!,
+      ctx.defaultAtencionDate,
+      startConsecutivo + index,
+      item.unitPrice,
+      item.quantity,
+      {
+        toothNumber: item.toothNumber,
+        fdiQuadrant: item.fdiQuadrant,
+        arch: item.arch,
+      },
+      item.diagnosisCode,
     ),
   )
 
@@ -314,17 +365,23 @@ export function compileProcedimientosForRecord(
   }
 
   const budget = buildBudgetProcedimientos(ctx, startConsecutivo)
+  const treatmentPlan = buildTreatmentPlanProcedimientos(ctx, budget.nextConsecutivo)
   const evolution = compileEvolutionNotesToRipsProcedimientos(
     record.evolutionNotes ?? [],
     ctx,
-    budget.nextConsecutivo,
+    treatmentPlan.nextConsecutivo,
     lookupCatalog,
   )
 
   return {
-    procedimientos: [...budget.procedimientos, ...evolution.procedimientos],
+    procedimientos: [
+      ...budget.procedimientos,
+      ...treatmentPlan.procedimientos,
+      ...evolution.procedimientos,
+    ],
     stats: {
       budgetProcedureCount: budget.procedimientos.length,
+      treatmentPlanProcedureCount: treatmentPlan.procedimientos.length,
       evolutionEligibleCount: evolution.procedimientos.length,
       evolutionOmittedCount: evolution.omissions.length,
       omissions: evolution.omissions,

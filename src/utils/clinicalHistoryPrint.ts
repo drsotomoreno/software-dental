@@ -9,7 +9,6 @@ import { CONSENT_TEMPLATES } from '@/constants/consentTemplates'
 import {
   DIAGNOSIS_CERTAINTY_LABELS,
   PAYMENT_METHOD_LABELS,
-  TREATMENT_PHASE_LABELS,
 } from '@/constants/dental'
 import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
 import { formatClinicalDiagnosticChartSummary, normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
@@ -38,6 +37,8 @@ import { formatEdentulousImplantPlanSummary } from '@/types/dentalImplantsPlanni
 import { formatImplantMedicalAnamnesisSummary } from '@/types/implantMedicalAnamnesis'
 import { formatImplantPeriodontalAssessmentSummary } from '@/types/implantPeriodontalAssessment'
 import { formatOralSurgeryAnnexSummary } from '@/types/oralSurgeryAnnex'
+import { formatAnatomicalZone } from '@/utils/treatmentPlanZone'
+import { sumTreatmentPlanPrices } from '@/utils/treatmentPlanPricing'
 import { formatEndoAnnexSummary } from '@/utils/endoAnnex'
 import { formatOrthodonticBudgetSummary } from '@/components/clinical/orthodontics/calculator/types'
 import {
@@ -553,19 +554,22 @@ function buildAnnexesSection(data: ClinicalRecordFormData): string {
 }
 
 function buildTreatmentSection(data: ClinicalRecordFormData): string {
-  const rows = data.treatmentPlan
-    .filter((item) => item.procedure.trim())
-    .map(
-      (item) =>
-        `<tr>
-          <td>${escapeHtml(TREATMENT_PHASE_LABELS[item.phase])}</td>
-          <td>${escapeHtml(item.procedure)}</td>
-          <td>${item.toothNumber ?? '—'}</td>
-          <td>${item.quantity}</td>
-          <td>${escapeHtml(item.notes || '—')}</td>
-        </tr>`,
-    )
+  const visible = data.treatmentPlan.filter(
+    (item) => item.procedure.trim() || item.diagnosisCode || item.cupsCode || item.unitPrice > 0,
+  )
+  const rows = visible
+    .map((item) => {
+      const cie = [item.diagnosisCode, item.diagnosisDescription].filter(Boolean).join(' ')
+      const procedure = [item.procedure, item.cupsCode].filter(Boolean).join(' · ')
+      return `<tr>
+          <td>${escapeHtml(formatAnatomicalZone(item) || '—')}</td>
+          <td>${escapeHtml(cie || '—')}</td>
+          <td>${escapeHtml(procedure || '—')}</td>
+          <td>${formatCurrency(item.unitPrice)}</td>
+        </tr>`
+    })
     .join('')
+  const total = sumTreatmentPlanPrices(visible)
 
   return `
     <section class="print-section">
@@ -573,8 +577,9 @@ function buildTreatmentSection(data: ClinicalRecordFormData): string {
       ${
         rows
           ? `<table>
-        <thead><tr><th>Fase</th><th>Procedimiento</th><th>Pieza</th><th>Cant.</th><th>Notas</th></tr></thead>
+        <thead><tr><th>Diente / Zona</th><th>Diagnóstico CIE</th><th>Procedimiento</th><th>Precio</th></tr></thead>
         <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="3">Valor Total</td><td>${formatCurrency(total)}</td></tr></tfoot>
       </table>`
           : '<p>Sin procedimientos en el plan de tratamiento.</p>'
       }

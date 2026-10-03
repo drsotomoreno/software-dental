@@ -40,6 +40,11 @@ export interface TreatmentPlanItem {
   fdiQuadrant?: ImplantFdiQuadrant
   /** Arcada para procedimientos mucosoportados o de arcada completa */
   arch?: 'superior' | 'inferior'
+  /**
+   * Texto de la columna Diente / Zona.
+   * Pieza (16), rango (14-18), cuadrante (Q1) o alcance (General, Arcada Superior, Arcada Inferior).
+   */
+  anatomicalZone?: string
   quantity: number
   unitPrice: number
   notes?: string
@@ -47,7 +52,14 @@ export interface TreatmentPlanItem {
   executionStatus: TreatmentExecutionStatus
   sessionDate?: string
   /** Origen del ítem — las sugerencias del odontograma son editables por el odontólogo */
-  source?: 'manual' | 'sugerencia' | 'orthodontics_annex' | 'endodontics_annex' | 'diagnostico'
+  source?:
+    | 'manual'
+    | 'sugerencia'
+    | 'orthodontics_annex'
+    | 'endodontics_annex'
+    | 'oral_surgery_annex'
+    | 'periodontics_annex'
+    | 'diagnostico'
   /** Diagnóstico CIE-10 vinculado al importar desde la sección 4 */
   diagnosisCode?: string
   diagnosisDescription?: string
