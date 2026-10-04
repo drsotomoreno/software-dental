@@ -120,6 +120,25 @@ export function downloadDianXml(xml: string, numFactura: string | null | undefin
   URL.revokeObjectURL(url)
 }
 
+export interface CuvFacturaConsulta {
+  success: boolean
+  data?: RipsCuvStoredRecord & {
+    cuv?: string | null
+    estadoValidacion?: string
+    mensaje?: string
+  }
+  message?: string
+  error?: string
+}
+
+/** Consulta el estado y el CUV guardados para una factura. */
+export async function consultarCuvPorFactura(numFactura: string): Promise<CuvFacturaConsulta> {
+  const response = await fetch(`/api/cuv/${encodeURIComponent(numFactura)}`, {
+    headers: { Accept: 'application/json', ...identityHeaders() },
+  })
+  return parseJson<CuvFacturaConsulta>(response)
+}
+
 export async function fetchCuvHistory(): Promise<RipsCuvStoredRecord[]> {
   const response = await fetch(`${API_BASE}/cuv/history`, {
     headers: identityHeaders(),

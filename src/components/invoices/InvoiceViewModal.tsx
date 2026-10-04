@@ -30,6 +30,8 @@ import {
 
 import { ThermalInvoiceReceipt } from '@/components/invoices/ThermalInvoiceReceipt'
 
+import { CuvNotifierPanel } from '@/components/rips/CuvNotifierPanel'
+
 import { formatCurrency } from '@/utils'
 import { formatRepsCodeDisplay } from '@/utils/repsCode'
 import { isInvoiceDeliverableToClient } from '@/utils/fevRipsEmissionPipeline'
@@ -484,6 +486,8 @@ function ElectronicInvoicePreview({
         <SummaryCard label="CUV MinSalud" value={invoice.cuv || 'Pendiente'} />
 
       </div>
+
+      {invoice.invoiceNumber ? <CuvNotifierPanel numFactura={invoice.invoiceNumber} /> : null}
 
 
 

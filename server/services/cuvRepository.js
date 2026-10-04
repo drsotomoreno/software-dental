@@ -46,6 +46,39 @@ export async function getCuvByFactura(numFactura) {
   return records.find((r) => r.numFactura === numFactura && r.status === 'approved') ?? null
 }
 
+/** Cualquier registro de la factura, sin filtrar por estado. El más reciente va primero. */
+export async function findCuvRecordByFactura(numFactura) {
+  const records = await readAll()
+  return records.find((r) => r.numFactura === numFactura) ?? null
+}
+
+export async function findPendingCuvByFactura(numFactura) {
+  const records = await readAll()
+  return records.find((r) => r.numFactura === numFactura && r.status === 'pending') ?? null
+}
+
+/**
+ * Actualiza un registro existente conservando id y createdAt.
+ * @param {string} id
+ * @param {object} patch
+ */
+export async function updateCuvRecord(id, patch) {
+  const records = await readAll()
+  const index = records.findIndex((r) => r.id === id)
+  if (index === -1) return null
+  const current = records[index]
+  const updated = {
+    ...current,
+    ...patch,
+    id: current.id,
+    createdAt: current.createdAt,
+    updatedAt: new Date().toISOString(),
+  }
+  records[index] = updated
+  await writeAll(records)
+  return updated
+}
+
 export async function listCuvRecords({ limit = 50 } = {}) {
   const records = await readAll()
   return records.slice(0, limit)
