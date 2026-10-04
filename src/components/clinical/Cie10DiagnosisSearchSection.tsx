@@ -1,5 +1,11 @@
 import { useState } from 'react'
-import type { Cie10Diagnosis, DiagnosisCertainty } from '@/types/clinicalRecord'
+import type {
+  BudgetLineItem,
+  Cie10Diagnosis,
+  DiagnosisCertainty,
+  DiagnosisRecommendedTreatment,
+  TreatmentPlanItem,
+} from '@/types/clinicalRecord'
 import { DIAGNOSIS_CERTAINTY_LABELS } from '@/constants/dental'
 import { ENDO_FDI_TEETH } from '@/types/endoAnnex.types'
 import {
@@ -9,12 +15,16 @@ import {
 } from '@/constants/clinicalHistorySections'
 import { useCatalogMeta, useCatalogSearch } from '@/hooks/useCatalogSearch'
 import { VoiceDictationButton, FieldVoiceHeader } from '@/components/voice'
+import { DiagnosisRecommendedTreatmentFields } from '@/components/clinical/DiagnosisRecommendedTreatmentFields'
 
 interface Cie10DiagnosisSearchSectionProps {
   diagnoses: Cie10Diagnosis[]
+  treatmentPlan?: TreatmentPlanItem[]
+  budgetItems?: BudgetLineItem[]
   onAddDiagnosis: (code: string, description: string, affectedTeeth?: number[]) => void
   onUpdateDiagnosis: (code: string, patch: Partial<Cie10Diagnosis>) => void
   onRemoveDiagnosis: (code: string) => void
+  onTransferRecommendedTreatment?: (diagnosisCode: string, recommendationId: string) => void
   disabled?: boolean
   /** Permite asociar piezas FDI mediante lista desplegable */
   enableToothSelection?: boolean
@@ -22,9 +32,12 @@ interface Cie10DiagnosisSearchSectionProps {
 
 export function Cie10DiagnosisSearchSection({
   diagnoses,
+  treatmentPlan = [],
+  budgetItems = [],
   onAddDiagnosis,
   onUpdateDiagnosis,
   onRemoveDiagnosis,
+  onTransferRecommendedTreatment,
   disabled = false,
   enableToothSelection = false,
 }: Cie10DiagnosisSearchSectionProps) {
@@ -271,6 +284,20 @@ export function Cie10DiagnosisSearchSection({
                   />
                 )}
               </div>
+              {onTransferRecommendedTreatment && (
+                <DiagnosisRecommendedTreatmentFields
+                  diagnosis={diagnosis}
+                  treatmentPlan={treatmentPlan}
+                  budgetItems={budgetItems}
+                  disabled={disabled}
+                  onChange={(recommendedTreatments: DiagnosisRecommendedTreatment[]) =>
+                    onUpdateDiagnosis(diagnosis.code, { recommendedTreatments })
+                  }
+                  onTransfer={(recommendationId) =>
+                    onTransferRecommendedTreatment(diagnosis.code, recommendationId)
+                  }
+                />
+              )}
             </li>
             )
           })}

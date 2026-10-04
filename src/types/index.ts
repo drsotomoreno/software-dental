@@ -11,6 +11,7 @@ export type {
   ClinicalRecord,
   ClinicalRecordFormData,
   Cie10Diagnosis,
+  DiagnosisRecommendedTreatment,
   TreatmentPlanItem,
   BudgetSummary,
 } from './clinicalRecord'
