@@ -171,7 +171,7 @@ async function bootAfterListen() {
 
 // Abrir el puerto antes de PostgreSQL. Si la base no responde, Render
 // igual tiene un proceso escuchando y deja de devolver 502.
-const port = Number(process.env.PORT) || config.port || 3000
+const port = process.env.PORT || 3000
 const httpServer = app.listen(port, '0.0.0.0', () => {
   console.log(`[RIPS API] App y API en http://0.0.0.0:${port}`)
   console.log(`[config] DATABASE_URL=${DATABASE_URL.replace(/:([^:@/]+)@/, ':***@')}`)
