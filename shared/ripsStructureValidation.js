@@ -144,6 +144,83 @@ export function validateRipsCodPrestador(codPrestador) {
   return { valid: true }
 }
 
+/** RIPS sin factura electrónica de venta (SISPRO). numFactura queda null y numNota es el consecutivo. */
+export const TIPO_NOTA_RIPS_SIN_FACTURA = 'RS'
+
+/**
+ * Consecutivo interno de RIPS sin factura. Acepta el formato de nota del prestador
+ * (p. ej. NOTA-RS-001), distinto del número FEV DIAN.
+ */
+export const RIPS_NUM_NOTA_RS_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,29}$/
+
+/**
+ * Subcategorías CUPS de consulta odontológica especializada (no son odontología general .03).
+ * 04 otras especialidades; 17–24 especialidades; 36 patología oral.
+ */
+const ODONTOLOGIA_ESPECIALIDAD_TAILS = new Set([
+  '04',
+  '17',
+  '18',
+  '19',
+  '20',
+  '21',
+  '22',
+  '23',
+  '24',
+  '36',
+])
+
+/**
+ * @param {unknown} tipoNota
+ * @returns {boolean}
+ */
+export function isRipsSinFactura(tipoNota) {
+  return String(tipoNota ?? '').trim().toUpperCase() === TIPO_NOTA_RIPS_SIN_FACTURA
+}
+
+/**
+ * @param {unknown} numNota
+ * @returns {{ valid: boolean, message?: string }}
+ */
+export function validateRipsNumNotaSinFactura(numNota) {
+  const value = normalizeRipsNumFactura(numNota)
+  if (!value) {
+    return {
+      valid: false,
+      message:
+        'Para RIPS sin factura (tipoNota: RS), el número de nota (numNota) es obligatorio.',
+    }
+  }
+
+  if (!RIPS_NUM_NOTA_RS_PATTERN.test(value)) {
+    return {
+      valid: false,
+      message:
+        'numNota debe ser un consecutivo interno (letras, números, punto, guion o guion bajo; máximo 30 caracteres).',
+    }
+  }
+
+  return { valid: true }
+}
+
+/**
+ * Odontología general (capítulo 89) debe cerrar en subcategoría .03 (890203, 890303, 890703).
+ * Las consultas de especialidad (p. ej. 890222 ortodoncia) no se rechazan por esta regla.
+ * @param {unknown} codConsulta
+ * @returns {boolean}
+ */
+export function consultaOdontologiaGeneralInvalida(codConsulta) {
+  const raw = String(codConsulta ?? '').trim()
+  if (!raw.startsWith('89')) return false
+
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length < 2) return true
+
+  const tail = digits.slice(-2)
+  if (tail === '03' || ODONTOLOGIA_ESPECIALIDAD_TAILS.has(tail)) return false
+  return true
+}
+
 /**
  * @param {string | null | undefined} numero
  * @param {{ label?: string, allowNull?: boolean }} [options]
@@ -327,11 +404,16 @@ export function validateRipsStructureSyntax(rips, context = {}) {
   const fechaGeneracion = context.fechaGeneracion ?? new Date()
   const convenioFechaInicio = context.convenioFechaInicio
   const numFactura = normalizeRipsNumFactura(rips?.numFactura)
+  const tipoNota = String(rips?.tipoNota ?? '').trim()
+  const esSinFactura = isRipsSinFactura(tipoNota)
   const allowNullNumFactura = allowsNullNumFactura(context.perfilFiscal, {
-    allowNullNumFactura: context.allowNullNumFactura,
+    allowNullNumFactura: context.allowNullNumFactura || esSinFactura,
     esRipsTemporal: context.esRipsTemporal,
+    tipoNota,
   })
-  const fevReferencia = normalizeRipsNumFactura(context.fevReferencia) ?? numFactura
+  const fevReferencia = esSinFactura
+    ? null
+    : (normalizeRipsNumFactura(context.fevReferencia) ?? numFactura)
 
   const facturaCheck = validateRipsFevNumero(numFactura, {
     label: 'numFactura',
@@ -346,7 +428,12 @@ export function validateRipsStructureSyntax(rips, context = {}) {
     )
   }
 
-  if (rips?.tipoNota) {
+  if (esSinFactura) {
+    const notaCheck = validateRipsNumNotaSinFactura(rips?.numNota)
+    if (!notaCheck.valid) {
+      pushError('numNota', notaCheck.message)
+    }
+  } else if (tipoNota) {
     const notaCheck = validateRipsFevNumero(rips?.numNota, { label: 'numNota' })
     if (!notaCheck.valid) {
       pushError('numNota', notaCheck.message)
@@ -354,7 +441,7 @@ export function validateRipsStructureSyntax(rips, context = {}) {
   } else if (rips?.numNota?.trim()) {
     pushError(
       'numNota',
-      'numNota solo debe informarse cuando tipoNota está definido (nota crédito/débito).',
+      'numNota solo debe informarse cuando tipoNota está definido (nota crédito/débito o RS).',
     )
   }
 
@@ -418,6 +505,16 @@ export function validateRipsStructureSyntax(rips, context = {}) {
         }
       })
     }
+
+    const consultas = servicios.consultas ?? []
+    consultas.forEach((consulta, idx) => {
+      if (!consultaOdontologiaGeneralInvalida(consulta?.codConsulta)) return
+      pushError(
+        `${prefix}.servicios.consultas[${idx}].codConsulta`,
+        `Usuario [${userIndex}], Consulta [${idx}]: Las consultas de odontología general deben usar subcategorías terminadas en .03.`,
+        { patientDocument: patientRef },
+      )
+    })
   })
 
   if (context.codPrestador) {

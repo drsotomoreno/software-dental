@@ -89,13 +89,15 @@ export function isObligadoFev(value) {
 }
 
 /**
- * Null en numFactura es válido para no obligados y para RIPS temporales (pre-FEV).
+ * Null en numFactura es válido para no obligados, RIPS temporales (pre-FEV)
+ * y RIPS sin factura electrónica (tipoNota "RS").
  * @param {unknown} perfilFiscal
- * @param {{ allowNullNumFactura?: boolean, esRipsTemporal?: boolean }} [options]
+ * @param {{ allowNullNumFactura?: boolean, esRipsTemporal?: boolean, tipoNota?: string | null }} [options]
  * @returns {boolean}
  */
 export function allowsNullNumFactura(perfilFiscal, options = {}) {
   if (options.allowNullNumFactura === true || options.esRipsTemporal === true) return true
+  if (String(options.tipoNota ?? '').trim().toUpperCase() === 'RS') return true
   return isNoObligadoFev(perfilFiscal)
 }
 

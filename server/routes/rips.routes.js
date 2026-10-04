@@ -1,8 +1,13 @@
 import { Router } from 'express'
 import { submitRipsToMinsalud } from '../services/minsaludRipsClient.js'
-import { saveCuvRecord, getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
+import { saveCuvRecord, getCuvByFactura, getCuvByNota, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
-import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
+import {
+  validateRipsPackageLocally,
+  hasBlockingValidationErrors,
+  validarRipsSinFactura,
+} from '../services/ripsLocalValidator.js'
+import { isRipsSinFactura } from '../../shared/ripsStructureValidation.js'
 import {
   saveTemporaryRipsRecord,
   listTemporaryRipsRecords,
@@ -57,7 +62,9 @@ router.post('/validate', async (req, res, next) => {
 
     const cuvRecord = await saveCuvRecord({
       cuv: result.cuv,
-      numFactura: rips.numFactura,
+      numFactura: isRipsSinFactura(rips.tipoNota) ? null : rips.numFactura,
+      tipoNota: isRipsSinFactura(rips.tipoNota) ? 'RS' : (rips.tipoNota ?? null),
+      numNota: isRipsSinFactura(rips.tipoNota) ? rips.numNota : (rips.numNota ?? null),
       numDocumentoIdObligado: rips.numDocumentoIdObligado,
       status: 'approved',
       procesoId: result.procesoId,
@@ -70,7 +77,7 @@ router.post('/validate', async (req, res, next) => {
     })
 
     let dianXml = null
-    if (invoice) {
+    if (invoice && !isRipsSinFactura(rips.tipoNota)) {
       dianXml = buildDianHealthInvoiceXml({
         cuv: result.cuv,
         numFactura: rips.numFactura,
@@ -122,14 +129,21 @@ router.post('/validate-local', (req, res) => {
  */
 router.get('/cuv', async (req, res, next) => {
   try {
-    const { numFactura, id } = req.query
+    const { numFactura, numNota, id } = req.query
     if (id) {
       const record = await getCuvById(String(id))
       if (!record) return res.status(404).json({ success: false, error: 'CUV no encontrado.' })
       return res.json({ success: true, record })
     }
+    if (numNota) {
+      const record = await getCuvByNota(String(numNota))
+      if (!record) {
+        return res.status(404).json({ success: false, error: 'CUV no encontrado para esa nota.' })
+      }
+      return res.json({ success: true, record })
+    }
     if (!numFactura) {
-      return res.status(400).json({ success: false, error: 'Indique numFactura o id.' })
+      return res.status(400).json({ success: false, error: 'Indique numFactura, numNota o id.' })
     }
     const record = await getCuvByFactura(String(numFactura))
     if (!record) return res.status(404).json({ success: false, error: 'CUV no encontrado para esa factura.' })
@@ -146,6 +160,91 @@ router.get('/cuv/history', async (req, res, next) => {
   try {
     const records = await listCuvRecords({ limit: Number(req.query.limit ?? 50) })
     res.json({ success: true, records })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * POST /api/rips/enviar
+ * Transmite el paquete. tipoNota RS omite el XML de la FEV y radica solo el JSON.
+ */
+router.post('/enviar', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const source = body.rips && typeof body.rips === 'object' ? body.rips : body
+    const tipoNota = isRipsSinFactura(source.tipoNota) ? 'RS' : (source.tipoNota ?? null)
+    const rips = {
+      numDocumentoIdObligado: source.numDocumentoIdObligado,
+      numFactura: tipoNota === 'RS' ? null : (source.numFactura ?? null),
+      tipoNota,
+      numNota: source.numNota ?? null,
+      usuarios: Array.isArray(source.usuarios) ? source.usuarios : [],
+    }
+
+    const encabezado = validarRipsSinFactura(rips, {
+      perfilFiscal: body.perfilFiscal ?? body.metadatos?.perfilFiscal,
+      esRipsTemporal: body.esRipsTemporal ?? body.metadatos?.esRipsTemporal,
+      allowNullNumFactura: body.allowNullNumFactura ?? body.metadatos?.allowNullNumFactura,
+    })
+    if (!encabezado.isValid) {
+      return res.status(422).json({
+        success: false,
+        error: encabezado.errors.join(' '),
+        errors: encabezado.errors,
+      })
+    }
+
+    const result = await submitRipsToMinsalud({
+      rips,
+      metadatos: {
+        ...(body.metadatos ?? {}),
+        xmlFev: body.xmlFev ?? body.metadatos?.xmlFev ?? null,
+        perfilFiscal: body.perfilFiscal ?? body.metadatos?.perfilFiscal,
+        esRipsTemporal: tipoNota === 'RS' || body.esRipsTemporal || body.metadatos?.esRipsTemporal,
+        allowNullNumFactura:
+          tipoNota === 'RS' || body.allowNullNumFactura || body.metadatos?.allowNullNumFactura,
+      },
+    })
+
+    if (!result.success) {
+      const localText = (result.localIssues ?? [])
+        .filter((issue) => issue.level === 'error')
+        .map((issue) => issue.message)
+        .join(' ')
+      const ministryText = (result.ministryErrors ?? []).map((issue) => issue.message).join(' ')
+      return res.status(422).json({
+        success: false,
+        error: result.error || localText || ministryText || 'No se pudo enviar el paquete RIPS.',
+        localIssues: result.localIssues ?? [],
+        ministryErrors: result.ministryErrors ?? [],
+        source: result.source,
+      })
+    }
+
+    const cuvRecord = await saveCuvRecord({
+      cuv: result.cuv,
+      numFactura: rips.numFactura,
+      tipoNota: rips.tipoNota,
+      numNota: rips.numNota,
+      numDocumentoIdObligado: rips.numDocumentoIdObligado,
+      status: 'approved',
+      procesoId: result.procesoId,
+      fechaRadicacion: result.fechaRadicacion,
+      estado: result.estado,
+      source: result.source,
+      metadatos: body.metadatos ?? {},
+    })
+
+    res.json({
+      success: true,
+      cuv: result.cuv,
+      cuvRecordId: cuvRecord.id,
+      procesoId: result.procesoId,
+      fechaRadicacion: result.fechaRadicacion,
+      estado: result.estado,
+      source: result.source,
+    })
   } catch (error) {
     next(error)
   }
