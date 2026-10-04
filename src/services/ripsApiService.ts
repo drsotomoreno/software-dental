@@ -4,7 +4,7 @@ import type {
   RipsValidateResponse,
   RipsCuvStoredRecord,
 } from '@/types/ripsCuv'
-import type { RipsTransaction } from '@/types/rips'
+import type { RipsTransaction, RipsUsuario } from '@/types/rips'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import type { FiscalProfile } from '@/utils/fiscalProfile'
 
@@ -104,6 +104,35 @@ export async function routeDictatedEvolutionByFiscalProfile(input: {
     body: JSON.stringify(input),
   })
   return parseJson<DictatedEvolutionBillingResult>(response)
+}
+
+export interface ProcesarRipsCierrePayload {
+  numDocumentoIdObligado: string
+  numFactura: string | null
+  tipoNota: 'RS' | null
+  numNota: string | null
+  usuarios: RipsUsuario[]
+}
+
+export interface ProcesarRipsCierreResponse {
+  success: boolean
+  cuv?: string
+  error?: string
+  estadoValidacion?: 'PENDIENTE' | 'VALIDO' | 'APROBADO_MSPS' | 'RECHAZADO'
+}
+
+/**
+ * Cierre de atención: radica FEV tradicional (tipoNota null) o RIPS sin factura (tipoNota RS).
+ */
+export async function procesarRipsCierre(
+  payload: ProcesarRipsCierrePayload,
+): Promise<ProcesarRipsCierreResponse> {
+  const response = await fetch(`${API_BASE}/procesar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...identityHeaders() },
+    body: JSON.stringify(payload),
+  })
+  return parseJson<ProcesarRipsCierreResponse>(response)
 }
 
 /** Descarga XML FEV-Salud con CUV inyectado para transmisión DIAN. */

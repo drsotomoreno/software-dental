@@ -39,6 +39,7 @@ import type { ElectronicCreditNote } from '@/types/creditNote'
 import type { ClinicBillingSettingsRecord } from '@/types/billingModality'
 import type { RdaCryptographicConsent, RdaExternalHistory } from '@/types/rdaExternalHistory'
 import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
+import type { LocalRipsRecord } from '@/types/localRips'
 import { CREDIT_NOTE_IMMUTABILITY_MESSAGE } from '@/types/creditNote'
 import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
@@ -77,6 +78,7 @@ export class DentalDatabase extends Dexie {
   rdaConsents!: EntityTable<RdaCryptographicConsent, 'id'>
   rdaExternalHistories!: EntityTable<RdaExternalHistory, 'id'>
   ripsTemporales!: EntityTable<TemporaryRipsRecord, 'id'>
+  localRipsRecords!: EntityTable<LocalRipsRecord, 'id'>
 
   constructor() {
     super('DentalEMR')
@@ -713,6 +715,11 @@ export class DentalDatabase extends Dexie {
           })
         }
       }
+    })
+
+    this.version(29).stores({
+      localRipsRecords:
+        '++id, numFactura, numNota, tipoNota, numDocumentoIdObligado, estadoValidacion, createdAt',
     })
   }
 }

@@ -39,6 +39,7 @@ export type {
 export type { UserProfile, PriceItem, Subscription, SubscriptionPlan } from './user'
 export type { FiscalProfile } from '@/utils/fiscalProfile'
 export type { TemporaryRipsRecord, TemporaryRipsStatus } from './ripsTemporal'
+export type { LocalRipsRecord, LocalRipsValidationStatus } from './localRips'
 export type {
   TariffItemType,
   TariffItem,
