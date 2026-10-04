@@ -6,138 +6,18 @@ import { useAuth } from '@/contexts/AuthContext'
 
 import { APP_INITIALS, APP_SHORT_NAME } from '@/constants/branding'
 
-import { ROLE_LABELS, type Permission } from '@/utils/permissions'
+import { ROLE_LABELS } from '@/utils/permissions'
+import { resolveNavModules, type ResolvedNavModule } from '@/services/uiConfigService'
 
 function navPillClassName(isActive: boolean): string {
   return `nav-pill-top ${isActive ? 'nav-pill-active' : 'nav-pill-inactive'}`
 }
 
-function isPatientsListActive(pathname: string): boolean {
-  return (
-    pathname === '/pacientes' ||
-    (pathname.startsWith('/pacientes/') && !pathname.startsWith('/pacientes/nuevo'))
-  )
-}
-
-function isValuatedPatientsActive(pathname: string): boolean {
-  return pathname === '/pacientes-valorados'
-}
-
-function isCompletedPatientsActive(pathname: string): boolean {
-  return pathname === '/pacientes-terminados'
-}
-
-type NavRow = 1 | 2
-
-interface TopNavItem {
-  label: string
-  to: string
-  permission: Permission
-  row: NavRow
-  isActive?: (pathname: string) => boolean
-}
-
-const TOP_NAV_ITEMS: TopNavItem[] = [
-  {
-    label: 'Nuevo Paciente',
-    to: '/pacientes/nuevo',
-    permission: 'patients.write',
-    row: 1,
-  },
-  {
-    label: 'Pacientes Activos',
-    to: '/pacientes',
-    permission: 'patients.read',
-    row: 1,
-    isActive: isPatientsListActive,
-  },
-  {
-    label: 'Pacientes Valorados',
-    to: '/pacientes-valorados',
-    permission: 'patients.read',
-    row: 1,
-    isActive: isValuatedPatientsActive,
-  },
-  {
-    label: 'Pacientes Terminados',
-    to: '/pacientes-terminados',
-    permission: 'patients.read',
-    row: 1,
-    isActive: isCompletedPatientsActive,
-  },
-  {
-    label: 'Agenda',
-    to: '/agenda',
-    permission: 'agenda.read',
-    row: 1,
-  },
-  {
-    label: 'Historia Clínica',
-    to: '/portabilidad',
-    permission: 'export.portability',
-    row: 1,
-  },
-  {
-    label: 'Mis Precios y Procedimientos',
-    to: '/precios',
-    permission: 'prices.manage',
-    row: 1,
-  },
-  {
-    label: 'Mis Cuentas y Facturas',
-    to: '/cuentas-facturas',
-    permission: 'invoices.read',
-    row: 2,
-  },
-  {
-    label: 'RIPS',
-    to: '/rips',
-    permission: 'export.rips',
-    row: 2,
-  },
-  {
-    label: 'FHIR',
-    to: '/fhir',
-    permission: 'export.fhir',
-    row: 2,
-  },
-  {
-    label: 'Catálogos',
-    to: '/catalogos',
-    permission: 'catalogs.manage',
-    row: 2,
-  },
-  {
-    label: 'Copias',
-    to: '/respaldos',
-    permission: 'backups.manage',
-    row: 2,
-  },
-  {
-    label: 'Usuarios',
-    to: '/usuarios',
-    permission: 'users.manage',
-    row: 2,
-  },
-  {
-    label: 'Auditoría',
-    to: '/auditoria',
-    permission: 'audit.read',
-    row: 2,
-  },
-  {
-    label: 'Suscripciones',
-    to: '/admin/usuarios',
-    permission: 'audit.read',
-    row: 2,
-  },
-]
-
 function TopNavPill({
   item,
   pathname,
 }: {
-  item: TopNavItem
+  item: ResolvedNavModule
   pathname: string
 }) {
   const active = item.isActive ? item.isActive(pathname) : pathname === item.to
@@ -182,7 +62,7 @@ export function TopNavbar() {
     navigate('/login')
   }
 
-  const visibleItems = TOP_NAV_ITEMS.filter((item) => can(item.permission))
+  const visibleItems = resolveNavModules().filter((item) => can(item.permission))
   const primaryRow = visibleItems.filter((item) => item.row === 1)
   const secondaryRow = visibleItems.filter((item) => item.row === 2)
 
@@ -198,7 +78,7 @@ export function TopNavbar() {
                 `top-nav-brand flex shrink-0 items-center gap-2 rounded-full border px-2 py-1.5 pr-3 transition sm:pr-3.5 ${
                   isActive
                     ? 'border-dental-600 bg-dental-600 text-white'
-                    : 'border-orange-200 bg-orange-50 text-orange-900 hover:bg-orange-100'
+                    : 'top-nav-brand-idle'
                 }`
               }
             >
@@ -215,7 +95,7 @@ export function TopNavbar() {
               {primaryRow.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                   {primaryRow.map((item) => (
-                    <TopNavPill key={item.to} item={item} pathname={location.pathname} />
+                    <TopNavPill key={item.id} item={item} pathname={location.pathname} />
                   ))}
                 </div>
               )}
@@ -223,7 +103,7 @@ export function TopNavbar() {
               {secondaryRow.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                   {secondaryRow.map((item) => (
-                    <TopNavPill key={item.to} item={item} pathname={location.pathname} />
+                    <TopNavPill key={item.id} item={item} pathname={location.pathname} />
                   ))}
                 </div>
               )}
