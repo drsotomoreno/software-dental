@@ -6,6 +6,7 @@ import type { RipsExportMetadata, RipsProcedimiento } from '@/types/rips'
 import { DOCUMENT_TYPE_RIPS, RIPS_DEFAULTS, DEMO_PRESTADOR_REPS } from '@/constants/rips'
 import { isValidCie10Format, normalizeCupsCode } from '@/services/catalogService'
 import { treatmentPlanItemsForRipsPayload } from '@/utils/treatmentPlanRips'
+import { paymentControlLinesForRipsPayload } from '@/utils/paymentControlLines'
 import { resolveEffectiveCupsForRips } from '@/utils/dentalServiceCatalogRules'
 import { isEvolutionNoteExemptFromRips } from '@/utils/evolutionNoteValidation'
 import { expandEvolutionNoteServices } from '@/utils/evolutionCatalogServices'
@@ -42,6 +43,7 @@ export interface RipsCompileOmission {
 export interface RipsCompileStats {
   budgetProcedureCount: number
   treatmentPlanProcedureCount: number
+  paymentControlProcedureCount: number
   evolutionEligibleCount: number
   evolutionOmittedCount: number
   omissions: RipsCompileOmission[]
@@ -272,6 +274,47 @@ function buildTreatmentPlanProcedimientos(
   }
 }
 
+function buildPaymentControlProcedimientos(
+  ctx: BuildProcedimientoContext,
+  startConsecutivo: number,
+): { procedimientos: RipsProcedimiento[]; nextConsecutivo: number } {
+  const items = paymentControlLinesForRipsPayload(ctx.record)
+  const expanded = expandBillableLinesForRips(
+    items.map((item) => ({
+      procedure: item.procedure,
+      cupsCode: item.cupsCode,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      toothNumber: item.toothNumber,
+      fdiQuadrant: item.fdiQuadrant,
+      arch: item.arch,
+      diagnosisCode: item.diagnosisCode,
+    })),
+  ) as Array<ExpandedRipsBillableLine & { diagnosisCode?: string }>
+
+  const procedimientos = expanded.map((item, index) =>
+    buildSingleProcedimiento(
+      ctx,
+      item.cupsCode!,
+      ctx.defaultAtencionDate,
+      startConsecutivo + index,
+      item.unitPrice,
+      item.quantity,
+      {
+        toothNumber: item.toothNumber,
+        fdiQuadrant: item.fdiQuadrant,
+        arch: item.arch,
+      },
+      item.diagnosisCode,
+    ),
+  )
+
+  return {
+    procedimientos,
+    nextConsecutivo: startConsecutivo + procedimientos.length,
+  }
+}
+
 export interface EvolutionCatalogLookup {
   (dentalServiceId: string | undefined): {
     requiereCupsRips: boolean
@@ -366,10 +409,11 @@ export function compileProcedimientosForRecord(
 
   const budget = buildBudgetProcedimientos(ctx, startConsecutivo)
   const treatmentPlan = buildTreatmentPlanProcedimientos(ctx, budget.nextConsecutivo)
+  const paymentControl = buildPaymentControlProcedimientos(ctx, treatmentPlan.nextConsecutivo)
   const evolution = compileEvolutionNotesToRipsProcedimientos(
     record.evolutionNotes ?? [],
     ctx,
-    treatmentPlan.nextConsecutivo,
+    paymentControl.nextConsecutivo,
     lookupCatalog,
   )
 
@@ -377,11 +421,13 @@ export function compileProcedimientosForRecord(
     procedimientos: [
       ...budget.procedimientos,
       ...treatmentPlan.procedimientos,
+      ...paymentControl.procedimientos,
       ...evolution.procedimientos,
     ],
     stats: {
       budgetProcedureCount: budget.procedimientos.length,
       treatmentPlanProcedureCount: treatmentPlan.procedimientos.length,
+      paymentControlProcedureCount: paymentControl.procedimientos.length,
       evolutionEligibleCount: evolution.procedimientos.length,
       evolutionOmittedCount: evolution.omissions.length,
       omissions: evolution.omissions,

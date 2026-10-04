@@ -126,6 +126,35 @@ export type PaymentMethod =
   | 'mixto'
   | 'otro'
 
+/**
+ * Fila de Control de Pagos.
+ * Vive dentro del registro clínico (Dexie) y alimenta el JSON RIPS
+ * cuando el procedimiento no está ya cubierto por presupuesto o plan.
+ */
+export interface PaymentControlLine {
+  id: string
+  procedure: string
+  /** CUPS — Codificación Única de Procedimientos en Salud */
+  cupsCode?: string
+  toothNumber?: number
+  /** Cuadrante FDI (Q1–Q4) */
+  fdiQuadrant?: ImplantFdiQuadrant
+  /** Arcada para procedimientos de arcada completa */
+  arch?: 'superior' | 'inferior'
+  /**
+   * Texto de la columna Diente / Zona.
+   * Pieza (16), rango (14-18), cuadrante (Q1) o alcance (General, Arcada Superior, Arcada Inferior).
+   */
+  anatomicalZone?: string
+  quantity: number
+  unitPrice: number
+  diagnosisCode?: string
+  diagnosisDescription?: string
+  /** Ítem de presupuesto del que se importó la fila */
+  budgetItemId?: string
+  source?: 'manual' | 'budget'
+}
+
 /** Forma de pago acordada por procedimiento */
 export interface PaymentPlanItem {
   id: string
@@ -178,6 +207,8 @@ export interface PaymentRecord {
   id: string
   /** Vínculo opcional con fila del plan de pagos */
   paymentPlanItemId?: string
+  /** Vínculo con la fila de Control de Pagos que originó el abono */
+  paymentControlLineId?: string
   paymentDate: string
   amount: number
   paymentMethod: PaymentMethod
@@ -245,6 +276,8 @@ export interface ClinicalRecord {
   paymentPlan: PaymentPlanItem[]
   /** Sección 8: Control de pagos y facturas */
   paymentControl: PaymentRecord[]
+  /** Filas de procedimientos del control de pagos (zona, CIE, CUPS y precio) */
+  paymentControlLines?: PaymentControlLine[]
   orthodonticsPaymentControl: OrthodonticsPaymentRecord[]
   /** Sección 9: Notas de evolución */
   evolutionNotes: EvolutionNote[]
@@ -288,6 +321,7 @@ export interface ClinicalRecordFormData {
   budget: BudgetSummary
   paymentPlan: PaymentPlanItem[]
   paymentControl: PaymentRecord[]
+  paymentControlLines: PaymentControlLine[]
   orthodonticsPaymentControl: OrthodonticsPaymentRecord[]
   evolutionNotes: EvolutionNote[]
   informedConsent: InformedConsent

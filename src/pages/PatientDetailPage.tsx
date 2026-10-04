@@ -1172,6 +1172,8 @@ export function PatientDetailPage() {
 
         paymentControl: normalizedClinicalData.paymentControl,
 
+        paymentControlLines: normalizedClinicalData.paymentControlLines ?? [],
+
         orthodonticsPaymentControl: normalizedClinicalData.orthodonticsPaymentControl ?? [],
 
         evolutionNotes: sortedEvolutionNotes,
@@ -1222,6 +1224,8 @@ export function PatientDetailPage() {
         paymentPlan: normalizedClinicalData.paymentPlan,
 
         paymentControl: normalizedClinicalData.paymentControl,
+
+        paymentControlLines: normalizedClinicalData.paymentControlLines ?? [],
 
         orthodonticsPaymentControl: normalizedClinicalData.orthodonticsPaymentControl ?? [],
 

@@ -39,6 +39,10 @@ import { formatImplantPeriodontalAssessmentSummary } from '@/types/implantPeriod
 import { formatOralSurgeryAnnexSummary } from '@/types/oralSurgeryAnnex'
 import { formatAnatomicalZone } from '@/utils/treatmentPlanZone'
 import { sumTreatmentPlanPrices } from '@/utils/treatmentPlanPricing'
+import {
+  sumPaymentControlPrices,
+  treatmentPaymentBalance,
+} from '@/utils/paymentControlLines'
 import { formatEndoAnnexSummary } from '@/utils/endoAnnex'
 import { formatOrthodonticBudgetSummary } from '@/components/clinical/orthodontics/calculator/types'
 import {
@@ -652,19 +656,38 @@ function buildPaymentPlanSection(data: ClinicalRecordFormData): string {
 }
 
 function buildPaymentControlSection(data: ClinicalRecordFormData): string {
-  const rows = data.paymentControl
-    .map(
-      (payment) =>
-        `<tr>
+  const lines = data.paymentControlLines ?? []
+  const visible = lines.filter(
+    (item) => item.procedure.trim() || item.diagnosisCode || item.cupsCode || item.unitPrice > 0,
+  )
+  const total = sumPaymentControlPrices(visible)
+  const balance = treatmentPaymentBalance(visible, data.paymentControl)
+  const rows = visible
+    .map((item) => {
+      const cie = [item.diagnosisCode, item.diagnosisDescription].filter(Boolean).join(' ')
+      const procedure = [item.procedure, item.cupsCode].filter(Boolean).join(' · ')
+      return `<tr>
+          <td>${escapeHtml(formatAnatomicalZone(item) || '—')}</td>
+          <td>${escapeHtml(cie || '—')}</td>
+          <td>${escapeHtml(procedure || '—')}</td>
+          <td>${formatCurrency(item.unitPrice)}</td>
+        </tr>`
+    })
+    .join('')
+  const legacyPayments =
+    visible.length === 0
+      ? data.paymentControl
+          .map(
+            (payment) =>
+              `<tr>
           <td>${formatDate(payment.paymentDate)}</td>
           <td>${formatCurrency(payment.amount)}</td>
           <td>${escapeHtml(PAYMENT_METHOD_LABELS[payment.paymentMethod])}</td>
-          <td>${escapeHtml(payment.treatingDentistName || '—')}</td>
           <td>${escapeHtml(payment.paymentReason)}</td>
-          <td>${escapeHtml(payment.notes || '—')}</td>
         </tr>`,
-    )
-    .join('')
+          )
+          .join('')
+      : ''
 
   return `
     <section class="print-section">
@@ -672,10 +695,19 @@ function buildPaymentControlSection(data: ClinicalRecordFormData): string {
       ${
         rows
           ? `<table>
-        <thead><tr><th>Fecha</th><th>Valor</th><th>Método</th><th>Odontólogo tratante</th><th>Concepto</th><th>Notas</th></tr></thead>
+        <thead><tr><th>Diente / Zona</th><th>Diagnóstico CIE</th><th>Procedimiento</th><th>Precio</th></tr></thead>
         <tbody>${rows}</tbody>
+        <tfoot>
+          <tr><td colspan="3">Valor Total</td><td>${formatCurrency(total)}</td></tr>
+          <tr><td colspan="3">Saldo del tratamiento</td><td>${formatCurrency(balance)}</td></tr>
+        </tfoot>
       </table>`
-          : '<p>Sin pagos registrados.</p>'
+          : legacyPayments
+            ? `<table>
+        <thead><tr><th>Fecha</th><th>Valor</th><th>Método</th><th>Concepto</th></tr></thead>
+        <tbody>${legacyPayments}</tbody>
+      </table>`
+            : '<p>Sin procedimientos en control de pagos.</p>'
       }
     </section>`
 }
