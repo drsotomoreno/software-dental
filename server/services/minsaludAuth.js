@@ -1,59 +1,218 @@
-import { config, hasMinsaludCredentials } from '../config.js'
+import { config } from '../config.js'
 
-let cachedToken = null
-let tokenExpiresAt = 0
+/** Ambiente de pruebas FEV-RIPS cuando no hay URL propia en la configuración. */
+const MSPS_BASE_URL_DEFAULT = 'https://stage-fevrips.sispro.gov.co'
+
+/** Margen para no reutilizar un token que está a punto de vencer (5 minutos). */
+const TOKEN_REUSE_MARGIN_MS = 300000
+
+/** Vigencia de 2 horas, fijada a 1 hora 55 minutos por seguridad. */
+const TOKEN_TTL_MS = 115 * 60 * 1000
 
 /**
- * Obtiene token de autenticación técnica para el API SISPRO/PISIS.
- * Soporta client_credentials OAuth2 o usuario/contraseña según configuración.
+ * Almacén en memoria segmentado por NIT del obligado.
+ * Cada prestador conserva su propio token.
+ * @type {Map<string, { token: string, expiresAt: number }>}
  */
-export async function getMinsaludAccessToken() {
-  if (cachedToken && Date.now() < tokenExpiresAt - 60_000) {
-    return cachedToken
+const tokenCachePorNit = new Map()
+
+function soloDigitos(value) {
+  return String(value ?? '').replace(/\D/g, '')
+}
+
+function mspsAuthUrl() {
+  const explicit = String(config.minsalud.authUrl || '').trim()
+  if (explicit) return explicit
+  const base = String(config.minsalud.apiBaseUrl || MSPS_BASE_URL_DEFAULT).replace(/\/$/, '')
+  return `${base}/api/v1/auth`
+}
+
+/**
+ * @param {{ tipoUsuario?: unknown, numeroDocumento?: unknown, nitObligado?: unknown }} [credenciales]
+ */
+export function normalizarCredencialesPrestador(credenciales = {}) {
+  return {
+    tipoUsuario: String(credenciales.tipoUsuario ?? '').trim(),
+    numeroDocumento: soloDigitos(credenciales.numeroDocumento),
+    nitObligado: soloDigitos(credenciales.nitObligado),
   }
+}
 
-  if (!hasMinsaludCredentials()) {
-    return null
-  }
+export function credencialesCompletas(credenciales) {
+  const { tipoUsuario, numeroDocumento, nitObligado } = normalizarCredencialesPrestador(credenciales)
+  return Boolean(tipoUsuario && numeroDocumento && nitObligado)
+}
 
-  const { apiBaseUrl, authUrl, clientId, clientSecret, username, password } = config.minsalud
-  const tokenUrl = authUrl || `${apiBaseUrl}/oauth/token`
+/**
+ * Credenciales corporativas del prestador autenticado.
+ * El NIT de la clínica (o del doctor, si es el titular) identifica la transmisión.
+ * @param {object} [user]
+ * @param {object} [clinica]
+ */
+function textoPresente(value) {
+  const trimmed = String(value ?? '').trim()
+  return trimmed || undefined
+}
 
-  const body = clientId && clientSecret
-    ? new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        client_secret: clientSecret,
-        scope: 'rips.validar',
-      })
-    : new URLSearchParams({
-        grant_type: 'password',
-        username,
-        password,
-        scope: 'rips.validar',
-      })
+export function credencialesCorporativasDesdeSesion(user, clinica) {
+  const nitObligado =
+    textoPresente(user?.nitObligado) ??
+    textoPresente(user?.providerNit) ??
+    textoPresente(clinica?.nitObligado) ??
+    textoPresente(clinica?.providerNit) ??
+    ''
+  const tipoExplicito = textoPresente(user?.tipoUsuario) ?? textoPresente(clinica?.tipoUsuario) ?? ''
+  const tipoUsuario = tipoExplicito || (soloDigitos(nitObligado) ? 'NIT' : String(user?.documentType || '').trim())
+  const numeroDocumento =
+    textoPresente(user?.numeroDocumento) ??
+    ((tipoUsuario.toUpperCase() === 'NIT' ? nitObligado : '') ||
+      textoPresente(user?.documentNumber) ||
+      textoPresente(clinica?.documentNumber) ||
+      '')
+  return normalizarCredencialesPrestador({ tipoUsuario, numeroDocumento, nitObligado })
+}
 
-  const response = await fetch(tokenUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
+/**
+ * Credenciales del usuario que ejecuta la transacción.
+ * El NIT del prestador puede venir del perfil o, en último término, del RIPS.
+ * @param {object} [user]
+ * @param {{ tipoUsuario?: unknown, numeroDocumento?: unknown, nitObligado?: unknown, numDocumentoIdObligado?: unknown }} [extras]
+ */
+export function credencialesDesdeUsuario(user, extras = {}) {
+  return normalizarCredencialesPrestador({
+    tipoUsuario: extras.tipoUsuario ?? user?.tipoUsuario ?? user?.documentType,
+    numeroDocumento: extras.numeroDocumento ?? user?.numeroDocumento ?? user?.documentNumber,
+    nitObligado:
+      extras.nitObligado ?? user?.nitObligado ?? user?.providerNit ?? extras.numDocumentoIdObligado,
   })
+}
 
-  if (!response.ok) {
-    const text = await response.text()
-    const error = new Error('Autenticación MinSalud fallida')
-    error.status = 502
-    error.details = text
+/** Respaldo de un solo prestador configurado en el servidor. */
+export function credencialesDesdeConfiguracion() {
+  const documento = soloDigitos(config.minsalud.username)
+  const tipoUsuario =
+    String(config.minsalud.tipoUsuario || '').trim() || (documento ? 'CC' : '')
+  return normalizarCredencialesPrestador({
+    tipoUsuario,
+    numeroDocumento: documento,
+    nitObligado: config.minsalud.nit,
+  })
+}
+
+/**
+ * Prioriza las credenciales explícitas de la transacción y, si faltan, las del usuario en sesión.
+ * @param {{ user?: object, rips?: object, metadatos?: object, credenciales?: object }} [contexto]
+ */
+export function resolverCredencialesPrestador({ user, rips, metadatos = {}, credenciales } = {}) {
+  const fromMeta =
+    metadatos?.credenciales && typeof metadatos.credenciales === 'object' ? metadatos.credenciales : {}
+  const explicit = credenciales && typeof credenciales === 'object' ? credenciales : {}
+  const direct = credencialesDesdeUsuario(user, {
+    tipoUsuario: explicit.tipoUsuario ?? fromMeta.tipoUsuario,
+    numeroDocumento: explicit.numeroDocumento ?? fromMeta.numeroDocumento,
+    nitObligado: explicit.nitObligado ?? fromMeta.nitObligado,
+  })
+  if (credencialesCompletas(direct)) return direct
+
+  const identidadDeTransaccion = Boolean(
+    user ||
+      explicit.tipoUsuario ||
+      explicit.numeroDocumento ||
+      explicit.nitObligado ||
+      fromMeta.tipoUsuario ||
+      fromMeta.numeroDocumento ||
+      fromMeta.nitObligado,
+  )
+  if (!identidadDeTransaccion) {
+    const fromEnv = credencialesDesdeConfiguracion()
+    if (credencialesCompletas(fromEnv)) return fromEnv
+  }
+
+  if (!direct.nitObligado && rips?.numDocumentoIdObligado) {
+    return normalizarCredencialesPrestador({
+      ...direct,
+      nitObligado: rips.numDocumentoIdObligado,
+    })
+  }
+  return direct
+}
+
+function errorAutenticacion(nitObligado, mensaje, details) {
+  const error = new Error(`Fallo de autenticación para el NIT ${nitObligado}: ${mensaje}`)
+  error.status = 502
+  if (details !== undefined) error.details = details
+  return error
+}
+
+/**
+ * Obtiene o reutiliza el token de acceso del Ministerio de forma dinámica por cada usuario/clínica.
+ * @param {{ tipoUsuario: string, numeroDocumento: string, nitObligado: string }} credenciales
+ * @returns {Promise<string>}
+ */
+export async function obtenerTokenMultiusuario(credenciales) {
+  const ahora = Date.now()
+  const { tipoUsuario, numeroDocumento, nitObligado } = normalizarCredencialesPrestador(credenciales)
+
+  if (!tipoUsuario || !numeroDocumento || !nitObligado) {
+    const error = new Error(
+      'Faltan credenciales del prestador que realiza la transacción (tipoUsuario, numeroDocumento, nitObligado).',
+    )
+    error.status = 400
     throw error
   }
 
-  const data = await response.json()
-  cachedToken = data.access_token
-  tokenExpiresAt = Date.now() + (data.expires_in ?? 3600) * 1000
-  return cachedToken
+  const cached = tokenCachePorNit.get(nitObligado)
+  if (cached && cached.expiresAt > ahora + TOKEN_REUSE_MARGIN_MS) {
+    return cached.token
+  }
+
+  try {
+    const response = await fetch(mspsAuthUrl(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ tipoUsuario, numeroDocumento, nitObligado }),
+    })
+
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw errorAutenticacion(
+        nitObligado,
+        data?.mensaje || data?.message || response.statusText || 'respuesta no exitosa',
+        data,
+      )
+    }
+
+    const token = data.token || data.access_token
+    if (!token) {
+      throw errorAutenticacion(nitObligado, 'la respuesta no incluye token', data)
+    }
+
+    tokenCachePorNit.set(nitObligado, {
+      token,
+      expiresAt: ahora + TOKEN_TTL_MS,
+    })
+    return token
+  } catch (error) {
+    if (error?.status) throw error
+    throw errorAutenticacion(nitObligado, error?.message || 'error de red')
+  }
 }
 
-export function clearMinsaludTokenCache() {
-  cachedToken = null
-  tokenExpiresAt = 0
+/**
+ * @param {{ tipoUsuario: string, numeroDocumento: string, nitObligado: string }} credenciales
+ */
+export async function getMinsaludAccessToken(credenciales) {
+  return obtenerTokenMultiusuario(credenciales)
+}
+
+/** Limpia el token de un prestador o, sin argumento, el de todos. */
+export function clearMinsaludTokenCache(nitObligado) {
+  if (nitObligado === undefined || nitObligado === null || nitObligado === '') {
+    tokenCachePorNit.clear()
+    return
+  }
+  tokenCachePorNit.delete(soloDigitos(nitObligado))
 }

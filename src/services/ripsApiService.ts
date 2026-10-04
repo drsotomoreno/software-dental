@@ -30,6 +30,35 @@ async function parseJson<T>(response: Response): Promise<T> {
   return data as T
 }
 
+export interface TransmisionMinisterioResult {
+  success: boolean
+  data?: {
+    CUV?: string
+    cuv?: string
+    ProcesoId?: string
+    estado?: string
+    source?: string
+  }
+  mensaje?: string
+  error?: string | { mensaje?: string; message?: string }
+}
+
+/**
+ * Envía el RIPS de la historia cerrada. El backend toma el NIT del prestador
+ * autenticado en la sesión; el cuerpo no lleva credenciales.
+ */
+export async function transmitirRipsDeLaSesion(
+  payloadRips: RipsTransaction,
+  xmlFev?: string,
+): Promise<TransmisionMinisterioResult> {
+  const response = await fetch(`${API_BASE}/transmitir`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...identityHeaders() },
+    body: JSON.stringify({ payloadRips, xmlFev }),
+  })
+  return parseJson<TransmisionMinisterioResult>(response)
+}
+
 /** Verifica que el backend RIPS esté disponible en localhost:3000 (vía proxy). */
 export async function checkRipsApiHealth(): Promise<boolean> {
   try {

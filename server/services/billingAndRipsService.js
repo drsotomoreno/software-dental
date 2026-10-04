@@ -109,7 +109,13 @@ export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user })
     }
   }
 
-  const ministryResult = await submitRipsToMinsalud({ rips: payload, metadatos: mergedMetadatos })
+  const ministryResult = await submitRipsToMinsalud({
+    rips: payload,
+    metadatos: mergedMetadatos,
+    user,
+    credenciales: metadatos.credenciales,
+    xmlFev: metadatos.xmlFev ?? invoice?.xmlFev ?? invoice?.xml,
+  })
   if (!ministryResult.success) {
     return {
       ok: false,
@@ -245,11 +251,12 @@ export async function enrutarPorPerfilFiscal({ perfilFiscal, rips, invoice, meta
  * @param {object} [params.invoice]
  * @param {object} [params.metadatos]
  */
-export async function processClinicalSessionOnServer({ rips, invoice, metadatos }) {
+export async function processClinicalSessionOnServer({ rips, invoice, metadatos, user }) {
   return enrutarPorPerfilFiscal({
-    perfilFiscal: metadatos?.perfilFiscal,
+    perfilFiscal: metadatos?.perfilFiscal ?? user?.perfilFiscal,
     rips,
     invoice,
     metadatos,
+    user,
   })
 }
