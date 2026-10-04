@@ -68,7 +68,11 @@ export async function processDictatedEvolution(req, res, next) {
       user: session.user,
     })
 
-    const status = result.ok ? 200 : result.localIssues ? 422 : 502
+    const status = result.ok
+      ? 200
+      : result.localIssues || result.estado_dian === 'Rechazado' || result.estado_minsalud_muv === 'Rechazado_Con_Glosas'
+        ? 422
+        : 502
     return res.status(status).json({
       ...result,
       success: result.ok === true,

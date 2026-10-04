@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { parseRepsCode } from '../../shared/repsCode.js'
 import { config } from '../config.js'
 import {
@@ -8,6 +7,9 @@ import {
   DIAN_IVA_EXCLUIDO_NORMA,
   buildExcludedIvaBreakdown,
 } from '../../shared/dianHealthTax.js'
+
+/** Placeholder de 96 hex hasta que la DIAN devuelve el CUFE real. */
+export const DIAN_CUFE_PLACEHOLDER = '0'.repeat(96)
 
 function escapeXml(value) {
   return String(value ?? '')
@@ -43,25 +45,56 @@ ${indent}</cac:TaxTotal>`
 }
 
 /**
- * Construye XML UBL 2.1 de Factura Electrónica de Venta en Salud (FEV-Salud)
- * con el CUV inyectado en el anexo normativo del sector salud (Res. 2275 / Anexo técnico DIAN).
+ * Inserta o reemplaza el CUFE real en `cbc:UUID` del XML FEV.
+ * @param {string} xml
+ * @param {string} cufe
+ */
+export function stampCufeOnInvoiceXml(xml, cufe) {
+  const safe = escapeXml(String(cufe ?? '').trim())
+  if (!safe || !xml) return xml
+  if (/<cbc:UUID schemeName="CUFE-SHA384">[^<]*<\/cbc:UUID>/.test(xml)) {
+    return xml.replace(
+      /<cbc:UUID schemeName="CUFE-SHA384">[^<]*<\/cbc:UUID>/,
+      `<cbc:UUID schemeName="CUFE-SHA384">${safe}</cbc:UUID>`,
+    )
+  }
+  return xml
+}
+
+/**
+ * Inyecta el CUV en copias de entrega (no es prerrequisito para enviar a la DIAN).
+ * @param {string} xml
+ * @param {string} cuv
+ */
+export function stampCuvOnInvoiceXml(xml, cuv) {
+  const safe = escapeXml(String(cuv ?? '').trim())
+  if (!safe || !xml) return xml
+  if (/<salud:CodigoUnicoValidacion>[^<]*<\/salud:CodigoUnicoValidacion>/.test(xml)) {
+    return xml.replace(
+      /<salud:CodigoUnicoValidacion>[^<]*<\/salud:CodigoUnicoValidacion>/,
+      `<salud:CodigoUnicoValidacion>${safe}</salud:CodigoUnicoValidacion>`,
+    )
+  }
+  return xml.replace(
+    /<salud:SectorSalud>/,
+    `<salud:SectorSalud>\n          <salud:CodigoUnicoValidacion>${safe}</salud:CodigoUnicoValidacion>`,
+  )
+}
+
+/**
+ * Construye XML UBL 2.1 de Factura Electrónica de Venta en Salud (FEV-Salud).
+ * El CUV es opcional: el envío a la DIAN ocurre primero y el CUV llega después (MUV).
  *
  * Tributo IVA código `01`, tarifa `0.00%` (servicios de salud excluidos, ET Art. 476).
- * BaseImponible = ValorTotal; ValorImpuesto = 0.00.
  *
  * @param {object} params
- * @param {string} params.cuv
+ * @param {string} [params.cuv]
+ * @param {string} [params.cufe]
  * @param {string} params.numFactura
- * @param {string} params.nitEmisor
- * @param {string} params.razonSocialEmisor
- * @param {string} params.nitAdquiriente
- * @param {string} params.razonSocialAdquiriente
- * @param {string} params.issueDate
- * @param {number} params.payableAmount
- * @param {string} [params.codPrestadorReps]
  */
 export function buildDianHealthInvoiceXml({
   cuv,
+  cufe,
   numFactura,
   nitEmisor,
   razonSocialEmisor,
@@ -72,13 +105,13 @@ export function buildDianHealthInvoiceXml({
   lines = [],
   codPrestadorReps,
 }) {
-  if (!cuv?.trim()) {
-    throw new Error('El CUV es obligatorio para generar la FEV-Salud ante la DIAN.')
-  }
-
-  const uuid = randomUUID()
+  const uuid = String(cufe ?? '').trim() || DIAN_CUFE_PLACEHOLDER
   const iva = buildExcludedIvaBreakdown(payableAmount)
   const reps = parseRepsCode(codPrestadorReps)
+  const cuvXml = String(cuv ?? '').trim()
+    ? `
+          <salud:CodigoUnicoValidacion>${escapeXml(String(cuv).trim())}</salud:CodigoUnicoValidacion>`
+    : ''
   const repsXml = reps.valid
     ? `
           <salud:CodigoPrestadorREPS>${escapeXml(reps.digits)}</salud:CodigoPrestadorREPS>`
@@ -121,8 +154,7 @@ ${excludedIvaTaxTotalXml(lineExtension, '      ')}
             <sts:SoftwareID>${escapeXml(config.dian.softwareId)}</sts:SoftwareID>
           </sts:SoftwareProvider>
         </sts:DianExtensions>
-        <salud:SectorSalud>
-          <salud:CodigoUnicoValidacion>${escapeXml(cuv)}</salud:CodigoUnicoValidacion>${repsXml}
+        <salud:SectorSalud>${cuvXml}${repsXml}
           <salud:NumeroFacturaVinculada>${escapeXml(numFactura)}</salud:NumeroFacturaVinculada>
           <salud:ResolucionAplicable>Resolución 2275 de 2023</salud:ResolucionAplicable>
         </salud:SectorSalud>

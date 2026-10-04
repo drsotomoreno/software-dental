@@ -9,8 +9,10 @@ import {
   getFoliosAvailable,
   usesProviderEmission,
 } from '@/services/billingModalityService'
-import { emitInvoiceWithDianProvider } from '@/services/dianProviderClient'
+import { emitDualValidation } from '@/services/ripsApiService'
 import { buildDianQrUrl } from '@/utils/thermalInvoicePrint'
+import { hasOfficialRipsPackage } from '@/utils/dualValidation'
+import type { EstadoDian, EstadoMinsaludMuv, MuvRejectionDetail } from '@/utils/dualValidation'
 
 export interface ChargeEmissionContext {
   invoice: PaymentInvoice
@@ -33,9 +35,25 @@ export interface ChargeEmissionResult {
   message: string
 }
 
+function parseOfficialRips(snapshot?: string | null) {
+  if (!snapshot?.trim()) return undefined
+  try {
+    const parsed = JSON.parse(snapshot) as Record<string, unknown>
+    if (hasOfficialRipsPackage(parsed)) return parsed
+  } catch {
+    /* snapshot no oficial */
+  }
+  return undefined
+}
+
 function buildRipsSnapshot(
   context: ChargeEmissionContext,
-  extras?: { cuv?: string | null; cufe?: string | null },
+  extras?: {
+    cuv?: string | null
+    cufe?: string | null
+    estado_dian?: EstadoDian
+    estado_minsalud_muv?: EstadoMinsaludMuv
+  },
 ): Record<string, unknown> {
   const cart = context.cart ?? []
   const procedimientos = cart
@@ -63,6 +81,10 @@ function buildRipsSnapshot(
     fecha: context.invoice.invoiceDate,
     cuv: extras?.cuv ?? null,
     cufe: extras?.cufe ?? null,
+    codigo_cufe: extras?.cufe ?? null,
+    codigo_cuv: extras?.cuv ?? null,
+    estado_dian: extras?.estado_dian ?? 'Pendiente',
+    estado_minsalud_muv: extras?.estado_minsalud_muv ?? 'Pendiente_Envio',
     paciente: {
       nombre: context.patientName ?? '',
       documento: context.patientDocument ?? '',
@@ -86,7 +108,9 @@ function buildRipsSnapshot(
     vrTotalRips: equality.ripsTotal,
     fevEqualsRips: equality.ok,
     nota: extras?.cufe
-      ? 'Factura electrónica DIAN (marca blanca). Folio consumido. Cruce CUFE ↔ RIPS JSON.'
+      ? extras.cuv
+        ? 'Factura 100% legalizada (CUFE DIAN + CUV MinSalud).'
+        : 'CUFE DIAN legalizado. CUV MinSalud pendiente o con glosas.'
       : 'Comprobante interno. No consume folios electrónicos.',
   }
 }
@@ -109,6 +133,11 @@ function cashReceiptResult(
       emissionMode: 'manual',
       cufe: null,
       cuv: null,
+      codigo_cufe: null,
+      codigo_cuv: null,
+      estado_dian: 'Pendiente',
+      estado_minsalud_muv: 'Pendiente_Envio',
+      detalles_rechazo_muv: [],
       dianQrUrl: null,
       ripsJsonSnapshot,
     },
@@ -125,37 +154,91 @@ export async function emitChargeReceipt(
     return cashReceiptResult(context, depleted && settings.modality === 'automatic')
   }
 
-  const emitted = await emitInvoiceWithDianProvider({
-    invoiceNumber: context.invoice.invoiceNumber,
-    issueDate: context.invoice.invoiceDate,
-    amount: context.amount,
-    buyerName: context.patientName,
-    buyerDocument: context.patientDocument,
+  const officialRips = parseOfficialRips(context.invoice.ripsJsonSnapshot)
+  const lines = (context.cart ?? []).map((item) => ({
+    description: item.name,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    cupsCode: item.cupsCode || undefined,
+  }))
+
+  const dual = await emitDualValidation({
+    rips: officialRips ?? {
+      numDocumentoIdObligado: '',
+      numFactura: context.invoice.invoiceNumber,
+      tipoNota: null,
+      numNota: null,
+      usuarios: [],
+    },
+    invoice: {
+      invoiceNumber: context.invoice.invoiceNumber,
+      nitEmisor: '900123456',
+      razonSocialEmisor: 'Prestador de servicios de salud',
+      nitAdquiriente: context.patientDocument ?? context.buyer?.documentNumber ?? '222222222222',
+      razonSocialAdquiriente: context.patientName ?? 'Adquiriente',
+      issueDate: context.invoice.invoiceDate,
+      payableAmount: context.amount,
+      lines: lines.length
+        ? lines
+        : [
+            {
+              description: context.paymentReason || context.invoice.notes || 'Atención odontológica',
+              quantity: 1,
+              unitPrice: context.amount,
+              cupsCode: context.cupsCode || undefined,
+            },
+          ],
+    },
+    metadatos: {
+      patientDocument: context.patientDocument,
+    },
+    options: {
+      apiKey: settings.tenantApiKey,
+    },
   })
 
-  if (!emitted.ok || !emitted.cufe) {
+  const cufe = dual.codigo_cufe ?? dual.cufe ?? null
+  if (dual.estado_dian !== 'Aprobado' || !cufe) {
     return cashReceiptResult(context, depleted)
   }
 
   const consumed = consumeElectronicFolio()
+  const cuv = dual.codigo_cuv ?? dual.cuv ?? null
   const ripsJsonSnapshot = JSON.stringify(
-    buildRipsSnapshot(context, { cuv: emitted.cuv, cufe: emitted.cufe }),
+    officialRips
+      ? { ...officialRips, cufe, cuv }
+      : buildRipsSnapshot(context, {
+          cuv,
+          cufe,
+          estado_dian: dual.estado_dian,
+          estado_minsalud_muv: dual.estado_minsalud_muv,
+        }),
   )
+
+  const glosas: MuvRejectionDetail[] = dual.detalles_rechazo_muv ?? []
+  const message = dual.listoParaEntrega
+    ? `CUFE y CUV listos. Factura 100% legalizada.${consumed ? ' Se descontó 1 folio.' : ''}`
+    : dual.estado_minsalud_muv === 'Rechazado_Con_Glosas'
+      ? `CUFE DIAN legalizado. MUV rechazó con glosas (${glosas.length}).`
+      : `CUFE DIAN legalizado. CUV pendiente de envío a MinSalud.${consumed ? ' Se descontó 1 folio.' : ''}`
 
   return {
     modality: 'automatic',
     usedProvider: true,
     folioConsumed: consumed,
     depleted: getFoliosAvailable() <= 0,
-    message: consumed
-      ? `${emitted.message} Se descontó 1 folio.`
-      : emitted.message,
+    message,
     invoice: {
       ...context.invoice,
       emissionMode: 'provider',
-      cufe: emitted.cufe,
-      cuv: emitted.cuv ?? null,
-      dianQrUrl: emitted.qrUrl || buildDianQrUrl(emitted.cufe),
+      cufe,
+      cuv,
+      codigo_cufe: cufe,
+      codigo_cuv: cuv,
+      estado_dian: dual.estado_dian,
+      estado_minsalud_muv: dual.estado_minsalud_muv,
+      detalles_rechazo_muv: glosas,
+      dianQrUrl: dual.qrUrl || buildDianQrUrl(cufe),
       ripsJsonSnapshot,
     },
   }

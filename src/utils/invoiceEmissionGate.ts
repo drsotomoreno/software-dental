@@ -26,12 +26,12 @@ export function validateInvoiceEmissionGate(
   const gate = { ...DEFAULT_GATE, ...options }
   const issues: InvoiceValidationIssue[] = []
 
-  if (gate.requireCuv && !invoice.cuv?.trim()) {
+  if (gate.requireCuv && !invoice.cuv?.trim() && !invoice.codigo_cuv?.trim()) {
     issues.push({
       level: 'error',
       field: 'cuv',
       message:
-        'No puede emitir la FEV-Salud sin el CUV del Ministerio de Salud. Radique primero los RIPS en MUV/PISIS.',
+        'No puede entregar la FEV-Salud al paciente sin el CUV del Ministerio de Salud. El CUFE DIAN no sustituye el CUV.',
     })
   }
 

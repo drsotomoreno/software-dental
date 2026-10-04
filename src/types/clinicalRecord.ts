@@ -155,7 +155,12 @@ export interface PaymentInvoice {
   /** Factura automática con proveedor vs recibo interno */
   emissionMode?: 'provider' | 'manual'
   cufe?: string | null
+  codigo_cufe?: string | null
   cuv?: string | null
+  codigo_cuv?: string | null
+  estado_dian?: import('./invoice').EstadoDian
+  estado_minsalud_muv?: import('./invoice').EstadoMinsaludMuv
+  detalles_rechazo_muv?: import('./invoice').MuvRejectionDetail[]
   dianQrUrl?: string | null
   /** RIPS JSON de salud asociado al cobro (stringificado) */
   ripsJsonSnapshot?: string | null

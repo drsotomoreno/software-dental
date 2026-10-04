@@ -113,6 +113,7 @@ export function validateCupsAssociationStep(items: InvoiceItem[]): FevRipsPipeli
 
 /**
  * Paso 4 — El CUV MinSalud debe estar enlazado antes de entregar la FEV al paciente.
+ * No bloquea el envío a la DIAN (el CUFE se obtiene primero).
  */
 export function validateCuvLinkageStep(
   invoice: Pick<ElectronicInvoice, 'cuv'>,
@@ -124,7 +125,7 @@ export function validateCuvLinkageStep(
     toIssue(4, {
       field: 'cuv',
       message:
-        'El CUV del Ministerio de Salud debe enlazarse a la factura electrónica antes de entregarla al paciente. Radique RIPS en MUV y espere el CUV.',
+        'El CUV del Ministerio de Salud debe enlazarse a la factura electrónica antes de entregarla al paciente. El CUFE DIAN puede existir sin CUV; radique RIPS en MUV y espere el CUV.',
     }),
   ]
 }
@@ -136,7 +137,7 @@ export function collectInvoiceCupsCodes(items: InvoiceItem[]): string[] {
 }
 
 /**
- * Orden obligatorio al facturar: REPS → RETHUS → CUPS → CUV (si FEV-Salud).
+ * Orden obligatorio al facturar: REPS → RETHUS → CUPS → (DIAN/CUFE) → CUV (entrega al paciente).
  */
 export function validateFevRipsEmissionPipeline(
   professional: UserProfile,
@@ -153,9 +154,9 @@ export function validateFevRipsEmissionPipeline(
 }
 
 export function isInvoiceDeliverableToClient(
-  invoice: Pick<ElectronicInvoice, 'cuv' | 'status'>,
+  invoice: Pick<ElectronicInvoice, 'cuv' | 'codigo_cuv' | 'status'>,
   isElectronicFev: boolean,
 ): boolean {
   if (!isElectronicFev) return true
-  return Boolean(invoice.cuv?.trim())
+  return Boolean(invoice.cuv?.trim() || invoice.codigo_cuv?.trim())
 }
