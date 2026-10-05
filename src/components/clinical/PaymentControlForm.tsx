@@ -150,18 +150,24 @@ function PriceCell({
 
 function PayAmountField({
   remaining,
+  paid,
   disabled,
   onPay,
 }: {
   remaining: number
+  paid: number
   disabled?: boolean
   onPay: (amount: number) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
 
-  if (remaining <= 0) {
+  if (remaining <= 0 && paid > 0) {
     return <span className="text-xs font-medium text-green-700">Pagado</span>
+  }
+
+  if (remaining <= 0) {
+    return <span className="text-xs text-slate-400">Sin saldo</span>
   }
 
   const amount = () => {
@@ -675,6 +681,7 @@ export function PaymentControlForm({
                       <div className="flex items-center justify-end gap-1">
                         <PayAmountField
                           remaining={remaining}
+                          paid={lineBillablePrice(line) - remaining}
                           disabled={disabled}
                           onPay={(amount) => registerPayment(line, amount)}
                         />
