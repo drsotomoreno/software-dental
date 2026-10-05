@@ -190,6 +190,19 @@ export function buildBudgetFromTreatmentPlan(
   return [...existingItems, ...toAdd]
 }
 
+/** Conceptos de ortodoncia que el plan de pagos mantiene aparte del listado clínico. */
+export const ORTHODONTICS_PAYMENT_PLAN_PROCEDURES = new Set([
+  'Ortodoncia — Cuota inicial',
+  'Ortodoncia — Controles',
+  'Ortodoncia — Retenedores',
+])
+
+/** Conceptos de implantes que el plan de pagos sincroniza con el presupuesto. */
+export const DENTAL_IMPLANT_PAYMENT_PLAN_PROCEDURES = new Set([
+  'Implantes — Colocación',
+  'Implantes — Prótesis definitiva',
+])
+
 /** Filas del plan de pagos derivadas del presupuesto de ortodoncia. */
 export function orthodonticsPaymentPlanItems(
   orthodontics?: OrthodonticsBudget,
@@ -257,16 +270,10 @@ export function syncPaymentPlanWithBudget(
   orthodontics?: OrthodonticsBudget,
   dentalImplants?: DentalImplantsBudget,
 ): PaymentPlanItem[] {
-  const orthoProcedureNames = new Set([
-    'Ortodoncia — Cuota inicial',
-    'Ortodoncia — Controles',
-    'Ortodoncia — Retenedores',
+  const managedProcedureNames = new Set([
+    ...ORTHODONTICS_PAYMENT_PLAN_PROCEDURES,
+    ...DENTAL_IMPLANT_PAYMENT_PLAN_PROCEDURES,
   ])
-  const implantProcedureNames = new Set([
-    'Implantes — Colocación',
-    'Implantes — Prótesis definitiva',
-  ])
-  const managedProcedureNames = new Set([...orthoProcedureNames, ...implantProcedureNames])
 
   const manualRows = current.filter(
     (p) => !p.budgetItemId && !managedProcedureNames.has(p.procedure),
@@ -299,7 +306,7 @@ export function syncPaymentPlanWithBudget(
 
   const existingOrtho = new Map(
     current
-      .filter((p) => orthoProcedureNames.has(p.procedure))
+      .filter((p) => ORTHODONTICS_PAYMENT_PLAN_PROCEDURES.has(p.procedure))
       .map((p) => [p.procedure, p]),
   )
 
@@ -310,7 +317,7 @@ export function syncPaymentPlanWithBudget(
 
   const existingImplants = new Map(
     current
-      .filter((p) => implantProcedureNames.has(p.procedure))
+      .filter((p) => DENTAL_IMPLANT_PAYMENT_PLAN_PROCEDURES.has(p.procedure))
       .map((p) => [p.procedure, p]),
   )
 

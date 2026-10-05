@@ -38,7 +38,6 @@ import { EvolutionNotesForm } from './EvolutionNotesForm'
 import { InformedConsentForm } from './InformedConsentForm'
 import { TreatmentPlanForm } from './TreatmentPlanForm'
 import { BudgetForm } from './BudgetForm'
-import { PaymentPlanForm } from './PaymentPlanForm'
 import { PaymentControlForm } from './PaymentControlForm'
 import { Odontogram } from '@/components/odontogram'
 import { DiagnosticOdontogramSection } from '@/components/clinical/diagnostics'
@@ -70,7 +69,8 @@ interface ClinicalHistoryFormProps {
 }
 
 function showClinicalSection(activeSection: string, section: string): boolean {
-  return activeSection === 'all' || activeSection === section
+  const normalized = activeSection === 'control-pagos' ? 'plan-pagos' : activeSection
+  return normalized === 'all' || normalized === section
 }
 
 export function createEmptyClinicalForm(
@@ -398,12 +398,26 @@ export function ClinicalHistoryForm({
 
       {showClinicalSection(activeSection, 'plan-pagos') && (
         <div id="clinical-section-plan-pagos">
-          <PaymentPlanForm
+          <PaymentControlForm
+            paymentControlLines={form.paymentControlLines ?? []}
             paymentPlan={form.paymentPlan}
-            budgetItems={form.budgetItems}
+            paymentControl={form.paymentControl}
+            orthodonticsPaymentControl={form.orthodonticsPaymentControl}
             orthodonticsBudget={form.orthodonticsBudget}
             dentalImplantsBudget={form.dentalImplantsBudget}
-            disabled={livingLocked}
+            budgetItems={form.budgetItems}
+            treatmentPlan={form.treatmentPlan}
+            disabled={snapshotLocked}
+            patientId={patientId}
+            clinicalRecordId={clinicalRecordId}
+            patientName={patientName}
+            patientDocument={patientDocument}
+            onLinesChange={(paymentControlLines) => update({ paymentControlLines })}
+            onPaymentPlanChange={(paymentPlan) => update({ paymentPlan })}
+            onChange={(paymentControl) => update({ paymentControl })}
+            onOrthodonticsPaymentControlChange={(orthodonticsPaymentControl) =>
+              update({ orthodonticsPaymentControl })
+            }
           />
         </div>
       )}
@@ -433,29 +447,6 @@ export function ClinicalHistoryForm({
         allowNewNotes
         allowAddendums
       />
-        </div>
-      )}
-
-      {showClinicalSection(activeSection, 'control-pagos') && (
-        <div id="clinical-section-control-pagos">
-          <PaymentControlForm
-            paymentControlLines={form.paymentControlLines ?? []}
-            paymentControl={form.paymentControl}
-            orthodonticsPaymentControl={form.orthodonticsPaymentControl}
-            orthodonticsBudget={form.orthodonticsBudget}
-            budgetItems={form.budgetItems}
-            treatmentPlan={form.treatmentPlan}
-            disabled={snapshotLocked}
-            patientId={patientId}
-            clinicalRecordId={clinicalRecordId}
-            patientName={patientName}
-            patientDocument={patientDocument}
-            onLinesChange={(paymentControlLines) => update({ paymentControlLines })}
-            onChange={(paymentControl) => update({ paymentControl })}
-            onOrthodonticsPaymentControlChange={(orthodonticsPaymentControl) =>
-              update({ orthodonticsPaymentControl })
-            }
-          />
         </div>
       )}
 

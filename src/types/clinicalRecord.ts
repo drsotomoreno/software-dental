@@ -160,6 +160,8 @@ export interface PaymentPlanItem {
   id: string
   /** Vínculo con ítem del presupuesto */
   budgetItemId?: string
+  /** Fila de la tabla clínica (zona, CIE, CUPS) a la que pertenece este acuerdo */
+  paymentControlLineId?: string
   /** Fila creada manualmente en el plan de pagos */
   source?: 'custom' | 'budget'
   procedure: string
@@ -272,11 +274,11 @@ export interface ClinicalRecord {
   orthodonticsBudget?: OrthodonticsBudget
   dentalImplantsBudget?: DentalImplantsBudget
   budget: BudgetSummary
-  /** Sección 7: Plan de pagos por procedimiento */
+  /** Sección 9: acuerdo de pago por procedimiento */
   paymentPlan: PaymentPlanItem[]
-  /** Sección 8: Control de pagos y facturas */
+  /** Sección 9: abonos, facturas y saldo */
   paymentControl: PaymentRecord[]
-  /** Filas de procedimientos del control de pagos (zona, CIE, CUPS y precio) */
+  /** Filas clínicas de la sección 9 (zona, CIE, CUPS y precio) */
   paymentControlLines?: PaymentControlLine[]
   orthodonticsPaymentControl: OrthodonticsPaymentRecord[]
   /** Sección 9: Notas de evolución */

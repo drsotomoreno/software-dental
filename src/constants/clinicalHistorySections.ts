@@ -10,8 +10,7 @@ export const CLINICAL_HISTORY_SECTION_NUMBERS = {
   planPagos: 9,
   consentimiento: 10,
   evolucion: 11,
-  controlPagos: 12,
-  exportacionHistoria: 13,
+  exportacionHistoria: 12,
 } as const
 
 export type ClinicalHistoryPrintSectionId =
@@ -24,7 +23,6 @@ export type ClinicalHistoryPrintSectionId =
   | 'tratamiento'
   | 'presupuesto'
   | 'planPagos'
-  | 'controlPagos'
   | 'evolucion'
   | 'consentimiento'
   | 'examenesComplementarios'
@@ -80,7 +78,7 @@ export const CLINICAL_HISTORY_PRINT_SECTIONS: ClinicalHistoryPrintSection[] = [
   },
   {
     id: 'planPagos',
-    label: 'Plan de Pagos',
+    label: 'Plan y Control de Pagos',
     number: CLINICAL_HISTORY_SECTION_NUMBERS.planPagos,
   },
   {
@@ -92,11 +90,6 @@ export const CLINICAL_HISTORY_PRINT_SECTIONS: ClinicalHistoryPrintSection[] = [
     id: 'evolucion',
     label: 'Evolución Clínica (Notas de Evolución)',
     number: CLINICAL_HISTORY_SECTION_NUMBERS.evolucion,
-  },
-  {
-    id: 'controlPagos',
-    label: 'Control de Pagos',
-    number: CLINICAL_HISTORY_SECTION_NUMBERS.controlPagos,
   },
   {
     id: 'exportacionHistoria',

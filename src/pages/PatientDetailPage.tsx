@@ -1421,10 +1421,9 @@ export function PatientDetailPage() {
         { id: 'examenes', label: 'Exámenes', row: 1 },
         { id: 'anexos', label: 'Anexos', row: 1 },
         { id: 'tratamiento', label: 'Tratamiento', row: 1 },
-        { id: 'plan-pagos', label: 'Plan de pagos', row: 1 },
+        { id: 'plan-pagos', label: 'Plan y control de pagos', row: 1 },
         { id: 'consentimiento', label: 'Consentimiento', row: 1 },
         { id: 'evolucion', label: 'Evolución', row: 1 },
-        { id: 'control-pagos', label: 'Control de pagos', row: 1 },
         ...(can('invoices.read')
           ? [
               {

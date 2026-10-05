@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Eye } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import type { UserProfile } from '@/types/user'
 import type {
   BudgetLineItem,
+  DentalImplantsBudget,
   OrthodonticsBudget,
   OrthodonticsPaymentRecord,
   PaymentControlLine,
   PaymentInvoice,
+  PaymentPlanItem,
   PaymentRecord,
   TreatmentPlanItem,
 } from '@/types/clinicalRecord'
@@ -34,12 +36,22 @@ import {
 } from '@/utils/treatmentPlanZone'
 import {
   emptyPaymentControlLine,
-  importBudgetIntoPaymentControl,
   lineBillablePrice,
   paidAmountForLine,
   sumPaymentControlPrices,
   treatmentPaymentBalance,
 } from '@/utils/paymentControlLines'
+import {
+  controlLineFromPlanItem,
+  createLinkedPlanItem,
+  importBudgetIntoPaymentSection,
+  mirrorLineOntoPlan,
+  orthodonticsPlanItems,
+  planItemForLine,
+  removePlanItemsForLine,
+  supplementalPlanItems,
+  upsertAgreement,
+} from '@/utils/paymentSectionMerge'
 import {
   attachAutoInvoiceToPayment,
   clinicalPaymentsNeedAutoInvoices,
@@ -54,12 +66,16 @@ import {
 import { isPaymentInvoiceImmutable } from '@/services/invoiceImmutabilityService'
 import { PAYMENT_METHOD_LABELS } from '@/constants/dental'
 import { OrthodonticsPaymentControlForm } from './OrthodonticsPaymentControlForm'
+import { PaymentAgreementFields } from './PaymentAgreementFields'
+import { PaymentPlanProcedureField } from './PaymentPlanProcedureField'
 
 interface PaymentControlFormProps {
   paymentControlLines: PaymentControlLine[]
+  paymentPlan: PaymentPlanItem[]
   paymentControl: PaymentRecord[]
   orthodonticsPaymentControl: OrthodonticsPaymentRecord[]
   orthodonticsBudget?: OrthodonticsBudget
+  dentalImplantsBudget?: DentalImplantsBudget
   budgetItems?: BudgetLineItem[]
   treatmentPlan?: TreatmentPlanItem[]
   disabled?: boolean
@@ -68,6 +84,7 @@ interface PaymentControlFormProps {
   patientName?: string
   patientDocument?: string
   onLinesChange: (lines: PaymentControlLine[]) => void
+  onPaymentPlanChange: (paymentPlan: PaymentPlanItem[]) => void
   onChange: (paymentControl: PaymentRecord[]) => void
   onOrthodonticsPaymentControlChange: (payments: OrthodonticsPaymentRecord[]) => void
 }
@@ -197,11 +214,21 @@ function PayAmountField({
   )
 }
 
+const EMPTY_AGREEMENT: Pick<
+  PaymentPlanItem,
+  'paymentMethod' | 'dueDate' | 'installments' | 'initialPayment' | 'installmentAmount' | 'scheduleNotes'
+> = {
+  paymentMethod: 'contado',
+  scheduleNotes: '',
+}
+
 export function PaymentControlForm({
   paymentControlLines,
+  paymentPlan = [],
   paymentControl,
   orthodonticsPaymentControl,
   orthodonticsBudget,
+  dentalImplantsBudget,
   budgetItems = [],
   treatmentPlan = [],
   disabled = false,
@@ -210,6 +237,7 @@ export function PaymentControlForm({
   patientName = '',
   patientDocument = '',
   onLinesChange,
+  onPaymentPlanChange,
   onChange,
   onOrthodonticsPaymentControlChange,
 }: PaymentControlFormProps) {
@@ -275,13 +303,58 @@ export function PaymentControlForm({
 
   const total = sumPaymentControlPrices(paymentControlLines)
   const balance = treatmentPaymentBalance(paymentControlLines, paymentControl)
-  const pendingBudgetCount = budgetItems.filter(
-    (item) => item.procedure.trim() && !paymentControlLines.some((line) => line.budgetItemId === item.id),
-  ).length
+  const canImportFromBudget =
+    budgetItems.some((item) => item.procedure.trim()) ||
+    Boolean(orthodonticsBudget?.active) ||
+    Boolean(dentalImplantsBudget?.active)
   const unlinkedPayments = paymentControl.filter((payment) => !payment.paymentControlLineId)
+  const pendingAgreements = supplementalPlanItems(paymentControlLines, paymentPlan)
+  const orthoAgreements = orthodonticsPlanItems(paymentPlan)
 
   const updateLine = (id: string, patch: Partial<PaymentControlLine>) => {
-    onLinesChange(paymentControlLines.map((line) => (line.id === id ? { ...line, ...patch } : line)))
+    const nextLines = paymentControlLines.map((line) => (line.id === id ? { ...line, ...patch } : line))
+    onLinesChange(nextLines)
+    const line = nextLines.find((item) => item.id === id)
+    if (!line) return
+    const nextPlan = mirrorLineOntoPlan(line, paymentPlan)
+    if (nextPlan !== paymentPlan) onPaymentPlanChange(nextPlan)
+  }
+
+  const updateAgreement = (line: PaymentControlLine, patch: Partial<PaymentPlanItem>) => {
+    onPaymentPlanChange(upsertAgreement(line, paymentPlan, patch))
+  }
+
+  const importFromBudget = () => {
+    const next = importBudgetIntoPaymentSection({
+      budgetItems,
+      treatmentPlan,
+      lines: paymentControlLines,
+      plan: paymentPlan,
+      orthodonticsBudget,
+      dentalImplantsBudget,
+    })
+    onLinesChange(next.lines)
+    onPaymentPlanChange(next.plan)
+  }
+
+  const addProcedure = () => {
+    const line = emptyPaymentControlLine()
+    onLinesChange([...paymentControlLines, line])
+    onPaymentPlanChange([...paymentPlan, createLinkedPlanItem(line)])
+  }
+
+  const removeLine = (id: string) => {
+    const line = paymentControlLines.find((item) => item.id === id)
+    onLinesChange(paymentControlLines.filter((item) => item.id !== id))
+    if (line) onPaymentPlanChange(removePlanItemsForLine(line, paymentPlan))
+  }
+
+  const promoteAgreement = (item: PaymentPlanItem) => {
+    const line = controlLineFromPlanItem(item)
+    onLinesChange([...paymentControlLines, line])
+    onPaymentPlanChange(
+      paymentPlan.map((row) => (row.id === item.id ? { ...row, paymentControlLineId: line.id } : row)),
+    )
   }
 
   const closeMenuSoon = (id: string, field: 'cie' | 'cups') => {
@@ -292,13 +365,15 @@ export function PaymentControlForm({
 
   const registerPayment = (line: PaymentControlLine, amount: number) => {
     if (disabled || amount <= 0) return
+    const agreement = planItemForLine(line, paymentPlan)
     const draft: PaymentRecord = {
       id: generateId(),
       paymentControlLineId: line.id,
+      paymentPlanItemId: agreement?.id,
       paymentDate: new Date().toISOString().slice(0, 10),
       amount,
-      paymentMethod: 'contado',
-      paymentReason: line.procedure.trim() || 'Procedimiento',
+      paymentMethod: agreement?.paymentMethod ?? 'contado',
+      paymentReason: line.procedure.trim() || agreement?.procedure || 'Procedimiento',
       cupsCode: line.cupsCode,
       treatingDentistUserId: user?.id,
       treatingDentistName: dentistName(user),
@@ -388,28 +463,26 @@ export function PaymentControlForm({
 
   return (
     <section className="card">
-      <h3 className={`mb-3 ${CLINICAL_SECTION_TITLE_CLASS}`}>
-        {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.controlPagos, 'Control de Pagos')}
+      <h3 className={`mb-2 ${CLINICAL_SECTION_TITLE_CLASS}`}>
+        {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.planPagos, 'Plan y Control de Pagos')}
       </h3>
+      <p className="mb-4 text-xs text-slate-500">
+        Para cada procedimiento defina la forma de pago, las cuotas y las fechas acordadas, y registre
+        los abonos con su factura y el saldo del tratamiento.
+      </p>
 
       {!disabled && (
         <div className="mb-3 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() =>
-              onLinesChange(importBudgetIntoPaymentControl(budgetItems, treatmentPlan, paymentControlLines))
-            }
-            disabled={pendingBudgetCount === 0}
+            onClick={importFromBudget}
+            disabled={!canImportFromBudget}
             className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Importar desde Presupuesto
+            Importar desde presupuesto
           </button>
-          <button
-            type="button"
-            onClick={() => onLinesChange([...paymentControlLines, emptyPaymentControlLine()])}
-            className="btn-primary text-xs"
-          >
-            Agregar Nuevo Procedimiento
+          <button type="button" onClick={addProcedure} className="btn-primary text-xs">
+            Agregar procedimiento
           </button>
         </div>
       )}
@@ -428,8 +501,10 @@ export function PaymentControlForm({
           <tbody>
             {paymentControlLines.length === 0 && unlinkedPayments.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-2 py-6 text-center text-sm text-slate-400">
-                  —
+                <td colSpan={5} className="px-2 py-6 text-center text-sm text-slate-500">
+                  {canImportFromBudget
+                    ? 'Importe el presupuesto o agregue un procedimiento.'
+                    : 'Agregue un procedimiento para acordar el pago y registrar abonos.'}
                 </td>
               </tr>
             ) : (
@@ -448,9 +523,12 @@ export function PaymentControlForm({
                     isPaymentInvoiceImmutable(latestInvoice) &&
                     latestInvoice.status !== 'voided_by_credit_note',
                 )
+                const agreement = planItemForLine(line, paymentPlan) ?? EMPTY_AGREEMENT
+                const manualProcedure = !line.budgetItemId
 
                 return (
-                  <tr key={line.id} className="border-b border-slate-100 align-top">
+                  <Fragment key={line.id}>
+                  <tr className="border-b border-slate-100 align-top">
                     <td className="px-2 py-1.5">
                       <input
                         id={`pay-zone-${line.id}`}
@@ -511,6 +589,16 @@ export function PaymentControlForm({
                       )}
                     </td>
                     <td className="relative px-2 py-1.5">
+                      {manualProcedure ? (
+                        <p className="px-1 py-1 text-sm text-slate-800" title={line.procedure || undefined}>
+                          {line.procedure || 'Procedimiento personalizado'}
+                          {line.cupsCode ? (
+                            <span className="ml-2 font-mono text-[10px] text-slate-400">
+                              {formatCupsCodeDotted(line.cupsCode)}
+                            </span>
+                          ) : null}
+                        </p>
+                      ) : (
                       <input
                         disabled={disabled}
                         value={cupsOpen ? openMenu.query : line.procedure}
@@ -530,12 +618,13 @@ export function PaymentControlForm({
                         aria-label="Procedimiento"
                         autoComplete="off"
                       />
-                      {line.cupsCode && !cupsOpen && (
+                      )}
+                      {!manualProcedure && line.cupsCode && !cupsOpen && (
                         <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 font-mono text-[10px] text-slate-400">
                           {formatCupsCodeDotted(line.cupsCode)}
                         </span>
                       )}
-                      {cupsOpen && (
+                      {!manualProcedure && cupsOpen && (
                         <ul className="absolute z-20 mt-1 max-h-44 w-[min(24rem,80vw)] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-md">
                           {cupsOptions.length === 0 ? (
                             <li className="px-2 py-1.5 text-xs text-slate-400">—</li>
@@ -618,9 +707,7 @@ export function PaymentControlForm({
                           <button
                             type="button"
                             aria-label="Quitar procedimiento"
-                            onClick={() =>
-                              onLinesChange(paymentControlLines.filter((item) => item.id !== line.id))
-                            }
+                            onClick={() => removeLine(line.id)}
                             className="inline-flex h-8 w-8 items-center justify-center text-slate-400 hover:text-red-600"
                           >
                             ×
@@ -634,6 +721,35 @@ export function PaymentControlForm({
                       )}
                     </td>
                   </tr>
+                  <tr className="border-b border-slate-100 bg-slate-50/70">
+                    <td colSpan={5} className="px-3 py-3">
+                      {manualProcedure && (
+                        <div className="mb-3">
+                          <PaymentPlanProcedureField
+                            procedure={line.procedure}
+                            cupsCode={line.cupsCode}
+                            totalAmount={lineBillablePrice(line)}
+                            disabled={disabled}
+                            onChange={(patch) =>
+                              updateLine(line.id, {
+                                procedure: patch.procedure,
+                                cupsCode: patch.cupsCode,
+                                unitPrice: patch.totalAmount ?? line.unitPrice,
+                                quantity: 1,
+                                source: 'manual',
+                              })
+                            }
+                          />
+                        </div>
+                      )}
+                      <PaymentAgreementFields
+                        item={agreement}
+                        disabled={disabled}
+                        onChange={(patch) => updateAgreement(line, patch)}
+                      />
+                    </td>
+                  </tr>
+                  </Fragment>
                 )
               })
             )}
@@ -671,11 +787,123 @@ export function PaymentControlForm({
           </tfoot>
         </table>
       </div>
+      {pendingAgreements.length > 0 && (
+        <div className="mt-4 space-y-3">
+          <h4 className="text-sm font-semibold text-slate-800">Acuerdos pendientes de registro clínico</h4>
+          <p className="text-xs text-slate-500">
+            Procedimientos acordados que todavía no tienen zona, diagnóstico ni abonos. Llévelos a la
+            tabla para registrar el pago y la factura.
+          </p>
+          {pendingAgreements.map((item) => (
+            <div key={item.id} className="rounded-lg border border-slate-200 p-3">
+              <div className="mb-3">
+                <span className="font-medium text-slate-800">{item.procedure || 'Procedimiento sin nombre'}</span>
+              </div>
+              {(item.source === 'custom' || !item.budgetItemId) && (
+                <div className="mb-3">
+                  <PaymentPlanProcedureField
+                    procedure={item.procedure}
+                    cupsCode={item.cupsCode}
+                    totalAmount={item.totalAmount}
+                    disabled={disabled}
+                    onChange={(patch) =>
+                      onPaymentPlanChange(
+                        paymentPlan.map((row) =>
+                          row.id === item.id
+                            ? {
+                                ...row,
+                                procedure: patch.procedure,
+                                cupsCode: patch.cupsCode,
+                                totalAmount: patch.totalAmount ?? row.totalAmount,
+                              }
+                            : row,
+                        ),
+                      )
+                    }
+                  />
+                </div>
+              )}
+              <div className="mb-3 max-w-xs">
+                <label className="mb-0.5 block text-[10px] text-slate-500">Valor total</label>
+                <input
+                  type="number"
+                  min={0}
+                  disabled={disabled}
+                  value={item.totalAmount}
+                  onChange={(event) =>
+                    onPaymentPlanChange(
+                      paymentPlan.map((row) =>
+                        row.id === item.id ? { ...row, totalAmount: Number(event.target.value) } : row,
+                      ),
+                    )
+                  }
+                  className="input-field"
+                />
+              </div>
+              <PaymentAgreementFields
+                item={item}
+                disabled={disabled}
+                onChange={(patch) =>
+                  onPaymentPlanChange(
+                    paymentPlan.map((row) => (row.id === item.id ? { ...row, ...patch } : row)),
+                  )
+                }
+              />
+              {!disabled && (
+                <div className="mt-2 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => promoteAgreement(item)}
+                    className="text-sm font-medium text-dental-700 hover:text-dental-900"
+                  >
+                    Llevar a la tabla
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onPaymentPlanChange(paymentPlan.filter((row) => row.id !== item.id))}
+                    className="text-sm text-red-500 hover:text-red-700"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <datalist id="payment-zone-presets">
         {ANATOMICAL_ZONE_PRESETS.map((zone) => (
           <option key={zone} value={zone} />
         ))}
       </datalist>
+
+      {(orthodonticsBudget?.active || orthoAgreements.length > 0) && orthoAgreements.length > 0 && (
+        <div className="mt-6 space-y-3">
+          <h4 className="text-sm font-semibold text-dental-800">Acuerdo de pago — ortodoncia</h4>
+          <p className="text-xs text-slate-500">
+            Forma de pago acordada para la cuota inicial, los controles y los retenedores. Los abonos
+            y sus facturas se registran en el bloque de ortodoncia.
+          </p>
+          {orthoAgreements.map((item) => (
+            <div key={item.id} className="rounded-lg border border-dental-100 bg-white p-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium text-slate-800">{item.procedure}</span>
+                <span className="text-sm font-semibold text-dental-700">{formatCurrency(item.totalAmount)}</span>
+              </div>
+              <PaymentAgreementFields
+                item={item}
+                disabled={disabled}
+                onChange={(patch) =>
+                  onPaymentPlanChange(
+                    paymentPlan.map((row) => (row.id === item.id ? { ...row, ...patch } : row)),
+                  )
+                }
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       {orthodonticsBudget?.active && (
         <OrthodonticsPaymentControlForm

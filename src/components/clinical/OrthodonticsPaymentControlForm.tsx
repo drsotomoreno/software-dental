@@ -182,7 +182,7 @@ export function OrthodonticsPaymentControlForm({
   return (
     <div className="mt-6 rounded-lg border border-dental-200 bg-dental-50/40 p-4">
       <h4 className="mb-1 text-sm font-semibold text-dental-800">
-        Control de pagos — Ortodoncia
+        Abonos de ortodoncia
       </h4>
       <p className="mb-4 text-xs text-slate-600">
         Registre cuota inicial, controles según presupuesto, retenedores o pagos adicionales. Cada

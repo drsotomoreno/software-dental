@@ -10,7 +10,7 @@ import {
   DIAGNOSIS_CERTAINTY_LABELS,
   PAYMENT_METHOD_LABELS,
 } from '@/constants/dental'
-import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
+import type { ClinicalRecordFormData, PaymentPlanItem } from '@/types/clinicalRecord'
 import { formatClinicalDiagnosticChartSummary, normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import { NO_REPORTA_LABEL } from '@/types/anamnesis'
 import { formatVitalSignsSummary } from '@/types/stomatologicalExam'
@@ -40,9 +40,16 @@ import { formatOralSurgeryAnnexSummary } from '@/types/oralSurgeryAnnex'
 import { formatAnatomicalZone } from '@/utils/treatmentPlanZone'
 import { sumTreatmentPlanPrices } from '@/utils/treatmentPlanPricing'
 import {
+  lineBillablePrice,
   sumPaymentControlPrices,
   treatmentPaymentBalance,
 } from '@/utils/paymentControlLines'
+import {
+  orthodonticsPlanItems,
+  planItemForLine,
+  supplementalPlanItems,
+} from '@/utils/paymentSectionMerge'
+import { ORTHODONTICS_PAYMENT_TYPE_LABELS, orthodonticsPaymentBalance } from '@/utils/orthodonticsPaymentControl'
 import { formatEndoAnnexSummary } from '@/utils/endoAnnex'
 import { formatOrthodonticBudgetSummary } from '@/components/clinical/orthodontics/calculator/types'
 import {
@@ -625,21 +632,84 @@ function buildBudgetSection(data: ClinicalRecordFormData): string {
     </section>`
 }
 
-function buildPaymentPlanSection(data: ClinicalRecordFormData): string {
-  const rows = data.paymentPlan
-    .filter((item) => item.procedure.trim())
-    .map(
-      (item) =>
-        `<tr>
-          <td>${escapeHtml(item.procedure)}</td>
-          <td>${formatCurrency(item.totalAmount)}</td>
-          <td>${escapeHtml(PAYMENT_METHOD_LABELS[item.paymentMethod])}</td>
+function agreementCells(item?: PaymentPlanItem): string {
+  if (!item) {
+    return '<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>'
+  }
+  return `<td>${escapeHtml(PAYMENT_METHOD_LABELS[item.paymentMethod])}</td>
           <td>${item.installments ?? '—'}</td>
+          <td>${item.initialPayment != null ? formatCurrency(item.initialPayment) : '—'}</td>
+          <td>${item.installmentAmount != null ? formatCurrency(item.installmentAmount) : '—'}</td>
           <td>${item.dueDate ? formatDate(item.dueDate) : '—'}</td>
-          <td>${escapeHtml(item.scheduleNotes || '—')}</td>
+          <td>${escapeHtml(item.scheduleNotes || '—')}</td>`
+}
+
+function buildPaymentsSection(data: ClinicalRecordFormData): string {
+  const lines = data.paymentControlLines ?? []
+  const plan = data.paymentPlan ?? []
+  const visible = lines.filter(
+    (item) => item.procedure.trim() || item.diagnosisCode || item.cupsCode || item.unitPrice > 0,
+  )
+  const extraAgreements = [
+    ...supplementalPlanItems(visible, plan),
+    ...orthodonticsPlanItems(plan),
+  ].filter((item) => item.procedure.trim() || item.totalAmount > 0)
+  const total = sumPaymentControlPrices(visible)
+  const balance = treatmentPaymentBalance(visible, data.paymentControl)
+  const lineRows = visible
+    .map((item) => {
+      const cie = [item.diagnosisCode, item.diagnosisDescription].filter(Boolean).join(' ')
+      const procedure = [item.procedure, item.cupsCode].filter(Boolean).join(' · ')
+      const agreement = planItemForLine(item, plan)
+      return `<tr>
+          <td>${escapeHtml(formatAnatomicalZone(item) || '—')}</td>
+          <td>${escapeHtml(cie || '—')}</td>
+          <td>${escapeHtml(procedure || '—')}</td>
+          <td>${formatCurrency(lineBillablePrice(item))}</td>
+          ${agreementCells(agreement)}
+        </tr>`
+    })
+    .join('')
+  const agreementRows = extraAgreements
+    .map(
+      (item) => `<tr>
+          <td>—</td>
+          <td>—</td>
+          <td>${escapeHtml(item.procedure || '—')}</td>
+          <td>${formatCurrency(item.totalAmount)}</td>
+          ${agreementCells(item)}
         </tr>`,
     )
     .join('')
+  const rows = `${lineRows}${agreementRows}`
+  const unlinkedPayments = data.paymentControl.filter((payment) => !payment.paymentControlLineId)
+  const unlinkedRows = unlinkedPayments
+    .map(
+      (payment) =>
+        `<tr>
+          <td>${formatDate(payment.paymentDate)}</td>
+          <td>${formatCurrency(payment.amount)}</td>
+          <td>${escapeHtml(PAYMENT_METHOD_LABELS[payment.paymentMethod])}</td>
+          <td>${escapeHtml(payment.paymentReason)}</td>
+        </tr>`,
+    )
+    .join('')
+  const orthoPayments = (data.orthodonticsPaymentControl ?? [])
+    .map(
+      (payment) =>
+        `<tr>
+          <td>${formatDate(payment.paymentDate)}</td>
+          <td>${escapeHtml(ORTHODONTICS_PAYMENT_TYPE_LABELS[payment.paymentType] ?? payment.paymentType)}</td>
+          <td>${formatCurrency(payment.amount)}</td>
+          <td>${escapeHtml(PAYMENT_METHOD_LABELS[payment.paymentMethod])}</td>
+          <td>${escapeHtml(payment.paymentReason || '—')}</td>
+        </tr>`,
+    )
+    .join('')
+  const orthoBalance =
+    data.orthodonticsBudget?.active
+      ? orthodonticsPaymentBalance(data.orthodonticsBudget, data.orthodonticsPaymentControl ?? [])
+      : null
 
   return `
     <section class="print-section">
@@ -647,67 +717,46 @@ function buildPaymentPlanSection(data: ClinicalRecordFormData): string {
       ${
         rows
           ? `<table>
-        <thead><tr><th>Procedimiento</th><th>Total</th><th>Forma de pago</th><th>Cuotas</th><th>Fecha</th><th>Observaciones</th></tr></thead>
+        <thead><tr><th>Diente / Zona</th><th>Diagnóstico CIE</th><th>Procedimiento</th><th>Precio</th><th>Forma de pago</th><th>Cuotas</th><th>Abono</th><th>Valor cuota</th><th>Fecha</th><th>Observaciones</th></tr></thead>
         <tbody>${rows}</tbody>
+        ${
+          visible.length > 0
+            ? `<tfoot>
+          <tr><td colspan="3">Valor total</td><td>${formatCurrency(total)}</td><td colspan="6"></td></tr>
+          <tr><td colspan="3">Saldo del tratamiento</td><td>${formatCurrency(balance)}</td><td colspan="6"></td></tr>
+        </tfoot>`
+            : ''
+        }
       </table>`
-          : '<p>Sin plan de pagos registrado.</p>'
-      }
-    </section>`
-}
-
-function buildPaymentControlSection(data: ClinicalRecordFormData): string {
-  const lines = data.paymentControlLines ?? []
-  const visible = lines.filter(
-    (item) => item.procedure.trim() || item.diagnosisCode || item.cupsCode || item.unitPrice > 0,
-  )
-  const total = sumPaymentControlPrices(visible)
-  const balance = treatmentPaymentBalance(visible, data.paymentControl)
-  const rows = visible
-    .map((item) => {
-      const cie = [item.diagnosisCode, item.diagnosisDescription].filter(Boolean).join(' ')
-      const procedure = [item.procedure, item.cupsCode].filter(Boolean).join(' · ')
-      return `<tr>
-          <td>${escapeHtml(formatAnatomicalZone(item) || '—')}</td>
-          <td>${escapeHtml(cie || '—')}</td>
-          <td>${escapeHtml(procedure || '—')}</td>
-          <td>${formatCurrency(item.unitPrice)}</td>
-        </tr>`
-    })
-    .join('')
-  const legacyPayments =
-    visible.length === 0
-      ? data.paymentControl
-          .map(
-            (payment) =>
-              `<tr>
-          <td>${formatDate(payment.paymentDate)}</td>
-          <td>${formatCurrency(payment.amount)}</td>
-          <td>${escapeHtml(PAYMENT_METHOD_LABELS[payment.paymentMethod])}</td>
-          <td>${escapeHtml(payment.paymentReason)}</td>
-        </tr>`,
-          )
-          .join('')
-      : ''
-
-  return `
-    <section class="print-section">
-      <h2>${printSectionHeading('controlPagos')}</h2>
-      ${
-        rows
-          ? `<table>
-        <thead><tr><th>Diente / Zona</th><th>Diagnóstico CIE</th><th>Procedimiento</th><th>Precio</th></tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot>
-          <tr><td colspan="3">Valor Total</td><td>${formatCurrency(total)}</td></tr>
-          <tr><td colspan="3">Saldo del tratamiento</td><td>${formatCurrency(balance)}</td></tr>
-        </tfoot>
-      </table>`
-          : legacyPayments
+          : unlinkedRows
             ? `<table>
         <thead><tr><th>Fecha</th><th>Valor</th><th>Método</th><th>Concepto</th></tr></thead>
-        <tbody>${legacyPayments}</tbody>
+        <tbody>${unlinkedRows}</tbody>
       </table>`
-            : '<p>Sin procedimientos en control de pagos.</p>'
+            : '<p>Sin procedimientos en el plan y control de pagos.</p>'
+      }
+      ${
+        rows && unlinkedRows
+          ? `<h3>Abonos sin procedimiento</h3>
+      <table>
+        <thead><tr><th>Fecha</th><th>Valor</th><th>Método</th><th>Concepto</th></tr></thead>
+        <tbody>${unlinkedRows}</tbody>
+      </table>`
+          : ''
+      }
+      ${
+        orthoPayments
+          ? `<h3>Pagos de ortodoncia</h3>
+      <table>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Valor</th><th>Forma de pago</th><th>Concepto</th></tr></thead>
+        <tbody>${orthoPayments}</tbody>
+        ${
+          orthoBalance != null
+            ? `<tfoot><tr><td colspan="2">Saldo de ortodoncia</td><td>${formatCurrency(orthoBalance)}</td><td colspan="2"></td></tr></tfoot>`
+            : ''
+        }
+      </table>`
+          : ''
       }
     </section>`
 }
@@ -818,8 +867,7 @@ const SECTION_BUILDERS: Record<
   anexos: ({ clinicalData }) => buildAnnexesSection(clinicalData),
   tratamiento: ({ clinicalData }) => buildTreatmentSection(clinicalData),
   presupuesto: ({ clinicalData }) => buildBudgetSection(clinicalData),
-  planPagos: ({ clinicalData }) => buildPaymentPlanSection(clinicalData),
-  controlPagos: ({ clinicalData }) => buildPaymentControlSection(clinicalData),
+  planPagos: ({ clinicalData }) => buildPaymentsSection(clinicalData),
   evolucion: ({ clinicalData }) => buildEvolutionSection(clinicalData),
   consentimiento: ({ clinicalData }) => buildConsentSection(clinicalData),
   exportacionHistoria: () => buildExportSection(),
