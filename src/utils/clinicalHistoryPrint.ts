@@ -38,7 +38,11 @@ import { formatImplantMedicalAnamnesisSummary } from '@/types/implantMedicalAnam
 import { formatImplantPeriodontalAssessmentSummary } from '@/types/implantPeriodontalAssessment'
 import { formatOralSurgeryAnnexSummary } from '@/types/oralSurgeryAnnex'
 import { formatAnatomicalZone } from '@/utils/treatmentPlanZone'
-import { sumTreatmentPlanPrices } from '@/utils/treatmentPlanPricing'
+import { lineSubtotal, normalizeDentalImplantsBudget, normalizeOrthodonticsBudget } from '@/utils/budget'
+import {
+  budgetSummaryForUnifiedRows,
+  buildUnifiedProcedureRows,
+} from '@/utils/unifiedTreatmentBudget'
 import {
   lineBillablePrice,
   sumPaymentControlPrices,
@@ -564,23 +568,73 @@ function buildAnnexesSection(data: ClinicalRecordFormData): string {
     </section>`
 }
 
+function buildSpecialtyPrintTable(
+  title: string,
+  lines: Array<{ concept: string; quantity: number; unitPrice: number }>,
+): string {
+  const rows = lines
+    .map(
+      (line) =>
+        `<tr>
+          <td>${escapeHtml(line.concept)}</td>
+          <td>${line.quantity}</td>
+          <td>${formatCurrency(line.unitPrice)}</td>
+          <td>${formatCurrency(lineSubtotal(line))}</td>
+        </tr>`,
+    )
+    .join('')
+  return `
+    <h3>${escapeHtml(title)}</h3>
+    <table>
+      <thead><tr><th>Concepto</th><th>Cant.</th><th>Valor unit.</th><th>Subtotal</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`
+}
+
 function buildTreatmentSection(data: ClinicalRecordFormData): string {
-  const visible = data.treatmentPlan.filter(
-    (item) => item.procedure.trim() || item.diagnosisCode || item.cupsCode || item.unitPrice > 0,
+  const unified = buildUnifiedProcedureRows(data.treatmentPlan, data.budgetItems)
+  const visible = unified.filter(
+    (row) =>
+      row.item.procedure.trim() ||
+      row.item.diagnosisCode ||
+      row.item.cupsCode ||
+      row.item.unitPrice > 0,
   )
   const rows = visible
-    .map((item) => {
+    .map((row) => {
+      const item = row.item
       const cie = [item.diagnosisCode, item.diagnosisDescription].filter(Boolean).join(' ')
       const procedure = [item.procedure, item.cupsCode].filter(Boolean).join(' · ')
       return `<tr>
           <td>${escapeHtml(formatAnatomicalZone(item) || '—')}</td>
           <td>${escapeHtml(cie || '—')}</td>
           <td>${escapeHtml(procedure || '—')}</td>
+          <td>${item.quantity || 1}</td>
           <td>${formatCurrency(item.unitPrice)}</td>
         </tr>`
     })
     .join('')
-  const total = sumTreatmentPlanPrices(visible)
+  const orthodontics = normalizeOrthodonticsBudget(data.orthodonticsBudget)
+  const implants = normalizeDentalImplantsBudget(data.dentalImplantsBudget)
+  const summary = budgetSummaryForUnifiedRows(
+    unified,
+    data.budget.discount,
+    orthodontics,
+    implants,
+  )
+  const orthodonticsTable = orthodontics.active
+    ? buildSpecialtyPrintTable('Presupuesto de ortodoncia', [
+        { concept: 'Cuota inicial', ...orthodontics.initialInstallment },
+        { concept: 'Controles', ...orthodontics.controls },
+        { concept: 'Retenedores', ...orthodontics.retainers },
+      ])
+    : ''
+  const implantsTable = implants.active
+    ? buildSpecialtyPrintTable('Presupuesto de implantes dentales', [
+        { concept: 'Colocación', ...implants.implantPlacement },
+        { concept: 'Prótesis definitiva', ...implants.prosthetics },
+      ])
+    : ''
 
   return `
     <section class="print-section">
@@ -588,47 +642,19 @@ function buildTreatmentSection(data: ClinicalRecordFormData): string {
       ${
         rows
           ? `<table>
-        <thead><tr><th>Diente / Zona</th><th>Diagnóstico CIE</th><th>Procedimiento</th><th>Precio</th></tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot><tr><td colspan="3">Valor Total</td><td>${formatCurrency(total)}</td></tr></tfoot>
-      </table>`
-          : '<p>Sin procedimientos en el plan de tratamiento.</p>'
-      }
-      ${data.treatmentPlanNotes ? `<h3>Observaciones</h3>${paragraph(data.treatmentPlanNotes)}` : ''}
-    </section>`
-}
-
-function buildBudgetSection(data: ClinicalRecordFormData): string {
-  const rows = data.budgetItems
-    .filter((item) => item.procedure.trim())
-    .map(
-      (item) =>
-        `<tr>
-          <td>${escapeHtml(item.procedure)}</td>
-          <td>${item.toothNumber ?? '—'}</td>
-          <td>${item.quantity}</td>
-          <td>${formatCurrency(item.unitPrice)}</td>
-          <td>${formatCurrency(item.quantity * item.unitPrice)}</td>
-        </tr>`,
-    )
-    .join('')
-
-  return `
-    <section class="print-section">
-      <h2>${printSectionHeading('presupuesto')}</h2>
-      ${
-        rows
-          ? `<table>
-        <thead><tr><th>Procedimiento</th><th>Pieza</th><th>Cant.</th><th>Valor unit.</th><th>Subtotal</th></tr></thead>
+        <thead><tr><th>Diente / Zona</th><th>Diagnóstico CIE</th><th>Procedimiento</th><th>Cant.</th><th>Precio</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`
-          : '<p>Sin ítems de presupuesto.</p>'
+          : '<p>Sin procedimientos en el plan de tratamiento y presupuesto.</p>'
       }
+      ${orthodonticsTable}
+      ${implantsTable}
       <table>
-        ${fieldRow('Subtotal', formatCurrency(data.budget.subtotal))}
-        ${fieldRow('Descuento', formatCurrency(data.budget.discount))}
-        ${fieldRow('Total', formatCurrency(data.budget.total))}
+        ${fieldRow('Subtotal', formatCurrency(summary.subtotal))}
+        ${fieldRow('Descuento', formatCurrency(summary.discount))}
+        ${fieldRow('Total', formatCurrency(summary.total))}
       </table>
+      ${data.treatmentPlanNotes ? `<h3>Observaciones</h3>${paragraph(data.treatmentPlanNotes)}` : ''}
     </section>`
 }
 
@@ -866,7 +892,6 @@ const SECTION_BUILDERS: Record<
   examenesComplementarios: () => buildDiagnosticAidsSection(),
   anexos: ({ clinicalData }) => buildAnnexesSection(clinicalData),
   tratamiento: ({ clinicalData }) => buildTreatmentSection(clinicalData),
-  presupuesto: ({ clinicalData }) => buildBudgetSection(clinicalData),
   planPagos: ({ clinicalData }) => buildPaymentsSection(clinicalData),
   evolucion: ({ clinicalData }) => buildEvolutionSection(clinicalData),
   consentimiento: ({ clinicalData }) => buildConsentSection(clinicalData),

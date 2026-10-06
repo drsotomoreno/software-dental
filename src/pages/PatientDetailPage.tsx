@@ -61,8 +61,6 @@ import {
   toDexiePrimaryKey,
 
   toPatientForeignKey,
-
-  calcOrthodonticsBudgetTotal,
 } from '@/utils'
 import { getFirstBlockingClinicalBudgetIssue } from '@/utils/clinicalRipsValidation'
 import { sortEvolutionNotesChronologically, verifyClinicalRecordIntegrity } from '@/utils/recordIntegrity'
@@ -946,24 +944,12 @@ export function PatientDetailPage() {
 
     }
 
-    if (!clinicalData.treatmentPlan.some((item) => item.procedure.trim())) {
-
-      setMessage('El plan de tratamiento debe incluir al menos un procedimiento.')
-
-      return false
-
-    }
-
-    const hasOrthodonticsBudget =
-      clinicalData.orthodonticsBudget?.active &&
-      calcOrthodonticsBudgetTotal(clinicalData.orthodonticsBudget) > 0
-
     if (
-      !clinicalData.budgetItems.some((item) => item.procedure.trim()) &&
-      !hasOrthodonticsBudget
+      !clinicalData.treatmentPlan.some((item) => item.procedure.trim()) &&
+      !clinicalData.budgetItems.some((item) => item.procedure.trim())
     ) {
 
-      setMessage('El presupuesto debe incluir al menos un tratamiento o el presupuesto de ortodoncia.')
+      setMessage('El plan de tratamiento y presupuesto debe incluir al menos un procedimiento.')
 
       return false
 
@@ -1420,7 +1406,7 @@ export function PatientDetailPage() {
         { id: 'diagnosticos', label: 'Diagnósticos', row: 1 },
         { id: 'examenes', label: 'Exámenes', row: 1 },
         { id: 'anexos', label: 'Anexos', row: 1 },
-        { id: 'tratamiento', label: 'Tratamiento', row: 1 },
+        { id: 'tratamiento', label: 'Plan de Tratamiento y Presupuesto', row: 1 },
         { id: 'plan-pagos', label: 'Plan y control de pagos', row: 1 },
         { id: 'consentimiento', label: 'Consentimiento', row: 1 },
         { id: 'evolucion', label: 'Evolución', row: 1 },

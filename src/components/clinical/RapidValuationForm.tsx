@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ClinicalRecordFormData, Cie10Diagnosis } from '@/types/clinicalRecord'
 import type { Patient, PatientFormData } from '@/types/patient'
-import { addTreatmentPlanItemToBudget, calcClinicalBudgetSummaryWithTax } from '@/utils/budget'
 import { createEmptyClinicalForm } from './ClinicalHistoryForm'
 import { ChiefComplaintSection } from './ChiefComplaintSection'
 import { VitalAlertsSection } from './VitalAlertsSection'
@@ -9,7 +8,6 @@ import { Cie10DiagnosisSearchSection } from './Cie10DiagnosisSearchSection'
 import { PatientRegistrationSection } from './PatientRegistrationSection'
 import { ConsentimientoValoracionSection } from './ConsentimientoValoracionSection'
 import { TreatmentPlanForm } from './TreatmentPlanForm'
-import { BudgetForm } from './BudgetForm'
 import type { OdontogramData } from '@/types/odontogram'
 
 interface RapidValuationFormProps {
@@ -65,32 +63,6 @@ export function RapidValuationForm({
   useEffect(() => {
     onChangeRef.current(form)
   }, [])
-
-  const budgetLinkedPlanItemIds = useMemo(
-    () =>
-      form.budgetItems
-        .map((item) => item.treatmentPlanItemId)
-        .filter((id): id is string => Boolean(id)),
-    [form.budgetItems],
-  )
-
-  const moveTreatmentPlanItemToBudget = (itemId: string) => {
-    const planItem = form.treatmentPlan.find((item) => item.id === itemId)
-    if (!planItem) return
-
-    const nextBudgetItems = addTreatmentPlanItemToBudget(planItem, form.budgetItems)
-    if (!nextBudgetItems) return
-
-    update({
-      budgetItems: nextBudgetItems,
-      budget: calcClinicalBudgetSummaryWithTax(
-        nextBudgetItems,
-        form.budget.discount,
-        form.orthodonticsBudget,
-        form.dentalImplantsBudget,
-      ),
-    })
-  }
 
   return (
     <div className="clinical-history-shell clinical-history space-y-6">
@@ -156,24 +128,12 @@ export function RapidValuationForm({
         <TreatmentPlanForm
           treatmentPlan={form.treatmentPlan}
           treatmentPlanNotes={form.treatmentPlanNotes}
-          diagnoses={form.diagnoses}
-          odontogram={odontogram}
-          specializedAnnexes={form.specializedAnnexes}
-          affectedTeeth={[...new Set(form.diagnoses.flatMap((d) => d.affectedTeeth ?? []))].sort(
-            (a, b) => a - b,
-          )}
-          budgetLinkedItemIds={budgetLinkedPlanItemIds}
-          disabled={disabled}
-          onChange={(patch) => update(patch)}
-          onMoveToBudget={moveTreatmentPlanItemToBudget}
-        />
-
-        <BudgetForm
           budgetItems={form.budgetItems}
           orthodonticsBudget={form.orthodonticsBudget}
           dentalImplantsBudget={form.dentalImplantsBudget}
           budget={form.budget}
-          treatmentPlan={form.treatmentPlan}
+          odontogram={odontogram}
+          specializedAnnexes={form.specializedAnnexes}
           disabled={disabled}
           onChange={(patch) => update(patch)}
         />
