@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
 import type {
   ClinicalRecordFormData,
   Cie10Diagnosis,
@@ -10,10 +10,6 @@ import {
   createEmptyOrthodonticsBudget,
   createEmptyDentalImplantsBudget,
 } from '@/utils'
-import {
-  addTreatmentPlanItemToBudget,
-  calcClinicalBudgetSummaryWithTax,
-} from '@/utils/budget'
 
 function syncClinicalDataFromAnnexes(data: ClinicalRecordFormData): ClinicalRecordFormData {
   return syncClinicalDataFromOrthodonticsAnnex(syncClinicalDataFromEndodonticsAnnex(data))
@@ -37,7 +33,6 @@ import { SpecializedAnnexesForm } from './SpecializedAnnexesForm'
 import { EvolutionNotesForm } from './EvolutionNotesForm'
 import { InformedConsentForm } from './InformedConsentForm'
 import { TreatmentPlanForm } from './TreatmentPlanForm'
-import { BudgetForm } from './BudgetForm'
 import { PaymentControlForm } from './PaymentControlForm'
 import { Odontogram } from '@/components/odontogram'
 import { DiagnosticOdontogramSection } from '@/components/clinical/diagnostics'
@@ -231,38 +226,6 @@ export function ClinicalHistoryForm({
     })
   }
 
-  const affectedTeeth = useMemo(
-    () =>
-      [...new Set(form.diagnoses.flatMap((d) => d.affectedTeeth ?? []))].sort((a, b) => a - b),
-    [form.diagnoses],
-  )
-
-  const budgetLinkedPlanItemIds = useMemo(
-    () =>
-      form.budgetItems
-        .map((item) => item.treatmentPlanItemId)
-        .filter((id): id is string => Boolean(id)),
-    [form.budgetItems],
-  )
-
-  const moveTreatmentPlanItemToBudget = (itemId: string) => {
-    const planItem = form.treatmentPlan.find((item) => item.id === itemId)
-    if (!planItem) return
-
-    const nextBudgetItems = addTreatmentPlanItemToBudget(planItem, form.budgetItems)
-    if (!nextBudgetItems) return
-
-    update({
-      budgetItems: nextBudgetItems,
-      budget: calcClinicalBudgetSummaryWithTax(
-        nextBudgetItems,
-        form.budget.discount,
-        form.orthodonticsBudget,
-        form.dentalImplantsBudget,
-      ),
-    })
-  }
-
   return (
     <div className="clinical-history-shell clinical-history space-y-6">
       {showClinicalSection(activeSection, 'anamnesis') && (
@@ -374,22 +337,12 @@ export function ClinicalHistoryForm({
       <TreatmentPlanForm
         treatmentPlan={form.treatmentPlan}
         treatmentPlanNotes={form.treatmentPlanNotes}
-        diagnoses={form.diagnoses}
-        odontogram={odontogram}
-        affectedTeeth={affectedTeeth}
-        specializedAnnexes={form.specializedAnnexes}
-        budgetLinkedItemIds={budgetLinkedPlanItemIds}
-        disabled={livingLocked}
-        onChange={(patch) => update(patch)}
-        onMoveToBudget={moveTreatmentPlanItemToBudget}
-      />
-
-      <BudgetForm
         budgetItems={form.budgetItems}
         orthodonticsBudget={form.orthodonticsBudget}
         dentalImplantsBudget={form.dentalImplantsBudget}
         budget={form.budget}
-        treatmentPlan={form.treatmentPlan}
+        odontogram={odontogram}
+        specializedAnnexes={form.specializedAnnexes}
         disabled={livingLocked}
         onChange={(patch) => update(patch)}
       />

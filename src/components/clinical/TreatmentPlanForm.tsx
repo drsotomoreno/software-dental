@@ -2,7 +2,13 @@ import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
-import type { Cie10Diagnosis, TreatmentPlanItem } from '@/types/clinicalRecord'
+import type {
+  BudgetLineItem,
+  BudgetSummary,
+  DentalImplantsBudget,
+  OrthodonticsBudget,
+  TreatmentPlanItem,
+} from '@/types/clinicalRecord'
 import type { OdontogramData } from '@/types/odontogram'
 import type { SpecializedAnnexes } from '@/types/specializedAnnexes'
 import { COMMON_CIE10_CODES } from '@/constants/dental'
@@ -14,34 +20,57 @@ import {
 import { useCatalogSearch } from '@/hooks/useCatalogSearch'
 import { useTariffSync } from '@/modules/tariff/useTariffSync'
 import { useTariffStore } from '@/store/useTariffStore'
-import { formatCurrency, generateId } from '@/utils'
+import {
+  formatCurrency,
+  generateId,
+  normalizeDentalImplantsBudget,
+  normalizeOrthodonticsBudget,
+} from '@/utils'
 import {
   mergeSuggestedTreatments,
   suggestTreatmentFromOdontogram,
 } from '@/utils/odontogramTreatmentPlan'
 import { resolveTariffUnitPrice } from '@/utils/tariffLookup'
-import { getDefaultQuantityForCups } from '@/utils/cupsBillingRules'
+import { getDefaultQuantityForCups, isCupsQuantityLocked } from '@/utils/cupsBillingRules'
 import { formatCupsCodeDotted } from '@/services/catalogService'
 import { searchGeneralDentistryCups } from '@/utils/cupsGeneralDentistry'
 import { importAnnexesToTreatmentPlan, previewAnnexTreatmentImports } from '@/utils/treatmentPlanAnnexImport'
-import { sumTreatmentPlanPrices } from '@/utils/treatmentPlanPricing'
 import {
   ANATOMICAL_ZONE_PRESETS,
   formatAnatomicalZone,
   parseAnatomicalZone,
 } from '@/utils/treatmentPlanZone'
+import {
+  budgetSummaryForUnifiedRows,
+  buildUnifiedProcedureRows,
+  commitUnifiedRowEdit,
+  persistVisibleBudgetLines,
+  reconcileBudgetAfterPlanChange,
+  removeUnifiedRow,
+} from '@/utils/unifiedTreatmentBudget'
+import { OrthodonticsBudgetSection } from './OrthodonticsBudgetSection'
+import { DentalImplantsBudgetSection } from './DentalImplantsBudgetSection'
+import { FieldVoiceHeader } from '@/components/voice'
+import { parseDictatedInteger } from '@/utils/voiceDictation'
 
 interface TreatmentPlanFormProps {
   treatmentPlan: TreatmentPlanItem[]
   treatmentPlanNotes?: string
-  diagnoses?: Cie10Diagnosis[]
+  budgetItems: BudgetLineItem[]
+  orthodonticsBudget?: OrthodonticsBudget
+  dentalImplantsBudget?: DentalImplantsBudget
+  budget: BudgetSummary
   odontogram?: OdontogramData | null
-  affectedTeeth?: number[]
   specializedAnnexes?: SpecializedAnnexes
-  budgetLinkedItemIds?: string[]
   disabled?: boolean
-  onChange: (patch: { treatmentPlan: TreatmentPlanItem[]; treatmentPlanNotes?: string }) => void
-  onMoveToBudget?: (itemId: string) => void
+  onChange: (patch: {
+    treatmentPlan: TreatmentPlanItem[]
+    treatmentPlanNotes?: string
+    budgetItems: BudgetLineItem[]
+    orthodonticsBudget: OrthodonticsBudget
+    dentalImplantsBudget: DentalImplantsBudget
+    budget: BudgetSummary
+  }) => void
 }
 
 const DEFAULT_TREATMENT_PHASE = 'fase_ii' as const
@@ -103,11 +132,17 @@ function PriceCell({
 export function TreatmentPlanForm({
   treatmentPlan,
   treatmentPlanNotes = '',
+  budgetItems,
+  orthodonticsBudget: orthodonticsBudgetProp,
+  dentalImplantsBudget: dentalImplantsBudgetProp,
+  budget,
   odontogram,
   specializedAnnexes,
   disabled = false,
   onChange,
 }: TreatmentPlanFormProps) {
+  const orthodonticsBudget = normalizeOrthodonticsBudget(orthodonticsBudgetProp)
+  const dentalImplantsBudget = normalizeDentalImplantsBudget(dentalImplantsBudgetProp)
   const [openMenu, setOpenMenu] = useState<{ id: string; field: 'cie' | 'cups'; query: string } | null>(
     null,
   )
@@ -123,8 +158,43 @@ export function TreatmentPlanForm({
     [user?.id],
   )
 
-  const emit = (plan: TreatmentPlanItem[]) => {
-    onChange({ treatmentPlan: plan, treatmentPlanNotes })
+  const rows = useMemo(
+    () => buildUnifiedProcedureRows(treatmentPlan, budgetItems),
+    [treatmentPlan, budgetItems],
+  )
+
+  const summary = useMemo(
+    () =>
+      budgetSummaryForUnifiedRows(
+        rows,
+        budget.discount,
+        orthodonticsBudget,
+        dentalImplantsBudget,
+      ),
+    [rows, budget.discount, orthodonticsBudget, dentalImplantsBudget],
+  )
+
+  const emitState = (
+    plan: TreatmentPlanItem[],
+    items: BudgetLineItem[],
+    ortho: OrthodonticsBudget = orthodonticsBudget,
+    implants: DentalImplantsBudget = dentalImplantsBudget,
+    discount: number = budget.discount,
+  ) => {
+    const syncedItems = persistVisibleBudgetLines(plan, items)
+    const nextRows = buildUnifiedProcedureRows(plan, syncedItems)
+    onChange({
+      treatmentPlan: plan,
+      treatmentPlanNotes,
+      budgetItems: syncedItems,
+      orthodonticsBudget: ortho,
+      dentalImplantsBudget: implants,
+      budget: budgetSummaryForUnifiedRows(nextRows, discount, ortho, implants),
+    })
+  }
+
+  const emitPlan = (plan: TreatmentPlanItem[], items: BudgetLineItem[] = budgetItems) => {
+    emitState(plan, items)
   }
 
   const catalogUnitPrice = (cupsCode?: string) =>
@@ -165,8 +235,6 @@ export function TreatmentPlanForm({
     [cupsQuery, prices],
   )
 
-  const total = sumTreatmentPlanPrices(treatmentPlan)
-
   const addTreatmentItem = () => {
     const item: TreatmentPlanItem = {
       id: generateId(),
@@ -178,7 +246,7 @@ export function TreatmentPlanForm({
       executionStatus: 'pendiente',
       source: 'manual',
     }
-    emit([...treatmentPlan, item])
+    emitPlan([...treatmentPlan, item])
   }
 
   const suggestFromOdontogram = () => {
@@ -188,19 +256,41 @@ export function TreatmentPlanForm({
       anatomicalZone: item.toothNumber ? String(item.toothNumber) : item.anatomicalZone,
       unitPrice: catalogUnitPrice(item.cupsCode) || item.unitPrice,
     }))
-    emit(mergeSuggestedTreatments(treatmentPlan, suggested))
+    const nextPlan = mergeSuggestedTreatments(treatmentPlan, suggested)
+    emitPlan(
+      nextPlan,
+      reconcileBudgetAfterPlanChange(treatmentPlan, nextPlan, budgetItems),
+    )
   }
 
   const importFromAnnexes = () => {
-    emit(importAnnexesToTreatmentPlan(specializedAnnexes, treatmentPlan, catalogUnitPrice))
+    const nextPlan = importAnnexesToTreatmentPlan(specializedAnnexes, treatmentPlan, catalogUnitPrice)
+    emitPlan(
+      nextPlan,
+      reconcileBudgetAfterPlanChange(treatmentPlan, nextPlan, budgetItems),
+    )
   }
 
-  const updateTreatmentItem = (id: string, patch: Partial<TreatmentPlanItem>) => {
-    emit(treatmentPlan.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+  const updateTreatmentItem = (key: string, patch: Partial<TreatmentPlanItem>) => {
+    const next = commitUnifiedRowEdit({
+      treatmentPlan,
+      budgetItems,
+      rows,
+      editedKey: key,
+      patch,
+    })
+    emitPlan(next.treatmentPlan, next.budgetItems)
   }
 
-  const removeTreatmentItem = (id: string) => {
-    emit(treatmentPlan.filter((item) => item.id !== id))
+  const removeTreatmentItem = (key: string) => {
+    const row = rows.find((item) => item.key === key)
+    if (!row) return
+    const next = removeUnifiedRow({ treatmentPlan, budgetItems, row })
+    emitPlan(next.treatmentPlan, next.budgetItems)
+  }
+
+  const emitDiscount = (discount: number) => {
+    emitState(treatmentPlan, budgetItems, orthodonticsBudget, dentalImplantsBudget, discount)
   }
 
   const focusRow = (id: string) => {
@@ -216,7 +306,10 @@ export function TreatmentPlanForm({
   return (
     <section className="card">
       <h3 className={`mb-3 ${CLINICAL_SECTION_TITLE_CLASS}`}>
-        {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.tratamiento, 'Plan de Tratamiento')}{' '}
+        {clinicalSectionTitle(
+          CLINICAL_HISTORY_SECTION_NUMBERS.tratamiento,
+          'Plan de Tratamiento y Presupuesto',
+        )}{' '}
         <span className="text-red-500">*</span>
       </h3>
 
@@ -245,36 +338,38 @@ export function TreatmentPlanForm({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] border-collapse text-sm">
+        <table className="w-full min-w-[860px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               <th className="px-2 py-2">Diente / Zona</th>
               <th className="px-2 py-2">Diagnóstico CIE</th>
               <th className="px-2 py-2">Procedimiento</th>
+              <th className="w-20 px-2 py-2 text-right">Cant.</th>
               <th className="w-36 px-2 py-2 text-right">Precio</th>
               <th className="w-28 px-2 py-2 text-right">Acciones</th>
             </tr>
           </thead>
           <tbody>
-            {treatmentPlan.length === 0 ? (
+            {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-2 py-6 text-center text-sm text-slate-400">
+                <td colSpan={6} className="px-2 py-6 text-center text-sm text-slate-400">
                   —
                 </td>
               </tr>
             ) : (
-              treatmentPlan.map((item) => {
-                const cieOpen = openMenu?.id === item.id && openMenu.field === 'cie'
-                const cupsOpen = openMenu?.id === item.id && openMenu.field === 'cups'
+              rows.map((row) => {
+                const item = row.item
+                const cieOpen = openMenu?.id === row.key && openMenu.field === 'cie'
+                const cupsOpen = openMenu?.id === row.key && openMenu.field === 'cups'
                 return (
-                  <tr key={item.id} className="border-b border-slate-100 align-top">
+                  <tr key={row.key} className="border-b border-slate-100 align-top">
                     <td className="px-2 py-1.5">
                       <input
-                        id={`plan-zone-${item.id}`}
+                        id={`plan-zone-${row.key}`}
                         list="plan-zone-presets"
                         disabled={disabled}
                         value={formatAnatomicalZone(item)}
-                        onChange={(event) => updateTreatmentItem(item.id, parseAnatomicalZone(event.target.value))}
+                        onChange={(event) => updateTreatmentItem(row.key, parseAnatomicalZone(event.target.value))}
                         placeholder="16, 14-18, Q1"
                         className="input-field h-8 px-2 text-sm"
                         aria-label="Diente o zona"
@@ -286,13 +381,13 @@ export function TreatmentPlanForm({
                         value={cieOpen ? openMenu.query : formatCieLabel(item)}
                         onFocus={() => {
                           if (disabled) return
-                          setOpenMenu({ id: item.id, field: 'cie', query: formatCieLabel(item) })
+                          setOpenMenu({ id: row.key, field: 'cie', query: formatCieLabel(item) })
                         }}
-                        onBlur={() => closeMenuSoon(item.id, 'cie')}
+                        onBlur={() => closeMenuSoon(row.key, 'cie')}
                         onChange={(event) => {
                           const query = event.target.value
-                          setOpenMenu({ id: item.id, field: 'cie', query })
-                          updateTreatmentItem(item.id, parseCieLabel(query))
+                          setOpenMenu({ id: row.key, field: 'cie', query })
+                          updateTreatmentItem(row.key, parseCieLabel(query))
                         }}
                         placeholder="CIE-10"
                         className="input-field h-8 px-2 text-sm"
@@ -305,13 +400,13 @@ export function TreatmentPlanForm({
                             <li className="px-2 py-1.5 text-xs text-slate-400">—</li>
                           ) : (
                             cieOptions.map((option) => (
-                              <li key={`${item.id}-${option.code}`}>
+                              <li key={`${row.key}-${option.code}`}>
                                 <button
                                   type="button"
                                   className="flex w-full gap-2 px-2 py-1.5 text-left text-xs hover:bg-slate-50"
                                   onMouseDown={(event) => event.preventDefault()}
                                   onClick={() => {
-                                    updateTreatmentItem(item.id, {
+                                    updateTreatmentItem(row.key, {
                                       diagnosisCode: option.code,
                                       diagnosisDescription: option.description,
                                     })
@@ -333,13 +428,13 @@ export function TreatmentPlanForm({
                         value={cupsOpen ? openMenu.query : item.procedure}
                         onFocus={() => {
                           if (disabled) return
-                          setOpenMenu({ id: item.id, field: 'cups', query: item.procedure })
+                          setOpenMenu({ id: row.key, field: 'cups', query: item.procedure })
                         }}
-                        onBlur={() => closeMenuSoon(item.id, 'cups')}
+                        onBlur={() => closeMenuSoon(row.key, 'cups')}
                         onChange={(event) => {
                           const query = event.target.value
-                          setOpenMenu({ id: item.id, field: 'cups', query })
-                          updateTreatmentItem(item.id, { procedure: query })
+                          setOpenMenu({ id: row.key, field: 'cups', query })
+                          updateTreatmentItem(row.key, { procedure: query })
                         }}
                         placeholder="CUPS .03"
                         title={item.procedure || undefined}
@@ -358,14 +453,14 @@ export function TreatmentPlanForm({
                             <li className="px-2 py-1.5 text-xs text-slate-400">—</li>
                           ) : (
                             cupsOptions.map((option) => (
-                              <li key={`${item.id}-${option.cupsCode}-${option.procedure}`}>
+                              <li key={`${row.key}-${option.cupsCode}-${option.procedure}`}>
                                 <button
                                   type="button"
                                   className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs hover:bg-slate-50"
                                   onMouseDown={(event) => event.preventDefault()}
                                   onClick={() => {
                                     const price = catalogUnitPrice(option.cupsCode)
-                                    updateTreatmentItem(item.id, {
+                                    updateTreatmentItem(row.key, {
                                       procedure: option.procedure,
                                       cupsCode: option.cupsCode,
                                       quantity: getDefaultQuantityForCups(option.cupsCode),
@@ -393,10 +488,23 @@ export function TreatmentPlanForm({
                       )}
                     </td>
                     <td className="px-2 py-1.5">
+                      <input
+                        type="number"
+                        min={1}
+                        disabled={disabled || isCupsQuantityLocked(item.cupsCode)}
+                        value={item.quantity || 1}
+                        onChange={(event) =>
+                          updateTreatmentItem(row.key, { quantity: Number(event.target.value) })
+                        }
+                        className="input-field h-8 px-2 text-right text-sm tabular-nums"
+                        aria-label="Cantidad"
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
                       <PriceCell
                         value={item.unitPrice}
                         disabled={disabled}
-                        onCommit={(unitPrice) => updateTreatmentItem(item.id, { unitPrice })}
+                        onCommit={(unitPrice) => updateTreatmentItem(row.key, { unitPrice })}
                       />
                     </td>
                     <td className="px-2 py-1.5 text-right">
@@ -404,14 +512,14 @@ export function TreatmentPlanForm({
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"
-                            onClick={() => focusRow(item.id)}
+                            onClick={() => focusRow(row.key)}
                             className="text-xs font-medium text-dental-700 hover:text-dental-800"
                           >
                             Editar
                           </button>
                           <button
                             type="button"
-                            onClick={() => removeTreatmentItem(item.id)}
+                            onClick={() => removeTreatmentItem(row.key)}
                             className="text-xs font-medium text-red-600 hover:text-red-700"
                           >
                             Eliminar
@@ -424,17 +532,6 @@ export function TreatmentPlanForm({
               })
             )}
           </tbody>
-          <tfoot>
-            <tr className="border-t border-slate-200">
-              <td colSpan={3} className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Valor Total
-              </td>
-              <td className="px-2 py-2 text-right text-sm font-semibold tabular-nums text-slate-900">
-                {formatCurrency(total)}
-              </td>
-              <td />
-            </tr>
-          </tfoot>
         </table>
       </div>
       <datalist id="plan-zone-presets">
@@ -442,6 +539,56 @@ export function TreatmentPlanForm({
           <option key={zone} value={zone} />
         ))}
       </datalist>
+
+      <OrthodonticsBudgetSection
+        orthodonticsBudget={orthodonticsBudget}
+        disabled={disabled}
+        onChange={(ortho) => emitState(treatmentPlan, budgetItems, ortho, dentalImplantsBudget)}
+      />
+
+      <DentalImplantsBudgetSection
+        dentalImplantsBudget={dentalImplantsBudget}
+        disabled={disabled}
+        onChange={(implants) => emitState(treatmentPlan, budgetItems, orthodonticsBudget, implants)}
+      />
+
+      <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 sm:grid-cols-2 lg:grid-cols-4 dark:border-slate-700">
+        <div>
+          <span className="text-sm text-slate-500 dark:text-slate-400">Subtotal clínico</span>
+          <p className="text-lg font-semibold">{formatCurrency(summary.subtotal)}</p>
+        </div>
+        <div>
+          <span className="text-sm text-slate-500 dark:text-slate-400">IVA excluido (0%)</span>
+          <p className="text-lg font-semibold">{formatCurrency(0)}</p>
+        </div>
+        <div>
+          <FieldVoiceHeader
+            label="Descuento global (COP)"
+            targetInputId="budget-form-global-discount"
+            disabled={disabled}
+            getValue={() => String(budget.discount || '')}
+            onValueChange={(text) => {
+              const parsed = parseDictatedInteger(text)
+              if (parsed != null) emitDiscount(Math.max(0, parsed))
+            }}
+          />
+          <input
+            id="budget-form-global-discount"
+            type="number"
+            min={0}
+            disabled={disabled}
+            value={budget.discount}
+            onChange={(event) => emitDiscount(Number(event.target.value))}
+            className="input-field"
+          />
+        </div>
+        <div>
+          <span className="text-sm text-slate-500 dark:text-slate-400">Total estimado</span>
+          <p className="text-xl font-bold text-dental-700 dark:text-dental-400">
+            {formatCurrency(summary.total)}
+          </p>
+        </div>
+      </div>
     </section>
   )
 }
