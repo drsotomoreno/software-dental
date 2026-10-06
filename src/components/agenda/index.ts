@@ -1,19 +1,21 @@
-import { AgendaScheduler } from './AgendaScheduler'
-export { DentalScheduler } from './DentalScheduler'
-export { SchedulerAppointmentCard } from './SchedulerAppointmentCard'
-export { CreateAppointmentModal } from './CreateAppointmentModal'
-export { ColumnManager } from './ColumnManager'
-export { AgendaViewTabs } from './AgendaViewTabs'
-export { AgendaPeriodNavigation, AgendaPeriodNavigationFrame } from './AgendaPeriodNavigation'
-export { AgendaDayView } from './AgendaDayView'
-export { AgendaWeekView } from './AgendaWeekView'
-export { AgendaMonthView } from './AgendaMonthView'
-export { BlockSlotModal } from './BlockSlotModal'
-export { BlockedSlotOverlay } from './BlockedSlotOverlay'
-export { AgendaCitasList } from './AgendaCitasList'
-export { AgendaContextMenu } from './AgendaContextMenu'
-export { AppointmentDetailPanel } from './AppointmentDetailPanel'
-export { PatientSearchInput } from './PatientSearchInput'
-export { WhatsAppReminderButton } from './WhatsAppReminderButton'
-export type { AgendaViewMode } from './AgendaViewTabs'
-export { AgendaScheduler }
+export {
+  AgendaCitasList,
+  AgendaContextMenu,
+  AgendaDayView,
+  AgendaMonthView,
+  AgendaPeriodNavigation,
+  AgendaPeriodNavigationFrame,
+  AgendaScheduler,
+  AgendaViewTabs,
+  AgendaWeekView,
+  AppointmentDetailPanel,
+  BlockedSlotOverlay,
+  BlockSlotModal,
+  ColumnManager,
+  CreateAppointmentModal,
+  DentalScheduler,
+  PatientSearchInput,
+  SchedulerAppointmentCard,
+  WhatsAppReminderButton,
+} from '@/modules/agenda'
+export type { AgendaViewMode, SlotSelection } from '@/modules/agenda'

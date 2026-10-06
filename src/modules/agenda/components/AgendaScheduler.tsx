@@ -40,22 +40,22 @@ import {
   AGENDA_REASIGNAR_EVENT,
   eliminarCita,
   renderCitas,
-} from '@/utils/agendaStorage'
+} from '../storage/agendaStorage'
 import {
   clearAgendaClipboard,
   copiarCitas,
   cortarCitas,
   hasAgendaClipboard,
   pegarCitasEn,
-} from '@/utils/agendaClipboard'
-import { noteTextForSlot, readSlotNotes, writeSlotNotes } from '@/utils/agendaSlotNotes'
-import { useAgendaClipboard } from '@/hooks/useAgendaClipboard'
-import { useScheduleColumns } from '@/hooks/useScheduleColumns'
-import { useAppointmentsRange } from '@/hooks/useAppointments'
-import { useScheduleBlocks } from '@/hooks/useScheduleBlocks'
+} from '../storage/agendaClipboard'
+import { noteTextForSlot, readSlotNotes, writeSlotNotes } from '../storage/agendaSlotNotes'
+import { useAgendaClipboard } from '../hooks/useAgendaClipboard'
+import { useScheduleColumns } from '../hooks/useScheduleColumns'
+import { useAppointmentsRange } from '../hooks/useAppointments'
+import { useScheduleBlocks } from '../hooks/useScheduleBlocks'
 import type { Appointment } from '@/types/appointment'
 import type { ScheduleBlock } from '@/types/scheduleBlock'
-import { findBlockAtSlot, isSlotBlocked } from '@/utils/scheduleBlocks'
+import { findBlockAtSlot, isSlotBlocked } from '../storage/scheduleBlocks'
 import { generateTimeSlots } from '@/constants/procedures'
 import {
   appointmentsCoveringSlots,
@@ -69,8 +69,8 @@ import {
   SLOT_DRAG_THRESHOLD_PX,
   slotFromClientPoint,
   type AgendaSlotRef,
-} from '@/utils/agendaSlotSelection'
-import { markAppointmentNoShow } from '@/utils/appointmentNoShow'
+} from '../storage/agendaSlotSelection'
+import { markAppointmentNoShow } from '../clinical/appointmentNoShow'
 import { useAuth } from '@/contexts/AuthContext'
 
 export function AgendaScheduler() {

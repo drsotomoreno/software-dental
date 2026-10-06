@@ -4,8 +4,8 @@ import {
   getAppointmentDisplayClasses,
   PROCEDURE_TYPE_CONFIG,
 } from '@/constants/procedures'
-import { usePatientPrecautionAlert } from '@/hooks/usePatientPrecautionAlert'
-import { getChairAbbreviation, getChairDisplayStyle } from '@/utils/scheduleColumnStyles'
+import { useAgendaPrecautionActive } from '../core/clinicalBridge'
+import { getChairAbbreviation, getChairDisplayStyle } from '../storage/scheduleColumnStyles'
 import { format, parseISO } from 'date-fns'
 
 interface SchedulerAppointmentCardProps {
@@ -33,8 +33,7 @@ export function SchedulerAppointmentCard({
   const start = format(parseISO(appointment.startTime), 'HH:mm')
   const end = format(parseISO(appointment.endTime), 'HH:mm')
   const chairAbbrev = columnName ? getChairAbbreviation(columnName) : null
-  const precautionAlert = usePatientPrecautionAlert(appointment.patientId)
-  const hasPrecaution = precautionAlert?.active ?? false
+  const hasPrecaution = useAgendaPrecautionActive(appointment.patientId)
 
   return (
     <div

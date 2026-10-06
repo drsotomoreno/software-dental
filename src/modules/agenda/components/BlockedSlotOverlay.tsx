@@ -1,5 +1,5 @@
 import type { ScheduleBlock } from '@/types/scheduleBlock'
-import type { BlockSegment } from '@/utils/scheduleBlocks'
+import type { BlockSegment } from '../storage/scheduleBlocks'
 
 interface BlockedSlotOverlayProps {
   segments: BlockSegment[]
