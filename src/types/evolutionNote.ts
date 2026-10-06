@@ -1,3 +1,4 @@
+import type { ImplantFdiQuadrant } from '@/constants/implantPlanning'
 import type { SignatureCaptureMetadata } from '@/types/signature'
 
 export type EvolutionNoteKind = 'evolution' | 'addendum'
@@ -22,6 +23,11 @@ export interface EvolutionCatalogService {
   requiereCupsRips?: boolean
   cost?: number
   isBillable?: boolean
+  /** Pieza FDI, cuadrante, arcada o alcance general donde se realizó el procedimiento. */
+  anatomicalZone?: string
+  toothNumber?: number
+  fdiQuadrant?: ImplantFdiQuadrant
+  arch?: 'superior' | 'inferior'
 }
 
 export interface EvolutionNote {
