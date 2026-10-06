@@ -125,9 +125,13 @@ export function clinicalRecordToFormData(
   })
 }
 
-export async function getLatestClinicalRecord(
+function clinicalRecordRecency(record: ClinicalRecord): string {
+  return record.signedAt ?? record.updatedAt ?? record.createdAt ?? ''
+}
+
+export async function listClinicalRecordsForPatient(
   patientRouteId: string,
-): Promise<ClinicalRecord | null> {
+): Promise<ClinicalRecord[]> {
   const patientId = toPatientForeignKey(patientRouteId)
   const numericKey = toDexiePrimaryKey(patientRouteId)
 
@@ -138,43 +142,30 @@ export async function getLatestClinicalRecord(
     byNumeric = await db.clinicalRecords.where('patientId').equals(numericKey).toArray()
   }
 
-  const merged = [...new Map([...byString, ...byNumeric].map((record) => [record.id, record])).values()]
+  return [...new Map([...byString, ...byNumeric].map((record) => [record.id, record])).values()]
+}
+
+export async function listSignedClinicalRecords(
+  patientRouteId: string,
+): Promise<ClinicalRecord[]> {
+  const records = await listClinicalRecordsForPatient(patientRouteId)
+  return records
+    .filter((record) => record.isLocked)
+    .sort((a, b) => clinicalRecordRecency(b).localeCompare(clinicalRecordRecency(a)))
+}
+
+export async function getLatestClinicalRecord(
+  patientRouteId: string,
+): Promise<ClinicalRecord | null> {
+  const merged = await listClinicalRecordsForPatient(patientRouteId)
   if (merged.length === 0) return null
 
-  return merged.sort((a, b) =>
-    (b.signedAt ?? b.updatedAt ?? b.createdAt ?? '').localeCompare(
-      a.signedAt ?? a.updatedAt ?? a.createdAt ?? '',
-    ),
-  )[0]
+  return merged.sort((a, b) => clinicalRecordRecency(b).localeCompare(clinicalRecordRecency(a)))[0]
 }
 
 export async function getLatestSignedClinicalRecord(
   patientRouteId: string,
 ): Promise<ClinicalRecord | null> {
-  const patientId = toPatientForeignKey(patientRouteId)
-  const numericKey = toDexiePrimaryKey(patientRouteId)
-
-  const byString = await db.clinicalRecords
-    .where('patientId')
-    .equals(patientId)
-    .filter((record) => record.isLocked)
-    .toArray()
-
-  let byNumeric: ClinicalRecord[] = []
-  if (typeof numericKey === 'number') {
-    byNumeric = await db.clinicalRecords
-      .where('patientId')
-      .equals(numericKey)
-      .filter((record) => record.isLocked)
-      .toArray()
-  }
-
-  const merged = [...new Map([...byString, ...byNumeric].map((record) => [record.id, record])).values()]
-  if (merged.length === 0) return null
-
-  return merged.sort((a, b) =>
-    (b.signedAt ?? b.updatedAt ?? b.createdAt ?? '').localeCompare(
-      a.signedAt ?? a.updatedAt ?? a.createdAt ?? '',
-    ),
-  )[0]
+  const signed = await listSignedClinicalRecords(patientRouteId)
+  return signed[0] ?? null
 }

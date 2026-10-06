@@ -89,8 +89,10 @@ import {
   clinicalRecordToFormData,
   getLatestClinicalRecord,
   getLatestSignedClinicalRecord,
+  listSignedClinicalRecords,
   normalizeClinicalRecordForExport,
 } from '@/utils/clinicalRecordSnapshot'
+import type { RipsSourceRecord } from '@/utils/rips'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { RipsExportForm } from '@/components/rips'
 import { FhirExportForm } from '@/components/fhir'
@@ -183,6 +185,8 @@ export function PatientDetailPage() {
 
   const [showSignConfirm, setShowSignConfirm] = useState(false)
   const [ripsShieldMismatches, setRipsShieldMismatches] = useState<RipsShieldMismatch[]>([])
+  const [ripsSources, setRipsSources] = useState<RipsSourceRecord[] | null>(null)
+  const [preparingRips, setPreparingRips] = useState(false)
 
   const [activeSection, setActiveSection] = useState<string>('all')
 
@@ -219,6 +223,8 @@ export function PatientDetailPage() {
     setViewMode('edit')
     setViewingRecord(null)
     setIntegrityStatus(null)
+    setRipsSources(null)
+    setPreparingRips(false)
     setMessage('')
     viewedPatientRef.current = null
     clinicalInitForPatientRef.current = null
@@ -1058,14 +1064,6 @@ export function PatientDetailPage() {
 
     if (!validateClinical()) return
 
-    const mismatches = (clinicalData.evolutionNotes ?? []).flatMap((note) =>
-      evaluateEvolutionRipsShield(note, user),
-    )
-    if (mismatches.length > 0) {
-      setRipsShieldMismatches(mismatches)
-      return
-    }
-
     setShowSignConfirm(true)
 
   }
@@ -1286,6 +1284,7 @@ export function PatientDetailPage() {
       setViewingRecord(null)
       setIsLocked(false)
       setShowSignConfirm(false)
+      setRipsSources(null)
 
       await clearPatientClinicalDraft(patientForeignKey)
 
@@ -1297,7 +1296,7 @@ export function PatientDetailPage() {
       })
 
       setMessage(
-        'Atención cerrada para facturación. Las evoluciones firmadas quedaron bloqueadas como folio (Res. 1995/1999). Odontograma, plan y exámenes siguen editables. Hash: ' +
+        'Historia clínica cerrada correctamente. Las evoluciones firmadas quedaron bloqueadas como folio (Res. 1995/1999). Odontograma, plan y exámenes siguen editables. El RIPS se genera con el botón Generar RIPS. Hash: ' +
           contentHash.slice(0, 16) +
           '…',
       )
@@ -1307,6 +1306,53 @@ export function PatientDetailPage() {
       return { ok: false as const, error: 'Error al firmar la historia clínica.' }
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleGenerateRips = async () => {
+    if (!patient || !user || !patientForeignKey) return
+
+    if (!can('export.rips') && !can('clinical.sign')) {
+      setMessage('No tiene permisos para generar RIPS.')
+      return
+    }
+
+    setPreparingRips(true)
+    setMessage('')
+    try {
+      const records = await listSignedClinicalRecords(patientForeignKey)
+      if (records.length === 0) {
+        setRipsSources(null)
+        setMessage(
+          'Cierre la historia clínica antes de generar el RIPS. El archivo usa la historia firmada de este paciente.',
+        )
+        return
+      }
+
+      const mismatches = records.flatMap((record) =>
+        (record.evolutionNotes ?? []).flatMap((note) => evaluateEvolutionRipsShield(note, user)),
+      )
+      if (mismatches.length > 0) {
+        setRipsShieldMismatches(mismatches)
+        return
+      }
+
+      setRipsSources(
+        records.map((record) => ({
+          record: normalizeClinicalRecordForExport(record),
+          patient,
+        })),
+      )
+      window.setTimeout(() => {
+        document.getElementById('generar-rips-panel')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        })
+      }, 50)
+    } catch {
+      setMessage('No se pudo preparar el RIPS de esta historia.')
+    } finally {
+      setPreparingRips(false)
     }
   }
 
@@ -1938,7 +1984,11 @@ export function PatientDetailPage() {
 
               ? 'bg-green-50 text-green-800'
 
-              : 'bg-red-50 text-red-700'
+              : message.includes('antes de generar')
+
+                ? 'bg-amber-50 text-amber-900'
+
+                : 'bg-red-50 text-red-700'
 
           }`}
 
@@ -2034,9 +2084,43 @@ export function PatientDetailPage() {
         </div>
       )}
 
+      {ripsSources && user && (can('export.rips') || can('clinical.sign')) && !isArchiveView && (
+        <div id="generar-rips-panel" className="card">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className={CLINICAL_SECTION_TITLE_CLASS}>Generar RIPS</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                {ripsSources.length === 1
+                  ? 'El JSON se arma con la historia clínica firmada de este paciente.'
+                  : `El JSON se arma con ${ripsSources.length} historias clínicas firmadas de este paciente.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              onClick={() => setRipsSources(null)}
+            >
+              Cerrar
+            </button>
+          </div>
+          <RipsExportForm
+            sources={ripsSources}
+            professional={user}
+            onExported={() =>
+              audit({
+                action: 'EXPORT_RIPS',
+                resourceType: 'rips',
+                resourceId: patientForeignKey,
+                details: `RIPS generado desde la historia — ${ripsSources.length} atención(es)`,
+              })
+            }
+          />
+        </div>
+      )}
+
       {!isArchiveView && !showRapidValuation && (
 
-        <div className="sticky bottom-4 flex gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
+        <div className="sticky bottom-4 flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
 
           <button type="button" onClick={() => void handleSaveDraft()} className="btn-secondary">
 
@@ -2051,13 +2135,31 @@ export function PatientDetailPage() {
 
             onClick={handleSignAndLock}
 
-            disabled={saving}
+            disabled={saving || preparingRips}
 
             className="btn-primary"
 
           >
 
-            {saving ? 'Cerrando atención...' : 'Cerrar atención (snapshot RIPS)'}
+            {saving ? 'Cerrando historia...' : 'Cerrar historia'}
+
+          </button>
+          )}
+
+          {(can('export.rips') || can('clinical.sign')) && (
+          <button
+
+            type="button"
+
+            onClick={() => void handleGenerateRips()}
+
+            disabled={saving || preparingRips}
+
+            className="btn-secondary"
+
+          >
+
+            {preparingRips ? 'Preparando RIPS...' : 'Generar RIPS'}
 
           </button>
           )}
@@ -2073,8 +2175,8 @@ export function PatientDetailPage() {
       />
       <SignConfirmationModal
         open={showSignConfirm}
-        title="Cerrar atención y firmar evoluciones"
-        description="Se firmarán las evoluciones completas (folios inmutables, Res. 1995/1999) y se guardará un snapshot para facturación/RIPS. El odontograma, los datos demográficos, el plan futuro y los exámenes del expediente no se bloquean. Las correcciones de un folio firmado se hacen con notas de aclaración."
+        title="Cerrar historia"
+        description="Se firmarán las evoluciones completas (folios inmutables, Res. 1995/1999) y quedará registrada la historia clínica firmada. El odontograma, los datos demográficos, el plan futuro y los exámenes del expediente siguen editables. Las correcciones de un folio firmado se hacen con notas de aclaración. El RIPS se genera después, con el botón Generar RIPS."
         userEmail={user?.email ?? ''}
         onConfirm={executeSignAndLock}
         onCancel={() => setShowSignConfirm(false)}

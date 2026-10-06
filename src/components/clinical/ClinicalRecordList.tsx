@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '@/db/database'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
+import { listSignedClinicalRecords } from '@/utils/clinicalRecordSnapshot'
 import { formatDate, toDexiePrimaryKey } from '@/utils'
 
 interface ClinicalRecordListProps {
@@ -9,30 +9,7 @@ interface ClinicalRecordListProps {
 }
 
 export function ClinicalRecordList({ patientId, onSelectRecord }: ClinicalRecordListProps) {
-  const records = useLiveQuery(async () => {
-    const numericKey = toDexiePrimaryKey(patientId)
-    const stringKey = String(patientId)
-
-    const byString = await db.clinicalRecords
-      .where('patientId')
-      .equals(stringKey)
-      .filter((r) => r.isLocked)
-      .toArray()
-
-    let byNumeric: typeof byString = []
-    if (typeof numericKey === 'number') {
-      byNumeric = await db.clinicalRecords
-        .where('patientId')
-        .equals(numericKey)
-        .filter((r) => r.isLocked)
-        .toArray()
-    }
-
-    const merged = new Map([...byString, ...byNumeric].map((r) => [r.id, r]))
-    return [...merged.values()].sort(
-      (a, b) => new Date(b.signedAt ?? 0).getTime() - new Date(a.signedAt ?? 0).getTime(),
-    )
-  }, [patientId])
+  const records = useLiveQuery(() => listSignedClinicalRecords(patientId), [patientId])
 
   if (records === undefined) {
     return (
