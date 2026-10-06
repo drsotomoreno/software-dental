@@ -3,6 +3,7 @@ import type { StomatologicalExam } from './stomatologicalExam'
 import type { SpecializedAnnexes } from './specializedAnnexes'
 import type { EvolutionNote } from './evolutionNote'
 import type { InformedConsent } from './consent'
+import type { SectionBiometricSignature } from './sectionSignature'
 import type { ValuationConsentMetadata } from './valuationConsent'
 import type { OdontogramData } from './odontogram'
 import type { ClinicalDiagnosticChart } from './clinicalDiagnosticChart'
@@ -269,6 +270,11 @@ export interface ClinicalRecord {
   treatmentPlan: TreatmentPlanItem[]
   /** Objetivos, alternativas y criterio clínico del odontólogo */
   treatmentPlanNotes?: string
+  /**
+   * Sello del plan de tratamiento, odontograma y presupuesto.
+   * Solo se escribe cuando el paciente acepta esa sección en MasterSignatureModal.
+   */
+  treatmentPlanLegal?: SectionBiometricSignature
   /** Sección 6: Presupuesto — tratamientos con precio */
   budgetItems: BudgetLineItem[]
   orthodonticsBudget?: OrthodonticsBudget
@@ -295,7 +301,9 @@ export interface ClinicalRecord {
   /**
    * Snapshot de atención cerrado para facturación / RIPS / integridad del paquete.
    * No bloquea la HCE viva: odontograma, demografía, plan futuro ni nuevos folios.
-   * El bloqueo legal (Res. 1995/1999) aplica a cada `EvolutionNote` firmada.
+   * El bloqueo legal (Res. 1995/1999) de una sección la escribe MasterSignatureModal
+   * en el objeto correspondiente (anamnesis, plan de tratamiento o consentimiento).
+   * Cada `EvolutionNote` firmada sigue siendo un folio inmutable.
    */
   isLocked: boolean
   createdAt: string
@@ -317,6 +325,8 @@ export interface ClinicalRecordFormData {
   findings: string
   treatmentPlan: TreatmentPlanItem[]
   treatmentPlanNotes?: string
+  /** Sello legal del plan, odontograma y presupuesto. Ausente si esa sección sigue abierta. */
+  treatmentPlanLegal?: SectionBiometricSignature
   budgetItems: BudgetLineItem[]
   orthodonticsBudget?: OrthodonticsBudget
   dentalImplantsBudget?: DentalImplantsBudget
