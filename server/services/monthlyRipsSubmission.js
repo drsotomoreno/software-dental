@@ -138,6 +138,27 @@ export async function enviarRipsMensuales(options = {}) {
         },
       })
 
+      const cuvRecord = await saveCuvRecord({
+        cuv: ministry.cuv,
+        numFactura: pkg.rips.numFactura ?? null,
+        numDocumentoIdObligado: pkg.rips.numDocumentoIdObligado,
+        procesoId: ministry.procesoId,
+        fechaRadicacion: ministry.fechaRadicacion,
+        estado: ministry.estado,
+        source: ministry.source,
+        ambiente: ministry.ambiente,
+        modulo: ministry.modulo,
+        httpStatus: ministry.httpStatus,
+        notificaciones: ministry.notificaciones,
+        rechazos: ministry.rechazos,
+        ministryErrors: ministry.ministryErrors,
+        localIssues: ministry.localIssues,
+        respuestaCruda: ministry.respuestaCruda,
+        rips: pkg.rips,
+        metadatos: { origen: 'cron-mensual', period, odontologoId: pkg.odontologoId },
+        clinicalRecordId: pkg.recordIds?.[0] ?? null,
+      })
+
       if (!ministry.success) {
         results.push({
           ...entry,
@@ -145,21 +166,11 @@ export async function enviarRipsMensuales(options = {}) {
           error: 'El Ministerio rechazó el paquete o falló la validación local.',
           localIssues: ministry.localIssues ?? [],
           ministryErrors: ministry.ministryErrors ?? [],
+          estadoCuv: cuvRecord.estado,
+          cuvRecordId: cuvRecord.id,
         })
         continue
       }
-
-      await saveCuvRecord({
-        cuv: ministry.cuv,
-        numFactura: null,
-        numDocumentoIdObligado: pkg.rips.numDocumentoIdObligado,
-        status: 'approved',
-        procesoId: ministry.procesoId,
-        fechaRadicacion: ministry.fechaRadicacion,
-        estado: ministry.estado,
-        source: ministry.source,
-        metadatos: { origen: 'cron-mensual', period, odontologoId: pkg.odontologoId },
-      })
       await markTemporaryRipsSubmitted(pkg.recordIds, {
         submittedAt: ministry.fechaRadicacion || new Date().toISOString(),
         cuv: ministry.cuv,

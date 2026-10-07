@@ -54,6 +54,25 @@ export async function submitRipsToMinsalud({ rips, metadatos = {}, xmlFev, xmlFe
         source: 'sandbox',
         localIssues,
         ministryErrors,
+        notificaciones: [],
+        rechazos: ministryErrors.map((item) => ({
+          clase: 'RECHAZADO',
+          codigo: item.code,
+          descripcion: item.message,
+          observaciones: '',
+          pathFuente: item.field ?? '',
+          fuente: 'MUV',
+        })),
+        httpStatus: 422,
+        respuestaCruda: {
+          ResultState: false,
+          ResultadosValidacion: ministryErrors.map((item) => ({
+            Clase: 'RECHAZADO',
+            Codigo: item.code,
+            Descripcion: item.message,
+            PathFuente: item.field ?? '',
+          })),
+        },
       }
     }
 
@@ -64,14 +83,27 @@ export async function submitRipsToMinsalud({ rips, metadatos = {}, xmlFev, xmlFe
       numFactura: rips?.numFactura ?? null,
       cuv,
     })
+    const fechaRadicacion = new Date().toISOString()
+    const procesoId = `PROC-${Date.now()}`
     return {
       success: true,
       source: 'sandbox',
       localIssues: localIssues.filter((i) => i.level === 'warning'),
       cuv,
-      procesoId: `PROC-${Date.now()}`,
-      fechaRadicacion: new Date().toISOString(),
+      notificaciones: [],
+      rechazos: [],
+      procesoId,
+      fechaRadicacion,
       estado: 'APROBADO',
+      httpStatus: 200,
+      respuestaCruda: {
+        ResultState: true,
+        CodigoUnicoValidacion: cuv,
+        ProcesoId: procesoId,
+        FechaRadicacion: fechaRadicacion,
+        Ambiente: 'sandbox',
+        ResultadosValidacion: [],
+      },
       metadatos,
     }
   }

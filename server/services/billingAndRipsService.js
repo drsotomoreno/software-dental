@@ -115,6 +115,30 @@ export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user })
     xmlFev: invoice?.xmlFev ?? invoice?.attachedDocument ?? metadatos.xmlFev,
     xmlFevFile: invoice?.xmlFevFile ?? metadatos.xmlFevFile,
   })
+  const cuvRecord = await saveCuvRecord({
+    cuv: ministryResult.cuv,
+    numFactura: payload.numFactura,
+    numDocumentoIdObligado: payload.numDocumentoIdObligado,
+    procesoId: ministryResult.procesoId,
+    fechaRadicacion: ministryResult.fechaRadicacion,
+    estado: ministryResult.estado,
+    source: ministryResult.source,
+    ambiente: ministryResult.ambiente,
+    modulo: ministryResult.modulo,
+    httpStatus: ministryResult.httpStatus,
+    notificaciones: ministryResult.notificaciones,
+    rechazos: ministryResult.rechazos,
+    ministryErrors: ministryResult.ministryErrors,
+    localIssues: ministryResult.localIssues ?? localIssues,
+    respuestaCruda: ministryResult.respuestaCruda,
+    rips: payload,
+    xmlFev: invoice?.xmlFev ?? invoice?.attachedDocument ?? mergedMetadatos.xmlFev,
+    xmlFevFile: invoice?.xmlFevFile ?? mergedMetadatos.xmlFevFile,
+    metadatos: { ...mergedMetadatos, ...ministryResult.metadatos },
+    clinicalRecordId: mergedMetadatos.clinicalRecordIds?.[0] ?? null,
+    patientUuid: mergedMetadatos.patientUuid ?? null,
+  })
+
   if (!ministryResult.success) {
     return {
       ok: false,
@@ -125,22 +149,11 @@ export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user })
       localIssues: ministryResult.localIssues ?? localIssues,
       ministryErrors: ministryResult.ministryErrors ?? [],
       source: ministryResult.source,
+      estadoCuv: cuvRecord.estado,
+      alertas: cuvRecord.alertas,
+      cuvRecordId: cuvRecord.id,
     }
   }
-
-  const cuvRecord = await saveCuvRecord({
-    cuv: ministryResult.cuv,
-    numFactura: payload.numFactura,
-    numDocumentoIdObligado: payload.numDocumentoIdObligado,
-    status: 'approved',
-    procesoId: ministryResult.procesoId,
-    fechaRadicacion: ministryResult.fechaRadicacion,
-    estado: ministryResult.estado,
-    source: ministryResult.source,
-    metadatos: { ...mergedMetadatos, ...ministryResult.metadatos },
-    clinicalRecordIds: mergedMetadatos.clinicalRecordIds ?? [],
-    patientUuid: mergedMetadatos.patientUuid ?? null,
-  })
 
   let dianXml = null
   if (invoice) {

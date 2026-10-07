@@ -107,6 +107,7 @@ export function parseMuvResponse(data, httpStatus) {
     success: approved,
     approved,
     httpStatus,
+    respuestaCruda: payload,
     resultState,
     cuv: approved ? cuv : null,
     procesoId: payload.ProcesoId ?? payload.procesoId ?? null,

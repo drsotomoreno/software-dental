@@ -26,6 +26,30 @@ export async function processElectronicInvoiceSubmission({ rips, invoice, metada
   }
 
   const ministryResult = await submitRipsToMinistry(rips, { metadatos, invoice })
+  const cuvRecord = await saveCuvRecord({
+    cuv: ministryResult?.cuv,
+    numFactura: rips.numFactura,
+    numDocumentoIdObligado: rips.numDocumentoIdObligado,
+    procesoId: ministryResult?.procesoId,
+    fechaRadicacion: ministryResult?.fechaRadicacion,
+    estado: ministryResult?.estado,
+    source: ministryResult?.source,
+    ambiente: ministryResult?.ambiente,
+    modulo: ministryResult?.modulo,
+    httpStatus: ministryResult?.httpStatus,
+    notificaciones: ministryResult?.notificaciones,
+    rechazos: ministryResult?.rechazos,
+    ministryErrors: ministryResult?.ministryErrors ?? ministryResult?.errors,
+    localIssues,
+    respuestaCruda: ministryResult?.respuestaCruda,
+    rips,
+    xmlFev: invoice?.xmlFev ?? invoice?.attachedDocument,
+    xmlFevFile: invoice?.xmlFevFile,
+    metadatos,
+    patientUuid: metadatos?.patientUuid ?? null,
+    clinicalRecordId: metadatos?.clinicalRecordIds?.[0] ?? null,
+    invoiceId: metadatos?.invoiceId ?? null,
+  })
   if (!ministryResult?.cuv) {
     return {
       success: false,
@@ -33,21 +57,11 @@ export async function processElectronicInvoiceSubmission({ rips, invoice, metada
       localIssues,
       ministryErrors: ministryResult?.errors ?? [],
       error: ministryResult?.error ?? 'MUV no devolvió CUV.',
+      estadoCuv: cuvRecord.estado,
+      alertas: cuvRecord.alertas,
+      cuvRecordId: cuvRecord.id,
     }
   }
-
-  const cuvRecord = await saveCuvRecord({
-    cuv: ministryResult.cuv,
-    numFactura: rips.numFactura,
-    numDocumentoIdObligado: rips.numDocumentoIdObligado,
-    status: 'approved',
-    procesoId: ministryResult.procesoId,
-    fechaRadicacion: ministryResult.fechaRadicacion,
-    estado: ministryResult.estado,
-    source: ministryResult.source,
-    patientUuid: metadatos?.patientUuid ?? null,
-    clinicalRecordIds: metadatos?.clinicalRecordIds ?? [],
-  })
 
   let dianXml
   if (invoice) {

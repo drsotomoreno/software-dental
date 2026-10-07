@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '@/db/database'
 import { RequirePermission } from '@/components/auth/RequirePermission'
+import { CuvAtencionBanner } from '@/components/cuv/CuvAlertas'
+import { listCuvExpedientes } from '@/services/cuvApiService'
 import { BillingModalitySettingsPanel } from '@/components/invoices/BillingModalitySettings'
 import { ElectronicInvoicePanel } from '@/components/invoices/ElectronicInvoicePanel'
 import { InvoiceLedgerPanel } from '@/components/invoices/InvoiceLedgerPanel'
@@ -11,6 +15,11 @@ type InvoicesTab = 'ledger' | 'fev'
 export function InvoicesAccountsPage() {
   const { audit } = useAudit()
   const [tab, setTab] = useState<InvoicesTab>('ledger')
+  const cuvExpedientes = useLiveQuery(() => db.cuvExpedientes.toArray()) ?? []
+
+  useEffect(() => {
+    void listCuvExpedientes().catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     audit({
@@ -23,6 +32,7 @@ export function InvoicesAccountsPage() {
   return (
     <RequirePermission permission="invoices.read">
       <div className="space-y-6">
+        <CuvAtencionBanner expedientes={cuvExpedientes} />
         <BillingModalitySettingsPanel />
 
         <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">

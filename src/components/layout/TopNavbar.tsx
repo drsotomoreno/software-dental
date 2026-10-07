@@ -96,6 +96,12 @@ const TOP_NAV_ITEMS: TopNavItem[] = [
     row: 2,
   },
   {
+    label: 'CUV',
+    to: '/cuv',
+    permission: 'export.rips',
+    row: 2,
+  },
+  {
     label: 'FHIR',
     to: '/fhir',
     permission: 'export.fhir',

@@ -45,6 +45,10 @@ export interface RipsValidateSuccessResponse {
   procesoId?: string
   fechaRadicacion?: string
   estado?: string
+  estadoCuv?: import('./cuvExpediente').CuvEstado
+  alertas?: import('./cuvExpediente').CuvAlerta[]
+  notificaciones?: import('./cuvExpediente').CuvRegla[]
+  expediente?: import('./cuvExpediente').CuvExpediente
   source: 'sandbox' | 'minsalud' | 'local'
   localWarnings?: import('./rips').RipsValidationIssue[]
   cuvRecordId: string
@@ -58,6 +62,10 @@ export interface RipsValidateErrorResponse {
   localIssues?: import('./rips').RipsValidationIssue[]
   ministryErrors?: RipsMinistryError[]
   error?: string
+  estadoCuv?: import('./cuvExpediente').CuvEstado
+  alertas?: import('./cuvExpediente').CuvAlerta[]
+  cuvRecordId?: string
+  expediente?: import('./cuvExpediente').CuvExpediente
 }
 
 export type RipsValidateResponse = RipsValidateSuccessResponse | RipsValidateErrorResponse
