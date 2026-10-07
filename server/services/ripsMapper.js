@@ -1,9 +1,12 @@
 /**
- * Adapta una consulta / atención odontológica de la historia clínica
- * al JSON de CargarRipsSinFactura que el Stage del MUV ya aceptó.
+ * Adapta una consulta odontológica al JSON de CargarRipsSinFactura (Res. 2275).
  *
- * vrServicio sale del valor pagado por el paciente. Un 0 dispara RVC091.
- * fechaInicioAtencion va en hora de Bogotá: YYYY-MM-DD HH:mm.
+ * vrServicio es el valor pagado por el paciente. 0, null o indefinido lanzan
+ * RipsMapperError (RVC091) antes de llamar a MinsaludService.
+ * Las fechas de atención quedan en hora de Bogotá: YYYY-MM-DD HH:mm.
+ * Con MINSALUD_ENV=stage el documento del paciente se sustituye por el del
+ * prestador para no tropezar con RVG01. En cualquier otro valor se envía
+ * el documento real.
  */
 
 import { splitUsuarioDocumento } from './fevRipsService.js'
@@ -40,13 +43,23 @@ export class RipsMapperError extends Error {
 }
 
 /**
+ * true solo cuando el entorno del MUV es el Stage de pruebas.
+ * @param {NodeJS.ProcessEnv} [env]
+ */
+export function isMuvStage(env = process.env) {
+  return String(env?.MINSALUD_ENV ?? '').trim() === 'stage'
+}
+
+/**
+ * Inicio o fin de atención en el string que exige el ministerio.
  * @param {string | Date | number} raw
+ * @param {string} [field]
  * @returns {string} YYYY-MM-DD HH:mm en America/Bogota
  */
-export function formatFechaInicioAtencion(raw) {
+export function formatFechaAtencion(raw, field = 'fechaInicioAtencion') {
   const text = raw instanceof Date ? raw.toISOString() : String(raw ?? '').trim()
   if (!text) {
-    throw new RipsMapperError('La fecha de atención es obligatoria.', 'fechaInicioAtencion')
+    throw new RipsMapperError('La fecha de atención es obligatoria.', field)
   }
 
   if (RIPS_DATETIME_PATTERN.test(text)) return text
@@ -57,12 +70,14 @@ export function formatFechaInicioAtencion(raw) {
 
   const parsed = new Date(text)
   if (Number.isNaN(parsed.getTime())) {
-    throw new RipsMapperError(
-      `fechaInicioAtencion no se pudo interpretar: ${text}`,
-      'fechaInicioAtencion',
-    )
+    throw new RipsMapperError(`${field} no se pudo interpretar: ${text}`, field)
   }
   return formatBogotaDateTime(parsed)
+}
+
+/** @param {string | Date | number} raw */
+export function formatFechaInicioAtencion(raw) {
+  return formatFechaAtencion(raw, 'fechaInicioAtencion')
 }
 
 function formatBogotaDateTime(date) {
@@ -100,6 +115,22 @@ function sumPaid(records) {
 }
 
 /**
+ * Rechaza 0, null e indefinido antes de armar el JSON (regla RVC091).
+ * @param {unknown} value
+ * @returns {number}
+ */
+export function assertVrServicio(value) {
+  const number = typeof value === 'number' ? value : Number(value)
+  if (value == null || value === '' || !Number.isFinite(number) || number <= 0) {
+    throw new RipsMapperError(
+      'RVC091: vrServicio no puede ser 0, null ni indefinido. El valor pagado por el paciente debe ser mayor que 0.',
+      'vrServicio',
+    )
+  }
+  return Math.round(number)
+}
+
+/**
  * Valor pagado por el paciente. Nunca devuelve 0 (regla RVC091).
  * @param {object} atencion
  * @returns {number}
@@ -119,14 +150,7 @@ export function resolveVrServicio(atencion) {
     positiveAmount(atencion?.cost),
     sumPaid(notes.filter((note) => note?.isBillable !== false)),
   ]
-  const amount = candidates.find((value) => value != null)
-  if (amount == null) {
-    throw new RipsMapperError(
-      'RVC091: el valor pagado por el paciente debe ser mayor que 0. Un vrServicio en 0 no es válido en RIPS sin factura.',
-      'vrServicio',
-    )
-  }
-  return amount
+  return assertVrServicio(candidates.find((value) => value != null))
 }
 
 function patientOf(atencion) {
@@ -204,6 +228,18 @@ function fechaAtencionOf(atencion) {
   )
 }
 
+function fechaFinOf(atencion) {
+  const notes = Array.isArray(atencion?.evolutionNotes) ? atencion.evolutionNotes : []
+  return (
+    atencion?.fechaFinAtencion ??
+    atencion?.fechaFin ??
+    atencion?.attentionEndDate ??
+    notes[0]?.fechaFinAtencion ??
+    notes[0]?.attentionEndDate ??
+    null
+  )
+}
+
 function documentPair(tipo, numero) {
   const split = splitUsuarioDocumento(numero, tipo || 'CC')
   const num = split.numero.replace(/[^A-Za-z0-9]/g, '')
@@ -274,9 +310,11 @@ function numNotaOf(atencion) {
 export class RipsMapper {
   /**
    * @param {object} [prestador] NIT, REPS y documento del profesional cuando la atención no los trae.
+   * @param {NodeJS.ProcessEnv} [env] Permite fijar MINSALUD_ENV en pruebas.
    */
-  constructor(prestador = {}) {
+  constructor(prestador = {}, env = process.env) {
     this.prestador = prestador ?? {}
+    this.env = env ?? process.env
   }
 
   /**
@@ -290,10 +328,6 @@ export class RipsMapper {
 
     const patient = patientOf(atencion)
     const professional = professionalOf(atencion, this.prestador)
-    const pacienteDoc = documentPair(
-      patient?.tipoDocumentoIdentificacion ?? patient?.documentType ?? patient?.tipoDocumento,
-      patient?.numDocumentoIdentificacion ?? patient?.documentNumber ?? patient?.numDocumento,
-    )
     const profesionalDoc = documentPair(
       professional?.tipoDocumentoIdentificacion ??
         professional?.documentType ??
@@ -304,8 +338,20 @@ export class RipsMapper {
         professional?.numeroDocumento ??
         this.prestador?.numeroDocumento,
     )
+    const stage = isMuvStage(this.env)
+    const pacienteDoc = stage
+      ? profesionalDoc
+      : documentPair(
+          patient?.tipoDocumentoIdentificacion ?? patient?.documentType ?? patient?.tipoDocumento,
+          patient?.numDocumentoIdentificacion ?? patient?.documentNumber ?? patient?.numDocumento,
+        )
     const diagnostico = principalDiagnosis(atencion)
-    const vrServicio = resolveVrServicio(atencion)
+    const vrServicio = assertVrServicio(resolveVrServicio(atencion))
+    const fechaInicioAtencion = formatFechaAtencion(fechaAtencionOf(atencion), 'fechaInicioAtencion')
+    // La consulta de la Res. 2275 solo transmite fechaInicioAtencion.
+    // El fin se normaliza al mismo formato para rechazarlo aquí si es inválido.
+    const finRaw = fechaFinOf(atencion)
+    if (finRaw) formatFechaAtencion(finRaw, 'fechaFinAtencion')
 
     return {
       numDocumentoIdObligado: nitOf(atencion, this.prestador),
@@ -329,7 +375,7 @@ export class RipsMapper {
             consultas: [
               {
                 codPrestador: codPrestadorOf(atencion, this.prestador),
-                fechaInicioAtencion: formatFechaInicioAtencion(fechaAtencionOf(atencion)),
+                fechaInicioAtencion,
                 numAutorizacion: null,
                 codConsulta: codConsultaOf(atencion),
                 modalidadGrupoServicioTecSal: '01',
