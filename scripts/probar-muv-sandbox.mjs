@@ -9,6 +9,7 @@
 import 'dotenv/config'
 import { pathToFileURL } from 'node:url'
 import { FevRipsService } from '../server/services/fevRipsService.js'
+import { RipsMapper } from '../server/services/ripsMapper.js'
 import {
   hasBlockingValidationErrors,
   validateRipsPackageLocally,
@@ -30,78 +31,31 @@ function assertMuvCredentials() {
   process.exit(1)
 }
 
-function formatBogotaDateTime(date) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Bogota',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date)
-  const pick = (type) => parts.find((part) => part.type === type)?.value ?? '00'
-  return `${pick('year')}-${pick('month')}-${pick('day')} ${pick('hour')}:${pick('minute')}`
-}
-
 /**
  * RIPS mínimo de una consulta odontológica aprobado por el Stage.
  * @param {import('../server/services/fevRipsService.js').FevRipsService['settings']} settings
  */
 export function buildMinimalRips(settings) {
-  const atencion = formatBogotaDateTime(new Date(Date.now() - 30 * 60 * 1000))
-  const profesionalDocumento = /^\d{3,10}$/.test(settings.numeroDocumento)
-    ? settings.numeroDocumento
-    : '1020304050'
-
-  return {
-    numDocumentoIdObligado: settings.nit,
-    numFactura: null,
-    tipoNota: 'RS',
-    numNota: `RS${Date.now()}`,
-    usuarios: [
-      {
-        tipoDocumentoIdentificacion: settings.pacienteTipoDocumento || 'CC',
-        numDocumentoIdentificacion: settings.pacienteDocumento,
-        tipoUsuario: '04',
-        fechaNacimiento: '1991-06-25',
-        codSexo: 'F',
-        codPaisResidencia: '170',
-        codMunicipioResidencia: '11001',
-        codZonaTerritorialResidencia: '02',
-        incapacidad: 'NO',
-        consecutivo: 1,
-        codPaisOrigen: '170',
-        servicios: {
-          consultas: [
-            {
-              codPrestador: settings.codPrestador,
-              fechaInicioAtencion: atencion,
-              numAutorizacion: null,
-              codConsulta: '890203',
-              modalidadGrupoServicioTecSal: '01',
-              grupoServicios: '01',
-              codServicio: 344,
-              finalidadTecnologiaSalud: '11',
-              causaMotivoAtencion: '38',
-              codDiagnosticoPrincipal: 'K021',
-              codDiagnosticoRelacionado1: null,
-              codDiagnosticoRelacionado2: null,
-              codDiagnosticoRelacionado3: null,
-              tipoDiagnosticoPrincipal: '02',
-              tipoDocumentoIdentificacion: settings.tipoDocumento || 'CC',
-              numDocumentoIdentificacion: profesionalDocumento,
-              vrServicio: 50000,
-              conceptoRecaudo: '05',
-              valorPagoModerador: 0,
-              numFEVPagoModerador: null,
-              consecutivo: 1,
-            },
-          ],
-        },
-      },
-    ],
-  }
+  const mapper = new RipsMapper({
+    nit: settings.nit,
+    codPrestador: settings.codPrestador,
+    tipoDocumento: settings.tipoDocumento,
+    numeroDocumento: settings.numeroDocumento,
+  })
+  return mapper.toRipsSinFactura({
+    paciente: {
+      documentType: settings.pacienteTipoDocumento || 'CC',
+      documentNumber: settings.pacienteDocumento,
+      birthDate: '1991-06-25',
+      gender: 'F',
+      regime: 'particular',
+      municipalityCode: '11001',
+    },
+    signedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    diagnoses: [{ code: 'K021', type: 'principal', certainty: 'confirmado' }],
+    codConsulta: '890203',
+    valorPagadoPaciente: 50000,
+  })
 }
 
 function validationItems(data) {
