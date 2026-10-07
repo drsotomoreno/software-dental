@@ -1,42 +1,19 @@
 #!/usr/bin/env node
 /**
  * Prueba aislada contra el ambiente Stage del Mecanismo Único de Validación (MUV).
- *
- * Contrato vigente (manual API-Docker FEV-RIPS v4.3 y host de pruebas del Ministerio):
- *   POST {base}/api/Auth/LoginSISPRO
- *   POST {base}/api/PaquetesFevRips/CargarRipsSinFactura
- *
- * Credenciales en .env (plantilla: .env.example):
- *   MINSALUD_USERNAME          número de documento SISPRO (obligatorio)
- *   MINSALUD_PASSWORD          clave (obligatorio)
- *   MINSALUD_NIT               NIT del prestador (obligatorio)
- *   MINSALUD_TIPO_DOCUMENTO    CC por defecto
- *   MINSALUD_TIPO_USUARIO      opcional: RE, PIN, PINx, PIE
- *   MINSALUD_COD_PRESTADOR     REPS de la sede, 12 dígitos
- *   MINSALUD_XML_FEV_PATH      si se define, envía CargarFevRips con el XML en Base64
+ * La sesión y el envío viven en server/services/fevRipsService.js.
  *
  * Uso: npm run muv:sandbox
  */
 
 import 'dotenv/config'
-import http from 'node:http'
-import https from 'node:https'
-import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
+import { FevRipsService } from '../server/services/fevRipsService.js'
 import {
   hasBlockingValidationErrors,
   validateRipsPackageLocally,
 } from '../server/services/ripsLocalValidator.js'
 
-const SANDBOX_BASE_URL = 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
-const PRODUCTION_BASE_URL = 'https://fevrips.sispro.gov.co/fevrips-api'
-const LOGIN_PATH = '/api/Auth/LoginSISPRO'
-const CARGAR_SIN_FACTURA_PATH = '/api/PaquetesFevRips/CargarRipsSinFactura'
-const CARGAR_FEV_PATH = '/api/PaquetesFevRips/CargarFevRips'
-const DEFAULT_APP_VERSION = '5.4.11'
-const DEFAULT_TIPO_MECANISMO = 1
-const DEFAULT_COD_PRESTADOR = '680010389801'
-const DEFAULT_PACIENTE_DOCUMENTO = '1020708099'
 const CRITICAL_ENV = ['MINSALUD_USERNAME', 'MINSALUD_PASSWORD', 'MINSALUD_NIT']
 const MISSING_CREDENTIALS_MESSAGE =
   'Error: Faltan credenciales del MUV. Por favor, copia el archivo .env.example como .env y configura los datos de prueba del prestador.'
@@ -53,52 +30,6 @@ function assertMuvCredentials() {
   process.exit(1)
 }
 
-function digitsOnly(value) {
-  return String(value ?? '').replace(/\D/g, '')
-}
-
-const DOCUMENT_TYPE_CODES = ['CC', 'CE', 'PA', 'RC', 'TI', 'NV', 'CD', 'SC', 'PE', 'PT', 'NI']
-
-/**
- * MINSALUD_USERNAME puede venir como número (79904620) o como tipo+número (CC79904620).
- * LoginSISPRO pide el tipo y el número por separado.
- */
-function splitUsuarioDocumento(raw, tipoPreferido) {
-  const value = String(raw ?? '').trim().toUpperCase()
-  const preferido = String(tipoPreferido || 'CC').trim().toUpperCase()
-  if (value.startsWith(preferido) && value.length > preferido.length) {
-    const resto = value.slice(preferido.length)
-    if (/^[A-Z0-9]+$/.test(resto)) return { tipo: preferido, numero: resto }
-  }
-  for (const code of DOCUMENT_TYPE_CODES) {
-    if (value.startsWith(code) && /^\d+$/.test(value.slice(code.length))) {
-      return { tipo: code, numero: value.slice(code.length) }
-    }
-  }
-  return { tipo: preferido, numero: value }
-}
-
-/**
- * Si el documento del profesional coincide con el NIT, el MUV exige tipoUsuario PIN.
- * RE solo aplica cuando el documento del usuario es distinto al de la entidad.
- */
-function resolveTipoUsuario(explicit, numeroDocumento, nit) {
-  const configured = String(explicit ?? '').trim().toUpperCase()
-  if (configured) return configured
-  if (numeroDocumento && nit && digitsOnly(numeroDocumento) === digitsOnly(nit)) return 'PIN'
-  return ''
-}
-
-function joinUrl(base, path) {
-  const root = base.replace(/\/$/, '')
-  const suffix = path.startsWith('/') ? path : `/${path}`
-  return `${root}${suffix}`
-}
-
-function isLocalHttps(url) {
-  return /^https:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(url)
-}
-
 function formatBogotaDateTime(date) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Bogota',
@@ -113,55 +44,21 @@ function formatBogotaDateTime(date) {
   return `${pick('year')}-${pick('month')}-${pick('day')} ${pick('hour')}:${pick('minute')}`
 }
 
-function readSettings() {
-  const sandbox = env('MINSALUD_SANDBOX') !== 'false'
-  const baseUrl = (env('MINSALUD_API_BASE_URL') || (sandbox ? SANDBOX_BASE_URL : PRODUCTION_BASE_URL)).replace(
-    /\/$/,
-    '',
-  )
-  const explicitValidateUrl = env('MINSALUD_VALIDATE_URL')
-  const xmlPath = env('MINSALUD_XML_FEV_PATH')
-  const cargarPath = explicitValidateUrl || (xmlPath ? CARGAR_FEV_PATH : CARGAR_SIN_FACTURA_PATH)
-  const identidad = splitUsuarioDocumento(env('MINSALUD_USERNAME'), env('MINSALUD_TIPO_DOCUMENTO') || 'CC')
-  const nit = digitsOnly(env('MINSALUD_NIT'))
-
-  return {
-    sandbox,
-    baseUrl,
-    loginUrl: env('MINSALUD_AUTH_URL') || joinUrl(baseUrl, LOGIN_PATH),
-    cargarUrl: cargarPath.startsWith('http') ? cargarPath : joinUrl(baseUrl, cargarPath),
-    tipoDocumento: identidad.tipo,
-    numeroDocumento: identidad.numero,
-    clave: env('MINSALUD_PASSWORD'),
-    nit,
-    tipoUsuario: resolveTipoUsuario(env('MINSALUD_TIPO_USUARIO'), identidad.numero, nit),
-    codPrestador: digitsOnly(env('MINSALUD_COD_PRESTADOR') || DEFAULT_COD_PRESTADOR),
-    appVersion: env('MINSALUD_APP_VERSION') || DEFAULT_APP_VERSION,
-    tipoMecanismoValidacion: Number(env('MINSALUD_TIPO_MECANISMO') || DEFAULT_TIPO_MECANISMO),
-    xmlPath,
-    pacienteTipoDocumento: (env('MINSALUD_PACIENTE_TIPO_DOCUMENTO') || identidad.tipo).toUpperCase(),
-    pacienteDocumento: digitsOnly(env('MINSALUD_PACIENTE_DOCUMENTO') || identidad.numero || DEFAULT_PACIENTE_DOCUMENTO),
-  }
-}
-
 /**
- * RIPS mínimo de una consulta odontológica.
- * Estructura del ejemplo oficial de CargarRipsSinFactura (Res. 2275),
- * con CUPS 890203 (consulta de primera vez por odontología general).
- * @param {ReturnType<typeof readSettings>} settings
+ * RIPS mínimo de una consulta odontológica aprobado por el Stage.
+ * @param {import('../server/services/fevRipsService.js').FevRipsService['settings']} settings
  */
 export function buildMinimalRips(settings) {
-  const conFactura = Boolean(settings.xmlPath)
   const atencion = formatBogotaDateTime(new Date(Date.now() - 30 * 60 * 1000))
   const profesionalDocumento = /^\d{3,10}$/.test(settings.numeroDocumento)
     ? settings.numeroDocumento
     : '1020304050'
 
   return {
-    numDocumentoIdObligado: settings.nit || '900123456',
-    numFactura: conFactura ? `FV${atencion.slice(0, 10).replace(/-/g, '')}1` : null,
-    tipoNota: conFactura ? null : 'RS',
-    numNota: conFactura ? null : `RS${Date.now()}`,
+    numDocumentoIdObligado: settings.nit,
+    numFactura: null,
+    tipoNota: 'RS',
+    numNota: `RS${Date.now()}`,
     usuarios: [
       {
         tipoDocumentoIdentificacion: settings.pacienteTipoDocumento || 'CC',
@@ -205,102 +102,6 @@ export function buildMinimalRips(settings) {
       },
     ],
   }
-}
-
-function buildLoginBody(settings) {
-  const body = {
-    persona: {
-      identificacion: {
-        tipo: settings.tipoDocumento,
-        numero: settings.numeroDocumento,
-      },
-    },
-    clave: settings.clave,
-    nit: settings.nit,
-    appVersion: settings.appVersion,
-    tipoMecanismoValidacion: settings.tipoMecanismoValidacion,
-  }
-  if (settings.tipoUsuario) body.tipoUsuario = settings.tipoUsuario
-  return body
-}
-
-function requestJson(url, { method = 'POST', headers = {}, body } = {}) {
-  const target = new URL(url)
-  const payload = body === undefined ? null : JSON.stringify(body)
-  const lib = target.protocol === 'https:' ? https : http
-  const requestHeaders = { ...headers }
-  if (payload !== null) requestHeaders['Content-Length'] = Buffer.byteLength(payload)
-
-  return new Promise((resolve, reject) => {
-    const req = lib.request(
-      {
-        protocol: target.protocol,
-        hostname: target.hostname,
-        port: target.port || undefined,
-        path: `${target.pathname}${target.search}`,
-        method,
-        headers: requestHeaders,
-        rejectUnauthorized: !isLocalHttps(url),
-      },
-      (response) => {
-        const chunks = []
-        response.on('data', (chunk) => chunks.push(chunk))
-        response.on('end', () => {
-          const rawText = Buffer.concat(chunks).toString('utf8')
-          let data = null
-          if (rawText) {
-            try {
-              data = JSON.parse(rawText)
-            } catch {
-              data = { message: rawText }
-            }
-          }
-          resolve({
-            response: { status: response.statusCode ?? 0, ok: (response.statusCode ?? 0) < 400 },
-            data,
-            rawText,
-          })
-        })
-      },
-    )
-    req.on('error', reject)
-    if (payload !== null) req.write(payload)
-    req.end()
-  })
-}
-
-function loginErrors(data) {
-  if (!data || typeof data !== 'object') return []
-  if (Array.isArray(data.errors)) return data.errors.map(String)
-  if (Array.isArray(data.Errors)) return data.Errors.map(String)
-  if (data.Errors && typeof data.Errors === 'object') {
-    return Object.entries(data.Errors).flatMap(([field, messages]) => {
-      const list = Array.isArray(messages) ? messages : [messages]
-      return list.map((message) => `${field}: ${message}`)
-    })
-  }
-  if (typeof data.message === 'string') return [data.message]
-  if (typeof data.Detail === 'string') return [data.Detail]
-  return []
-}
-
-function extractToken(data) {
-  if (!data || typeof data !== 'object') return ''
-  return String(data.token ?? data.Token ?? data.access_token ?? data.JWTToken ?? '').trim()
-}
-
-async function authenticate(settings) {
-  const { response, data } = await requestJson(settings.loginUrl, {
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: buildLoginBody(settings),
-  })
-
-  const token = extractToken(data)
-  const accepted = response.ok && data?.login === true && Boolean(token)
-  return { response, data, token, accepted, errors: loginErrors(data) }
 }
 
 function validationItems(data) {
@@ -396,28 +197,21 @@ function printLocalIssues(issues) {
   }
 }
 
-async function buildRequestBody(settings, rips) {
-  if (!settings.xmlPath) {
-    return { rips, xmlFevFile: '' }
-  }
-  const xml = await readFile(settings.xmlPath)
-  return { rips, xmlFevFile: xml.toString('base64') }
-}
-
 async function main() {
   assertMuvCredentials()
-  const settings = readSettings()
+  const service = new FevRipsService()
+  const { settings } = service
   const rips = buildMinimalRips(settings)
   const localIssues = validateRipsPackageLocally(rips, {
-    perfilFiscal: settings.xmlPath ? 'Obligado_FEV' : 'No_Obligado',
-    allowNullNumFactura: !settings.xmlPath,
+    perfilFiscal: 'No_Obligado',
+    allowNullNumFactura: true,
     codPrestador: settings.codPrestador,
   })
 
   console.log('MUV — prueba de comunicación')
   console.log(`Destino: ${settings.sandbox ? 'Stage (pruebas)' : 'Producción'}`)
   console.log(`Login: ${settings.loginUrl}`)
-  console.log(`Carga: ${settings.cargarUrl}`)
+  console.log(`Carga: ${settings.cargarSinFacturaUrl}`)
   console.log(`NIT: ${settings.nit || '(no configurado)'}`)
   console.log(`Usuario: ${settings.tipoDocumento} ${settings.numeroDocumento}  tipoUsuario: ${settings.tipoUsuario || '(no enviado)'}`)
   console.log(`numFactura: ${rips.numFactura ?? 'null'}  tipoNota: ${rips.tipoNota ?? 'null'}  numNota: ${rips.numNota ?? 'null'}`)
@@ -439,50 +233,29 @@ async function main() {
   }
 
   console.log('')
-  console.log('Autenticando en LoginSISPRO…')
-  let auth
-  try {
-    auth = await authenticate(settings)
-  } catch (error) {
-    console.log('')
-    console.log(`No hubo respuesta de autenticación: ${error.message}`)
-    process.exitCode = 2
-    return
-  }
-
-  if (!auth.accepted) {
-    console.log('')
-    console.log(`Autenticación rechazada (HTTP ${auth.response.status}).`)
-    if (auth.errors.length > 0) {
-      for (const message of auth.errors) console.log(`  - ${message}`)
-    } else {
-      console.log(JSON.stringify(auth.data ?? {}, null, 2))
-    }
-    process.exitCode = 2
-    return
-  }
-
-  console.log(`Token recibido (${auth.token.length} caracteres). Enviando RIPS…`)
-  const payload = await buildRequestBody(settings, rips)
-
+  console.log('Enviando RIPS sin factura…')
   let carga
   try {
-    carga = await requestJson(settings.cargarUrl, {
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${auth.token}`,
-      },
-      body: payload,
-    })
+    carga = await service.enviarRipsSinFactura(rips)
   } catch (error) {
     console.log('')
+    if (Array.isArray(error.errors) && error.errors.length > 0) {
+      console.log(`Autenticación rechazada (HTTP ${error.status ?? 'sin estado'}).`)
+      for (const message of error.errors) console.log(`  - ${message}`)
+      process.exitCode = 2
+      return
+    }
     console.log(`No hubo respuesta del MUV: ${error.message}`)
     process.exitCode = 1
     return
   }
 
-  const approved = printMuvResponse({ httpStatus: carga.response.status, data: carga.data })
+  console.log(
+    carga.fromCache
+      ? 'Token reutilizado desde la caché en memoria.'
+      : `Token recibido (${carga.tokenLength} caracteres).`,
+  )
+  const approved = printMuvResponse({ httpStatus: carga.httpStatus, data: carga.data })
   process.exitCode = approved ? 0 : 1
 }
 
