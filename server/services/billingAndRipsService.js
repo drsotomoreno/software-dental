@@ -109,7 +109,12 @@ export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user })
     }
   }
 
-  const ministryResult = await submitRipsToMinsalud({ rips: payload, metadatos: mergedMetadatos })
+  const ministryResult = await submitRipsToMinsalud({
+    rips: payload,
+    metadatos: mergedMetadatos,
+    xmlFev: invoice?.xmlFev ?? invoice?.attachedDocument ?? metadatos.xmlFev,
+    xmlFevFile: invoice?.xmlFevFile ?? metadatos.xmlFevFile,
+  })
   if (!ministryResult.success) {
     return {
       ok: false,
