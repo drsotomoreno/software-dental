@@ -18,6 +18,7 @@ import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
 import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
 import { startMonthlyRipsCron } from './server/jobs/monthlyRipsCron.js'
+import { initCuvPersistence } from './server/services/cuv/store.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -163,6 +164,7 @@ async function bootAfterListen() {
         error instanceof Error ? error.message : error,
       )
     })
+  void initCuvPersistence()
   void startMonthlyRipsCron().catch((error) => {
     console.error(
       '[RIPS mensual] No se pudo armar el cron:',

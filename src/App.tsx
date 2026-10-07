@@ -26,6 +26,7 @@ import {
   ClinicalHistoryExportPage,
   CatalogManagementPage,
   InvoicesAccountsPage,
+  CuvValidationPage,
   WelcomeTrialPage,
   AdminSubscriptionUsersPage,
 } from '@/pages'
@@ -67,6 +68,7 @@ export function AppRouter() {
               <Route path="suscripcion" element={<SubscriptionPage />} />
               <Route element={<PermissionRoute permission="export.rips" />}>
                 <Route path="rips" element={<RipsExportPage />} />
+                <Route path="cuv" element={<CuvValidationPage />} />
               </Route>
               <Route element={<PermissionRoute permission="export.fhir" />}>
                 <Route path="fhir" element={<FhirExportPage />} />

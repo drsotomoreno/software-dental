@@ -3,6 +3,7 @@ import {
   CalendarDays,
   CircleDollarSign,
   ClipboardList,
+  BadgeCheck,
   FileJson,
   Share2,
   Stethoscope,
@@ -77,6 +78,15 @@ const HOME_LINKS: Array<{
     icon: ClipboardList,
     accent:
       'bg-gradient-to-br from-emerald-400 to-emerald-600 text-white shadow-lg shadow-emerald-500/25 ring-4 ring-emerald-100',
+    permission: 'export.rips',
+  },
+  {
+    title: 'Validación CUV',
+    desc: 'Reenvíe paquetes y revise notificaciones del MUV',
+    to: '/cuv',
+    icon: BadgeCheck,
+    accent:
+      'bg-gradient-to-br from-amber-400 to-amber-600 text-white shadow-lg shadow-amber-500/25 ring-4 ring-amber-100',
     permission: 'export.rips',
   },
   {

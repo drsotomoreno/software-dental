@@ -1,6 +1,12 @@
 import { Router } from 'express'
 import { submitRipsToMinsalud } from '../services/minsaludRipsClient.js'
 import { saveCuvRecord, getCuvByFactura, listCuvRecords, getCuvById } from '../services/cuvRepository.js'
+import {
+  consultCuvEstado,
+  getCuvExpediente,
+  listCuvExpedientes,
+  resendCuvPackage,
+} from '../controllers/cuv.controller.js'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
 import {
@@ -33,7 +39,7 @@ router.post('/mensual/enviar', runMonthlyRipsJob)
 
 /**
  * POST /api/rips/validate
- * Valida localmente y radica ante MinSalud; persiste CUV si es aprobado.
+ * Valida localmente, radica ante MinSalud y guarda el expediente con su intento.
  */
 router.post('/validate', async (req, res, next) => {
   try {
@@ -43,7 +49,37 @@ router.post('/validate', async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'El cuerpo debe incluir el objeto rips.' })
     }
 
-    const result = await submitRipsToMinsalud({ rips, metadatos })
+    const result = await submitRipsToMinsalud({
+      rips,
+      metadatos,
+      xmlFev: metadatos?.xmlFev ?? invoice?.xmlFev ?? invoice?.attachedDocument,
+      xmlFevFile: metadatos?.xmlFevFile ?? invoice?.xmlFevFile,
+    })
+
+    const cuvRecord = await saveCuvRecord({
+      cuv: result.cuv,
+      numFactura: rips.numFactura,
+      numDocumentoIdObligado: rips.numDocumentoIdObligado,
+      procesoId: result.procesoId,
+      fechaRadicacion: result.fechaRadicacion,
+      estado: result.estado,
+      source: result.source,
+      ambiente: result.ambiente,
+      modulo: result.modulo,
+      httpStatus: result.httpStatus,
+      notificaciones: result.notificaciones,
+      rechazos: result.rechazos,
+      ministryErrors: result.ministryErrors,
+      localIssues: result.localIssues,
+      respuestaCruda: result.respuestaCruda,
+      rips,
+      xmlFev: metadatos?.xmlFev ?? invoice?.xmlFev ?? invoice?.attachedDocument,
+      xmlFevFile: metadatos?.xmlFevFile ?? invoice?.xmlFevFile,
+      metadatos: { ...metadatos, ...result.metadatos, invoiceId: invoice?.id ?? metadatos?.invoiceId },
+      clinicalRecordId: metadatos?.clinicalRecordIds?.[0] ?? null,
+      patientUuid: metadatos?.patientUuid ?? null,
+      invoiceId: invoice?.id ?? metadatos?.invoiceId ?? null,
+    })
 
     if (!result.success) {
       return res.status(422).json({
@@ -52,22 +88,12 @@ router.post('/validate', async (req, res, next) => {
         source: result.source,
         localIssues: result.localIssues ?? [],
         ministryErrors: result.ministryErrors ?? [],
+        estadoCuv: cuvRecord.estado,
+        alertas: cuvRecord.alertas,
+        cuvRecordId: cuvRecord.id,
+        expediente: cuvRecord,
       })
     }
-
-    const cuvRecord = await saveCuvRecord({
-      cuv: result.cuv,
-      numFactura: rips.numFactura,
-      numDocumentoIdObligado: rips.numDocumentoIdObligado,
-      status: 'approved',
-      procesoId: result.procesoId,
-      fechaRadicacion: result.fechaRadicacion,
-      estado: result.estado,
-      source: result.source,
-      metadatos: { ...metadatos, ...result.metadatos },
-      clinicalRecordIds: metadatos?.clinicalRecordIds ?? [],
-      patientUuid: metadatos?.patientUuid ?? null,
-    })
 
     let dianXml = null
     if (invoice) {
@@ -89,6 +115,10 @@ router.post('/validate', async (req, res, next) => {
       source: result.source,
       localWarnings: result.localIssues ?? [],
       cuvRecordId: cuvRecord.id,
+      estadoCuv: cuvRecord.estado,
+      alertas: cuvRecord.alertas,
+      notificaciones: result.notificaciones ?? [],
+      expediente: cuvRecord,
       dianXml,
     })
   } catch (error) {
@@ -116,6 +146,29 @@ router.post('/validate-local', (req, res) => {
     issues,
   })
 })
+
+/**
+ * GET /api/rips/cuv/expedientes
+ * Bandeja administrativa de CUV por factura o atención.
+ */
+router.get('/cuv/expedientes', listCuvExpedientes)
+
+/**
+ * GET /api/rips/cuv/expedientes/:id
+ */
+router.get('/cuv/expedientes/:id', getCuvExpediente)
+
+/**
+ * POST /api/rips/cuv/consultar
+ * Estado de validación guardado para un CUV, factura o expediente.
+ */
+router.post('/cuv/consultar', consultCuvEstado)
+
+/**
+ * POST /api/rips/cuv/expedientes/:id/reenviar
+ * Reenvía el paquete FEV-RIPS conservado en el expediente.
+ */
+router.post('/cuv/expedientes/:id/reenviar', resendCuvPackage)
 
 /**
  * GET /api/rips/cuv?numFactura=FV-001

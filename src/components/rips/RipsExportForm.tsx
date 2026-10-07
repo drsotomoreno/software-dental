@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { db } from '@/db/database'
 import type { RipsExportMetadata, RipsValidationIssue } from '@/types/rips'
 import type { RipsMinistryError, RipsValidateSuccessResponse } from '@/types/ripsCuv'
+import type { CuvAlerta } from '@/types/cuvExpediente'
 import type { RipsSourceRecord } from '@/utils/rips'
 import type { UserProfile } from '@/types/user'
 import {
@@ -31,6 +32,8 @@ import {
   downloadDianXml,
   validateRipsWithMinistry,
 } from '@/services/ripsApiService'
+import { cacheCuvExpedientes } from '@/services/cuvApiService'
+import { CuvAlertas } from '@/components/cuv/CuvAlertas'
 import { saveTemporaryRips } from '@/services/ripsTemporalService'
 import { getBillingModalitySettings } from '@/services/billingModalityService'
 import {
@@ -72,6 +75,7 @@ export function RipsExportForm({
   const [validating, setValidating] = useState(false)
   const [cuvResult, setCuvResult] = useState<RipsValidateSuccessResponse | null>(null)
   const [ministryErrors, setMinistryErrors] = useState<RipsMinistryError[]>([])
+  const [alertas, setAlertas] = useState<CuvAlerta[]>([])
   const [validateMessage, setValidateMessage] = useState('')
   const invoiceTouchedRef = useRef(Boolean(normalizeRipsNumFactura(initialMetadata?.numFactura)))
 
@@ -256,6 +260,7 @@ export function RipsExportForm({
     setValidating(true)
     setCuvResult(null)
     setMinistryErrors([])
+    setAlertas([])
     setValidateMessage('')
 
     const patientUuid = uuidv4()
@@ -311,10 +316,16 @@ export function RipsExportForm({
     })
 
     setValidating(false)
+    setAlertas(response.alertas ?? [])
+    if (response.expediente) void cacheCuvExpedientes([response.expediente]).catch(() => undefined)
 
     if (response.success && response.approved) {
       setCuvResult(response)
-      setValidateMessage('RIPS aprobado por el motor de validación. CUV almacenado.')
+      setValidateMessage(
+        response.estadoCuv === 'notificado'
+          ? 'El MUV entregó el CUV y dejó notificaciones. Revise las reglas antes de cerrar el trámite.'
+          : 'RIPS aprobado por el motor de validación. CUV almacenado.',
+      )
       onCuvObtained?.(response)
       return
     }
@@ -554,6 +565,8 @@ export function RipsExportForm({
         <RipsValidationList issues={result.issues} errors={errors} warnings={warnings} />
       )}
 
+      <CuvAlertas alertas={alertas} />
+
       {ministryErrors.length > 0 && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="mb-2 text-sm font-medium text-red-900">
@@ -573,7 +586,11 @@ export function RipsExportForm({
 
       {cuvResult && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-          <p className="text-sm font-semibold text-emerald-900">CUV obtenido correctamente</p>
+          <p className="text-sm font-semibold text-emerald-900">
+            {cuvResult.estadoCuv === 'notificado'
+              ? 'CUV notificado: válido, con reglas por revisar'
+              : 'CUV obtenido correctamente'}
+          </p>
           <p className="mt-2 font-mono text-lg font-bold tracking-wide text-emerald-800">
             {cuvResult.cuv}
           </p>
