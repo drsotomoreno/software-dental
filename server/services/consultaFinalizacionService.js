@@ -2,7 +2,8 @@
  * Cierra una consulta sin factura: genera el RIPS, lo radica en el MUV
  * y deja el CUV y el estado en la tabla consultas.
  */
-import { FevRipsService, readFevRipsSettings } from './fevRipsService.js'
+import { readFevRipsSettings } from './fevRipsService.js'
+import { MinsaludService } from './minsaludService.js'
 import { RipsMapper, RipsMapperError } from './ripsMapper.js'
 import {
   ensureConsultasSchema,
@@ -159,7 +160,7 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
     throw error
   }
 
-  const service = deps.fevRipsService ?? new FevRipsService()
+  const service = deps.minsaludService ?? deps.fevRipsService ?? new MinsaludService()
   let envio
   try {
     envio = await service.enviarRipsSinFactura(rips)
@@ -181,7 +182,11 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
     throw wrapped
   }
 
-  const interpreted = interpretarRespuestaMuv(envio.httpStatus, envio.data)
+  const interpreted = interpretarRespuestaMuv(envio?.resultState ? 200 : 400, {
+    ResultState: envio?.resultState === true,
+    CodigoUnicoValidacion: envio?.CUV,
+    ResultadosValidacion: envio?.resultadosValidacion,
+  })
   const consulta = await persistir({
     cuv: interpreted.cuv,
     estadoMuv: interpreted.estadoMuv,

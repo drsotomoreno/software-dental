@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
  * Prueba aislada contra el ambiente Stage del Mecanismo Único de Validación (MUV).
- * La sesión y el envío viven en server/services/fevRipsService.js.
+ * La sesión y el envío viven en server/services/minsaludService.js.
  *
  * Uso: npm run muv:sandbox
  */
 
 import 'dotenv/config'
 import { pathToFileURL } from 'node:url'
-import { FevRipsService } from '../server/services/fevRipsService.js'
+import { MinsaludService } from '../server/services/minsaludService.js'
 import { RipsMapper } from '../server/services/ripsMapper.js'
 import {
   hasBlockingValidationErrors,
@@ -33,7 +33,7 @@ function assertMuvCredentials() {
 
 /**
  * RIPS mínimo de una consulta odontológica aprobado por el Stage.
- * @param {import('../server/services/fevRipsService.js').FevRipsService['settings']} settings
+ * @param {import('../server/services/minsaludService.js').MinsaludService['settings']} settings
  */
 export function buildMinimalRips(settings) {
   const mapper = new RipsMapper({
@@ -56,11 +56,6 @@ export function buildMinimalRips(settings) {
     codConsulta: '890203',
     valorPagadoPaciente: 50000,
   })
-}
-
-function validationItems(data) {
-  const items = data?.ResultadosValidacion ?? data?.resultadosValidacion ?? []
-  return Array.isArray(items) ? items : []
 }
 
 function itemClase(item) {
@@ -86,38 +81,23 @@ function printRule(item, index) {
   if (fuente) console.log(`     Fuente: ${fuente}`)
 }
 
-export function printMuvResponse({ httpStatus, data }) {
-  const resultState = data?.ResultState ?? data?.resultState
-  const cuv = data?.CodigoUnicoValidacion ?? data?.codigoUnicoValidacion ?? data?.CUV ?? data?.cuv
-  const cuvVisible = data?.CodigoUnicoValidacionToShow ?? data?.codigoUnicoValidacionToShow
-  const items = validationItems(data)
+export function printMuvResponse(result) {
+  const resultState = result?.resultState === true
+  const cuv = result?.CUV
+  const items = Array.isArray(result?.resultadosValidacion) ? result.resultadosValidacion : []
   const rechazos = items.filter((item) => itemClase(item) === 'RECHAZADO')
   const notificaciones = items.filter((item) => itemClase(item) === 'NOTIFICACION')
   const otras = items.filter((item) => !['RECHAZADO', 'NOTIFICACION'].includes(itemClase(item)))
-  const approved = resultState === true && isRealCuv(cuv)
+  const approved = resultState && isRealCuv(cuv)
 
   console.log('')
   console.log('── Respuesta del MUV ──')
-  console.log(`HTTP: ${httpStatus}`)
-  console.log(`ResultState: ${resultState === undefined ? '(ausente)' : String(resultState)}`)
-  console.log(`Ambiente: ${data?.Ambiente ?? data?.ambiente ?? '(no informado)'}`)
-  console.log(`Módulo: ${data?.Modulo ?? data?.modulo ?? '(no informado)'}`)
-  console.log(`ProcesoId: ${data?.ProcesoId ?? data?.procesoId ?? '(no informado)'}`)
-  console.log(`NumFactura: ${data?.NumFactura ?? data?.numFactura ?? '(no informado)'}`)
-  console.log(`FechaRadicacion: ${data?.FechaRadicacion ?? data?.fechaRadicacion ?? '(no informada)'}`)
+  console.log(`ResultState: ${String(resultState)}`)
 
   if (approved) {
     console.log('')
     console.log('CUV:')
     console.log(String(cuv).replace(/\s/g, ''))
-  } else if (cuvVisible) {
-    console.log('')
-    console.log('CUV:')
-    console.log(cuvVisible)
-  } else if (cuv && cuv !== '-') {
-    console.log('')
-    console.log('CUV:')
-    console.log(cuv)
   }
 
   if (rechazos.length > 0) {
@@ -137,8 +117,8 @@ export function printMuvResponse({ httpStatus, data }) {
   }
 
   console.log('')
-  console.log('Respuesta cruda:')
-  console.log(JSON.stringify(data ?? {}, null, 2))
+  console.log('resultadosValidacion:')
+  console.log(JSON.stringify(items, null, 2))
 
   return approved
 }
@@ -153,7 +133,7 @@ function printLocalIssues(issues) {
 
 async function main() {
   assertMuvCredentials()
-  const service = new FevRipsService()
+  const service = new MinsaludService()
   const { settings } = service
   const rips = buildMinimalRips(settings)
   const localIssues = validateRipsPackageLocally(rips, {
@@ -204,12 +184,7 @@ async function main() {
     return
   }
 
-  console.log(
-    carga.fromCache
-      ? 'Token reutilizado desde la caché en memoria.'
-      : `Token recibido (${carga.tokenLength} caracteres).`,
-  )
-  const approved = printMuvResponse({ httpStatus: carga.httpStatus, data: carga.data })
+  const approved = printMuvResponse(carga)
   process.exitCode = approved ? 0 : 1
 }
 

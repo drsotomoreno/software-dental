@@ -116,13 +116,9 @@ test('finalizar consulta genera el RIPS, llama al MUV y guarda el CUV', async ()
         async enviarRipsSinFactura(payload) {
           enviado = payload
           return {
-            httpStatus: 200,
-            data: {
-              ResultState: true,
-              CodigoUnicoValidacion: CUV,
-              ResultadosValidacion: [],
-              ProcesoId: 3813311,
-            },
+            CUV,
+            resultState: true,
+            resultadosValidacion: [],
           }
         },
       },
@@ -147,11 +143,9 @@ test('un rechazo del MUV queda en la consulta', async () => {
       fevRipsService: {
         async enviarRipsSinFactura() {
           return {
-            httpStatus: 400,
-            data: {
-              ResultState: false,
-              ResultadosValidacion: [{ Clase: 'RECHAZADO', Codigo: 'RVG01' }],
-            },
+            CUV: null,
+            resultState: false,
+            resultadosValidacion: [{ Clase: 'RECHAZADO', Codigo: 'RVG01' }],
           }
         },
       },

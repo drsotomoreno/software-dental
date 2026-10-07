@@ -1,10 +1,12 @@
 /**
- * Ayudas de documento y el cliente FEV anterior.
- * El envío al MUV sin factura vive en MinsaludService.
+ * Cliente del MUV (LoginSISPRO + CargarRipsSinFactura).
+ * El token queda en memoria y se renueva si faltan menos de 5 minutos.
+ * El login separa MINSALUD_USERNAME en tipo y número, y envía tipoUsuario PIN.
  */
 
 import http from 'node:http'
 import https from 'node:https'
+import { splitUsuarioDocumento } from './fevRipsService.js'
 
 const SANDBOX_BASE_URL = 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
 const PRODUCTION_BASE_URL = 'https://fevrips.sispro.gov.co/fevrips-api'
@@ -12,10 +14,10 @@ const LOGIN_PATH = '/api/Auth/LoginSISPRO'
 const CARGAR_SIN_FACTURA_PATH = '/api/PaquetesFevRips/CargarRipsSinFactura'
 const DEFAULT_APP_VERSION = '5.4.11'
 const DEFAULT_TIPO_MECANISMO = 1
-const TOKEN_RENEW_SKEW_MS = 60_000
+const TOKEN_RENEW_SKEW_MS = 5 * 60 * 1000
 const DEFAULT_TOKEN_TTL_MS = 50 * 60 * 1000
 
-const DOCUMENT_TYPE_CODES = ['CC', 'CE', 'PA', 'RC', 'TI', 'NV', 'CD', 'SC', 'PE', 'PT', 'NI']
+const AUTH_ENV = ['MINSALUD_USERNAME', 'MINSALUD_PASSWORD', 'MINSALUD_NIT']
 
 function envValue(name, source = process.env) {
   const value = source[name]
@@ -37,45 +39,27 @@ function isLocalHttps(url) {
 }
 
 /**
- * MINSALUD_USERNAME puede venir como número (79904620) o como tipo+número (CC79904620).
- * @param {string} raw
- * @param {string} [tipoPreferido]
- * @returns {{ tipo: string, numero: string }}
+ * Falla al construir el servicio si no hay usuario, clave o NIT.
+ * @param {NodeJS.ProcessEnv} source
+ * @param {object} overrides
  */
-export function splitUsuarioDocumento(raw, tipoPreferido) {
-  const value = String(raw ?? '').trim().toUpperCase()
-  const preferido = String(tipoPreferido || 'CC').trim().toUpperCase()
-  if (value.startsWith(preferido) && value.length > preferido.length) {
-    const resto = value.slice(preferido.length)
-    if (/^[A-Z0-9]+$/.test(resto)) return { tipo: preferido, numero: resto }
+export function resolveMinsaludSettings(source = process.env, overrides = {}) {
+  const username = overrides.username ?? envValue('MINSALUD_USERNAME', source)
+  const password = overrides.password ?? envValue('MINSALUD_PASSWORD', source)
+  const nit = digitsOnly(overrides.nit ?? envValue('MINSALUD_NIT', source))
+  const missing = []
+  if (!String(username ?? '').trim()) missing.push('MINSALUD_USERNAME')
+  if (!String(password ?? '').trim()) missing.push('MINSALUD_PASSWORD')
+  if (!nit) missing.push('MINSALUD_NIT')
+  if (missing.length > 0) {
+    const error = new Error(
+      `Faltan credenciales del MUV: ${missing.join(', ')}. Copia .env.example como .env y configura los datos de prueba del prestador.`,
+    )
+    error.code = 'MUV_CREDENTIALS_MISSING'
+    error.missing = missing
+    throw error
   }
-  for (const code of DOCUMENT_TYPE_CODES) {
-    if (value.startsWith(code) && /^\d+$/.test(value.slice(code.length))) {
-      return { tipo: code, numero: value.slice(code.length) }
-    }
-  }
-  return { tipo: preferido, numero: value }
-}
 
-/**
- * PIN cuando el documento coincide con el NIT. RE exige que sean distintos.
- * @param {string} explicit
- * @param {string} numeroDocumento
- * @param {string} nit
- * @returns {string}
- */
-export function resolveTipoUsuario(explicit, numeroDocumento, nit) {
-  const configured = String(explicit ?? '').trim().toUpperCase()
-  if (configured) return configured
-  if (numeroDocumento && nit && digitsOnly(numeroDocumento) === digitsOnly(nit)) return 'PIN'
-  return ''
-}
-
-/**
- * @param {NodeJS.ProcessEnv} [source]
- * @param {object} [overrides]
- */
-export function readFevRipsSettings(source = process.env, overrides = {}) {
   const sandbox = envValue('MINSALUD_SANDBOX', source) !== 'false'
   const baseUrl = (
     overrides.baseUrl ||
@@ -83,14 +67,8 @@ export function readFevRipsSettings(source = process.env, overrides = {}) {
     (sandbox ? SANDBOX_BASE_URL : PRODUCTION_BASE_URL)
   ).replace(/\/$/, '')
   const identidad = splitUsuarioDocumento(
-    overrides.username ?? envValue('MINSALUD_USERNAME', source),
+    username,
     overrides.tipoDocumento ?? (envValue('MINSALUD_TIPO_DOCUMENTO', source) || 'CC'),
-  )
-  const nit = digitsOnly(overrides.nit ?? envValue('MINSALUD_NIT', source))
-  const tipoUsuario = resolveTipoUsuario(
-    overrides.tipoUsuario ?? envValue('MINSALUD_TIPO_USUARIO', source),
-    identidad.numero,
-    nit,
   )
 
   return {
@@ -100,9 +78,9 @@ export function readFevRipsSettings(source = process.env, overrides = {}) {
     cargarSinFacturaUrl: joinUrl(baseUrl, CARGAR_SIN_FACTURA_PATH),
     tipoDocumento: identidad.tipo,
     numeroDocumento: identidad.numero,
-    clave: overrides.password ?? envValue('MINSALUD_PASSWORD', source),
+    clave: password,
     nit,
-    tipoUsuario,
+    tipoUsuario: 'PIN',
     appVersion: overrides.appVersion || envValue('MINSALUD_APP_VERSION', source) || DEFAULT_APP_VERSION,
     tipoMecanismoValidacion: Number(
       overrides.tipoMecanismoValidacion ??
@@ -154,7 +132,6 @@ function requestJson(url, { method = 'POST', headers = {}, body } = {}) {
           resolve({
             response: { status: response.statusCode ?? 0, ok: (response.statusCode ?? 0) < 400 },
             data,
-            rawText,
           })
         })
       },
@@ -196,31 +173,27 @@ function jwtExpiryMs(token) {
   }
 }
 
-function buildLoginBody(settings) {
-  const body = {
-    persona: {
-      identificacion: {
-        tipo: settings.tipoDocumento,
-        numero: settings.numeroDocumento,
-      },
-    },
-    clave: settings.clave,
-    nit: settings.nit,
-    appVersion: settings.appVersion,
-    tipoMecanismoValidacion: settings.tipoMecanismoValidacion,
-  }
-  if (settings.tipoUsuario) body.tipoUsuario = settings.tipoUsuario
-  return body
+function validationItems(data) {
+  const items = data?.ResultadosValidacion ?? data?.resultadosValidacion ?? []
+  return Array.isArray(items) ? items : []
 }
 
-export class FevRipsService {
+function cleanCuv(value, resultState) {
+  if (resultState !== true) return null
+  const cuv = String(value ?? '').replace(/\s/g, '').trim()
+  if (!cuv || cuv === '-') return null
+  return cuv
+}
+
+export class MinsaludService {
   /**
    * @param {object} [options]
    * @param {Function} [options.request] Transporte inyectable para pruebas.
+   * @param {NodeJS.ProcessEnv} [options.env] Entorno alterno; por defecto process.env.
    */
   constructor(options = {}) {
-    const { request, ...overrides } = options
-    this.settings = readFevRipsSettings(process.env, overrides)
+    const { request, env, ...overrides } = options
+    this.settings = resolveMinsaludSettings(env ?? process.env, overrides)
     this._request = request ?? requestJson
     this._cachedToken = null
     this._tokenExpiresAt = 0
@@ -232,7 +205,7 @@ export class FevRipsService {
   }
 
   /**
-   * LoginSISPRO. Reutiliza el token en memoria mientras no esté por vencer.
+   * LoginSISPRO. Reutiliza el JWT hasta 5 minutos antes de que expire.
    * @returns {Promise<{ token: string, fromCache: boolean }>}
    */
   async _authenticate() {
@@ -248,12 +221,25 @@ export class FevRipsService {
   }
 
   async _login() {
-    const { response, data } = await this._request(this.settings.loginUrl, {
+    const { settings } = this
+    const { response, data } = await this._request(settings.loginUrl, {
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      body: buildLoginBody(this.settings),
+      body: {
+        persona: {
+          identificacion: {
+            tipo: settings.tipoDocumento,
+            numero: settings.numeroDocumento,
+          },
+        },
+        clave: settings.clave,
+        nit: settings.nit,
+        tipoUsuario: 'PIN',
+        appVersion: settings.appVersion,
+        tipoMecanismoValidacion: settings.tipoMecanismoValidacion,
+      },
     })
 
     const token = extractToken(data)
@@ -274,13 +260,14 @@ export class FevRipsService {
   }
 
   /**
-   * Envía un RIPS sin factura electrónica al MUV.
-   * @param {object} payloadJSON Paquete RIPS (numDocumentoIdObligado, usuarios, …).
-   * @returns {Promise<{ httpStatus: number, data: object | null, fromCache: boolean, tokenLength: number }>}
+   * Radica un RIPS sin factura. No lanza si el ministerio rechaza el paquete:
+   * el resultado queda en resultState y resultadosValidacion.
+   * @param {object} payloadJSON
+   * @returns {Promise<{ CUV: string | null, resultState: boolean, resultadosValidacion: object[] }>}
    */
   async enviarRipsSinFactura(payloadJSON) {
     const auth = await this._authenticate()
-    const { response, data } = await this._request(this.settings.cargarSinFacturaUrl, {
+    const { data } = await this._request(this.settings.cargarSinFacturaUrl, {
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
@@ -292,11 +279,14 @@ export class FevRipsService {
       },
     })
 
+    const resultState = data?.ResultState === true || data?.resultState === true
+    const cuv = data?.CodigoUnicoValidacion ?? data?.codigoUnicoValidacion ?? data?.CUV ?? data?.cuv
     return {
-      httpStatus: response.status,
-      data,
-      fromCache: auth.fromCache,
-      tokenLength: auth.token.length,
+      CUV: cleanCuv(cuv, resultState),
+      resultState,
+      resultadosValidacion: validationItems(data),
     }
   }
 }
+
+export { AUTH_ENV, TOKEN_RENEW_SKEW_MS }
