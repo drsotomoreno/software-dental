@@ -6,16 +6,13 @@
  *   POST {base}/api/Auth/LoginSISPRO
  *   POST {base}/api/PaquetesFevRips/CargarRipsSinFactura
  *
- * Credenciales en .env (las mismas claves que usa server/config.js):
- *   MINSALUD_USERNAME          número de documento SISPRO
- *   MINSALUD_PASSWORD          clave
- *   MINSALUD_NIT               NIT del prestador
+ * Credenciales en .env (plantilla: .env.example):
+ *   MINSALUD_USERNAME          número de documento SISPRO (obligatorio)
+ *   MINSALUD_PASSWORD          clave (obligatorio)
+ *   MINSALUD_NIT               NIT del prestador (obligatorio)
  *   MINSALUD_TIPO_DOCUMENTO    CC por defecto
  *   MINSALUD_TIPO_USUARIO      opcional: RE, PIN, PINx, PIE
  *   MINSALUD_COD_PRESTADOR     REPS de la sede, 12 dígitos
- *   MINSALUD_API_BASE_URL      opcional; por defecto el Stage público
- *   MINSALUD_APP_VERSION       opcional; el Stage exige la versión publicada (5.4.11)
- *   MINSALUD_TIPO_MECANISMO    opcional; 1 = mecanismo reconocido en Stage
  *   MINSALUD_XML_FEV_PATH      si se define, envía CargarFevRips con el XML en Base64
  *
  * Uso: npm run muv:sandbox
@@ -40,10 +37,20 @@ const DEFAULT_APP_VERSION = '5.4.11'
 const DEFAULT_TIPO_MECANISMO = 1
 const DEFAULT_COD_PRESTADOR = '680010389801'
 const DEFAULT_PACIENTE_DOCUMENTO = '1020708099'
+const CRITICAL_ENV = ['MINSALUD_USERNAME', 'MINSALUD_PASSWORD', 'MINSALUD_NIT']
+const MISSING_CREDENTIALS_MESSAGE =
+  'Error: Faltan credenciales del MUV. Por favor, copia el archivo .env.example como .env y configura los datos de prueba del prestador.'
 
 function env(name) {
   const value = process.env[name]
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function assertMuvCredentials() {
+  const missing = CRITICAL_ENV.filter((name) => !env(name))
+  if (missing.length === 0) return
+  console.error(`\x1b[31m${MISSING_CREDENTIALS_MESSAGE}\x1b[0m`)
+  process.exit(1)
 }
 
 function digitsOnly(value) {
@@ -100,14 +107,6 @@ function readSettings() {
     xmlPath,
     pacienteDocumento: digitsOnly(env('MINSALUD_PACIENTE_DOCUMENTO') || DEFAULT_PACIENTE_DOCUMENTO),
   }
-}
-
-function missingCredentialNames(settings) {
-  const missing = []
-  if (!settings.numeroDocumento) missing.push('MINSALUD_USERNAME')
-  if (!settings.clave) missing.push('MINSALUD_PASSWORD')
-  if (!settings.nit) missing.push('MINSALUD_NIT')
-  return missing
 }
 
 /**
@@ -371,6 +370,7 @@ async function buildRequestBody(settings, rips) {
 }
 
 async function main() {
+  assertMuvCredentials()
   const settings = readSettings()
   const rips = buildMinimalRips(settings)
   const localIssues = validateRipsPackageLocally(rips, {
@@ -400,14 +400,6 @@ async function main() {
     }
   } else {
     console.log('Validación local del RIPS: sin errores.')
-  }
-
-  const missing = missingCredentialNames(settings)
-  if (missing.length > 0) {
-    console.log('')
-    console.log(`Faltan credenciales de prueba en .env: ${missing.join(', ')}`)
-    process.exitCode = 2
-    return
   }
 
   console.log('')

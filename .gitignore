@@ -26,6 +26,7 @@ dist-ssr
 # Env
 .env
 .env.*
+!.env.example
 
 # API RIPS — registros CUV locales
 server/data/
