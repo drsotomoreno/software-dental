@@ -53,6 +53,11 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     perfilFiscal: metadatos.perfilFiscal,
     esRipsTemporal: metadatos.esRipsTemporal,
     allowNullNumFactura: metadatos.allowNullNumFactura,
+    coberturaPlanBeneficios: metadatos.coberturaPlanBeneficios,
+    modalidadPago: metadatos.modalidadPago,
+    acuerdoVoluntades: metadatos.acuerdoVoluntades,
+    checkAcuerdo: true,
+    requireSectorFields: Boolean(metadatos.coberturaPlanBeneficios || metadatos.modalidadPago),
   })
   if (hasBlockingValidationErrors(localIssues)) {
     return {
