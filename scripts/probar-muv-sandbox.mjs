@@ -57,6 +57,38 @@ function digitsOnly(value) {
   return String(value ?? '').replace(/\D/g, '')
 }
 
+const DOCUMENT_TYPE_CODES = ['CC', 'CE', 'PA', 'RC', 'TI', 'NV', 'CD', 'SC', 'PE', 'PT', 'NI']
+
+/**
+ * MINSALUD_USERNAME puede venir como número (79904620) o como tipo+número (CC79904620).
+ * LoginSISPRO pide el tipo y el número por separado.
+ */
+function splitUsuarioDocumento(raw, tipoPreferido) {
+  const value = String(raw ?? '').trim().toUpperCase()
+  const preferido = String(tipoPreferido || 'CC').trim().toUpperCase()
+  if (value.startsWith(preferido) && value.length > preferido.length) {
+    const resto = value.slice(preferido.length)
+    if (/^[A-Z0-9]+$/.test(resto)) return { tipo: preferido, numero: resto }
+  }
+  for (const code of DOCUMENT_TYPE_CODES) {
+    if (value.startsWith(code) && /^\d+$/.test(value.slice(code.length))) {
+      return { tipo: code, numero: value.slice(code.length) }
+    }
+  }
+  return { tipo: preferido, numero: value }
+}
+
+/**
+ * Si el documento del profesional coincide con el NIT, el MUV exige tipoUsuario PIN.
+ * RE solo aplica cuando el documento del usuario es distinto al de la entidad.
+ */
+function resolveTipoUsuario(explicit, numeroDocumento, nit) {
+  const configured = String(explicit ?? '').trim().toUpperCase()
+  if (configured) return configured
+  if (numeroDocumento && nit && digitsOnly(numeroDocumento) === digitsOnly(nit)) return 'PIN'
+  return ''
+}
+
 function joinUrl(base, path) {
   const root = base.replace(/\/$/, '')
   const suffix = path.startsWith('/') ? path : `/${path}`
@@ -90,22 +122,25 @@ function readSettings() {
   const explicitValidateUrl = env('MINSALUD_VALIDATE_URL')
   const xmlPath = env('MINSALUD_XML_FEV_PATH')
   const cargarPath = explicitValidateUrl || (xmlPath ? CARGAR_FEV_PATH : CARGAR_SIN_FACTURA_PATH)
+  const identidad = splitUsuarioDocumento(env('MINSALUD_USERNAME'), env('MINSALUD_TIPO_DOCUMENTO') || 'CC')
+  const nit = digitsOnly(env('MINSALUD_NIT'))
 
   return {
     sandbox,
     baseUrl,
     loginUrl: env('MINSALUD_AUTH_URL') || joinUrl(baseUrl, LOGIN_PATH),
     cargarUrl: cargarPath.startsWith('http') ? cargarPath : joinUrl(baseUrl, cargarPath),
-    tipoDocumento: (env('MINSALUD_TIPO_DOCUMENTO') || 'CC').toUpperCase(),
-    numeroDocumento: env('MINSALUD_USERNAME'),
+    tipoDocumento: identidad.tipo,
+    numeroDocumento: identidad.numero,
     clave: env('MINSALUD_PASSWORD'),
-    nit: digitsOnly(env('MINSALUD_NIT')),
-    tipoUsuario: env('MINSALUD_TIPO_USUARIO').toUpperCase(),
+    nit,
+    tipoUsuario: resolveTipoUsuario(env('MINSALUD_TIPO_USUARIO'), identidad.numero, nit),
     codPrestador: digitsOnly(env('MINSALUD_COD_PRESTADOR') || DEFAULT_COD_PRESTADOR),
     appVersion: env('MINSALUD_APP_VERSION') || DEFAULT_APP_VERSION,
     tipoMecanismoValidacion: Number(env('MINSALUD_TIPO_MECANISMO') || DEFAULT_TIPO_MECANISMO),
     xmlPath,
-    pacienteDocumento: digitsOnly(env('MINSALUD_PACIENTE_DOCUMENTO') || DEFAULT_PACIENTE_DOCUMENTO),
+    pacienteTipoDocumento: (env('MINSALUD_PACIENTE_TIPO_DOCUMENTO') || identidad.tipo).toUpperCase(),
+    pacienteDocumento: digitsOnly(env('MINSALUD_PACIENTE_DOCUMENTO') || identidad.numero || DEFAULT_PACIENTE_DOCUMENTO),
   }
 }
 
@@ -129,7 +164,7 @@ export function buildMinimalRips(settings) {
     numNota: conFactura ? null : `RS${Date.now()}`,
     usuarios: [
       {
-        tipoDocumentoIdentificacion: 'CC',
+        tipoDocumentoIdentificacion: settings.pacienteTipoDocumento || 'CC',
         numDocumentoIdentificacion: settings.pacienteDocumento,
         tipoUsuario: '04',
         fechaNacimiento: '1991-06-25',
@@ -159,7 +194,7 @@ export function buildMinimalRips(settings) {
               tipoDiagnosticoPrincipal: '02',
               tipoDocumentoIdentificacion: settings.tipoDocumento || 'CC',
               numDocumentoIdentificacion: profesionalDocumento,
-              vrServicio: 0,
+              vrServicio: 50000,
               conceptoRecaudo: '05',
               valorPagoModerador: 0,
               numFEVPagoModerador: null,
@@ -384,6 +419,7 @@ async function main() {
   console.log(`Login: ${settings.loginUrl}`)
   console.log(`Carga: ${settings.cargarUrl}`)
   console.log(`NIT: ${settings.nit || '(no configurado)'}`)
+  console.log(`Usuario: ${settings.tipoDocumento} ${settings.numeroDocumento}  tipoUsuario: ${settings.tipoUsuario || '(no enviado)'}`)
   console.log(`numFactura: ${rips.numFactura ?? 'null'}  tipoNota: ${rips.tipoNota ?? 'null'}  numNota: ${rips.numNota ?? 'null'}`)
 
   if (hasBlockingValidationErrors(localIssues)) {
