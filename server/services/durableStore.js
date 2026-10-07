@@ -84,6 +84,32 @@ function poolConfig(url) {
   }
 }
 
+/**
+ * Ejecuta trabajo contra el Postgres de mihistoriadental.
+ * No convierte un error de SQL en enfriamiento: solo un fallo de conexión.
+ * @param {(client: import('pg').PoolClient) => Promise<unknown>} fn
+ */
+export async function withPgClient(fn) {
+  const db = getPool()
+  if (!db) {
+    const error = new Error('PostgreSQL no está configurado.')
+    error.code = 'PG_UNAVAILABLE'
+    throw error
+  }
+  let client
+  try {
+    client = await db.connect()
+  } catch (error) {
+    markPostgresUnavailable(error)
+    throw error
+  }
+  try {
+    return await fn(client)
+  } finally {
+    client.release()
+  }
+}
+
 function getPool() {
   if (pool !== undefined) return pool
   const Pool = loadPgPool()

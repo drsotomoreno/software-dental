@@ -63,7 +63,9 @@ export async function validateRipsWithMinistry(
   return parseJson<RipsValidateResponse>(response)
 }
 
-export type FiscalBillingRoute = 'generarFEV_y_RIPS' | 'guardarRIPS_Pendiente'
+export type FiscalBillingRoute = 'generarFEV_y_RIPS' | 'guardarRIPS_Pendiente' | 'muv_sin_factura'
+
+export type EstadoMuv = 'PENDIENTE' | 'APROBADO' | 'RECHAZADO'
 
 export interface DictatedEvolutionBillingResult {
   ok: boolean
@@ -73,10 +75,14 @@ export interface DictatedEvolutionBillingResult {
   numFactura?: string | null
   cuv?: string | null
   cuvRecordId?: string
+  estadoMuv?: EstadoMuv
+  resultadoValidacion?: unknown
+  consultaId?: string | null
   dianXml?: string | null
   pendingRips?: { id: string; numFactura: string | null; status: string }
   message?: string
   error?: string
+  field?: string | null
   codes?: { cie10: string[]; cups: string[] }
   localIssues?: Array<{ level: string; field?: string; message: string }>
   ministryErrors?: Array<{ message: string }>
@@ -87,7 +93,8 @@ export interface DictatedEvolutionBillingResult {
  * Obligado → generarFEV_y_RIPS(); No obligado → guardarRIPS_Pendiente(numFactura: null).
  */
 export async function routeDictatedEvolutionByFiscalProfile(input: {
-  rips: RipsTransaction
+  rips?: RipsTransaction
+  atencion?: object
   invoice?: DianInvoicePayload
   metadatos?: RipsValidateRequestMetadatos
   cie10?: Array<string | null | undefined>

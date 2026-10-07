@@ -70,6 +70,7 @@ import {
   ensureEvolutionNoteOutboxCreate,
   finalizeEvolutionNote,
 } from '@/services/evolutionNoteService'
+import { reportarAtencionCerradaAlMuv } from '@/services/finalizarConsultaMuv'
 import { isEvolutionNoteImmutable } from '@/types/evolutionNote'
 import { validateEvolutionNote } from '@/utils/evolutionNoteValidation'
 import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
@@ -1296,10 +1297,31 @@ export function PatientDetailPage() {
         details: `Paciente ${patient.documentType} ${patient.documentNumber} — usuario ${user.email}`,
       })
 
+      const muvNotice =
+        recordId == null
+          ? ''
+          : await reportarAtencionCerradaAlMuv({
+              recordKey: recordId,
+              patient,
+              professional: user,
+              signedAt: now,
+              record: {
+                patientId: patientForeignKey,
+                professionalId: user.id,
+                diagnoses: normalizedClinicalData.diagnoses,
+                evolutionNotes: sortedEvolutionNotes,
+                paymentControl: normalizedClinicalData.paymentControl,
+                orthodonticsPaymentControl: normalizedClinicalData.orthodonticsPaymentControl ?? [],
+                budget: normalizedClinicalData.budget,
+                signedAt: now,
+              },
+            })
+
       setMessage(
         'Atención cerrada para facturación. Las evoluciones firmadas quedaron bloqueadas como folio (Res. 1995/1999). Odontograma, plan y exámenes siguen editables. Hash: ' +
           contentHash.slice(0, 16) +
-          '…',
+          '…' +
+          (muvNotice ? ` ${muvNotice}` : ''),
       )
       return { ok: true as const }
     } catch {
