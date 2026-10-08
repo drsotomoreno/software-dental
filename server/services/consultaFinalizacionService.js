@@ -1,14 +1,15 @@
 /**
- * Después de dejar la consulta guardada, genera el RIPS y lo radica.
- * Un RipsMapperError o un rechazo del MUV actualizan estado_muv y no
- * deshacen ese guardado.
+ * Después de insertar la consulta, genera el RIPS y lo radica.
+ * Un RipsMapperError o un rechazo del MUV hacen UPDATE de estado_muv
+ * y no deshacen ese guardado ni tumban la petición.
  */
 import { readFevRipsSettings } from './fevRipsService.js'
 import { MinsaludService } from './minsaludService.js'
 import { RipsMapper, RipsMapperError } from './ripsMapper.js'
 import {
+  actualizarEstadoMuv,
   ensureConsultasSchema,
-  guardarResultadoMuv,
+  insertarConsultaClinica,
   obtenerConsulta,
 } from './consultasRepository.js'
 
@@ -121,7 +122,8 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
   const repo = {
     ensureConsultasSchema: deps.ensureConsultasSchema ?? ensureConsultasSchema,
     obtenerConsulta: deps.obtenerConsulta ?? obtenerConsulta,
-    guardarResultadoMuv: deps.guardarResultadoMuv ?? guardarResultadoMuv,
+    insertarConsultaClinica: deps.insertarConsultaClinica ?? insertarConsultaClinica,
+    actualizarEstadoMuv: deps.actualizarEstadoMuv ?? actualizarEstadoMuv,
   }
 
   try {
@@ -149,24 +151,33 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
     }
   }
 
-  const persistir = async (payload) => {
+  let guardada
+  try {
+    guardada = await repo.insertarConsultaClinica(identidad)
+  } catch (cause) {
+    throw errorDeBase('No se pudo guardar la consulta en la base de datos.', { estadoMuv: 'PENDIENTE' }, cause)
+  }
+
+  const actualizar = async (payload) => {
     try {
-      return await repo.guardarResultadoMuv({ ...identidad, ...payload })
+      return await repo.actualizarEstadoMuv({ id: guardada.id, ...payload })
     } catch (cause) {
       throw errorDeBase('No se pudo guardar el CUV en la base de datos.', payload, cause)
     }
   }
 
-  await persistir({
-    cuv: null,
-    estadoMuv: 'PENDIENTE',
-    resultadoValidacion: { fase: 'pendiente_envio' },
-  })
-
   const mapper = deps.mapper ?? new RipsMapper(input.prestador ?? prestadorDesdeSesion(user), input.env)
+  const atencionGuardada = {
+    ...atencion,
+    id: guardada.id,
+    clinicId: guardada.clinicId,
+    patientId: guardada.patientId,
+    professionalId: guardada.professionalId,
+    clinicalRecordId: guardada.clinicalRecordId,
+  }
   let rips
   try {
-    rips = mapper.toRipsSinFactura(atencion)
+    rips = mapper.toRipsSinFactura(atencionGuardada)
   } catch (error) {
     const esMapper = error instanceof RipsMapperError || error?.name === 'RipsMapperError'
     if (!esMapper) throw error
@@ -174,7 +185,7 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
       error: error.message,
       field: error.field ?? null,
     }
-    const consulta = await persistir({
+    const consulta = await actualizar({
       cuv: null,
       estadoMuv: 'RECHAZADO',
       resultadoValidacion: detalle,
@@ -192,9 +203,9 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
     }
   }
 
-  const service = deps.minsaludService ?? deps.fevRipsService ?? new MinsaludService()
   let envio
   try {
+    const service = deps.minsaludService ?? deps.fevRipsService ?? new MinsaludService()
     envio = await service.enviarRipsSinFactura(rips)
   } catch (error) {
     const detalle = {
@@ -202,7 +213,7 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
       errors: error?.errors ?? null,
       status: error?.status ?? null,
     }
-    const consulta = await persistir({
+    const consulta = await actualizar({
       cuv: null,
       estadoMuv: 'RECHAZADO',
       resultadoValidacion: detalle,
@@ -220,7 +231,7 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
   }
 
   const interpreted = aplicarRespuestaEstandar(envio)
-  const consulta = await persistir({
+  const consulta = await actualizar({
     cuv: interpreted.cuv,
     estadoMuv: interpreted.estadoMuv,
     resultadoValidacion: interpreted.resultadoValidacion,

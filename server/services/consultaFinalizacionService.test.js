@@ -7,6 +7,10 @@ import {
   finalizarConsultaEnMuv,
   interpretarRespuestaMuv,
 } from './consultaFinalizacionService.js'
+import {
+  SQL_ACTUALIZAR_ESTADO_MUV,
+  SQL_INSERTAR_CONSULTA_CLINICA,
+} from './consultasRepository.js'
 
 const MIGRATION = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -42,11 +46,42 @@ function atencionValida(extra = {}) {
 
 function memoria() {
   const rows = new Map()
+  const calls = []
   return {
     rows,
+    calls,
     async ensureConsultasSchema() {},
     async obtenerConsulta(id) {
       return rows.get(id) ?? null
+    },
+    async insertarConsultaClinica(entry) {
+      calls.push('insert')
+      const prev = rows.get(entry.id)
+      const row = {
+        id: entry.id,
+        clinicId: entry.clinicId ?? prev?.clinicId ?? null,
+        patientId: entry.patientId ?? prev?.patientId ?? null,
+        professionalId: entry.professionalId ?? prev?.professionalId ?? null,
+        clinicalRecordId: entry.clinicalRecordId ?? prev?.clinicalRecordId ?? entry.id,
+        cuv: prev?.cuv ?? null,
+        estadoMuv: prev?.estadoMuv ?? 'PENDIENTE',
+        resultadoValidacion: prev?.resultadoValidacion ?? null,
+      }
+      rows.set(entry.id, row)
+      return row
+    },
+    async actualizarEstadoMuv(entry) {
+      calls.push('update')
+      const prev = rows.get(entry.id)
+      if (!prev) throw new Error('consulta no encontrada')
+      const row = {
+        ...prev,
+        cuv: entry.cuv ?? null,
+        estadoMuv: entry.estadoMuv,
+        resultadoValidacion: entry.resultadoValidacion ?? null,
+      }
+      rows.set(entry.id, row)
+      return row
     },
     async guardarResultadoMuv(entry) {
       const prev = rows.get(entry.id)
@@ -65,6 +100,18 @@ function memoria() {
     },
   }
 }
+
+test('el alta y el estado del MUV usan SQL parametrizado', () => {
+  assert.match(SQL_INSERTAR_CONSULTA_CLINICA, /INSERT INTO consultas/)
+  assert.match(SQL_INSERTAR_CONSULTA_CLINICA, /VALUES \(\$1, \$2, \$3, \$4, \$5, now\(\)\)/)
+  assert.match(SQL_ACTUALIZAR_ESTADO_MUV, /UPDATE consultas/)
+  assert.match(SQL_ACTUALIZAR_ESTADO_MUV, /SET cuv = \$2/)
+  assert.match(SQL_ACTUALIZAR_ESTADO_MUV, /estado_muv = \$3::estado_muv/)
+  assert.match(SQL_ACTUALIZAR_ESTADO_MUV, /resultado_validacion = \$4::jsonb/)
+  assert.match(SQL_ACTUALIZAR_ESTADO_MUV, /WHERE id = \$1/)
+  assert.doesNotMatch(SQL_INSERTAR_CONSULTA_CLINICA, /\$\{/)
+  assert.doesNotMatch(SQL_ACTUALIZAR_ESTADO_MUV, /\$\{/)
+})
 
 test('la migración declara cuv, el enum del MUV y resultado_validacion jsonb', async () => {
   const sql = await readFile(MIGRATION, 'utf8')
@@ -127,6 +174,7 @@ test('finalizar consulta genera el RIPS, llama al MUV y guarda el CUV', async ()
 
   assert.equal(result.estadoMuv, 'APROBADO')
   assert.equal(result.cuv, CUV)
+  assert.deepEqual(repo.calls, ['insert', 'update'])
   assert.equal(enviado.numFactura, null)
   assert.equal(enviado.usuarios[0].servicios.consultas[0].codDiagnosticoPrincipal, 'K021')
   assert.equal(enviado.usuarios[0].servicios.consultas[0].vrServicio, 50000)
@@ -155,6 +203,27 @@ test('un rechazo del MUV queda en la consulta', async () => {
   assert.equal(result.estadoMuv, 'RECHAZADO')
   assert.equal(result.cuv, null)
   assert.equal(repo.rows.get('consulta-2').resultadoValidacion[0].Codigo, 'RVG01')
+  assert.deepEqual(repo.calls, ['insert', 'update'])
+})
+
+test('notificaciones sin CUV quedan RECHAZADO y el array se guarda', async () => {
+  const repo = memoria()
+  const avisos = [{ Clase: 'NOTIFICACION', Codigo: 'RVG08', Descripcion: 'aviso' }]
+  const result = await finalizarConsultaEnMuv(
+    { atencion: atencionValida({ id: 'consulta-avisos' }) },
+    {
+      ...repo,
+      minsaludService: {
+        async enviarRipsSinFactura() {
+          return { CUV: null, resultState: true, resultadosValidacion: avisos }
+        },
+      },
+    },
+  )
+  assert.equal(result.clinicoGuardado, true)
+  assert.equal(result.estadoMuv, 'RECHAZADO')
+  assert.equal(result.cuv, null)
+  assert.equal(repo.rows.get('consulta-avisos').resultadoValidacion[0].Codigo, 'RVG08')
 })
 
 test('un vrServicio en 0 no llama al MUV, guarda RECHAZADO y no interrumpe el cierre', async () => {
@@ -177,6 +246,7 @@ test('un vrServicio en 0 no llama al MUV, guarda RECHAZADO y no interrumpe el ci
   assert.equal(result.estadoMuv, 'RECHAZADO')
   assert.equal(repo.rows.get('consulta-3').estadoMuv, 'RECHAZADO')
   assert.match(repo.rows.get('consulta-3').resultadoValidacion.error, /RVC091/)
+  assert.deepEqual(repo.calls, ['insert', 'update'])
 })
 
 test('una consulta ya aprobada no se reenvía al MUV', async () => {
