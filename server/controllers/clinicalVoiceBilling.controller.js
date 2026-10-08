@@ -73,8 +73,9 @@ export async function processDictatedEvolution(req, res, next) {
           clinicalItems: body.clinicalItems,
         })
         const aprobado = result.estadoMuv === 'APROBADO'
-        return respuestaMuv(res, aprobado ? 200 : 422, {
-          ok: aprobado,
+        return respuestaMuv(res, 200, {
+          ok: true,
+          clinicoGuardado: true,
           route: 'muv_sin_factura',
           perfilFiscal,
           numFactura: null,
@@ -85,21 +86,28 @@ export async function processDictatedEvolution(req, res, next) {
           alreadyStored: result.alreadyStored === true,
           codes,
           rips: result.rips,
+          field: result.field ?? null,
+          error: aprobado ? null : result.error,
           message: aprobado
             ? 'RIPS sin factura radicado en el MUV.'
-            : 'El MUV rechazó el RIPS de la consulta.',
+            : result.error || 'El MUV rechazó el RIPS de la consulta. La atención guardada se conservó.',
         })
       } catch (error) {
         if (error instanceof RipsMapperError || error?.name === 'RipsMapperError') {
-          return respuestaMuv(res, 422, {
-            ok: false,
+          return respuestaMuv(res, 200, {
+            ok: true,
+            clinicoGuardado: true,
             route: 'muv_sin_factura',
             perfilFiscal,
             estadoMuv: 'RECHAZADO',
             error: error.message,
             field: error.field ?? null,
             consultaId: error.consulta?.id ?? null,
-            resultadoValidacion: error.consulta?.resultadoValidacion ?? null,
+            resultadoValidacion: error.consulta?.resultadoValidacion ?? {
+              error: error.message,
+              field: error.field ?? null,
+            },
+            message: 'La atención guardada se conservó. El RIPS no se pudo armar.',
           })
         }
         if (error?.statusCode === 400 || error?.statusCode === 502 || error?.statusCode === 503) {

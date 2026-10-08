@@ -1,6 +1,7 @@
 /**
- * Cierra una consulta sin factura: genera el RIPS, lo radica en el MUV
- * y deja el CUV y el estado en la tabla consultas.
+ * Después de dejar la consulta guardada, genera el RIPS y lo radica.
+ * Un RipsMapperError o un rechazo del MUV actualizan estado_muv y no
+ * deshacen ese guardado.
  */
 import { readFevRipsSettings } from './fevRipsService.js'
 import { MinsaludService } from './minsaludService.js'
@@ -20,6 +21,26 @@ export function consultaIdDe(atencion, metadatos = {}) {
   const raw = atencion?.id ?? atencion?.clinicalRecordId ?? metadatos.clinicalRecordId ?? fromList
   const id = String(raw ?? '').trim()
   return id || null
+}
+
+/**
+ * APROBADO cuando el MUV responde ResultState verdadero y entrega CUV.
+ * El arreglo de validaciones se guarda tal cual.
+ * @param {object | null} envio
+ */
+export function aplicarRespuestaEstandar(envio) {
+  const resultState = envio?.resultState === true || envio?.ResultState === true
+  const crudo = envio?.CUV ?? envio?.cuv ?? envio?.CodigoUnicoValidacion ?? ''
+  const cuv = String(crudo ?? '').trim()
+  const resultados = Array.isArray(envio?.resultadosValidacion)
+    ? envio.resultadosValidacion
+    : Array.isArray(envio?.ResultadosValidacion)
+      ? envio.ResultadosValidacion
+      : []
+  if (resultState && cuv && cuv !== '-') {
+    return { estadoMuv: 'APROBADO', cuv, resultadoValidacion: resultados }
+  }
+  return { estadoMuv: 'RECHAZADO', cuv: null, resultadoValidacion: resultados }
 }
 
 /**
@@ -142,22 +163,33 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
     resultadoValidacion: { fase: 'pendiente_envio' },
   })
 
-  const mapper = deps.mapper ?? new RipsMapper(input.prestador ?? prestadorDesdeSesion(user))
+  const mapper = deps.mapper ?? new RipsMapper(input.prestador ?? prestadorDesdeSesion(user), input.env)
   let rips
   try {
     rips = mapper.toRipsSinFactura(atencion)
   } catch (error) {
+    const esMapper = error instanceof RipsMapperError || error?.name === 'RipsMapperError'
+    if (!esMapper) throw error
+    const detalle = {
+      error: error.message,
+      field: error.field ?? null,
+    }
     const consulta = await persistir({
       cuv: null,
       estadoMuv: 'RECHAZADO',
-      resultadoValidacion: {
-        fase: 'generacion_rips',
-        error: error instanceof Error ? error.message : String(error),
-        field: error?.field ?? null,
-      },
+      resultadoValidacion: detalle,
     })
-    if (error && typeof error === 'object') error.consulta = consulta
-    throw error
+    return {
+      clinicoGuardado: true,
+      alreadyStored: false,
+      consulta,
+      rips: null,
+      estadoMuv: 'RECHAZADO',
+      cuv: null,
+      error: error.message,
+      field: error.field ?? null,
+      resultadoValidacion: detalle,
+    }
   }
 
   const service = deps.minsaludService ?? deps.fevRipsService ?? new MinsaludService()
@@ -165,28 +197,29 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
   try {
     envio = await service.enviarRipsSinFactura(rips)
   } catch (error) {
+    const detalle = {
+      error: error instanceof Error ? error.message : 'No se pudo contactar el MUV.',
+      errors: error?.errors ?? null,
+      status: error?.status ?? null,
+    }
     const consulta = await persistir({
       cuv: null,
       estadoMuv: 'RECHAZADO',
-      resultadoValidacion: {
-        fase: 'autenticacion_muv',
-        error: error instanceof Error ? error.message : String(error),
-        errors: error?.errors ?? null,
-        status: error?.status ?? null,
-      },
+      resultadoValidacion: detalle,
     })
-    const wrapped = new Error(error instanceof Error ? error.message : 'No se pudo contactar el MUV.')
-    wrapped.statusCode = 502
-    wrapped.consulta = consulta
-    wrapped.estadoMuv = 'RECHAZADO'
-    throw wrapped
+    return {
+      clinicoGuardado: true,
+      alreadyStored: false,
+      consulta,
+      rips,
+      estadoMuv: 'RECHAZADO',
+      cuv: null,
+      error: detalle.error,
+      resultadoValidacion: detalle,
+    }
   }
 
-  const interpreted = interpretarRespuestaMuv(envio?.resultState ? 200 : 400, {
-    ResultState: envio?.resultState === true,
-    CodigoUnicoValidacion: envio?.CUV,
-    ResultadosValidacion: envio?.resultadosValidacion,
-  })
+  const interpreted = aplicarRespuestaEstandar(envio)
   const consulta = await persistir({
     cuv: interpreted.cuv,
     estadoMuv: interpreted.estadoMuv,
@@ -194,11 +227,13 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
   })
 
   return {
+    clinicoGuardado: true,
     alreadyStored: false,
     consulta,
     rips,
     estadoMuv: interpreted.estadoMuv,
-    cuv: interpreted.estadoMuv === 'APROBADO' ? interpreted.cuv : null,
+    cuv: interpreted.cuv,
+    error: interpreted.estadoMuv === 'APROBADO' ? null : 'El MUV rechazó el RIPS de la consulta.',
     resultadoValidacion: interpreted.resultadoValidacion,
   }
 }

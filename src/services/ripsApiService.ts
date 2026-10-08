@@ -76,6 +76,7 @@ export interface DictatedEvolutionBillingResult {
   cuv?: string | null
   cuvRecordId?: string
   estadoMuv?: EstadoMuv
+  clinicoGuardado?: boolean
   resultadoValidacion?: unknown
   consultaId?: string | null
   dianXml?: string | null

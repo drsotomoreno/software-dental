@@ -151,32 +151,32 @@ test('un rechazo del MUV queda en la consulta', async () => {
       },
     },
   )
+  assert.equal(result.clinicoGuardado, true)
   assert.equal(result.estadoMuv, 'RECHAZADO')
   assert.equal(result.cuv, null)
-  assert.equal(repo.rows.get('consulta-2').resultadoValidacion.ResultadosValidacion[0].Codigo, 'RVG01')
+  assert.equal(repo.rows.get('consulta-2').resultadoValidacion[0].Codigo, 'RVG01')
 })
 
-test('un vrServicio en 0 no llama al MUV y deja la consulta RECHAZADA', async () => {
+test('un vrServicio en 0 no llama al MUV, guarda RECHAZADO y no interrumpe el cierre', async () => {
   const repo = memoria()
   let llamadas = 0
-  await assert.rejects(
-    () =>
-      finalizarConsultaEnMuv(
-        { atencion: atencionValida({ id: 'consulta-3', valorPagadoPaciente: 0 }) },
-        {
-          ...repo,
-          fevRipsService: {
-            async enviarRipsSinFactura() {
-              llamadas += 1
-              return { httpStatus: 200, data: {} }
-            },
-          },
+  const result = await finalizarConsultaEnMuv(
+    { atencion: atencionValida({ id: 'consulta-3', valorPagadoPaciente: 0 }) },
+    {
+      ...repo,
+      fevRipsService: {
+        async enviarRipsSinFactura() {
+          llamadas += 1
+          return { CUV: null, resultState: false, resultadosValidacion: [] }
         },
-      ),
-    (error) => error?.name === 'RipsMapperError' && /RVC091/.test(error.message),
+      },
+    },
   )
   assert.equal(llamadas, 0)
+  assert.equal(result.clinicoGuardado, true)
+  assert.equal(result.estadoMuv, 'RECHAZADO')
   assert.equal(repo.rows.get('consulta-3').estadoMuv, 'RECHAZADO')
+  assert.match(repo.rows.get('consulta-3').resultadoValidacion.error, /RVC091/)
 })
 
 test('una consulta ya aprobada no se reenvía al MUV', async () => {
