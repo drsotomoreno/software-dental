@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
+import { EstadoRipsCuv } from '@/components/clinical/EstadoRipsCuv'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 import { formatDate, toDexiePrimaryKey } from '@/utils'
 
@@ -55,31 +56,40 @@ export function ClinicalRecordList({ patientId, onSelectRecord }: ClinicalRecord
 
   return (
     <div className="card">
-      <h3 className={`mb-4 ${CLINICAL_SECTION_TITLE_CLASS}`}>
+      <h3 className={`mb-1 ${CLINICAL_SECTION_TITLE_CLASS}`}>
         Historias clínicas firmadas ({records.length})
       </h3>
+      <p className="mb-3 text-xs text-slate-500">Estado RIPS / CUV de cada atención cerrada.</p>
       <ul className="space-y-2">
         {records.map((record) => (
-          <li key={record.id}>
+          <li
+            key={record.id}
+            className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3 text-sm transition hover:bg-slate-50"
+          >
             <button
               type="button"
               onClick={() => record.id != null && onSelectRecord?.(String(record.id))}
-              className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-4 py-3 text-left text-sm transition hover:bg-slate-50"
+              className="min-w-0 flex-1 text-left"
             >
-              <div>
-                <span className="font-medium text-slate-800">
-                  {record.signedAt ? formatDate(record.signedAt) : 'Sin fecha'}
-                </span>
-                <span className="ml-2 text-slate-500">
-                  {record.diagnoses?.[0]?.code
-                    ? `— ${record.diagnoses[0].code}: ${record.diagnoses[0].description}`
-                    : ''}
-                </span>
-              </div>
+              <span className="font-medium text-slate-800">
+                {record.signedAt ? formatDate(record.signedAt) : 'Sin fecha'}
+              </span>
+              <span className="ml-2 text-slate-500">
+                {record.diagnoses?.[0]?.code
+                  ? `— ${record.diagnoses[0].code}: ${record.diagnoses[0].description}`
+                  : ''}
+              </span>
+            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <EstadoRipsCuv
+                estadoMuv={record.estadoMuv}
+                cuv={record.cuv}
+                resultadoValidacion={record.resultadoValidacion}
+              />
               <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
                 Bloqueada
               </span>
-            </button>
+            </div>
           </li>
         ))}
       </ul>
