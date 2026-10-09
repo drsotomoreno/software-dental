@@ -16,6 +16,8 @@ export {
 } from './patientId'
 export {
   deriveDiagnosesFromOdontogram,
+  collectOdontogramCieDiagnoses,
+  importOdontogramCieDiagnoses,
   formatOdontogramFindings,
   mergeDiagnosesWithOdontogram,
   syncClinicalDataFromOdontogram,

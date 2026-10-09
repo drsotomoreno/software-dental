@@ -7,6 +7,8 @@ import {
   syncClinicalDataFromOdontogram,
   syncClinicalDataFromOrthodonticsAnnex,
   syncClinicalDataFromEndodonticsAnnex,
+  collectOdontogramCieDiagnoses,
+  importOdontogramCieDiagnoses,
   createEmptyOrthodonticsBudget,
   createEmptyDentalImplantsBudget,
 } from '@/utils'
@@ -26,7 +28,11 @@ import type { StomatologicalExam } from '@/types/stomatologicalExam'
 import type { SpecializedAnnexes } from '@/types/specializedAnnexes'
 import { createEmptySpecializedAnnexes } from '@/types/specializedAnnexes'
 import { createEmptyStomatologicalExam } from '@/types/stomatologicalExam'
-import { createEmptyClinicalDiagnosticChart, normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
+import {
+  appendUnassignedDiagnosticChartEntries,
+  createEmptyClinicalDiagnosticChart,
+  normalizeClinicalDiagnosticChart,
+} from '@/types/clinicalDiagnosticChart'
 import type { EvolutionNote } from '@/types/evolutionNote'
 import type { InformedConsent } from '@/types/consent'
 import type { UserProfile } from '@/types/user'
@@ -237,6 +243,28 @@ export function ClinicalHistoryForm({
     [form.diagnoses],
   )
 
+  const odontogramCieDiagnoses = useMemo(
+    () => collectOdontogramCieDiagnoses(odontogram),
+    [odontogram],
+  )
+
+  const importOdontogramDiagnoses = () => {
+    const result = importOdontogramCieDiagnoses(form.diagnoses, odontogramCieDiagnoses)
+    const currentChart = normalizeClinicalDiagnosticChart(form.diagnosticChart)
+    const diagnosticChart = appendUnassignedDiagnosticChartEntries(
+      currentChart,
+      odontogramCieDiagnoses,
+    )
+    const chartChanged = diagnosticChart.entries.length !== currentChart.entries.length
+    if (result.added > 0 || result.updated > 0 || chartChanged) {
+      update({
+        diagnoses: result.diagnoses,
+        ...(chartChanged ? { diagnosticChart } : {}),
+      })
+    }
+    return { added: result.added, updated: result.updated }
+  }
+
   const budgetLinkedPlanItemIds = useMemo(
     () =>
       form.budgetItems
@@ -302,6 +330,8 @@ export function ClinicalHistoryForm({
         <DiagnosticOdontogramSection
           value={form.diagnosticChart}
           diagnoses={form.diagnoses}
+          odontogramCieDiagnoses={odontogramCieDiagnoses}
+          onImportOdontogramDiagnoses={importOdontogramDiagnoses}
           onChange={(diagnosticChart) => update({ diagnosticChart })}
           onEnsureDiagnosis={({ code, description, toothId }) => {
             const toothNumber = Number(toothId)
@@ -344,7 +374,14 @@ export function ClinicalHistoryForm({
           }}
           onUpdateDiagnosis={updateDiagnosis}
           onRemoveAdditionalDiagnosis={(code) => {
-            update({ diagnoses: form.diagnoses.filter((diagnosis) => diagnosis.code !== code) })
+            const diagnosticChart = normalizeClinicalDiagnosticChart(form.diagnosticChart)
+            update({
+              diagnoses: form.diagnoses.filter((diagnosis) => diagnosis.code !== code),
+              diagnosticChart: {
+                ...diagnosticChart,
+                entries: diagnosticChart.entries.filter((entry) => entry.diagnosisCode !== code),
+              },
+            })
           }}
           disabled={livingLocked}
         />
