@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mensajesResultadoValidacion } from './estadoRipsCuv.ts'
+import {
+  leerEstadoMuv,
+  leerResultadoValidacion,
+  mensajesResultadoValidacion,
+} from './estadoRipsCuv.ts'
 
 test('traduce RVC091 y el detalle guardado por el mapper', () => {
   assert.deepEqual(mensajesResultadoValidacion([{ Clase: 'RECHAZADO', Codigo: 'RVC091' }]), [
@@ -11,6 +15,27 @@ test('traduce RVC091 y el detalle guardado por el mapper', () => {
       error: 'RVC091: vrServicio no puede ser 0, null ni indefinido.',
       field: 'vrServicio',
     }),
+    ['Rechazado por regla RVC091: el valor pagado por el paciente no puede ser 0.'],
+  )
+})
+
+test('lee estado_muv y traduce una fecha inválida', () => {
+  assert.equal(leerEstadoMuv({ estado_muv: 'rechazado' }), 'RECHAZADO')
+  assert.equal(leerEstadoMuv({ estadoMuv: 'APROBADO' }), 'APROBADO')
+  assert.equal(leerEstadoMuv({ estado_muv: 'otro' }), null)
+  assert.deepEqual(
+    leerResultadoValidacion({ resultado_validacion: [{ Codigo: 'RVG01' }] }),
+    [{ Codigo: 'RVG01' }],
+  )
+  assert.deepEqual(
+    mensajesResultadoValidacion({
+      error: 'fechaInicioAtencion no se pudo interpretar: ayer',
+      field: 'fechaInicioAtencion',
+    }),
+    ['Rechazado: la fecha de inicio de la atención no es válida.'],
+  )
+  assert.deepEqual(
+    mensajesResultadoValidacion('{"field":"vrServicio","error":"vrServicio es 0"}'),
     ['Rechazado por regla RVC091: el valor pagado por el paciente no puede ser 0.'],
   )
 })

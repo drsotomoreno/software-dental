@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import { EstadoRipsCuv } from '@/components/clinical/EstadoRipsCuv'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
+import { leerEstadoMuv, leerResultadoValidacion } from '@/utils/estadoRipsCuv'
 import { formatDate, toDexiePrimaryKey } from '@/utils'
 
 interface ClinicalRecordListProps {
@@ -59,39 +60,55 @@ export function ClinicalRecordList({ patientId, onSelectRecord }: ClinicalRecord
       <h3 className={`mb-1 ${CLINICAL_SECTION_TITLE_CLASS}`}>
         Historias clínicas firmadas ({records.length})
       </h3>
-      <p className="mb-3 text-xs text-slate-500">Estado RIPS / CUV de cada atención cerrada.</p>
+      <p className="mb-3 text-xs text-slate-500">
+        Cada atención cerrada muestra su Estado RIPS según la respuesta del MUV.
+      </p>
+      <div className="mb-2 hidden grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:grid">
+        <span>Consulta</span>
+        <span>Estado RIPS</span>
+        <span className="sr-only">Bloqueo</span>
+      </div>
       <ul className="space-y-2">
-        {records.map((record) => (
-          <li
-            key={record.id}
-            className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3 text-sm transition hover:bg-slate-50"
-          >
-            <button
-              type="button"
-              onClick={() => record.id != null && onSelectRecord?.(String(record.id))}
-              className="min-w-0 flex-1 text-left"
+        {records.map((record) => {
+          const fuente = record as typeof record & {
+            estado_muv?: string | null
+            resultado_validacion?: unknown
+          }
+          return (
+            <li
+              key={record.id}
+              className="grid items-center gap-2 rounded-lg border border-slate-200 px-4 py-3 text-sm transition hover:bg-slate-50 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:gap-3"
             >
-              <span className="font-medium text-slate-800">
-                {record.signedAt ? formatDate(record.signedAt) : 'Sin fecha'}
-              </span>
-              <span className="ml-2 text-slate-500">
-                {record.diagnoses?.[0]?.code
-                  ? `— ${record.diagnoses[0].code}: ${record.diagnoses[0].description}`
-                  : ''}
-              </span>
-            </button>
-            <div className="flex shrink-0 items-center gap-2">
-              <EstadoRipsCuv
-                estadoMuv={record.estadoMuv}
-                cuv={record.cuv}
-                resultadoValidacion={record.resultadoValidacion}
-              />
-              <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
+              <button
+                type="button"
+                onClick={() => record.id != null && onSelectRecord?.(String(record.id))}
+                className="min-w-0 text-left"
+              >
+                <span className="font-medium text-slate-800">
+                  {record.signedAt ? formatDate(record.signedAt) : 'Sin fecha'}
+                </span>
+                <span className="ml-2 text-slate-500">
+                  {record.diagnoses?.[0]?.code
+                    ? `— ${record.diagnoses[0].code}: ${record.diagnoses[0].description}`
+                    : ''}
+                </span>
+              </button>
+              <div className="flex flex-col items-start gap-1 sm:items-end">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 sm:sr-only">
+                  Estado RIPS
+                </span>
+                <EstadoRipsCuv
+                  estadoMuv={leerEstadoMuv(fuente)}
+                  cuv={record.cuv}
+                  resultadoValidacion={leerResultadoValidacion(fuente)}
+                />
+              </div>
+              <span className="w-fit rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
                 Bloqueada
               </span>
-            </div>
-          </li>
-        ))}
+            </li>
+          )
+        })}
       </ul>
     </div>
   )
