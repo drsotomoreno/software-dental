@@ -16,6 +16,7 @@ import {
   normalizeQuantityForCups,
 } from './cupsBillingRules'
 import { resolveTariffUnitPrice } from './tariffLookup'
+import { formatAnatomicalZone } from './treatmentPlanZone'
 
 export function createEmptyOrthodonticsBudget(): OrthodonticsBudget {
   return {
@@ -118,25 +119,58 @@ export function calcBudgetSummary(
   return { subtotal, discount, total, currency: 'COP' }
 }
 
-/** Convierte un ítem del plan en línea de presupuesto con precio del tarifario. */
+function planProcedure(item: Pick<TreatmentPlanItem, 'procedure'>): string {
+  return (item.procedure ?? '').trim()
+}
+
+function sameText(left: string | undefined, right: string | undefined): boolean {
+  return (left ?? '').trim().toLowerCase() === (right ?? '').trim().toLowerCase()
+}
+
+/** Convierte un ítem del plan en línea de presupuesto, conservando zona, CIE y precio. */
 export function treatmentPlanItemToBudgetLine(item: TreatmentPlanItem): BudgetLineItem | null {
-  if (!item.procedure.trim()) return null
+  const procedure = planProcedure(item)
+  if (!procedure) return null
 
   const catalogPrice = resolveTariffUnitPrice(item.cupsCode)
-  const unitPrice = item.unitPrice != null && item.unitPrice > 0 ? item.unitPrice : catalogPrice
+  const unitPrice =
+    item.unitPrice != null && Number.isFinite(item.unitPrice)
+      ? Math.max(0, Math.round(item.unitPrice))
+      : catalogPrice
+  const zone = formatAnatomicalZone(item)
 
   return {
     id: generateId(),
     treatmentPlanItemId: item.id,
-    procedure: item.procedure,
+    procedure,
     cupsCode: item.cupsCode,
     toothNumber: item.toothNumber,
     fdiQuadrant: item.fdiQuadrant,
     arch: item.arch,
-    quantity: normalizeQuantityForCups(item.cupsCode, item.quantity),
+    anatomicalZone: zone || undefined,
+    diagnosisCode: item.diagnosisCode,
+    diagnosisDescription: item.diagnosisDescription,
+    quantity: normalizeQuantityForCups(item.cupsCode, item.quantity ?? 1),
     unitPrice,
     source: 'treatment_plan',
   }
+}
+
+function budgetLineMatchesPlanItem(line: BudgetLineItem, item: TreatmentPlanItem): boolean {
+  if (line.treatmentPlanItemId && line.treatmentPlanItemId === item.id) return true
+  if (line.treatmentPlanItemId && line.treatmentPlanItemId !== item.id) return false
+  if (!sameText(line.procedure, item.procedure)) return false
+
+  const lineCups = (line.cupsCode ?? '').trim()
+  const itemCups = (item.cupsCode ?? '').trim()
+  if (lineCups && itemCups && lineCups !== itemCups) return false
+
+  const lineZone = formatAnatomicalZone(line).trim().toLowerCase()
+  const itemZone = formatAnatomicalZone(item).trim().toLowerCase()
+  if (lineZone && itemZone) return lineZone === itemZone
+  // Una importación anterior podía guardar la fila sin zona. Se reutiliza
+  // para no duplicar el procedimiento al volver a importar.
+  return !lineZone
 }
 
 /** Agrega un procedimiento del plan al presupuesto si aún no está vinculado. */
@@ -178,16 +212,48 @@ export function buildBudgetFromTreatmentPlan(
   treatmentPlan: TreatmentPlanItem[],
   existingItems: BudgetLineItem[] = [],
 ): BudgetLineItem[] {
-  const linked = new Set(existingItems.map((i) => i.treatmentPlanItemId).filter(Boolean))
-  const toAdd: BudgetLineItem[] = []
+  const next = [...existingItems]
+  const usedLineIds = new Set<string>()
 
   for (const item of treatmentPlan) {
-    if (!item.procedure.trim() || linked.has(item.id)) continue
+    if (!planProcedure(item)) continue
+
+    const matchIndex = next.findIndex(
+      (line) => !usedLineIds.has(line.id) && budgetLineMatchesPlanItem(line, item),
+    )
+
+    if (matchIndex >= 0) {
+      const line = next[matchIndex]
+      usedLineIds.add(line.id)
+      const zone = formatAnatomicalZone(item)
+      next[matchIndex] = {
+        ...line,
+        treatmentPlanItemId: line.treatmentPlanItemId || item.id,
+        cupsCode: line.cupsCode || item.cupsCode,
+        toothNumber: line.toothNumber ?? item.toothNumber,
+        fdiQuadrant: line.fdiQuadrant ?? item.fdiQuadrant,
+        arch: line.arch ?? item.arch,
+        anatomicalZone: line.anatomicalZone || zone || undefined,
+        diagnosisCode: line.diagnosisCode || item.diagnosisCode,
+        diagnosisDescription: line.diagnosisDescription || item.diagnosisDescription,
+        source: line.source ?? 'treatment_plan',
+        unitPrice:
+          line.unitPrice > 0
+            ? line.unitPrice
+            : item.unitPrice != null && Number.isFinite(item.unitPrice)
+              ? Math.max(0, Math.round(item.unitPrice))
+              : line.unitPrice,
+      }
+      continue
+    }
+
     const line = treatmentPlanItemToBudgetLine(item)
-    if (line) toAdd.push(line)
+    if (!line) continue
+    usedLineIds.add(line.id)
+    next.push(line)
   }
 
-  return [...existingItems, ...toAdd]
+  return next
 }
 
 /** Conceptos de ortodoncia que el plan de pagos mantiene aparte del listado clínico. */

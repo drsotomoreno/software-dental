@@ -111,6 +111,13 @@ export interface BudgetLineItem {
   fdiQuadrant?: ImplantFdiQuadrant
   /** Arcada para procedimientos mucosoportados o de arcada completa */
   arch?: 'superior' | 'inferior'
+  /**
+   * Texto de Diente / Zona copiado del plan.
+   * Conserva rangos y combinaciones (16, 14-18, Q1) que no caben en una sola pieza.
+   */
+  anatomicalZone?: string
+  diagnosisCode?: string
+  diagnosisDescription?: string
   quantity: number
   unitPrice: number
   source?: 'manual' | 'treatment_plan' | 'endodontics_annex'

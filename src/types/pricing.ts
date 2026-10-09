@@ -21,6 +21,12 @@ export interface BudgetItem {
   toothNumber?: number
   fdiQuadrant?: ImplantFdiQuadrant
   arch?: 'superior' | 'inferior'
+  anatomicalZone?: string
+  diagnosisCode?: string
+  diagnosisDescription?: string
+  /** Vínculo con la fila del plan de tratamiento de la que se importó. */
+  treatmentPlanItemId?: string
+  source?: 'manual' | 'treatment_plan' | 'endodontics_annex'
   quantity: number
   unitPrice: number
   /** Descuento en COP aplicado a la línea (no porcentaje). */
