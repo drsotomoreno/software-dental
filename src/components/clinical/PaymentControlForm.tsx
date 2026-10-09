@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Eye } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
@@ -131,7 +131,7 @@ function PriceCell({
       inputMode="numeric"
       disabled={disabled}
       aria-label="Precio"
-      className="input-field h-8 px-2 text-right text-sm tabular-nums"
+      className="input-field h-8 bg-white px-2 text-right text-sm tabular-nums"
       value={editing ? draft : formatCurrency(value || 0)}
       onFocus={() => {
         if (disabled) return
@@ -177,12 +177,12 @@ function PayAmountField({
   }
 
   return (
-    <div className="flex items-center justify-end gap-1">
+    <div className="flex items-center gap-1">
       <input
         inputMode="numeric"
         disabled={disabled}
         aria-label="Valor del pago"
-        className="input-field h-8 w-28 px-2 text-right text-sm tabular-nums"
+        className="input-field h-8 w-28 bg-white px-2 text-right text-sm tabular-nums"
         value={editing ? draft : formatCurrency(remaining)}
         onFocus={() => {
           if (disabled) return
@@ -226,6 +226,24 @@ const EMPTY_AGREEMENT: Pick<
 > = {
   paymentMethod: 'contado',
   scheduleNotes: '',
+}
+
+function procedurePaymentStatus(remaining: number, paid: number): { label: string; className: string } {
+  if (remaining <= 0 && paid > 0) {
+    return { label: 'Pagado', className: 'bg-green-100 text-green-800' }
+  }
+  if (remaining <= 0) {
+    return { label: 'Sin saldo', className: 'bg-slate-200 text-slate-600' }
+  }
+  return { label: `Saldo ${formatCurrency(remaining)}`, className: 'bg-amber-100 text-amber-900' }
+}
+
+function FieldCaption({ children }: { children: string }) {
+  return (
+    <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+      {children}
+    </span>
+  )
 }
 
 export function PaymentControlForm({
@@ -493,118 +511,169 @@ export function PaymentControlForm({
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[920px] border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              <th className="px-2 py-2">Diente / Zona</th>
-              <th className="px-2 py-2">Diagnóstico CIE</th>
-              <th className="px-2 py-2">Procedimiento</th>
-              <th className="w-36 px-2 py-2 text-right">Precio</th>
-              <th className="w-56 px-2 py-2 text-right">Registrar Pago</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paymentControlLines.length === 0 && unlinkedPayments.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-2 py-6 text-center text-sm text-slate-500">
-                  {canImportFromBudget
-                    ? 'Importe el presupuesto o agregue un procedimiento.'
-                    : 'Agregue un procedimiento para acordar el pago y registrar abonos.'}
-                </td>
-              </tr>
-            ) : (
-              paymentControlLines.map((line) => {
-                const cieOpen = openMenu?.id === line.id && openMenu.field === 'cie'
-                const cupsOpen = openMenu?.id === line.id && openMenu.field === 'cups'
-                const remaining = Math.max(0, lineBillablePrice(line) - paidAmountForLine(line.id, paymentControl))
-                const linePayments = paymentControl.filter((payment) => payment.paymentControlLineId === line.id)
-                const latestPayment = [...linePayments].reverse().find((payment) => payment.invoices.length > 0)
-                const latestInvoice = latestPayment
-                  ? [...latestPayment.invoices].reverse()[0]
-                  : undefined
-                const canCreditNote = Boolean(
-                  latestPayment &&
-                    latestInvoice &&
-                    isPaymentInvoiceImmutable(latestInvoice) &&
-                    latestInvoice.status !== 'voided_by_credit_note',
-                )
-                const agreement = planItemForLine(line, paymentPlan) ?? EMPTY_AGREEMENT
-                const manualProcedure = !line.budgetItemId
+      <div className="space-y-4">
+        {paymentControlLines.length === 0 && unlinkedPayments.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+            {canImportFromBudget
+              ? 'Importe el presupuesto o agregue un procedimiento.'
+              : 'Agregue un procedimiento para acordar el pago y registrar abonos.'}
+          </p>
+        ) : (
+          paymentControlLines.map((line, index) => {
+            const cieOpen = openMenu?.id === line.id && openMenu.field === 'cie'
+            const cupsOpen = openMenu?.id === line.id && openMenu.field === 'cups'
+            const billable = lineBillablePrice(line)
+            const paid = paidAmountForLine(line.id, paymentControl)
+            const remaining = Math.max(0, billable - paid)
+            const status = procedurePaymentStatus(remaining, paid)
+            const linePayments = paymentControl.filter((payment) => payment.paymentControlLineId === line.id)
+            const latestPayment = [...linePayments].reverse().find((payment) => payment.invoices.length > 0)
+            const latestInvoice = latestPayment
+              ? [...latestPayment.invoices].reverse()[0]
+              : undefined
+            const canCreditNote = Boolean(
+              latestPayment &&
+                latestInvoice &&
+                isPaymentInvoiceImmutable(latestInvoice) &&
+                latestInvoice.status !== 'voided_by_credit_note',
+            )
+            const agreement = planItemForLine(line, paymentPlan) ?? EMPTY_AGREEMENT
+            const manualProcedure = !line.budgetItemId
+            const procedureTitle = line.procedure.trim() || 'Sin nombre'
 
-                return (
-                  <Fragment key={line.id}>
-                  <tr className="border-b border-slate-100 align-top">
-                    <td className="px-2 py-1.5">
-                      <input
-                        id={`pay-zone-${line.id}`}
-                        list="payment-zone-presets"
-                        disabled={disabled}
-                        value={formatAnatomicalZone(line)}
-                        onChange={(event) => updateLine(line.id, parseAnatomicalZone(event.target.value))}
-                        placeholder="16, 14-18, General"
-                        className="input-field h-8 px-2 text-sm"
-                        aria-label="Diente o zona"
-                      />
-                    </td>
-                    <td className="relative px-2 py-1.5">
-                      <input
-                        disabled={disabled}
-                        value={cieOpen ? openMenu.query : formatCieLabel(line)}
-                        onFocus={() => {
-                          if (disabled) return
-                          setOpenMenu({ id: line.id, field: 'cie', query: formatCieLabel(line) })
-                        }}
-                        onBlur={() => closeMenuSoon(line.id, 'cie')}
-                        onChange={(event) => {
-                          const query = event.target.value
-                          setOpenMenu({ id: line.id, field: 'cie', query })
-                          updateLine(line.id, parseCieLabel(query))
-                        }}
-                        placeholder="CIE-10"
-                        className="input-field h-8 px-2 text-sm"
-                        aria-label="Diagnóstico CIE"
-                        autoComplete="off"
-                      />
-                      {cieOpen && (
-                        <ul className="absolute z-20 mt-1 max-h-40 w-[min(20rem,70vw)] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-md">
-                          {cieOptions.length === 0 ? (
-                            <li className="px-2 py-1.5 text-xs text-slate-400">—</li>
-                          ) : (
-                            cieOptions.map((option) => (
-                              <li key={`${line.id}-${option.code}`}>
-                                <button
-                                  type="button"
-                                  className="flex w-full gap-2 px-2 py-1.5 text-left text-xs hover:bg-slate-50"
-                                  onMouseDown={(event) => event.preventDefault()}
-                                  onClick={() => {
-                                    updateLine(line.id, {
-                                      diagnosisCode: option.code,
-                                      diagnosisDescription: option.description,
-                                    })
-                                    setOpenMenu(null)
-                                  }}
-                                >
-                                  <span className="font-mono text-dental-700">{option.code}</span>
-                                  <span className="truncate text-slate-600">{option.description}</span>
-                                </button>
-                              </li>
-                            ))
-                          )}
-                        </ul>
-                      )}
-                    </td>
-                    <td className="relative px-2 py-1.5">
-                      {manualProcedure ? (
-                        <p className="px-1 py-1 text-sm text-slate-800" title={line.procedure || undefined}>
-                          {line.procedure || 'Procedimiento personalizado'}
-                          {line.cupsCode ? (
-                            <span className="ml-2 font-mono text-[10px] text-slate-400">
-                              {formatCupsCodeDotted(line.cupsCode)}
-                            </span>
-                          ) : null}
-                        </p>
-                      ) : (
+            return (
+              <article
+                key={line.id}
+                className={`rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm ${
+                  cieOpen || cupsOpen ? 'relative z-30' : 'relative'
+                }`}
+              >
+                <header className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-dental-700">
+                      Procedimiento {index + 1}
+                    </p>
+                    <h4 className="text-sm font-semibold text-slate-900" title={procedureTitle}>
+                      {procedureTitle}
+                      {line.cupsCode ? (
+                        <span className="ml-2 font-mono text-[11px] font-normal text-slate-500">
+                          {formatCupsCodeDotted(line.cupsCode)}
+                        </span>
+                      ) : null}
+                    </h4>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-1">
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${status.className}`}>
+                      {status.label}
+                    </span>
+                    {latestPayment && latestInvoice && (
+                      <button
+                        type="button"
+                        aria-label="Ver factura"
+                        onClick={() => openLatestInvoice(latestPayment)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {canCreditNote && latestPayment && latestInvoice && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCreditNoteTarget({
+                            paymentId: latestPayment.id,
+                            invoice: latestInvoice,
+                            source: 'control',
+                          })
+                        }
+                        className="h-8 rounded-lg border border-rose-200 bg-white px-2 text-[11px] font-medium text-rose-800 hover:bg-rose-50"
+                      >
+                        Anular
+                      </button>
+                    )}
+                    {!disabled && (
+                      <button
+                        type="button"
+                        aria-label="Quitar procedimiento"
+                        onClick={() => removeLine(line.id)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-red-600"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                  {latestInvoice && paymentInvoiceStatusLabel(latestInvoice) && (
+                    <p className="basis-full text-right text-[10px] text-rose-700">
+                      {paymentInvoiceStatusLabel(latestInvoice)}
+                    </p>
+                  )}
+                </header>
+
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div>
+                    <FieldCaption>Diente / Zona</FieldCaption>
+                    <input
+                      id={`pay-zone-${line.id}`}
+                      list="payment-zone-presets"
+                      disabled={disabled}
+                      value={formatAnatomicalZone(line)}
+                      onChange={(event) => updateLine(line.id, parseAnatomicalZone(event.target.value))}
+                      placeholder="16, 14-18, General"
+                      className="input-field h-8 bg-white px-2 text-sm"
+                      aria-label="Diente o zona"
+                    />
+                  </div>
+                  <div className="relative">
+                    <FieldCaption>Diagnóstico CIE</FieldCaption>
+                    <input
+                      disabled={disabled}
+                      value={cieOpen ? openMenu.query : formatCieLabel(line)}
+                      onFocus={() => {
+                        if (disabled) return
+                        setOpenMenu({ id: line.id, field: 'cie', query: formatCieLabel(line) })
+                      }}
+                      onBlur={() => closeMenuSoon(line.id, 'cie')}
+                      onChange={(event) => {
+                        const query = event.target.value
+                        setOpenMenu({ id: line.id, field: 'cie', query })
+                        updateLine(line.id, parseCieLabel(query))
+                      }}
+                      placeholder="CIE-10"
+                      className="input-field h-8 bg-white px-2 text-sm"
+                      aria-label="Diagnóstico CIE"
+                      autoComplete="off"
+                    />
+                    {cieOpen && (
+                      <ul className="absolute z-20 mt-1 max-h-40 w-[min(20rem,70vw)] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-md">
+                        {cieOptions.length === 0 ? (
+                          <li className="px-2 py-1.5 text-xs text-slate-400">—</li>
+                        ) : (
+                          cieOptions.map((option) => (
+                            <li key={`${line.id}-${option.code}`}>
+                              <button
+                                type="button"
+                                className="flex w-full gap-2 px-2 py-1.5 text-left text-xs hover:bg-slate-50"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  updateLine(line.id, {
+                                    diagnosisCode: option.code,
+                                    diagnosisDescription: option.description,
+                                  })
+                                  setOpenMenu(null)
+                                }}
+                              >
+                                <span className="font-mono text-dental-700">{option.code}</span>
+                                <span className="truncate text-slate-600">{option.description}</span>
+                              </button>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    )}
+                  </div>
+                  {!manualProcedure && (
+                    <div className="relative sm:col-span-2 xl:col-span-2">
+                      <FieldCaption>Procedimiento</FieldCaption>
                       <input
                         disabled={disabled}
                         value={cupsOpen ? openMenu.query : line.procedure}
@@ -620,17 +689,16 @@ export function PaymentControlForm({
                         }}
                         placeholder="CUPS .03"
                         title={line.procedure || undefined}
-                        className="input-field h-8 px-2 pr-24 text-sm"
+                        className="input-field h-8 bg-white px-2 pr-24 text-sm"
                         aria-label="Procedimiento"
                         autoComplete="off"
                       />
-                      )}
-                      {!manualProcedure && line.cupsCode && !cupsOpen && (
-                        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 font-mono text-[10px] text-slate-400">
+                      {line.cupsCode && !cupsOpen && (
+                        <span className="pointer-events-none absolute bottom-2 right-3 font-mono text-[10px] text-slate-400">
                           {formatCupsCodeDotted(line.cupsCode)}
                         </span>
                       )}
-                      {!manualProcedure && cupsOpen && (
+                      {cupsOpen && (
                         <ul className="absolute z-20 mt-1 max-h-44 w-[min(24rem,80vw)] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-md">
                           {cupsOptions.length === 0 ? (
                             <li className="px-2 py-1.5 text-xs text-slate-400">—</li>
@@ -669,143 +737,111 @@ export function PaymentControlForm({
                           )}
                         </ul>
                       )}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <PriceCell
-                        value={lineBillablePrice(line)}
-                        disabled={disabled}
-                        onCommit={(unitPrice) => updateLine(line.id, { unitPrice, quantity: 1 })}
-                      />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <div className="flex items-center justify-end gap-1">
-                        <PayAmountField
-                          remaining={remaining}
-                          paid={lineBillablePrice(line) - remaining}
-                          disabled={disabled}
-                          onPay={(amount) => registerPayment(line, amount)}
-                        />
-                        {latestPayment && latestInvoice && (
-                          <button
-                            type="button"
-                            aria-label="Ver factura"
-                            onClick={() => openLatestInvoice(latestPayment)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        {canCreditNote && latestPayment && latestInvoice && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setCreditNoteTarget({
-                                paymentId: latestPayment.id,
-                                invoice: latestInvoice,
-                                source: 'control',
-                              })
-                            }
-                            className="h-8 rounded-lg border border-rose-200 px-2 text-[11px] font-medium text-rose-800 hover:bg-rose-50"
-                          >
-                            Anular
-                          </button>
-                        )}
-                        {!disabled && (
-                          <button
-                            type="button"
-                            aria-label="Quitar procedimiento"
-                            onClick={() => removeLine(line.id)}
-                            className="inline-flex h-8 w-8 items-center justify-center text-slate-400 hover:text-red-600"
-                          >
-                            ×
-                          </button>
-                        )}
-                      </div>
-                      {latestInvoice && paymentInvoiceStatusLabel(latestInvoice) && (
-                        <p className="mt-1 text-right text-[10px] text-rose-700">
-                          {paymentInvoiceStatusLabel(latestInvoice)}
-                        </p>
-                      )}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-slate-100 bg-slate-50/70">
-                    <td colSpan={5} className="px-3 py-3">
-                      {manualProcedure && (
-                        <div className="mb-3">
-                          <PaymentPlanProcedureField
-                            procedure={line.procedure}
-                            cupsCode={line.cupsCode}
-                            totalAmount={lineBillablePrice(line)}
-                            disabled={disabled}
-                            onChange={(patch) =>
-                              updateLine(line.id, {
-                                procedure: patch.procedure,
-                                cupsCode: patch.cupsCode,
-                                unitPrice: patch.totalAmount ?? line.unitPrice,
-                                quantity: 1,
-                                source: 'manual',
-                              })
-                            }
-                          />
-                        </div>
-                      )}
-                      <PaymentAgreementFields
-                        item={agreement}
-                        disabled={disabled}
-                        onChange={(patch) => updateAgreement(line, patch)}
-                      />
-                    </td>
-                  </tr>
-                  </Fragment>
-                )
-              })
-            )}
-            {unlinkedPayments.map((payment) => (
-              <tr key={payment.id} className="border-b border-slate-100 text-slate-500">
-                <td className="px-2 py-1.5">—</td>
-                <td className="px-2 py-1.5">—</td>
-                <td className="px-2 py-1.5">{payment.paymentReason || 'Pago'}</td>
-                <td className="px-2 py-1.5 text-right">—</td>
-                <td className="px-2 py-1.5 text-right text-sm tabular-nums">
-                  {formatCurrency(payment.amount)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-slate-200">
-              <td colSpan={3} className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Valor Total
-              </td>
-              <td className="px-2 py-2 text-right text-sm font-semibold tabular-nums text-slate-900">
-                {formatCurrency(total)}
-              </td>
-              <td />
-            </tr>
-            <tr>
-              <td colSpan={3} className="px-2 pb-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Saldo del tratamiento
-              </td>
-              <td className="px-2 pb-2 text-right text-sm font-semibold tabular-nums text-amber-800">
-                {formatCurrency(balance)}
-              </td>
-              <td />
-            </tr>
-          </tfoot>
-        </table>
+                    </div>
+                  )}
+                  <div>
+                    <FieldCaption>Precio</FieldCaption>
+                    <PriceCell
+                      value={billable}
+                      disabled={disabled}
+                      onCommit={(unitPrice) => updateLine(line.id, { unitPrice, quantity: 1 })}
+                    />
+                  </div>
+                  <div>
+                    <FieldCaption>Registrar pago</FieldCaption>
+                    <PayAmountField
+                      remaining={remaining}
+                      paid={paid}
+                      disabled={disabled}
+                      onPay={(amount) => registerPayment(line, amount)}
+                    />
+                  </div>
+                </div>
+
+                {manualProcedure && (
+                  <div className="mt-4">
+                    <PaymentPlanProcedureField
+                      procedure={line.procedure}
+                      cupsCode={line.cupsCode}
+                      totalAmount={billable}
+                      disabled={disabled}
+                      onChange={(patch) =>
+                        updateLine(line.id, {
+                          procedure: patch.procedure,
+                          cupsCode: patch.cupsCode,
+                          unitPrice: patch.totalAmount ?? line.unitPrice,
+                          quantity: 1,
+                          source: 'manual',
+                        })
+                      }
+                    />
+                  </div>
+                )}
+
+                <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Acuerdo de pago
+                  </p>
+                  <PaymentAgreementFields
+                    item={agreement}
+                    disabled={disabled}
+                    onChange={(patch) => updateAgreement(line, patch)}
+                  />
+                </div>
+              </article>
+            )
+          })
+        )}
+
+        {unlinkedPayments.length > 0 && (
+          <article className="rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm">
+            <h4 className="mb-3 text-sm font-semibold text-slate-900">Abonos sin procedimiento</h4>
+            <ul className="space-y-2">
+              {unlinkedPayments.map((payment) => (
+                <li
+                  key={payment.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                >
+                  <span className="text-slate-700">{payment.paymentReason || 'Pago'}</span>
+                  <span className="font-semibold tabular-nums text-slate-900">
+                    {formatCurrency(payment.amount)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </article>
+        )}
+
+        <div className="flex flex-wrap justify-end gap-6 rounded-xl border border-slate-300 bg-white px-4 py-3">
+          <div className="text-right">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Valor total</p>
+            <p className="text-sm font-semibold tabular-nums text-slate-900">{formatCurrency(total)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Saldo del tratamiento
+            </p>
+            <p className="text-sm font-semibold tabular-nums text-amber-800">{formatCurrency(balance)}</p>
+          </div>
+        </div>
       </div>
       {pendingAgreements.length > 0 && (
         <div className="mt-4 space-y-3">
           <h4 className="text-sm font-semibold text-slate-800">Acuerdos pendientes de registro clínico</h4>
           <p className="text-xs text-slate-500">
-            Procedimientos acordados que todavía no tienen zona, diagnóstico ni abonos. Llévelos a la
-            tabla para registrar el pago y la factura.
+            Procedimientos acordados que todavía no tienen zona, diagnóstico ni abonos. Páselos a su
+            propia ficha para registrar el pago y la factura.
           </p>
           {pendingAgreements.map((item) => (
-            <div key={item.id} className="rounded-lg border border-slate-200 p-3">
-              <div className="mb-3">
-                <span className="font-medium text-slate-800">{item.procedure || 'Procedimiento sin nombre'}</span>
-              </div>
+            <article key={item.id} className="rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm">
+              <header className="mb-3 border-b border-slate-200 pb-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-dental-700">
+                  Procedimiento pendiente
+                </p>
+                <h4 className="text-sm font-semibold text-slate-900">
+                  {item.procedure || 'Procedimiento sin nombre'}
+                </h4>
+              </header>
               {(item.source === 'custom' || !item.budgetItemId) && (
                 <div className="mb-3">
                   <PaymentPlanProcedureField
@@ -844,18 +880,23 @@ export function PaymentControlForm({
                       ),
                     )
                   }
-                  className="input-field"
+                  className="input-field bg-white"
                 />
               </div>
-              <PaymentAgreementFields
-                item={item}
-                disabled={disabled}
-                onChange={(patch) =>
-                  onPaymentPlanChange(
-                    paymentPlan.map((row) => (row.id === item.id ? { ...row, ...patch } : row)),
-                  )
-                }
-              />
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Acuerdo de pago
+                </p>
+                <PaymentAgreementFields
+                  item={item}
+                  disabled={disabled}
+                  onChange={(patch) =>
+                    onPaymentPlanChange(
+                      paymentPlan.map((row) => (row.id === item.id ? { ...row, ...patch } : row)),
+                    )
+                  }
+                />
+              </div>
               {!disabled && (
                 <div className="mt-2 flex justify-end gap-3">
                   <button
@@ -863,7 +904,7 @@ export function PaymentControlForm({
                     onClick={() => promoteAgreement(item)}
                     className="text-sm font-medium text-dental-700 hover:text-dental-900"
                   >
-                    Llevar a la tabla
+                    Crear ficha
                   </button>
                   <button
                     type="button"
@@ -874,7 +915,7 @@ export function PaymentControlForm({
                   </button>
                 </div>
               )}
-            </div>
+            </article>
           ))}
         </div>
       )}
@@ -893,21 +934,31 @@ export function PaymentControlForm({
             y sus facturas se registran en el bloque de ortodoncia.
           </p>
           {orthoAgreements.map((item) => (
-            <div key={item.id} className="rounded-lg border border-dental-100 bg-white p-3">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium text-slate-800">{item.procedure}</span>
+            <article key={item.id} className="rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm">
+              <header className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-dental-700">
+                    Procedimiento de ortodoncia
+                  </p>
+                  <h4 className="text-sm font-semibold text-slate-900">{item.procedure}</h4>
+                </div>
                 <span className="text-sm font-semibold text-dental-700">{formatCurrency(item.totalAmount)}</span>
+              </header>
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Acuerdo de pago
+                </p>
+                <PaymentAgreementFields
+                  item={item}
+                  disabled={disabled}
+                  onChange={(patch) =>
+                    onPaymentPlanChange(
+                      paymentPlan.map((row) => (row.id === item.id ? { ...row, ...patch } : row)),
+                    )
+                  }
+                />
               </div>
-              <PaymentAgreementFields
-                item={item}
-                disabled={disabled}
-                onChange={(patch) =>
-                  onPaymentPlanChange(
-                    paymentPlan.map((row) => (row.id === item.id ? { ...row, ...patch } : row)),
-                  )
-                }
-              />
-            </div>
+            </article>
           ))}
         </div>
       )}
