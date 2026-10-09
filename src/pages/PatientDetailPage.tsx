@@ -18,6 +18,8 @@ import {
 
   ExternalHistoryRdaPanel,
 
+  MissingFieldsAlert,
+
   createEmptyClinicalForm,
 
 } from '@/components/clinical'
@@ -183,6 +185,7 @@ export function PatientDetailPage() {
 
   const [showSignConfirm, setShowSignConfirm] = useState(false)
   const [ripsShieldMismatches, setRipsShieldMismatches] = useState<RipsShieldMismatch[]>([])
+  const [missingFieldErrors, setMissingFieldErrors] = useState<string[]>([])
 
   const [activeSection, setActiveSection] = useState<string>('all')
 
@@ -220,6 +223,7 @@ export function PatientDetailPage() {
     setViewingRecord(null)
     setIntegrityStatus(null)
     setMessage('')
+    setMissingFieldErrors([])
     viewedPatientRef.current = null
     clinicalInitForPatientRef.current = null
     window.scrollTo({ top: 0, behavior: 'auto' })
@@ -929,7 +933,7 @@ export function PatientDetailPage() {
 
     const draftIssues = validateClinicalRecordDraft(clinicalData)
     if (draftIssues.length > 0) {
-      setMessage(draftIssues.join('\n'))
+      setMissingFieldErrors(draftIssues)
       return false
     }
 
@@ -2030,6 +2034,10 @@ export function PatientDetailPage() {
 
       )}
 
+      <MissingFieldsAlert
+        errors={missingFieldErrors}
+        onClose={() => setMissingFieldErrors([])}
+      />
       <RipsShieldModal
         open={ripsShieldMismatches.length > 0}
         mismatches={ripsShieldMismatches}
