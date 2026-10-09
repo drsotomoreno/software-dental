@@ -10,6 +10,7 @@ import {
 import {
   SQL_ACTUALIZAR_ESTADO_MUV,
   SQL_INSERTAR_CONSULTA_CLINICA,
+  splitSqlStatements,
 } from './consultasRepository.js'
 
 const MIGRATION = join(
@@ -119,6 +120,39 @@ test('la migración declara cuv, el enum del MUV y resultado_validacion jsonb', 
   assert.match(sql, /cuv text/)
   assert.match(sql, /resultado_validacion jsonb/)
   assert.match(sql, /CREATE TABLE IF NOT EXISTS consultas/)
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS clinical_record_id text/)
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS professional_id text/)
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS updated_at timestamptz/)
+  const statements = splitSqlStatements(sql)
+  const indexAt = statements.findIndex((statement) => /idx_consultas_clinical_record/.test(statement))
+  const columnAt = statements.findIndex((statement) => /ADD COLUMN IF NOT EXISTS clinical_record_id/.test(statement))
+  assert.ok(columnAt >= 0 && indexAt > columnAt)
+  const createType = statements.find((statement) => /CREATE TYPE estado_muv/.test(statement))
+  assert.match(createType, /CREATE TYPE estado_muv AS ENUM \('PENDIENTE', 'APROBADO', 'RECHAZADO'\)/)
+  assert.doesNotMatch(createType, /CREATE INDEX/)
+})
+
+test('el 503 de preparar la tabla conserva el error de PostgreSQL', async () => {
+  await assert.rejects(
+    () =>
+      finalizarConsultaEnMuv(
+        { atencion: atencionValida() },
+        {
+          async ensureConsultasSchema() {
+            const error = new Error('column "clinical_record_id" does not exist')
+            error.code = '42703'
+            throw error
+          },
+        },
+      ),
+    (error) => {
+      assert.equal(error.statusCode, 503)
+      assert.equal(error.message, 'No se pudo preparar la tabla de consultas.')
+      assert.match(error.detalle, /clinical_record_id/)
+      assert.equal(error.cause.code, '42703')
+      return true
+    },
+  )
 })
 
 test('un CUV con notificaciones queda APROBADO', () => {

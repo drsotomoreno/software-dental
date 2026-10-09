@@ -40,6 +40,73 @@ export const SQL_ACTUALIZAR_ESTADO_MUV = `UPDATE consultas
 
 let schemaReady = null
 
+/**
+ * Separa un script en sentencias. Respeta bloques dollar-quote (DO $$ ... $$)
+ * para no partir el CREATE TYPE por el punto y coma interno.
+ * @param {string} sql
+ * @returns {string[]}
+ */
+export function splitSqlStatements(sql) {
+  const statements = []
+  let current = ''
+  let index = 0
+  let dollar = null
+
+  while (index < sql.length) {
+    if (!dollar && sql.startsWith('--', index)) {
+      const end = sql.indexOf('\n', index)
+      index = end === -1 ? sql.length : end + 1
+      continue
+    }
+
+    if (!dollar && sql[index] === "'") {
+      current += sql[index]
+      index += 1
+      while (index < sql.length) {
+        current += sql[index]
+        if (sql[index] === "'" && sql[index + 1] === "'") {
+          current += sql[index + 1]
+          index += 2
+          continue
+        }
+        if (sql[index] === "'") {
+          index += 1
+          break
+        }
+        index += 1
+      }
+      continue
+    }
+
+    if (sql[index] === '$') {
+      const match = /^\$[A-Za-z0-9_]*\$/.exec(sql.slice(index))
+      if (match) {
+        const tag = match[0]
+        if (!dollar) dollar = tag
+        else if (dollar === tag) dollar = null
+        current += tag
+        index += tag.length
+        continue
+      }
+    }
+
+    if (!dollar && sql[index] === ';') {
+      const statement = current.trim()
+      if (statement) statements.push(statement)
+      current = ''
+      index += 1
+      continue
+    }
+
+    current += sql[index]
+    index += 1
+  }
+
+  const tail = current.trim()
+  if (tail) statements.push(tail)
+  return statements
+}
+
 function mapRow(row) {
   if (!row) return null
   return {
@@ -60,7 +127,17 @@ export async function ensureConsultasSchema() {
   if (!schemaReady) {
     schemaReady = withPgClient(async (client) => {
       const sql = await readFile(MIGRATION_FILE, 'utf8')
-      await client.query(sql)
+      for (const statement of splitSqlStatements(sql)) {
+        try {
+          await client.query(statement)
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error)
+          const wrapped = new Error(`${detail} — sentencia: ${statement}`)
+          wrapped.code = error?.code
+          wrapped.cause = error
+          throw wrapped
+        }
+      }
     }).catch((error) => {
       schemaReady = null
       throw error
