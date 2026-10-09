@@ -23,8 +23,10 @@ export interface UserProfile {
   clinicId?: string
   /** Titular de la suscripción / clínica. */
   isClinicOwner?: boolean
-  /** `false` = acceso cancelado (sin contraseña vigente). */
+  /** `false` = acceso suspendido (sin contraseña vigente). La ficha sigue en la clínica. */
   accessEnabled?: boolean
+  /** Aparece en la lista pero su ficha quedó fuera de la clínica. Hay que volver a vincularla. */
+  detached?: boolean
   /** Razón social (IPS) o nombre legal del profesional independiente. */
   legalName?: string
   /** Tipo de prestador: IPS / persona jurídica vs consultorio unipersonal. */

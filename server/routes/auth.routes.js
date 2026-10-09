@@ -26,6 +26,7 @@ import {
   MASTER_EMAIL,
   registerSubscriptionUser,
   resetClinicUserPassword,
+  reattachClinicUser,
   resolveSubscriptionSession,
   sessionHintFromRequest,
   updateClinicUser,
@@ -348,6 +349,25 @@ router.put('/clinic/users/:id/password', async (req, res) => {
   } catch (error) {
     console.error('[Auth] Error en PUT /clinic/users/:id/password:', error)
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo asignar la contraseña.' })
+  }
+})
+
+router.post('/clinic/users/:id/reattach', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const result = await reattachClinicUser({
+      token,
+      hint: sessionHintFromRequest(req),
+      userId: req.params.id,
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true, user: result.user, seats: result.seats })
+  } catch (error) {
+    console.error('[Auth] Error en POST /clinic/users/:id/reattach:', error)
+    return res.status(500).json({ success: false, ok: false, error: 'No se pudo vincular el colaborador.' })
   }
 })
 
