@@ -87,7 +87,8 @@ function lineFromBudgetItem(
     fdiQuadrant: item.fdiQuadrant ?? linked?.fdiQuadrant,
     arch: item.arch ?? linked?.arch,
     anatomicalZone:
-      item.toothNumber || item.fdiQuadrant || item.arch ? undefined : linked?.anatomicalZone,
+      item.anatomicalZone ||
+      (item.toothNumber || item.fdiQuadrant || item.arch ? undefined : linked?.anatomicalZone),
   }
 
   return {
@@ -96,8 +97,8 @@ function lineFromBudgetItem(
     cupsCode: item.cupsCode,
     quantity: item.quantity > 0 ? item.quantity : 1,
     unitPrice: Math.max(0, item.unitPrice || 0),
-    diagnosisCode: linked?.diagnosisCode,
-    diagnosisDescription: linked?.diagnosisDescription,
+    diagnosisCode: item.diagnosisCode ?? linked?.diagnosisCode,
+    diagnosisDescription: item.diagnosisDescription ?? linked?.diagnosisDescription,
     budgetItemId: item.id,
     source: 'budget',
     ...zoneSource,
