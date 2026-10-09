@@ -11,6 +11,7 @@ export type ConsentTemplateId =
   | 'rehabilitacion_oral'
   | 'implantes_dentales'
   | 'blanqueamiento_dental'
+  | 'endodoncia'
   | 'general_odonto'
 
 export interface ConsentTemplate {
@@ -293,6 +294,33 @@ A pesar del uso de productos seguros y protocolos profesionales, pueden presenta
 • He tenido la oportunidad de resolver todas mis dudas con el profesional a cargo.
 • Comprendo que el resultado del blanqueamiento es variable según la respuesta biológica de mis dientes y que requiere evitar alimentos con colorantes y mantener una buena higiene para prolongar su efecto.
 • Doy mi consentimiento libre, voluntario y consciente para que se lleve a cabo el procedimiento de blanqueamiento dental.`,
+  },
+  {
+    id: 'endodoncia',
+    label: 'Endodoncia',
+    text: `CONSENTIMIENTO INFORMADO PARA TRATAMIENTO DE ENDODONCIA
+
+1. Descripción del Procedimiento
+El propósito de la endodoncia (tratamiento de conductos) es conservar la pieza dental cuando la pulpa está inflamada o infectada, o cuando el diente lo requiere por destrucción, trauma o indicación protésica. Consiste en el acceso cameral, la limpieza, conformación y desinfección de los conductos radiculares y su obturación, bajo anestesia local cuando está indicada. Un mismo consentimiento cubre las sesiones y controles de este tratamiento; no se firma uno nuevo en cada cita de la misma endodoncia.
+
+2. Posibles Riesgos y Complicaciones
+A pesar de la correcta ejecución clínica y del uso de aislamiento y magnificación cuando están indicados, pueden presentarse complicaciones. A continuación se detallan las principales, de mayor a menor frecuencia habitual:
+• Sensibilidad o dolor postoperatorio: molestia a la masticación durante los primeros días, controlable con la medicación indicada.
+• Inflamación local: edema leve de los tejidos vecinos tras la instrumentación o la medicación intraconducto.
+• Necesidad de más de una cita: anatomía radicular, exudado o reconstrucción pendiente pueden exigir sesiones adicionales del mismo tratamiento.
+• Fractura de instrumental o escalón intraconducto: complicación técnica que puede limitar la limpieza del tercio apical.
+• Perforación radicular o de cámara: comunicación accidental que puede requerir reparación o cambiar el pronóstico.
+• Sobreobturación o material más allá del ápice: irritación de los tejidos periapicales.
+• Persistencia de la lesión periapical: la cicatrización ósea puede ser parcial o requerir retratamiento o cirugía apical.
+• Fractura de la corona o de la raíz: el diente endodonciado es más frágil si no se restaura de forma definitiva.
+• Reacción a la anestesia o a los medicamentos intraconducto: alergia o irritación poco frecuente.
+• Extracción del diente: cuando el conducto no es tratable, hay fractura vertical o el pronóstico es desfavorable.
+
+3. Declaración y Consentimiento del Paciente
+• He leído, comprendido y aceptado la información descrita en este documento.
+• He tenido la oportunidad de resolver todas mis dudas con el profesional a cargo.
+• Comprendo que el éxito depende también de la restauración definitiva y de los controles, y que este consentimiento aplica a las sesiones del mismo tratamiento endodóntico.
+• Doy mi consentimiento libre, voluntario y consciente para que se lleve a cabo el tratamiento de endodoncia.`,
   },
   {
     id: 'general_odonto',

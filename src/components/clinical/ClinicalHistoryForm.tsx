@@ -36,7 +36,7 @@ import {
 import type { EvolutionNote } from '@/types/evolutionNote'
 import type { InformedConsent } from '@/types/consent'
 import type { UserProfile } from '@/types/user'
-import { createEmptyConsent } from '@/types/consent'
+import { createEmptyConsent, normalizeConsent } from '@/types/consent'
 import { AnamnesisForm } from './AnamnesisForm'
 import { StomatologicalExamForm } from './StomatologicalExamForm'
 import { SpecializedAnnexesForm } from './SpecializedAnnexesForm'
@@ -135,6 +135,11 @@ export function ClinicalHistoryForm({
       ...initialData,
       anamnesis: normalizeAnamnesis({ ...emptyForm.anamnesis, ...initialData?.anamnesis }),
       diagnosticChart: normalizeClinicalDiagnosticChart(initialData?.diagnosticChart),
+      informedConsent: normalizeConsent(
+        initialData?.informedConsent,
+        professionalLicense,
+        professionalLicense,
+      ),
     }
     try {
       return syncClinicalDataFromAnnexes(base)
@@ -162,6 +167,11 @@ export function ClinicalHistoryForm({
       ...initialData,
       anamnesis: normalizeAnamnesis({ ...emptyForm.anamnesis, ...initialData?.anamnesis }),
       diagnosticChart: normalizeClinicalDiagnosticChart(initialData?.diagnosticChart),
+      informedConsent: normalizeConsent(
+        initialData?.informedConsent,
+        professionalLicense,
+        professionalLicense,
+      ),
     }
 
     try {
@@ -463,6 +473,10 @@ export function ClinicalHistoryForm({
         <div id="clinical-section-consentimiento">
       <InformedConsentForm
         data={form.informedConsent}
+        treatmentPlan={form.treatmentPlan}
+        orthodonticsBudgetActive={Boolean(form.orthodonticsBudget?.active)}
+        dentalImplantsBudgetActive={Boolean(form.dentalImplantsBudget?.active)}
+        professionalLicense={professionalLicense}
         onChange={(informedConsent: InformedConsent) => update({ informedConsent })}
         disabled={snapshotLocked}
       />

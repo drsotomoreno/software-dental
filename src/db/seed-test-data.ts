@@ -15,7 +15,9 @@ import { createEmptyAnamnesis } from '@/types/anamnesis'
 import { createEmptyStomatologicalExam } from '@/types/stomatologicalExam'
 import { createEmptySpecializedAnnexes } from '@/types/specializedAnnexes'
 import { createEmptyClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
-import { createEmptyConsent } from '@/types/consent'
+import { createEmptyConsent, normalizeConsent } from '@/types/consent'
+import { defaultConsentTemplateForCategory } from '@/constants/consentCategories'
+import { requiredConsentCategories } from '@/utils/informedConsentRules'
 import { createDefaultOdontogram } from '@/types/odontogram'
 import type { OdontogramData } from '@/types/odontogram'
 import type { Patient } from '@/types/patient'
@@ -657,16 +659,27 @@ async function persistSignedRecord(params: {
     paymentControl: params.paymentControl,
     orthodonticsPaymentControl: [],
     evolutionNotes: signedNotes,
-    informedConsent: {
+    informedConsent: normalizeConsent({
       ...createEmptyConsent(professionalLicense, professionalLicense),
-      selectedConsentIds: ['operatoria_dental', 'general_odonto'],
-      textAccepted: true,
-      professionalSignatureDataUrl: SEED_SIGNATURE_DATA_URL,
-      professionalSignatureMeta: signatureMeta(params.now),
-      patientSignatureDataUrl: SEED_SIGNATURE_DATA_URL,
-      patientSignatureMeta: signatureMeta(params.now),
-      signedAt: params.now,
-    },
+      records: requiredConsentCategories({ treatmentPlan: params.treatmentPlan }).map(
+        (categoryId) => ({
+          id: `seed-${categoryId}-${params.now}`,
+          categoryId,
+          templateId: defaultConsentTemplateForCategory(categoryId),
+          status: 'archivado' as const,
+          scope: 'categoria_clinica' as const,
+          textAccepted: true,
+          professionalLicense,
+          professionalRegistry: professionalLicense,
+          professionalSignatureDataUrl: SEED_SIGNATURE_DATA_URL,
+          professionalSignatureMeta: signatureMeta(params.now),
+          patientSignatureDataUrl: SEED_SIGNATURE_DATA_URL,
+          patientSignatureMeta: signatureMeta(params.now),
+          signedAt: params.now,
+          archivedAt: params.now,
+        }),
+      ),
+    }),
     isLocked: true,
     signedAt: params.now,
     createdAt: params.now,
