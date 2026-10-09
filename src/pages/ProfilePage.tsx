@@ -15,7 +15,7 @@ import {
   RethusSpecialtyField,
   ensureSpecialtyInRepsPortfolio,
 } from '@/components/settings/RegulatoryIdentityFields'
-import { getStoredApiAuth, setStoredApiAuth } from '@/services/apiAuthService'
+import { getStoredApiAuth, isUniqueSuperAdminAccount, setStoredApiAuth } from '@/services/apiAuthService'
 import { updateOwnProfile, changeOwnPassword } from '@/services/subscriptionService'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
@@ -613,9 +613,10 @@ export function ProfilePage() {
         ) : null}
       </form>
 
-      {(getStoredApiAuth()?.user?.rol === 'superadmin' || user.role === 'superadmin') && (
+      {isUniqueSuperAdminAccount(user.email) &&
+      isUniqueSuperAdminAccount(getStoredApiAuth()?.user?.email) ? (
         <MailSettingsPanel />
-      )}
+      ) : null}
 
       {can('backups.manage') && (
         <div className="card space-y-3">

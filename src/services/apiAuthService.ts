@@ -6,6 +6,9 @@ import {
 } from '@/utils/permissions'
 import type { UserRole } from '@/types/user'
 import { splitPersonName } from '@/utils/personName'
+import { UNIQUE_SUPERADMIN_EMAIL } from '../../shared/uniqueSuperAdmin.js'
+
+export { isUniqueSuperAdminAccount } from '../../shared/uniqueSuperAdmin.js'
 
 export const API_AUTH_TOKEN_KEY = 'doctorSEO_token'
 export const API_AUTH_USER_KEY = 'doctorSEO_user'
@@ -57,7 +60,7 @@ export interface ApiSubscriptionUser {
   updatedAt?: string
 }
 
-export const SUPERADMIN_EMAIL = 'doctormauriciosoto@gmail.com'
+export const SUPERADMIN_EMAIL = UNIQUE_SUPERADMIN_EMAIL
 export const MASTER_PASSWORD = 'Dragon1976%'
 
 export function isMasterCredentials(email: string, password: string): boolean {
