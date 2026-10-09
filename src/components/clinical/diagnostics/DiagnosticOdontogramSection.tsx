@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Stethoscope } from 'lucide-react'
+import { Download, Stethoscope } from 'lucide-react'
 import type { Cie10Diagnosis, DiagnosisCertainty } from '@/types/clinicalRecord'
 import type { ClinicalDiagnosticChart, ClinicalDiagnosticToothEntry } from '@/types/clinicalDiagnosticChart'
 import {
@@ -23,12 +23,47 @@ function isAdditionalDiagnosis(diagnosis: Cie10Diagnosis): boolean {
 }
 
 function isQuickAssignableDiagnosis(diagnosis: Cie10Diagnosis): boolean {
-  return diagnosis.source === 'manual'
+  return (
+    !diagnosis.source ||
+    diagnosis.source === 'manual' ||
+    diagnosis.source === 'odontograma' ||
+    diagnosis.source === 'odontograma_suplementario'
+  )
+}
+
+function isOdontogramDiagnosis(diagnosis: Cie10Diagnosis): boolean {
+  return diagnosis.source === 'odontograma' || diagnosis.source === 'odontograma_suplementario'
+}
+
+function formatImportNotice(added: number, updated: number): string {
+  if (added === 0 && updated === 0) {
+    return 'Esos diagnósticos CIE del odontograma ya estaban registrados en esta sección.'
+  }
+  if (added > 0 && updated > 0) {
+    const addedText =
+      added === 1 ? 'Se importó 1 diagnóstico CIE' : `Se importaron ${added} diagnósticos CIE`
+    const updatedText =
+      updated === 1
+        ? 'se actualizó 1 diagnóstico ya registrado'
+        : `se actualizaron ${updated} diagnósticos ya registrados`
+    return `${addedText} y ${updatedText} desde el odontograma.`
+  }
+  if (added > 0) {
+    return added === 1
+      ? 'Se importó 1 diagnóstico CIE desde el odontograma.'
+      : `Se importaron ${added} diagnósticos CIE desde el odontograma.`
+  }
+  return updated === 1
+    ? 'Se actualizaron las piezas de 1 diagnóstico CIE del odontograma.'
+    : `Se actualizaron las piezas de ${updated} diagnósticos CIE del odontograma.`
 }
 
 interface DiagnosticOdontogramSectionProps {
   value: ClinicalDiagnosticChart
   diagnoses: Cie10Diagnosis[]
+  /** CIE-10 derivados del odontograma. El botón importa esta lista si tiene elementos. */
+  odontogramCieDiagnoses?: Cie10Diagnosis[]
+  onImportOdontogramDiagnoses?: () => { added: number; updated: number }
   onChange: (value: ClinicalDiagnosticChart) => void
   onEnsureDiagnosis?: (payload: { code: string; description: string; toothId: string }) => void
   onAddAdditionalDiagnosis?: (code: string, description: string) => void
@@ -47,6 +82,8 @@ function toVisualPlan(entries: ClinicalDiagnosticToothEntry[]): RehabTreatmentPl
 export function DiagnosticOdontogramSection({
   value,
   diagnoses,
+  odontogramCieDiagnoses = [],
+  onImportOdontogramDiagnoses,
   onChange,
   onEnsureDiagnosis,
   onAddAdditionalDiagnosis,
@@ -58,6 +95,7 @@ export function DiagnosticOdontogramSection({
   const [selectedToothId, setSelectedToothId] = useState<string | null>(null)
   const [cieSearch, setCieSearch] = useState('')
   const [additionalCieSearch, setAdditionalCieSearch] = useState('')
+  const [importNotice, setImportNotice] = useState<string | null>(null)
 
   const cie10Results = useCatalogSearch('cie10', cieSearch, 30)
   const additionalCie10Results = useCatalogSearch('cie10', additionalCieSearch, 30)
@@ -65,7 +103,9 @@ export function DiagnosticOdontogramSection({
   const filteredCie10 = cie10Results ?? []
   const filteredAdditionalCie10 = additionalCie10Results ?? []
   const additionalDiagnoses = diagnoses.filter(isAdditionalDiagnosis)
+  const importedOdontogramDiagnoses = diagnoses.filter(isOdontogramDiagnosis)
   const quickAssignableDiagnoses = diagnoses.filter(isQuickAssignableDiagnosis)
+  const canImportOdontogramCie = odontogramCieDiagnoses.length > 0
 
   const visualPlan = useMemo(() => toVisualPlan(chart.entries), [chart.entries])
   const selectedEntry = chart.entries.find((entry) => entry.dienteId === selectedToothId)
@@ -143,6 +183,12 @@ export function DiagnosticOdontogramSection({
     setSelectedToothId(null)
   }
 
+  const importOdontogramCie = () => {
+    if (disabled || !canImportOdontogramCie || !onImportOdontogramDiagnoses) return
+    const result = onImportOdontogramDiagnoses()
+    setImportNotice(formatImportNotice(result.added, result.updated))
+  }
+
   const quadrantProps = {
     selectedToothId,
     plan: visualPlan,
@@ -154,14 +200,50 @@ export function DiagnosticOdontogramSection({
 
   return (
     <section id="clinical-section-diagnosticos" className="card space-y-4">
-      <div>
-        <h3 className={CLINICAL_SECTION_TITLE_CLASS}>
-          {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.diagnosticos, 'Diagnósticos')}
-        </h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Esquema gráfico por pieza FDI para ubicar diagnósticos CIE-10 en la dentición.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className={CLINICAL_SECTION_TITLE_CLASS}>
+            {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.diagnosticos, 'Diagnósticos')}
+          </h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Esquema gráfico por pieza FDI para ubicar diagnósticos CIE-10 en la dentición.
+          </p>
+        </div>
+        {!disabled && onImportOdontogramDiagnoses && (
+          <button
+            type="button"
+            onClick={importOdontogramCie}
+            disabled={!canImportOdontogramCie}
+            className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            Importar diagnósticos CIE del odontograma
+          </button>
+        )}
       </div>
+
+      {!disabled && onImportOdontogramDiagnoses && (
+        <div className="space-y-1">
+          {canImportOdontogramCie ? (
+            <p className="text-xs text-slate-500">
+              El odontograma tiene{' '}
+              {odontogramCieDiagnoses.length === 1
+                ? '1 diagnóstico CIE'
+                : `${odontogramCieDiagnoses.length} diagnósticos CIE`}{' '}
+              disponible{odontogramCieDiagnoses.length === 1 ? '' : 's'} para importar.
+            </p>
+          ) : (
+            <p className="text-xs text-slate-500">
+              El odontograma no tiene diagnósticos CIE para importar.
+            </p>
+          )}
+          {importNotice && (
+            <p className="text-xs font-medium text-dental-700" role="status">
+              {importNotice}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <header className="border-b border-slate-200 bg-slate-50 px-4 py-3">
@@ -377,6 +459,78 @@ export function DiagnosticOdontogramSection({
           )}
         </footer>
       </div>
+
+      {importedOdontogramDiagnoses.length > 0 && (
+        <div>
+          <h4 className="label-field mb-1">Diagnósticos CIE importados del odontograma</h4>
+          <ul className="space-y-2">
+            {importedOdontogramDiagnoses.map((diagnosis) => (
+              <li
+                key={diagnosis.code}
+                className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm"
+              >
+                <span className="font-mono font-medium text-dental-700">{diagnosis.code}</span>
+                <span>— {diagnosis.description}</span>
+                {(diagnosis.affectedTeeth?.length ?? 0) > 0 && (
+                  <span className="text-xs text-slate-500">
+                    Piezas {diagnosis.affectedTeeth?.join(', ')}
+                  </span>
+                )}
+                {!disabled ? (
+                  <>
+                    <select
+                      value={diagnosis.type}
+                      onChange={(e) =>
+                        onUpdateDiagnosis?.(diagnosis.code, {
+                          type: e.target.value as Cie10Diagnosis['type'],
+                        })
+                      }
+                      className="rounded border border-slate-300 px-1.5 py-0.5 text-xs"
+                      aria-label={`Tipo de ${diagnosis.code}`}
+                    >
+                      <option value="principal">Principal</option>
+                      <option value="relacionado">Relacionado</option>
+                    </select>
+                    <select
+                      value={diagnosis.certainty}
+                      onChange={(e) =>
+                        onUpdateDiagnosis?.(diagnosis.code, {
+                          certainty: e.target.value as DiagnosisCertainty,
+                        })
+                      }
+                      className="rounded border border-slate-300 px-1.5 py-0.5 text-xs"
+                      aria-label={`Certeza de ${diagnosis.code}`}
+                    >
+                      {Object.entries(DIAGNOSIS_CERTAINTY_LABELS).map(([key, label]) => (
+                        <option key={key} value={key}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveAdditionalDiagnosis?.(diagnosis.code)}
+                      className="ml-auto text-red-500 hover:text-red-700"
+                      aria-label={`Quitar ${diagnosis.code}`}
+                    >
+                      ✕
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="rounded bg-dental-100 px-1.5 py-0.5 text-xs text-dental-700">
+                      {diagnosis.type}
+                    </span>
+                    <span className="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">
+                      {DIAGNOSIS_CERTAINTY_LABELS[diagnosis.certainty]}
+                    </span>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div>
         <h4 className="label-field mb-1">Diagnosticos Adicionales</h4>

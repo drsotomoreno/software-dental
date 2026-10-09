@@ -72,6 +72,45 @@ export function normalizeClinicalDiagnosticChart(
   }
 }
 
+/** Pinta en el esquema las piezas que aún no tienen diagnóstico, sin reemplazar asignaciones hechas a mano. */
+export function appendUnassignedDiagnosticChartEntries(
+  chart: Partial<ClinicalDiagnosticChart> | undefined,
+  diagnoses: Array<{ code: string; description: string; affectedTeeth?: number[] }>,
+): ClinicalDiagnosticChart {
+  const normalized = normalizeClinicalDiagnosticChart(chart)
+  const occupied = new Set(normalized.entries.map((entry) => entry.dienteId))
+  const colorByCode = new Map<string, string>()
+  for (const entry of normalized.entries) {
+    if (!colorByCode.has(entry.diagnosisCode)) {
+      colorByCode.set(entry.diagnosisCode, entry.color)
+    }
+  }
+
+  let colorIndex = colorByCode.size
+  const additions: ClinicalDiagnosticToothEntry[] = []
+
+  for (const diagnosis of diagnoses) {
+    for (const tooth of diagnosis.affectedTeeth ?? []) {
+      const dienteId = String(tooth)
+      if (!VALID_TOOTH_IDS.has(dienteId) || occupied.has(dienteId)) continue
+      occupied.add(dienteId)
+      if (!colorByCode.has(diagnosis.code)) {
+        colorByCode.set(diagnosis.code, getDiagnosisChartColor(colorIndex))
+        colorIndex += 1
+      }
+      additions.push({
+        dienteId,
+        diagnosisCode: diagnosis.code,
+        diagnosisDescription: diagnosis.description,
+        color: colorByCode.get(diagnosis.code) ?? getDiagnosisChartColor(0),
+      })
+    }
+  }
+
+  if (additions.length === 0) return normalized
+  return { ...normalized, entries: [...normalized.entries, ...additions] }
+}
+
 export function formatClinicalDiagnosticChartSummary(chart: ClinicalDiagnosticChart): string {
   if (chart.entries.length === 0 && !chart.notes.trim()) return ''
 
