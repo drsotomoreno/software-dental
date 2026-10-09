@@ -1739,7 +1739,6 @@ export function PatientDetailPage() {
             }}
             patient={patient}
             initialData={clinicalData}
-            odontogram={odontogram}
             onChange={setClinicalData}
             consentAccepted={consentAccepted}
             onConsentAcceptedChange={(accepted) => {
