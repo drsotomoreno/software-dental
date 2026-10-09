@@ -21,8 +21,12 @@ export function normalizeCie10SearchText(value: string): string {
 }
 
 function entrySearchBlob(entry: Cie10DataEntry): string {
-  const parts = [entry.code, entry.description, ...(entry.keywords ?? [])]
+  const parts = [entry.code, entry.code.replace(/\./g, ''), entry.description, ...(entry.keywords ?? [])]
   return normalizeCie10SearchText(parts.join(' '))
+}
+
+function compactCie10Code(value: string): string {
+  return normalizeCie10SearchText(value).replace(/\./g, '')
 }
 
 /**
@@ -57,7 +61,7 @@ export class Cie10SearchEngine {
       const entry = this.dataset[index]
       const blob = this.searchIndex[index]
 
-      const codeMatch = this.normalize(entry.code).includes(normalizedQuery)
+      const codeMatch = compactCie10Code(entry.code).includes(compactCie10Code(normalizedQuery))
       const textMatch = blob.includes(normalizedQuery)
 
       if (!codeMatch && !textMatch) continue
@@ -117,6 +121,11 @@ export function runCie10SearchEngineUnitTests(): void {
   const cariesResults = engine.search('caries')
   if (cariesResults.length === 0) {
     throw new Error('Expected at least one result for "caries"')
+  }
+
+  const undotted = engine.search('K021')
+  if (!undotted.some((item) => item.code === 'K02.1')) {
+    throw new Error('K021 sin punto debe encontrar K02.1')
   }
 }
 

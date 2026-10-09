@@ -39,6 +39,15 @@ import type { ElectronicCreditNote } from '@/types/creditNote'
 import type { ClinicBillingSettingsRecord } from '@/types/billingModality'
 import type { RdaCryptographicConsent, RdaExternalHistory } from '@/types/rdaExternalHistory'
 import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
+import type {
+  EvolutionNoteRecord,
+  RipsConsultationRecord,
+  RipsProcedureRecord,
+} from '@/types/evolutionNoteRips'
+import {
+  EVOLUTION_NOTE_RIPS_SCHEMA,
+  registerEvolutionNoteRipsGuards,
+} from '@/db/evolutionNoteRipsIntegrity'
 import { CREDIT_NOTE_IMMUTABILITY_MESSAGE } from '@/types/creditNote'
 import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
@@ -77,6 +86,12 @@ export class DentalDatabase extends Dexie {
   rdaConsents!: EntityTable<RdaCryptographicConsent, 'id'>
   rdaExternalHistories!: EntityTable<RdaExternalHistory, 'id'>
   ripsTemporales!: EntityTable<TemporaryRipsRecord, 'id'>
+  /** Fuente de verdad clínica que sustenta los RIPS (Res. 2275). */
+  evolution_notes!: EntityTable<EvolutionNoteRecord, 'id'>
+  /** 0..1 consulta RIPS por nota. Índice único: `evolution_note_id`. */
+  rips_consultations!: EntityTable<RipsConsultationRecord, 'id'>
+  /** 0..N procedimientos RIPS por nota. Índice: `evolution_note_id`. */
+  rips_procedures!: EntityTable<RipsProcedureRecord, 'id'>
 
   constructor() {
     super('DentalEMR')
@@ -714,6 +729,10 @@ export class DentalDatabase extends Dexie {
         }
       }
     })
+
+    // Nota de evolución 1 → 0..1 consulta y 0..N procedimientos RIPS.
+    // Los índices `evolution_note_id` (único en consultas) resuelven el vínculo.
+    this.version(29).stores({ ...EVOLUTION_NOTE_RIPS_SCHEMA })
   }
 }
 
@@ -865,6 +884,10 @@ db.diagnosticAids.hook('creating', (_primKey, obj) => {
 
 db.diagnosticAids.hook('updating', (mods, _primKey, obj) => {
   stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as DiagnosticAid)
+})
+
+registerEvolutionNoteRipsGuards(db, {
+  isRestoreUnlocked: () => backupRestoreUnlock,
 })
 
 async function seedDefaultColumns(): Promise<void> {

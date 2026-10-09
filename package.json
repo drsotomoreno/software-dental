@@ -17,7 +17,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "rips:mensual": "node server/jobs/enviarRipsMensuales.js",
-    "rips:mensual:dry": "node server/jobs/enviarRipsMensuales.js --dry-run"
+    "rips:mensual:dry": "node server/jobs/enviarRipsMensuales.js --dry-run",
+    "verify:evolution-rips": "tsx --tsconfig tsconfig.app.json scripts/verify-evolution-note-rips.ts"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.10",
@@ -52,6 +53,8 @@
     "@types/react-dom": "^19.1.2",
     "@types/uuid": "^10.0.0",
     "electron": "^35.0.0",
+    "fake-indexeddb": "^6.2.5",
+    "tsx": "^4.23.15",
     "eslint": "^9.25.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.19",
