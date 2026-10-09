@@ -49,6 +49,10 @@ export interface BackupDataTables {
   rdaConsents?: unknown[]
   rdaExternalHistories?: unknown[]
   ripsTemporales?: unknown[]
+  /** Fuente de verdad clínica de los RIPS (Res. 2275). */
+  evolution_notes?: unknown[]
+  rips_consultations?: unknown[]
+  rips_procedures?: unknown[]
 }
 
 export interface BackupPayload {

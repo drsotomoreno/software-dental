@@ -40,6 +40,14 @@ export type { UserProfile, PriceItem, Subscription, SubscriptionPlan } from './u
 export type { FiscalProfile } from '@/utils/fiscalProfile'
 export type { TemporaryRipsRecord, TemporaryRipsStatus } from './ripsTemporal'
 export type {
+  EvolutionNoteRecord,
+  EvolutionNoteCupsProcedure,
+  EvolutionNoteRipsBundle,
+  RipsConsultationRecord,
+  RipsProcedureRecord,
+  RipsEvolutionNoteForeignKey,
+} from './evolutionNoteRips'
+export type {
   TariffItemType,
   TariffItem,
   BudgetItem,
