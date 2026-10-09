@@ -62,7 +62,7 @@ import {
 
   toPatientForeignKey,
 
-  calcOrthodonticsBudgetTotal,
+  validateClinicalRecordDraft,
 } from '@/utils'
 import { getFirstBlockingClinicalBudgetIssue } from '@/utils/clinicalRipsValidation'
 import { sortEvolutionNotesChronologically, verifyClinicalRecordIntegrity } from '@/utils/recordIntegrity'
@@ -927,46 +927,10 @@ export function PatientDetailPage() {
 
     if (!clinicalData) return false
 
-    if (!clinicalData.anamnesis.chiefComplaint.trim()) {
-
-      setMessage('El motivo de consulta es obligatorio.')
-
+    const draftIssues = validateClinicalRecordDraft(clinicalData)
+    if (draftIssues.length > 0) {
+      setMessage(draftIssues.join('\n'))
       return false
-
-    }
-
-    if (
-      clinicalData.diagnoses.length === 0 &&
-      clinicalData.diagnosticChart.entries.length === 0
-    ) {
-
-      setMessage('Debe registrar al menos un diagnóstico en el esquema por pieza.')
-
-      return false
-
-    }
-
-    if (!clinicalData.treatmentPlan.some((item) => item.procedure.trim())) {
-
-      setMessage('El plan de tratamiento debe incluir al menos un procedimiento.')
-
-      return false
-
-    }
-
-    const hasOrthodonticsBudget =
-      clinicalData.orthodonticsBudget?.active &&
-      calcOrthodonticsBudgetTotal(clinicalData.orthodonticsBudget) > 0
-
-    if (
-      !clinicalData.budgetItems.some((item) => item.procedure.trim()) &&
-      !hasOrthodonticsBudget
-    ) {
-
-      setMessage('El presupuesto debe incluir al menos un tratamiento o el presupuesto de ortodoncia.')
-
-      return false
-
     }
 
     const ripsLocationIssue = getFirstBlockingClinicalBudgetIssue(clinicalData.budgetItems)
@@ -1932,7 +1896,7 @@ export function PatientDetailPage() {
 
         <div
 
-          className={`rounded-lg px-4 py-3 text-sm ${
+          className={`whitespace-pre-line rounded-lg px-4 py-3 text-sm ${
 
             message.includes('correctamente') || message.includes('guardado')
 
