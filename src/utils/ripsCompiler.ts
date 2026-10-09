@@ -3,7 +3,6 @@ import type { DentalService } from '@/types/dentalServiceCatalog'
 import type { EvolutionNote } from '@/types/evolutionNote'
 import type { UserProfile } from '@/types/user'
 import type { RipsExportMetadata, RipsProcedimiento } from '@/types/rips'
-import { COMMON_DENTAL_PROCEDURES } from '@/constants/dental'
 import { DOCUMENT_TYPE_RIPS, RIPS_DEFAULTS, DEMO_PRESTADOR_REPS } from '@/constants/rips'
 import { isValidCie10Format, normalizeCupsCode } from '@/services/catalogService'
 import { treatmentPlanItemsForRipsPayload } from '@/utils/treatmentPlanRips'
@@ -122,25 +121,7 @@ export function resolveEvolutionNoteRipsCups(
     }
   }
 
-  const fromProcedureName = resolveCupsFromProcedureCatalog(note.procedure)
-  if (fromProcedureName) return fromProcedureName
-
   return extractCupsCodeFromText(note.procedure)
-}
-
-/**
- * Notas dictadas que guardan el nombre del catálogo oficial pero no el CUPS.
- * Solo coincide el nombre exacto de COMMON_DENTAL_PROCEDURES.
- */
-function resolveCupsFromProcedureCatalog(procedure: string | null | undefined): string | null {
-  const name = String(procedure ?? '').trim().toLowerCase()
-  if (!name) return null
-  const match = COMMON_DENTAL_PROCEDURES.find(
-    (item) => item.procedure.trim().toLowerCase() === name,
-  )
-  if (!match) return null
-  const code = normalizeCupsCode(match.cupsCode)
-  return CUPS_PATTERN.test(code) ? code : null
 }
 
 export function isEvolutionNoteEligibleForRipsProcedimiento(
