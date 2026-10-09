@@ -8,8 +8,6 @@ import type {
   DentitionType,
 } from '@/types/odontogram'
 import {
-  TOOTH_FACE_STATE_DESCRIPTIONS,
-  TOOTH_GLOBAL_STATE_LABELS,
   ODONTOGRAM_ACTIVE_TOOLS,
   getActiveFaceTool,
   getActiveGlobalToolFromPalette,
@@ -219,31 +217,6 @@ export function Odontogram({ data, onChange, disabled = false }: OdontogramProps
           </div>
         </div>
       )}
-
-      {/* Leyenda */}
-      <div className="mb-4 grid gap-2 sm:grid-cols-2">
-        {ODONTOGRAM_ACTIVE_TOOLS.map((tool) => (
-          <div key={tool.id} className="flex items-start gap-2 text-xs">
-            <span
-              className="mt-0.5 inline-block h-4 w-4 shrink-0 rounded-sm border-2"
-              style={{ backgroundColor: tool.style.bg, borderColor: tool.style.border }}
-            />
-            <div>
-              <span className="font-medium text-slate-700">
-                {tool.prefix ?? ''}
-                {tool.label} ({tool.description})
-              </span>
-              <p className="text-slate-500">
-                {tool.kind === 'face' && tool.faceState
-                  ? TOOTH_FACE_STATE_DESCRIPTIONS[tool.faceState]
-                  : tool.globalState
-                    ? TOOTH_GLOBAL_STATE_LABELS[tool.globalState]
-                    : ''}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-3 text-xs text-slate-600">
         <span className="font-medium">Superficies:</span>
