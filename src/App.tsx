@@ -3,6 +3,7 @@ import { AuthProvider } from '@/contexts/AuthContext'
 import { MainLayout } from '@/components/layout'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { PermissionRoute } from '@/components/auth/PermissionRoute'
+import { EpsBillingRoute } from '@/components/auth/EpsBillingRoute'
 import {
   HomePage,
   LandingPage,
@@ -66,7 +67,9 @@ export function AppRouter() {
               </Route>
               <Route path="suscripcion" element={<SubscriptionPage />} />
               <Route element={<PermissionRoute permission="export.rips" />}>
-                <Route path="rips" element={<RipsExportPage />} />
+                <Route element={<EpsBillingRoute />}>
+                  <Route path="rips" element={<RipsExportPage />} />
+                </Route>
               </Route>
               <Route element={<PermissionRoute permission="export.fhir" />}>
                 <Route path="fhir" element={<FhirExportPage />} />

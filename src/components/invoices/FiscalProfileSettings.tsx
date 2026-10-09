@@ -6,7 +6,9 @@ import { useAuth } from '@/contexts/AuthContext'
 import { canManageClinicTeam } from '@/utils/permissions'
 import { FiscalProfileSelector } from '@/components/onboarding'
 import { persistClinicPerfilFiscal } from '@/services/fiscalProfileService'
+import { persistHabilitarFacturacionEps } from '@/services/epsBillingService'
 import { normalizePerfilFiscal, type FiscalProfile } from '@/utils/fiscalProfile'
+import { isHabilitarFacturacionEps } from '@/utils/habilitarFacturacionEps'
 import type { BillingModalitySettings } from '@/types/billingModality'
 import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
 
@@ -28,6 +30,11 @@ export function FiscalProfileSettings({ settings, onPersist }: FiscalProfileSett
   const canEdit = canManageClinicTeam(user)
   const current = normalizePerfilFiscal(settings.perfilFiscal ?? user?.perfilFiscal)
 
+  const epsBilling = isHabilitarFacturacionEps(
+    user?.habilitarFacturacionEps ?? settings.habilitarFacturacionEps,
+  )
+  const [savingEps, setSavingEps] = useState(false)
+
   const selectProfile = async (perfilFiscal: FiscalProfile) => {
     if (!canEdit || perfilFiscal === current) return
     onPersist({ ...settings, perfilFiscal })
@@ -35,6 +42,20 @@ export function FiscalProfileSettings({ settings, onPersist }: FiscalProfileSett
       user,
       applySessionUser,
     })
+  }
+
+  const toggleEpsBilling = async (enabled: boolean) => {
+    if (!canEdit || savingEps) return
+    setSavingEps(true)
+    onPersist({ ...settings, habilitarFacturacionEps: enabled })
+    try {
+      await persistHabilitarFacturacionEps(enabled, {
+        user,
+        applySessionUser,
+      })
+    } finally {
+      setSavingEps(false)
+    }
   }
 
   return (
@@ -46,6 +67,27 @@ export function FiscalProfileSettings({ settings, onPersist }: FiscalProfileSett
         title="Perfil fiscal de la clínica"
         description="Define si el prestador está obligado a factura electrónica de venta. Un profesional independiente por debajo de 3.500 UVT ($183.309.000 COP en 2026) reporta RIPS sin FEV."
       />
+
+      <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <input
+          id="habilitar-facturacion-eps"
+          type="checkbox"
+          className="mt-1 h-4 w-4 rounded border-slate-300 text-dental-600"
+          checked={epsBilling}
+          disabled={!canEdit || savingEps}
+          onChange={(event) => void toggleEpsBilling(event.target.checked)}
+        />
+        <span>
+          <span className="block text-sm font-semibold text-slate-900">
+            Habilitar facturación EPS
+          </span>
+          <span className="mt-1 block text-sm text-slate-600">
+            Muestra en el menú la exportación masiva de RIPS. Desactivado por defecto: el
+            odontólogo particular solo ve la historia clínica y el RIPS sin factura se envía
+            automáticamente en segundo plano al cerrar cada evolución.
+          </span>
+        </span>
+      </label>
     </div>
   )
 }

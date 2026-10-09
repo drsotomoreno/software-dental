@@ -16,6 +16,7 @@ import { EditableHomeTitle } from '@/components/home/EditableHomeTitle'
 import { useAuth } from '@/contexts/AuthContext'
 import { getBackupSettings } from '@/services/backupService'
 import type { Permission } from '@/utils/permissions'
+import { isHabilitarFacturacionEps } from '@/utils/habilitarFacturacionEps'
 
 const HOME_LINKS: Array<{
   title: string
@@ -24,6 +25,7 @@ const HOME_LINKS: Array<{
   icon: LucideIcon
   accent: string
   permission: Permission
+  requiresEpsBilling?: boolean
 }> = [
   {
     title: 'Nuevo Paciente',
@@ -75,6 +77,7 @@ const HOME_LINKS: Array<{
     desc: 'Generar JSON RIPS para FEV-Salud',
     to: '/rips',
     icon: ClipboardList,
+    requiresEpsBilling: true,
     accent:
       'bg-gradient-to-br from-emerald-400 to-emerald-600 text-white shadow-lg shadow-emerald-500/25 ring-4 ring-emerald-100',
     permission: 'export.rips',
@@ -102,7 +105,11 @@ const HOME_LINKS: Array<{
 export function HomePage() {
   const { can, user } = useAuth()
   const backupSettings = getBackupSettings()
-  const visibleLinks = HOME_LINKS.filter((item) => can(item.permission))
+  const epsBillingEnabled = isHabilitarFacturacionEps(user?.habilitarFacturacionEps)
+  const visibleLinks = HOME_LINKS.filter((item) => {
+    if (item.requiresEpsBilling && !epsBillingEnabled) return false
+    return can(item.permission)
+  })
 
   return (
     <div className="space-y-8">

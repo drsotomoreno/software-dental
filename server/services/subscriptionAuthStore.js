@@ -23,6 +23,10 @@ import {
   isNoObligadoFev,
   normalizePerfilFiscal,
 } from '../../shared/fiscalProfile.js'
+import {
+  isHabilitarFacturacionEps,
+  readHabilitarFacturacionEpsPatch,
+} from '../../shared/habilitarFacturacionEps.js'
 import { parseRepsCodeWithDane } from './repsDane.js'
 
 
@@ -1112,6 +1116,7 @@ export async function verifyEmailAndRegister({ email, code, password }) {
     fecha_vencimiento: null,
     plan: null,
     perfilFiscal: DEFAULT_PERFIL_FISCAL,
+    habilitarFacturacionEps: false,
   }
 
   if (existing) {
@@ -1190,6 +1195,7 @@ function sanitizeUser(user) {
     accessEnabled: user.accessEnabled !== false && Boolean(user.passwordHash),
     phone: user.phone ?? '',
     perfilFiscal: normalizePerfilFiscal(user.perfilFiscal),
+    habilitarFacturacionEps: isHabilitarFacturacionEps(user.habilitarFacturacionEps),
     providerNit: user.providerNit ?? '',
     repsCode: user.repsCode ?? '',
     repsStatus: user.repsStatus ?? 'activo',
@@ -1279,41 +1285,60 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
   }
 
   const current = store.users[index]
-  const fiscalOnlyKeys = Object.keys(patch).filter((key) => patch[key] !== undefined)
-  const isFiscalProfileOnlyPatch =
-    fiscalOnlyKeys.length > 0 &&
-    fiscalOnlyKeys.every((key) => key === 'perfilFiscal' || key === 'providerType') &&
-    patch.perfilFiscal !== undefined
+  const clinicSettingKeys = new Set([
+    'perfilFiscal',
+    'providerType',
+    'habilitarFacturacionEps',
+    'habilitar_facturacion_eps',
+    'tipo_flujo_rips',
+  ])
+  const presentKeys = Object.keys(patch).filter((key) => patch[key] !== undefined)
+  const nextFlag = readHabilitarFacturacionEpsPatch(patch)
+  const isClinicSettingsOnlyPatch =
+    presentKeys.length > 0 &&
+    presentKeys.every((key) => clinicSettingKeys.has(key)) &&
+    (patch.perfilFiscal !== undefined || nextFlag !== undefined)
 
-  if (isFiscalProfileOnlyPatch) {
+  if (isClinicSettingsOnlyPatch) {
     if (!(isClinicOwner(current) || canManageClinicTeam(actor))) {
       return {
         ok: false,
         status: 403,
-        error: 'Solo el titular o el administrador de la clínica puede cambiar el perfil fiscal.',
+        error: 'Solo el titular o el administrador de la clínica puede cambiar esta configuración.',
       }
     }
-    const nextPerfil = normalizePerfilFiscal(patch.perfilFiscal)
-    const nextProviderType = isNoObligadoFev(nextPerfil)
-      ? 'profesional_independiente'
-      : normalizeProviderType(patch.providerType ?? current.providerType)
     const now = new Date().toISOString()
     const clinicId = clinicIdOf(current)
+    const updatesPerfil = patch.perfilFiscal !== undefined
+    const nextPerfil = updatesPerfil
+      ? normalizePerfilFiscal(patch.perfilFiscal)
+      : normalizePerfilFiscal(current.perfilFiscal)
+    const nextProviderType = updatesPerfil && isNoObligadoFev(nextPerfil)
+      ? 'profesional_independiente'
+      : normalizeProviderType(patch.providerType ?? current.providerType)
+    const flag = nextFlag !== undefined
+      ? nextFlag
+      : isHabilitarFacturacionEps(current.habilitarFacturacionEps)
     const updated = {
       ...current,
-      perfilFiscal: nextPerfil,
-      providerType: nextProviderType,
+      habilitarFacturacionEps: flag,
       updatedAt: now,
+    }
+    if (updatesPerfil) {
+      updated.perfilFiscal = nextPerfil
+      updated.providerType = nextProviderType
     }
     store.users[index] = updated
     for (let i = 0; i < store.users.length; i++) {
       if (clinicIdOf(store.users[i]) !== clinicId) continue
       if (store.users[i].id === current.id) continue
-      store.users[i] = {
+      const sibling = {
         ...store.users[i],
-        perfilFiscal: nextPerfil,
         updatedAt: now,
       }
+      if (updatesPerfil) sibling.perfilFiscal = nextPerfil
+      if (nextFlag !== undefined) sibling.habilitarFacturacionEps = flag
+      store.users[i] = sibling
     }
     await saveStore(store)
     return { ok: true, user: sanitizeUser(updated) }
@@ -1500,6 +1525,22 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
     }
   } else {
     updated.perfilFiscal = normalizePerfilFiscal(current.perfilFiscal)
+  }
+
+  if (nextFlag !== undefined && (isClinicOwner(current) || canManageClinicTeam(actor))) {
+    const clinicId = clinicIdOf(current)
+    updated.habilitarFacturacionEps = nextFlag
+    for (let i = 0; i < store.users.length; i++) {
+      if (clinicIdOf(store.users[i]) !== clinicId) continue
+      if (store.users[i].id === current.id) continue
+      store.users[i] = {
+        ...store.users[i],
+        habilitarFacturacionEps: nextFlag,
+        updatedAt: now,
+      }
+    }
+  } else {
+    updated.habilitarFacturacionEps = isHabilitarFacturacionEps(current.habilitarFacturacionEps)
   }
 
   store.users[index] = updated
@@ -1785,6 +1826,7 @@ export async function createClinicUser({ token, hint, member }) {
     legalName: owner.legalName || '',
     providerType: owner.providerType || 'profesional_independiente',
     perfilFiscal: normalizePerfilFiscal(owner.perfilFiscal) || DEFAULT_PERFIL_FISCAL,
+    habilitarFacturacionEps: isHabilitarFacturacionEps(owner.habilitarFacturacionEps),
     providerNit: owner.providerNit || '',
     repsCode: owner.repsCode || '',
     repsStatus: owner.repsStatus || 'activo',

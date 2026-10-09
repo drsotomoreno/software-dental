@@ -102,6 +102,7 @@ import { ClinicalRecordAddendumPanel } from '@/components/clinical/ClinicalRecor
 import { SignatureAuditTrail } from '@/components/clinical/SignatureAuditTrail'
 import { SignConfirmationModal } from '@/components/signature/SignConfirmationModal'
 import { useAuth } from '@/contexts/AuthContext'
+import { isHabilitarFacturacionEps } from '@/utils/habilitarFacturacionEps'
 import { useAudit } from '@/hooks/useAudit'
 import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceService'
 import { useClinicalVoiceRegistry } from '@/hooks/useClinicalVoiceRegistry'
@@ -1840,7 +1841,7 @@ export function PatientDetailPage() {
             />
           )}
 
-          {can('export.rips') && (
+          {can('export.rips') && isHabilitarFacturacionEps(user?.habilitarFacturacionEps) && (
           <div className="card">
 
             <h3 className={`mb-4 ${CLINICAL_SECTION_TITLE_CLASS}`}>
