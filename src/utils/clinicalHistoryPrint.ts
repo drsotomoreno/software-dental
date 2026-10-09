@@ -632,16 +632,32 @@ function buildBudgetSection(data: ClinicalRecordFormData): string {
     </section>`
 }
 
-function agreementCells(item?: PaymentPlanItem): string {
+function agreementFieldRows(item?: PaymentPlanItem): string {
   if (!item) {
-    return '<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>'
+    return [
+      fieldRow('Forma de pago', '—'),
+      fieldRow('Cuotas', '—'),
+      fieldRow('Abono', '—'),
+      fieldRow('Valor cuota', '—'),
+      fieldRow('Fecha', '—'),
+      fieldRow('Observaciones', '—'),
+    ].join('')
   }
-  return `<td>${escapeHtml(PAYMENT_METHOD_LABELS[item.paymentMethod])}</td>
-          <td>${item.installments ?? '—'}</td>
-          <td>${item.initialPayment != null ? formatCurrency(item.initialPayment) : '—'}</td>
-          <td>${item.installmentAmount != null ? formatCurrency(item.installmentAmount) : '—'}</td>
-          <td>${item.dueDate ? formatDate(item.dueDate) : '—'}</td>
-          <td>${escapeHtml(item.scheduleNotes || '—')}</td>`
+  return [
+    fieldRow('Forma de pago', PAYMENT_METHOD_LABELS[item.paymentMethod]),
+    fieldRow('Cuotas', item.installments != null ? String(item.installments) : '—'),
+    fieldRow('Abono', item.initialPayment != null ? formatCurrency(item.initialPayment) : '—'),
+    fieldRow('Valor cuota', item.installmentAmount != null ? formatCurrency(item.installmentAmount) : '—'),
+    fieldRow('Fecha', item.dueDate ? formatDate(item.dueDate) : '—'),
+    fieldRow('Observaciones', item.scheduleNotes || '—'),
+  ].join('')
+}
+
+function paymentProcedureBox(index: number, title: string, rows: string): string {
+  return `<article class="procedure-box">
+      <h3>Procedimiento ${index} — ${escapeHtml(title.trim() || 'Sin nombre')}</h3>
+      <table><tbody>${rows}</tbody></table>
+    </article>`
 }
 
 function buildPaymentsSection(data: ClinicalRecordFormData): string {
@@ -656,32 +672,40 @@ function buildPaymentsSection(data: ClinicalRecordFormData): string {
   ].filter((item) => item.procedure.trim() || item.totalAmount > 0)
   const total = sumPaymentControlPrices(visible)
   const balance = treatmentPaymentBalance(visible, data.paymentControl)
-  const lineRows = visible
-    .map((item) => {
+  const lineBoxes = visible
+    .map((item, index) => {
       const cie = [item.diagnosisCode, item.diagnosisDescription].filter(Boolean).join(' ')
       const procedure = [item.procedure, item.cupsCode].filter(Boolean).join(' · ')
       const agreement = planItemForLine(item, plan)
-      return `<tr>
-          <td>${escapeHtml(formatAnatomicalZone(item) || '—')}</td>
-          <td>${escapeHtml(cie || '—')}</td>
-          <td>${escapeHtml(procedure || '—')}</td>
-          <td>${formatCurrency(lineBillablePrice(item))}</td>
-          ${agreementCells(agreement)}
-        </tr>`
+      return paymentProcedureBox(
+        index + 1,
+        item.procedure,
+        [
+          fieldRow('Diente / Zona', formatAnatomicalZone(item) || '—'),
+          fieldRow('Diagnóstico CIE', cie || '—'),
+          fieldRow('Procedimiento', procedure || '—'),
+          fieldRow('Precio', formatCurrency(lineBillablePrice(item))),
+          agreementFieldRows(agreement),
+        ].join(''),
+      )
     })
     .join('')
-  const agreementRows = extraAgreements
-    .map(
-      (item) => `<tr>
-          <td>—</td>
-          <td>—</td>
-          <td>${escapeHtml(item.procedure || '—')}</td>
-          <td>${formatCurrency(item.totalAmount)}</td>
-          ${agreementCells(item)}
-        </tr>`,
+  const agreementBoxes = extraAgreements
+    .map((item, index) =>
+      paymentProcedureBox(
+        visible.length + index + 1,
+        item.procedure,
+        [
+          fieldRow('Diente / Zona', '—'),
+          fieldRow('Diagnóstico CIE', '—'),
+          fieldRow('Procedimiento', item.procedure || '—'),
+          fieldRow('Precio', formatCurrency(item.totalAmount)),
+          agreementFieldRows(item),
+        ].join(''),
+      ),
     )
     .join('')
-  const rows = `${lineRows}${agreementRows}`
+  const rows = `${lineBoxes}${agreementBoxes}`
   const unlinkedPayments = data.paymentControl.filter((payment) => !payment.paymentControlLineId)
   const unlinkedRows = unlinkedPayments
     .map(
@@ -716,18 +740,17 @@ function buildPaymentsSection(data: ClinicalRecordFormData): string {
       <h2>${printSectionHeading('planPagos')}</h2>
       ${
         rows
-          ? `<table>
-        <thead><tr><th>Diente / Zona</th><th>Diagnóstico CIE</th><th>Procedimiento</th><th>Precio</th><th>Forma de pago</th><th>Cuotas</th><th>Abono</th><th>Valor cuota</th><th>Fecha</th><th>Observaciones</th></tr></thead>
-        <tbody>${rows}</tbody>
+          ? `${rows}
         ${
           visible.length > 0
-            ? `<tfoot>
-          <tr><td colspan="3">Valor total</td><td>${formatCurrency(total)}</td><td colspan="6"></td></tr>
-          <tr><td colspan="3">Saldo del tratamiento</td><td>${formatCurrency(balance)}</td><td colspan="6"></td></tr>
-        </tfoot>`
+            ? `<table>
+          <tbody>
+            <tr><th>Valor total</th><td>${formatCurrency(total)}</td></tr>
+            <tr><th>Saldo del tratamiento</th><td>${formatCurrency(balance)}</td></tr>
+          </tbody>
+        </table>`
             : ''
-        }
-      </table>`
+        }`
           : unlinkedRows
             ? `<table>
         <thead><tr><th>Fecha</th><th>Valor</th><th>Método</th><th>Concepto</th></tr></thead>
@@ -896,6 +919,8 @@ export function buildClinicalHistoryPrintHtml(input: ClinicalHistoryPrintInput):
     h3 { font-size: 0.95rem; margin: 1rem 0 0.35rem; color: #0f172a; }
     .meta { font-size: 0.85rem; color: #475569; margin-bottom: 1.5rem; }
     .print-section { page-break-inside: avoid; margin-bottom: 1.25rem; }
+    .procedure-box { border: 1px solid #94a3b8; border-radius: 10px; padding: 0.7rem 0.85rem 0.85rem; margin: 0.75rem 0; page-break-inside: avoid; }
+    .procedure-box h3 { margin: 0 0 0.35rem; }
     table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.5rem; }
     th, td { border: 1px solid #e2e8f0; padding: 0.4rem 0.55rem; text-align: left; vertical-align: top; }
     th { background: #f8fafc; width: 32%; font-weight: 600; }
