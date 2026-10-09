@@ -16,6 +16,7 @@ import {
   materializeRipsFromEvolutionNote,
   saveEvolutionNoteRecord,
 } from '../src/db/evolutionNoteRipsRepository'
+import { saveEvolutionNoteTransaction } from '../src/hooks/useSaveEvolutionNote'
 import {
   EVOLUTION_NOTE_RIPS_DELETE_BLOCKED_MESSAGE,
   EVOLUTION_NOTE_SINGLE_CONSULTATION_MESSAGE,
@@ -50,6 +51,7 @@ function sampleNote(overrides: Partial<EvolutionNoteRecord> = {}): EvolutionNote
     related_diagnoses_cie10: ['K05.1', 'K04.0'],
     purpose_of_care: '44',
     date_time: '2026-10-09T15:30:00.000Z',
+    clinical_note: 'Se realiza operatoria en 16 y 26 y detartraje en 36.',
     procedures_cups: [
       { cups_code: '232101', tooth_number: 16, description: 'Resina' },
       { cups_code: '232101', tooth_number: 26, description: 'Resina' },
@@ -186,6 +188,70 @@ async function main(): Promise<void> {
   await database.rips_procedures.where('evolution_note_id').equals(note.id).delete()
   await deleteEvolutionNoteRecord(database, note.id)
   assert((await database.evolution_notes.get(note.id)) == null, 'La nota sin RIPS sí se puede eliminar')
+
+  const signed = await saveEvolutionNoteTransaction(database, {
+    patientId: 'patient-ui',
+    clinicalNote: 'Control de caries en 16 y consulta de primera vez.',
+    mainDiagnosisCie10: 'K02.1',
+    purposeOfCare: '16',
+    dateTime: '2026-10-09T16:00:00.000Z',
+    selectedCups: [
+      { cupsCode: '890203', description: 'Consulta de primera vez' },
+      { cupsCode: '232101', description: 'Resina', toothNumber: 16 },
+    ],
+  })
+  assert(signed.evolutionNoteId === signed.note.id, 'El id recuperado es el de la nota guardada')
+  assert(signed.consultationId != null, 'El CUPS de consulta genera rips_consultations')
+  assert(signed.procedureIds.length === 1, 'El CUPS de operatoria genera rips_procedures')
+  const derived = await listRipsByEvolutionNote(database, signed.evolutionNoteId)
+  assert(derived.consultation?.evolution_note_id === signed.evolutionNoteId, 'La consulta apunta a la nota')
+  assert(
+    derived.procedures[0]?.evolution_note_id === signed.evolutionNoteId,
+    'El procedimiento apunta a la nota',
+  )
+  assert(derived.procedures[0]?.pieza_dental === 16, 'La pieza viaja al RIPS derivado')
+
+  const beforeRollback = await database.evolution_notes.count()
+  await expectError(
+    () =>
+      database.transaction(
+        'rw',
+        database.evolution_notes,
+        database.rips_consultations,
+        database.rips_procedures,
+        async () => {
+          await database.evolution_notes.put({
+            ...signed.note,
+            id: 'note-rollback',
+            procedures_cups: [{ cups_code: '232101', tooth_number: 16 }],
+            consultation_cups: null,
+          })
+          await database.rips_procedures.add({
+            id: 'proc-ajeno',
+            evolution_note_id: 'note-rollback',
+            patient_id: signed.note.patient_id,
+            fecha_inicio_atencion: signed.note.date_time,
+            finalidad_tecnologia_salud: signed.note.purpose_of_care,
+            cod_diagnostico_principal: signed.note.main_diagnosis_cie10,
+            cod_diagnostico_relacionado: null,
+            cod_procedimiento: '890203',
+            pieza_dental: null,
+            cuadrante_fdi: null,
+            arcada: null,
+            vr_servicio: 0,
+            consecutivo: 1,
+            created_at: signed.note.created_at,
+            updated_at: signed.note.updated_at,
+          })
+        },
+      ),
+    'procedures_cups',
+  )
+  assert(
+    (await database.evolution_notes.count()) === beforeRollback,
+    'Si el RIPS no corresponde a la nota, la transacción revierte también la nota',
+  )
+  assert((await database.evolution_notes.get('note-rollback')) == null, 'La nota fallida no persiste')
 
   await database.delete()
   console.log('Relación nota de evolución → RIPS verificada')

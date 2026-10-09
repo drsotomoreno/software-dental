@@ -74,6 +74,8 @@ export interface EvolutionNoteRecord {
   purpose_of_care: string
   /** Fecha y hora de la atención → `fechaInicioAtencion`. ISO-8601. */
   date_time: string
+  /** Texto clínico firmado por el profesional. */
+  clinical_note: string
   /** Procedimientos realizados. Un ítem, una fila potencial en `rips_procedures`. */
   procedures_cups: EvolutionNoteCupsProcedure[]
   /**
@@ -294,6 +296,7 @@ export function normalizeEvolutionNoteRecord(input: EvolutionNoteRecord): Evolut
     related_diagnoses_cie10: related,
     purpose_of_care: requireText(input.purpose_of_care, 'purpose_of_care'),
     date_time: requireDateTime(input.date_time),
+    clinical_note: requireText(input.clinical_note, 'clinical_note'),
     procedures_cups: procedures,
     consultation_cups: consultation,
     created_at: optionalText(input.created_at) ?? now,

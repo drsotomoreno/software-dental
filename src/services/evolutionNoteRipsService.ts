@@ -14,8 +14,12 @@ import {
 } from '@/db/evolutionNoteRipsRepository'
 import type { EvolutionNoteRecord } from '@/types/evolutionNoteRips'
 
-function ripsDatabase(): EvolutionNoteRipsDatabase {
+export function getEvolutionNoteRipsDatabase(): EvolutionNoteRipsDatabase {
   return db as unknown as EvolutionNoteRipsDatabase
+}
+
+function ripsDatabase(): EvolutionNoteRipsDatabase {
+  return getEvolutionNoteRipsDatabase()
 }
 
 /**

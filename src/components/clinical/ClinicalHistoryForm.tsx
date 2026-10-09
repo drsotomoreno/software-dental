@@ -40,6 +40,7 @@ import { createEmptyConsent } from '@/types/consent'
 import { AnamnesisForm } from './AnamnesisForm'
 import { StomatologicalExamForm } from './StomatologicalExamForm'
 import { SpecializedAnnexesForm } from './SpecializedAnnexesForm'
+import { EvolutionNoteForm } from './EvolutionNoteForm'
 import { EvolutionNotesForm } from './EvolutionNotesForm'
 import { InformedConsentForm } from './InformedConsentForm'
 import { TreatmentPlanForm } from './TreatmentPlanForm'
@@ -471,6 +472,13 @@ export function ClinicalHistoryForm({
 
       {showClinicalSection(activeSection, 'evolucion') && (
         <div id="clinical-section-evolucion">
+      <EvolutionNoteForm
+        patientId={patientId}
+        clinicalRecordId={clinicalRecordId != null ? String(clinicalRecordId) : undefined}
+        professionalId={authorUserId || clinicalUser?.id}
+        clinicId={clinicalUser?.clinicId}
+        disabled={livingLocked}
+      />
       <EvolutionNotesForm
         notes={form.evolutionNotes}
         onChange={(evolutionNotes: EvolutionNote[]) => update({ evolutionNotes })}
