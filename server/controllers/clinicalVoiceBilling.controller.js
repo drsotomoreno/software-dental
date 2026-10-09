@@ -117,6 +117,7 @@ export async function processDictatedEvolution(req, res, next) {
             perfilFiscal,
             estadoMuv: error.estadoMuv ?? error.consulta?.estadoMuv ?? 'RECHAZADO',
             error: error.message,
+            detalle: error.detalle ?? null,
             cuv: error.cuv ?? null,
             consultaId: error.consulta?.id ?? null,
             resultadoValidacion: error.resultadoValidacion ?? error.consulta?.resultadoValidacion ?? null,

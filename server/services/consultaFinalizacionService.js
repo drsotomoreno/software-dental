@@ -101,6 +101,7 @@ function errorDeBase(message, payload, cause) {
   error.estadoMuv = payload.estadoMuv
   error.resultadoValidacion = payload.resultadoValidacion ?? null
   error.cause = cause
+  error.detalle = cause instanceof Error ? cause.message : cause ? String(cause) : null
   return error
 }
 
@@ -129,6 +130,7 @@ export async function finalizarConsultaEnMuv(input, deps = {}) {
   try {
     await repo.ensureConsultasSchema()
   } catch (cause) {
+    console.error('[consultas] No se pudo preparar la tabla de consultas.', cause)
     throw errorDeBase('No se pudo preparar la tabla de consultas.', { estadoMuv: 'PENDIENTE' }, cause)
   }
 
