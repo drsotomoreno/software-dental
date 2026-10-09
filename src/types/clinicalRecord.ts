@@ -305,6 +305,12 @@ export interface ClinicalRecord {
    * El bloqueo legal (Res. 1995/1999) aplica a cada `EvolutionNote` firmada.
    */
   isLocked: boolean
+  /** CUV entregado por el MUV al cerrar la atención sin factura. */
+  cuv?: string | null
+  /** PENDIENTE, APROBADO o RECHAZADO. */
+  estadoMuv?: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | null
+  /** Notificaciones o errores de ResultadosValidacion. */
+  resultadoValidacion?: unknown
   createdAt: string
   updatedAt: string
   syncId?: string

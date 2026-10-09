@@ -151,6 +151,26 @@ export interface SeedTestDataOptions {
   professional?: UserProfile | null
 }
 
+const SEED_CUV = 'c'.repeat(96)
+
+/** Estados de ejemplo para la columna Estado RIPS del historial de prueba. */
+function estadoMuvDePrueba(caseId: TestSeedCaseId) {
+  if (caseId === 'A') {
+    return { estadoMuv: 'APROBADO' as const, cuv: SEED_CUV, resultadoValidacion: [] }
+  }
+  if (caseId === 'B') {
+    return {
+      estadoMuv: 'RECHAZADO' as const,
+      cuv: null,
+      resultadoValidacion: {
+        error: 'RVC091: vrServicio no puede ser 0, null ni indefinido.',
+        field: 'vrServicio',
+      },
+    }
+  }
+  return { estadoMuv: 'PENDIENTE' as const, cuv: null, resultadoValidacion: null }
+}
+
 function signatureMeta(now: string) {
   return {
     signatureMethod: 'canvas_biometric' as const,
@@ -922,6 +942,10 @@ export async function seedTestClinicalAndBillingData(
       paymentControl,
       odontogram,
     })
+
+    if (record.id != null) {
+      await db.clinicalRecords.update(record.id, estadoMuvDePrueba(spec.caseId))
+    }
 
     const patient = await getPatientByRouteId(patientId)
     const dentalServices = await db.dentalServices.toArray()
