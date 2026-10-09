@@ -931,12 +931,6 @@ export function PatientDetailPage() {
 
     if (!clinicalData) return false
 
-    const draftIssues = validateClinicalRecordDraft(clinicalData)
-    if (draftIssues.length > 0) {
-      setMissingFieldErrors(draftIssues)
-      return false
-    }
-
     const ripsLocationIssue = getFirstBlockingClinicalBudgetIssue(clinicalData.budgetItems)
     if (ripsLocationIssue) {
       setMessage(ripsLocationIssue.message)
@@ -1011,6 +1005,13 @@ export function PatientDetailPage() {
 
   const handleSignAndLock = async () => {
 
+    const draftIssues = validateClinicalRecordDraft(clinicalData)
+    if (draftIssues.length > 0) {
+      setMissingFieldErrors(draftIssues)
+      return
+    }
+    setMissingFieldErrors([])
+
     if (!id || !clinicalData || !odontogram || !user) return
 
     if (!can('clinical.sign')) {
@@ -1041,6 +1042,13 @@ export function PatientDetailPage() {
   const executeSignAndLock = async (password: string) => {
     if (!id || !clinicalData || !odontogram || !user || !patient) {
       return { ok: false as const, error: 'Datos incompletos para firmar.' }
+    }
+
+    const draftIssues = validateClinicalRecordDraft(clinicalData)
+    if (draftIssues.length > 0) {
+      setShowSignConfirm(false)
+      setMissingFieldErrors(draftIssues)
+      return { ok: false as const, error: 'Complete la historia clínica antes de cerrar la atención.' }
     }
 
     const rethusBlocker = getProfessionalSignBlocker(user)
