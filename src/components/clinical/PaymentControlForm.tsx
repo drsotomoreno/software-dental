@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Eye } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
@@ -34,6 +34,13 @@ import {
   formatAnatomicalZone,
   parseAnatomicalZone,
 } from '@/utils/treatmentPlanZone'
+import {
+  duplicateTreatmentIdSet,
+  duplicateTreatmentNotice,
+  findDuplicateTreatment,
+  skippedTreatmentsMessage,
+  type TreatmentIdentity,
+} from '@/utils/treatmentIdentity'
 import {
   emptyPaymentControlLine,
   lineBillablePrice,
@@ -257,6 +264,8 @@ export function PaymentControlForm({
   const [openMenu, setOpenMenu] = useState<{ id: string; field: 'cie' | 'cups'; query: string } | null>(
     null,
   )
+  const [duplicateNotice, setDuplicateNotice] = useState<string | null>(null)
+  const identityOnFocus = useRef(new Map<string, TreatmentIdentity>())
   const cieQuery = openMenu?.field === 'cie' ? openMenu.query : ''
   const cupsQuery = openMenu?.field === 'cups' ? openMenu.query : ''
   const cieCatalog = useCatalogSearch('cie10', cieQuery, 20)
@@ -307,6 +316,10 @@ export function PaymentControlForm({
     tariffMap[cupsCode?.trim().toUpperCase() ?? '']?.price ??
     resolveTariffUnitPrice(cupsCode)
 
+  const duplicateIds = useMemo(
+    () => duplicateTreatmentIdSet(paymentControlLines),
+    [paymentControlLines],
+  )
   const total = sumPaymentControlPrices(paymentControlLines)
   const balance = treatmentPaymentBalance(paymentControlLines, paymentControl)
   const canImportFromBudget =
@@ -317,13 +330,58 @@ export function PaymentControlForm({
   const pendingAgreements = supplementalPlanItems(paymentControlLines, paymentPlan)
   const orthoAgreements = orthodonticsPlanItems(paymentPlan)
 
+  const lineIdentity = (line: PaymentControlLine): TreatmentIdentity => ({
+    procedure: line.procedure,
+    cupsCode: line.cupsCode,
+    toothNumber: line.toothNumber,
+    fdiQuadrant: line.fdiQuadrant,
+    arch: line.arch,
+    anatomicalZone: line.anatomicalZone,
+  })
+
   const updateLine = (id: string, patch: Partial<PaymentControlLine>) => {
-    const nextLines = paymentControlLines.map((line) => (line.id === id ? { ...line, ...patch } : line))
+    const current = paymentControlLines.find((line) => line.id === id)
+    if (!current) return
+    const nextLine = { ...current, ...patch }
+    const checksIdentity =
+      patch.cupsCode !== undefined ||
+      patch.toothNumber !== undefined ||
+      patch.fdiQuadrant !== undefined ||
+      patch.arch !== undefined ||
+      patch.anatomicalZone !== undefined ||
+      (patch.procedure !== undefined && patch.cupsCode !== undefined)
+    if (
+      checksIdentity &&
+      findDuplicateTreatment(paymentControlLines, lineIdentity(nextLine), id)
+    ) {
+      setDuplicateNotice(duplicateTreatmentNotice(lineIdentity(nextLine)))
+      return
+    }
+
+    const nextLines = paymentControlLines.map((line) => (line.id === id ? nextLine : line))
     onLinesChange(nextLines)
-    const line = nextLines.find((item) => item.id === id)
-    if (!line) return
-    const nextPlan = mirrorLineOntoPlan(line, paymentPlan)
+    const nextPlan = mirrorLineOntoPlan(nextLine, paymentPlan)
     if (nextPlan !== paymentPlan) onPaymentPlanChange(nextPlan)
+  }
+
+  const rememberLineIdentity = (line: PaymentControlLine) => {
+    identityOnFocus.current.set(line.id, lineIdentity(line))
+  }
+
+  const revertLineIfDuplicate = (id: string) => {
+    const current = paymentControlLines.find((line) => line.id === id)
+    const snapshot = identityOnFocus.current.get(id)
+    if (!current || !snapshot) return
+    if (!findDuplicateTreatment(paymentControlLines, lineIdentity(current), id)) return
+    setDuplicateNotice(duplicateTreatmentNotice(lineIdentity(current)))
+    updateLine(id, {
+      procedure: snapshot.procedure ?? '',
+      cupsCode: snapshot.cupsCode,
+      toothNumber: snapshot.toothNumber,
+      fdiQuadrant: snapshot.fdiQuadrant,
+      arch: snapshot.arch,
+      anatomicalZone: snapshot.anatomicalZone,
+    })
   }
 
   const updateAgreement = (line: PaymentControlLine, patch: Partial<PaymentPlanItem>) => {
@@ -339,8 +397,9 @@ export function PaymentControlForm({
       orthodonticsBudget,
       dentalImplantsBudget,
     })
-    onLinesChange(next.lines)
-    onPaymentPlanChange(next.plan)
+    setDuplicateNotice(skippedTreatmentsMessage(next.skippedDuplicates, 'el plan de pagos'))
+    if (next.lines !== paymentControlLines) onLinesChange(next.lines)
+    if (next.plan !== paymentPlan) onPaymentPlanChange(next.plan)
   }
 
   const addProcedure = () => {
@@ -474,8 +533,20 @@ export function PaymentControlForm({
       </h3>
       <p className="mb-4 text-xs text-slate-500">
         Para cada procedimiento defina la forma de pago, las cuotas y las fechas acordadas, y registre
-        los abonos con su factura y el saldo del tratamiento.
+        los abonos con su factura y el saldo del tratamiento. Un tratamiento repetido en la misma
+        pieza o zona no se carga otra vez.
       </p>
+      {duplicateNotice && (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {duplicateNotice}
+        </p>
+      )}
+      {duplicateIds.size > 0 && (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Hay tratamientos repetidos en el plan de pagos. Cada procedimiento y zona solo debe
+          aparecer una vez.
+        </p>
+      )}
 
       {!disabled && (
         <div className="mb-3 flex flex-wrap gap-2">
@@ -534,13 +605,16 @@ export function PaymentControlForm({
 
                 return (
                   <Fragment key={line.id}>
-                  <tr className="border-b border-slate-100 align-top">
+                  <tr
+                    className={`border-b border-slate-100 align-top ${duplicateIds.has(line.id) ? 'bg-amber-50' : ''}`}
+                  >
                     <td className="px-2 py-1.5">
                       <input
                         id={`pay-zone-${line.id}`}
                         list="payment-zone-presets"
                         disabled={disabled}
                         value={formatAnatomicalZone(line)}
+                        onFocus={() => rememberLineIdentity(line)}
                         onChange={(event) => updateLine(line.id, parseAnatomicalZone(event.target.value))}
                         placeholder="16, 14-18, General"
                         className="input-field h-8 px-2 text-sm"
@@ -610,9 +684,13 @@ export function PaymentControlForm({
                         value={cupsOpen ? openMenu.query : line.procedure}
                         onFocus={() => {
                           if (disabled) return
+                          rememberLineIdentity(line)
                           setOpenMenu({ id: line.id, field: 'cups', query: line.procedure })
                         }}
-                        onBlur={() => closeMenuSoon(line.id, 'cups')}
+                        onBlur={() => {
+                          closeMenuSoon(line.id, 'cups')
+                          revertLineIfDuplicate(line.id)
+                        }}
                         onChange={(event) => {
                           const query = event.target.value
                           setOpenMenu({ id: line.id, field: 'cups', query })

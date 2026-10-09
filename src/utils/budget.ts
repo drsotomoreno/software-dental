@@ -10,12 +10,9 @@ import type {
 import type { PaymentPlanItem } from '@/types/clinicalRecord'
 import { DEFAULT_IVA_RATE } from '@/types/pricing'
 import { generateId } from './crypto'
-import {
-  calcBillableLineTotal,
-  getDefaultQuantityForCups,
-  normalizeQuantityForCups,
-} from './cupsBillingRules'
+import { calcBillableLineTotal, normalizeQuantityForCups } from './cupsBillingRules'
 import { resolveTariffUnitPrice } from './tariffLookup'
+import { canonicalCupsCode, findDuplicateTreatment, isSameTreatment } from './treatmentIdentity'
 
 export function createEmptyOrthodonticsBudget(): OrthodonticsBudget {
   return {
@@ -144,7 +141,18 @@ export function addTreatmentPlanItemToBudget(
   planItem: TreatmentPlanItem,
   existingItems: BudgetLineItem[] = [],
 ): BudgetLineItem[] | null {
+  if (!planItem.procedure.trim() && !planItem.cupsCode?.trim()) return null
   if (existingItems.some((line) => line.treatmentPlanItemId === planItem.id)) {
+    return null
+  }
+
+  const duplicate = findDuplicateTreatment(existingItems, planItem)
+  if (duplicate) {
+    if (!duplicate.treatmentPlanItemId) {
+      return existingItems.map((line) =>
+        line.id === duplicate.id ? { ...line, treatmentPlanItemId: planItem.id } : line,
+      )
+    }
     return null
   }
 
@@ -152,6 +160,11 @@ export function addTreatmentPlanItemToBudget(
   if (!line) return null
 
   return [...existingItems, line]
+}
+
+export interface BudgetImportResult {
+  items: BudgetLineItem[]
+  skippedDuplicates: number
 }
 
 export function calcClinicalBudgetSummaryWithTax(
@@ -173,21 +186,52 @@ export function calcClinicalBudgetSummaryWithTax(
   }
 }
 
+/**
+ * Convierte procedimientos del plan clínico en líneas de presupuesto.
+ * No vuelve a cargar un tratamiento ya vinculado o repetido (mismo CUPS o nombre y misma zona).
+ */
+export function importTreatmentPlanIntoBudget(
+  treatmentPlan: TreatmentPlanItem[],
+  existingItems: BudgetLineItem[] = [],
+): BudgetImportResult {
+  let next = existingItems
+  let changed = false
+  let skippedDuplicates = 0
+
+  for (const item of treatmentPlan) {
+    if (!item.procedure.trim() && !item.cupsCode?.trim()) continue
+    if (next.some((line) => line.treatmentPlanItemId === item.id)) {
+      skippedDuplicates += 1
+      continue
+    }
+
+    const duplicate = findDuplicateTreatment(next, item)
+    if (duplicate) {
+      skippedDuplicates += 1
+      if (!duplicate.treatmentPlanItemId) {
+        changed = true
+        next = next.map((line) =>
+          line.id === duplicate.id ? { ...line, treatmentPlanItemId: item.id } : line,
+        )
+      }
+      continue
+    }
+
+    const line = treatmentPlanItemToBudgetLine(item)
+    if (!line) continue
+    changed = true
+    next = [...next, line]
+  }
+
+  return { items: changed ? next : existingItems, skippedDuplicates }
+}
+
 /** Convierte procedimientos del plan clínico en líneas de presupuesto con precio del tarifario. */
 export function buildBudgetFromTreatmentPlan(
   treatmentPlan: TreatmentPlanItem[],
   existingItems: BudgetLineItem[] = [],
 ): BudgetLineItem[] {
-  const linked = new Set(existingItems.map((i) => i.treatmentPlanItemId).filter(Boolean))
-  const toAdd: BudgetLineItem[] = []
-
-  for (const item of treatmentPlan) {
-    if (!item.procedure.trim() || linked.has(item.id)) continue
-    const line = treatmentPlanItemToBudgetLine(item)
-    if (line) toAdd.push(line)
-  }
-
-  return [...existingItems, ...toAdd]
+  return importTreatmentPlanIntoBudget(treatmentPlan, existingItems).items
 }
 
 /** Conceptos de ortodoncia que el plan de pagos mantiene aparte del listado clínico. */
@@ -263,6 +307,16 @@ export function dentalImplantsPaymentPlanItems(
     }))
 }
 
+function procedureMatchesBudget(plan: PaymentPlanItem, item: BudgetLineItem): boolean {
+  const planName = plan.procedure.trim().toLowerCase()
+  const itemName = item.procedure.trim().toLowerCase()
+  if (!planName || planName !== itemName) return false
+  const planCups = canonicalCupsCode(plan.cupsCode)
+  const itemCups = canonicalCupsCode(item.cupsCode)
+  if (planCups && itemCups && planCups !== itemCups) return false
+  return true
+}
+
 /** Crea o actualiza filas del plan de pagos según el presupuesto. */
 export function syncPaymentPlanWithBudget(
   budgetItems: BudgetLineItem[],
@@ -283,26 +337,80 @@ export function syncPaymentPlanWithBudget(
     current.filter((p) => p.budgetItemId).map((p) => [p.budgetItemId!, p]),
   )
 
-  const fromItems = budgetItems.map((item) => {
-    const existing = byBudgetId.get(item.id)
+  const accepted: BudgetLineItem[] = []
+  const consumedManualIds = new Set<string>()
+  const fromItems: PaymentPlanItem[] = []
+
+  for (const item of budgetItems) {
+    if (!item.procedure.trim() && !item.cupsCode?.trim()) continue
+    if (accepted.some((existing) => isSameTreatment(existing, item))) {
+      const existingPlan = byBudgetId.get(item.id)
+      if (existingPlan) {
+        fromItems.push({
+          ...existingPlan,
+          procedure: item.procedure,
+          cupsCode: item.cupsCode ?? existingPlan.cupsCode,
+          totalAmount: item.quantity * item.unitPrice,
+        })
+      }
+      continue
+    }
+
     const totalAmount = item.quantity * item.unitPrice
+    const existing = byBudgetId.get(item.id)
     if (existing) {
-      return {
+      accepted.push(item)
+      fromItems.push({
         ...existing,
         procedure: item.procedure,
+        cupsCode: item.cupsCode ?? existing.cupsCode,
         totalAmount,
-      }
+      })
+      continue
     }
-    return {
+
+    const specialtyExisting = current.find(
+      (row) =>
+        !row.budgetItemId &&
+        !consumedManualIds.has(row.id) &&
+        (ORTHODONTICS_PAYMENT_PLAN_PROCEDURES.has(row.procedure) ||
+          DENTAL_IMPLANT_PAYMENT_PLAN_PROCEDURES.has(row.procedure)) &&
+        row.procedure === item.procedure,
+    )
+    const manualExisting = current.find(
+      (row) =>
+        !row.budgetItemId &&
+        !consumedManualIds.has(row.id) &&
+        !managedProcedureNames.has(row.procedure) &&
+        procedureMatchesBudget(row, item),
+    )
+    const reusable = specialtyExisting ?? manualExisting
+    if (reusable) {
+      consumedManualIds.add(reusable.id)
+      accepted.push(item)
+      fromItems.push({
+        ...reusable,
+        budgetItemId: item.id,
+        source: 'budget',
+        procedure: item.procedure,
+        cupsCode: item.cupsCode ?? reusable.cupsCode,
+        totalAmount,
+      })
+      continue
+    }
+
+    accepted.push(item)
+    fromItems.push({
       id: generateId(),
       budgetItemId: item.id,
       source: 'budget' as const,
       procedure: item.procedure,
+      cupsCode: item.cupsCode,
       totalAmount,
       paymentMethod: 'contado' as const,
       scheduleNotes: '',
-    }
-  })
+    })
+  }
 
   const existingOrtho = new Map(
     current
@@ -310,10 +418,14 @@ export function syncPaymentPlanWithBudget(
       .map((p) => [p.procedure, p]),
   )
 
-  const orthoRows = orthodonticsPaymentPlanItems(orthodontics).map((row) => {
-    const existing = existingOrtho.get(row.procedure)
-    return existing ? { ...existing, totalAmount: row.totalAmount } : row
-  })
+  const coveredProcedures = new Set(fromItems.map((item) => item.procedure))
+
+  const orthoRows = orthodonticsPaymentPlanItems(orthodontics)
+    .filter((row) => !coveredProcedures.has(row.procedure))
+    .map((row) => {
+      const existing = existingOrtho.get(row.procedure)
+      return existing ? { ...existing, totalAmount: row.totalAmount } : row
+    })
 
   const existingImplants = new Map(
     current
@@ -321,12 +433,16 @@ export function syncPaymentPlanWithBudget(
       .map((p) => [p.procedure, p]),
   )
 
-  const implantRows = dentalImplantsPaymentPlanItems(dentalImplants).map((row) => {
-    const existing = existingImplants.get(row.procedure)
-    return existing ? { ...existing, totalAmount: row.totalAmount } : row
-  })
+  const implantRows = dentalImplantsPaymentPlanItems(dentalImplants)
+    .filter((row) => !coveredProcedures.has(row.procedure))
+    .map((row) => {
+      const existing = existingImplants.get(row.procedure)
+      return existing ? { ...existing, totalAmount: row.totalAmount } : row
+    })
 
-  return [...fromItems, ...manualRows, ...orthoRows, ...implantRows]
+  const remainingManual = manualRows.filter((row) => !consumedManualIds.has(row.id))
+
+  return [...fromItems, ...remainingManual, ...orthoRows, ...implantRows]
 }
 
 /** Migra registros antiguos que guardaban precios solo en treatmentPlan. */
@@ -356,12 +472,15 @@ export function migrateLegacyBudget(
 
   const fromPlan = treatmentPlan
     .filter((t) => (t.procedure ?? '').trim())
+    .filter((t, index, all) => all.findIndex((other) => isSameTreatment(other, t)) === index)
     .map((t) => ({
       id: generateId(),
       treatmentPlanItemId: t.id,
       procedure: t.procedure,
       cupsCode: t.cupsCode,
       toothNumber: t.toothNumber,
+      fdiQuadrant: t.fdiQuadrant,
+      arch: t.arch,
       quantity: t.quantity,
       unitPrice: t.unitPrice ?? 0,
     }))

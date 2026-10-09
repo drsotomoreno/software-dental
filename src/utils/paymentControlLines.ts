@@ -11,6 +11,7 @@ import { generateId } from '@/utils/crypto'
 import { formatAnatomicalZone } from '@/utils/treatmentPlanZone'
 import { treatmentPlanItemsForRipsPayload } from '@/utils/treatmentPlanRips'
 import { calcTotalPaid } from '@/utils/paymentControl'
+import { findDuplicateTreatment } from '@/utils/treatmentIdentity'
 
 function namesMatch(left: string, right: string): boolean {
   const a = left.trim().toLowerCase()
@@ -105,18 +106,59 @@ function lineFromBudgetItem(
   }
 }
 
+export interface PaymentControlImportResult {
+  lines: PaymentControlLine[]
+  skippedDuplicates: number
+}
+
 /** Copia los procedimientos del presupuesto que aún no están en la tabla. */
 export function importBudgetIntoPaymentControl(
   budgetItems: BudgetLineItem[],
   treatmentPlan: TreatmentPlanItem[],
   existing: PaymentControlLine[],
 ): PaymentControlLine[] {
-  const linked = new Set(existing.map((line) => line.budgetItemId).filter(Boolean))
-  const imported = budgetItems
-    .filter((item) => item.procedure.trim() && !linked.has(item.id))
-    .map((item) => lineFromBudgetItem(item, treatmentPlan))
+  return importBudgetLinesIntoPaymentControl(budgetItems, treatmentPlan, existing).lines
+}
 
-  return imported.length > 0 ? [...existing, ...imported] : existing
+/**
+ * Copia los procedimientos del presupuesto que aún no están en la tabla.
+ * Si el mismo tratamiento ya existe (aunque se haya escrito a mano), no lo agrega otra vez.
+ */
+export function importBudgetLinesIntoPaymentControl(
+  budgetItems: BudgetLineItem[],
+  treatmentPlan: TreatmentPlanItem[],
+  existing: PaymentControlLine[],
+): PaymentControlImportResult {
+  let next = existing
+  let changed = false
+  let skippedDuplicates = 0
+
+  for (const item of budgetItems) {
+    if (!item.procedure.trim() && !item.cupsCode?.trim()) continue
+    if (next.some((line) => line.budgetItemId === item.id)) {
+      skippedDuplicates += 1
+      continue
+    }
+
+    const duplicate = findDuplicateTreatment(next, item)
+    if (duplicate) {
+      skippedDuplicates += 1
+      if (!duplicate.budgetItemId) {
+        changed = true
+        next = next.map((line) =>
+          line.id === duplicate.id
+            ? { ...line, budgetItemId: item.id, source: 'budget' as const }
+            : line,
+        )
+      }
+      continue
+    }
+
+    changed = true
+    next = [...next, lineFromBudgetItem(item, treatmentPlan)]
+  }
+
+  return { lines: changed ? next : existing, skippedDuplicates }
 }
 
 function sameLocation(

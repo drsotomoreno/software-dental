@@ -11,6 +11,7 @@ import {
   formatEndodonticBudgetSummary,
 } from './endoAnnex'
 import { generateId } from './crypto'
+import { isSameTreatment } from './treatmentIdentity'
 
 const SYNC_NOTES_START = '--- Plan de endodoncia (anexo) ---'
 const SYNC_NOTES_END = '--- Fin plan de endodoncia ---'
@@ -89,18 +90,29 @@ function syncEndodonticsBudgetItems(
   const budget = endodontics.budget
   if (!budget?.active) return withoutAnnex
 
+  const consumedIds = new Set<string>()
   const synced = budget.toothLines
     .filter((line) => line.toothNumber > 0 && line.unitPrice > 0)
     .map((line) => {
       const procedure = formatEndoProcedureLabel(line.toothNumber, endodontics.isRetreatment)
+      const identity = {
+        procedure,
+        cupsCode: ENDO_CUPS_CODE,
+        toothNumber: line.toothNumber,
+      }
       const planItem = treatmentPlan.find(
         (item) =>
           item.source === 'endodontics_annex' && item.toothNumber === line.toothNumber,
       )
-      const existing = items.find(
+      const annexExisting = items.find(
         (item) =>
           item.source === 'endodontics_annex' && item.toothNumber === line.toothNumber,
       )
+      const clinicalExisting = withoutAnnex.find(
+        (item) => !consumedIds.has(item.id) && isSameTreatment(item, identity),
+      )
+      if (clinicalExisting) consumedIds.add(clinicalExisting.id)
+      const existing = annexExisting ?? clinicalExisting
 
       return {
         id: existing?.id ?? generateId(),
@@ -114,7 +126,7 @@ function syncEndodonticsBudgetItems(
       }
     })
 
-  return [...withoutAnnex, ...synced]
+  return [...withoutAnnex.filter((item) => !consumedIds.has(item.id)), ...synced]
 }
 
 export function syncClinicalDataFromEndodonticsAnnex(

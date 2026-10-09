@@ -12,7 +12,8 @@ import {
   syncPaymentPlanWithBudget,
 } from '@/utils/budget'
 import { generateId } from '@/utils/crypto'
-import { importBudgetIntoPaymentControl, lineBillablePrice } from '@/utils/paymentControlLines'
+import { importBudgetLinesIntoPaymentControl, lineBillablePrice } from '@/utils/paymentControlLines'
+import { isSameTreatment } from '@/utils/treatmentIdentity'
 
 export function isOrthodonticsPlanItem(item: Pick<PaymentPlanItem, 'procedure'>): boolean {
   return ORTHODONTICS_PAYMENT_PLAN_PROCEDURES.has(item.procedure)
@@ -181,6 +182,15 @@ function promoteImplantPlanItems(
 
   for (const item of plan.filter(isImplantPlanItem)) {
     if (nextLines.some((line) => lineOwnsPlanItem(line, item))) continue
+    const duplicate = nextLines.find((line) =>
+      isSameTreatment(line, { procedure: item.procedure, cupsCode: item.cupsCode }),
+    )
+    if (duplicate) {
+      nextPlan = nextPlan.map((row) =>
+        row.id === item.id ? { ...row, paymentControlLineId: duplicate.id } : row,
+      )
+      continue
+    }
     const line = controlLineFromPlanItem(item)
     nextLines = [...nextLines, line]
     nextPlan = nextPlan.map((row) =>
@@ -202,8 +212,8 @@ export function importBudgetIntoPaymentSection(input: {
   plan: PaymentPlanItem[]
   orthodonticsBudget?: OrthodonticsBudget
   dentalImplantsBudget?: DentalImplantsBudget
-}): { lines: PaymentControlLine[]; plan: PaymentPlanItem[] } {
-  const importedLines = importBudgetIntoPaymentControl(
+}): { lines: PaymentControlLine[]; plan: PaymentPlanItem[]; skippedDuplicates: number } {
+  const imported = importBudgetLinesIntoPaymentControl(
     input.budgetItems,
     input.treatmentPlan,
     input.lines,
@@ -214,6 +224,7 @@ export function importBudgetIntoPaymentSection(input: {
     input.orthodonticsBudget,
     input.dentalImplantsBudget,
   )
-  const linked = linkPlanItemsToLines(importedLines, syncedPlan)
-  return promoteImplantPlanItems(importedLines, linked)
+  const linked = linkPlanItemsToLines(imported.lines, syncedPlan)
+  const promoted = promoteImplantPlanItems(imported.lines, linked)
+  return { ...promoted, skippedDuplicates: imported.skippedDuplicates }
 }

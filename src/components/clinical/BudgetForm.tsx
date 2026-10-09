@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -36,7 +36,7 @@ import { useTariffSync } from '@/modules/tariff/useTariffSync'
 
 import {
 
-  buildBudgetFromTreatmentPlan,
+  importTreatmentPlanIntoBudget,
 
   calcSpecialtyBudgetTotal,
 
@@ -63,6 +63,7 @@ import { DentalImplantsBudgetSection } from './DentalImplantsBudgetSection'
 import { FieldVoiceHeader } from '@/components/voice'
 
 import { parseDictatedInteger } from '@/utils/voiceDictation'
+import { skippedTreatmentsMessage } from '@/utils/treatmentIdentity'
 
 
 
@@ -157,6 +158,7 @@ export function BudgetForm({
   const dentalImplantsBudget = normalizeDentalImplantsBudget(dentalImplantsBudgetProp)
 
   const { user } = useAuth()
+  const [duplicateNotice, setDuplicateNotice] = useState<string | null>(null)
 
   useTariffSync(user?.id)
 
@@ -251,13 +253,11 @@ export function BudgetForm({
 
 
   const importFromTreatmentPlan = () => {
-
-    const lines = buildBudgetFromTreatmentPlan(treatmentPlan, budgetItems)
-
-    const items = mapLinesToBudgetItems(lines)
-
+    const imported = importTreatmentPlanIntoBudget(treatmentPlan, budgetItems)
+    setDuplicateNotice(skippedTreatmentsMessage(imported.skippedDuplicates, 'el presupuesto'))
+    if (imported.items === budgetItems) return
+    const items = mapLinesToBudgetItems(imported.items)
     emitItemsWithDiscount(items, budget.discount)
-
   }
 
 
@@ -295,8 +295,13 @@ export function BudgetForm({
       <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
         Autocarga el precio desde Mis Precios y Procedimientos al seleccionar un tratamiento. El
         precio unitario en cada fila puede ajustarse para esta atención sin modificar el catálogo
-        global.
+        global. Un tratamiento repetido en la misma pieza o zona no se carga otra vez.
       </p>
+      {duplicateNotice && (
+        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {duplicateNotice}
+        </p>
+      )}
 
       {(!disabled || budgetItems.length > 0) && (
         <BudgetModule

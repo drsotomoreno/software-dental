@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { normalizeCupsCode } from '@/services/catalogService'
 import { useTariffStore } from '@/store/useTariffStore'
 import type { BudgetItem } from '@/types/pricing'
@@ -14,6 +14,12 @@ import { CupsAnatomicalLocationField } from '@/components/billing/CupsAnatomical
 import { normalizeQuantityForCups } from '@/utils/cupsBillingRules'
 import { VoiceDictationButton, FieldVoiceHeader } from '@/components/voice'
 import { parseDictatedInteger, parseDictatedNumber } from '@/utils/voiceDictation'
+import {
+  duplicateTreatmentIdSet,
+  duplicateTreatmentNotice,
+  findDuplicateTreatment,
+  type TreatmentIdentity,
+} from '@/utils/treatmentIdentity'
 
 interface BudgetModuleProps {
   items: BudgetItem[]
@@ -42,6 +48,31 @@ export function BudgetModule({
 }: BudgetModuleProps) {
   const tariffMap = useTariffStore((state) => state.tariffMap)
   const [procedureSearch, setProcedureSearch] = useState('')
+  const [duplicateNotice, setDuplicateNotice] = useState<string | null>(null)
+  const identityOnFocus = useRef(new Map<string, TreatmentIdentity>())
+
+  const duplicateIds = useMemo(
+    () =>
+      duplicateTreatmentIdSet(
+        items.map((item) => ({
+          id: item.id,
+          procedure: item.description,
+          cupsCode: item.code,
+          toothNumber: item.toothNumber,
+          fdiQuadrant: item.fdiQuadrant,
+          arch: item.arch,
+        })),
+      ),
+    [items],
+  )
+
+  const identityOf = (item: BudgetItem): TreatmentIdentity => ({
+    procedure: item.description,
+    cupsCode: item.code,
+    toothNumber: item.toothNumber,
+    fdiQuadrant: item.fdiQuadrant,
+    arch: item.arch,
+  })
 
   const totals = useMemo(
     () => computeBudgetTotals(items, globalDiscount, taxRate),
@@ -63,18 +94,54 @@ export function BudgetModule({
   }, [tariffMap, procedureSearch])
 
   const updateItem = (id: string, patch: Partial<BudgetItem>) => {
+    const current = items.find((item) => item.id === id)
+    if (!current) return
+    const next = { ...current, ...patch }
+    const checksLocation =
+      'toothNumber' in patch || 'fdiQuadrant' in patch || 'arch' in patch
+    if (checksLocation && findDuplicateTreatment(items.map(identityOf), identityOf(next), id)) {
+      setDuplicateNotice(duplicateTreatmentNotice(identityOf(next)))
+      return
+    }
+
     onItemsChange(
       items.map((item) => {
         if (item.id !== id) return item
-        const next = { ...item, ...patch }
+        const updated = { ...item, ...patch }
         const cupsCode = patch.code ?? item.code
         if (patch.code !== undefined || patch.quantity !== undefined) {
-          next.quantity = normalizeQuantityForCups(
+          updated.quantity = normalizeQuantityForCups(
             cupsCode,
             patch.quantity ?? item.quantity,
           )
         }
-        return { ...next, total: calcBudgetItemTotal(next) }
+        return { ...updated, total: calcBudgetItemTotal(updated) }
+      }),
+    )
+  }
+
+  const rememberIdentity = (item: BudgetItem) => {
+    identityOnFocus.current.set(item.id, identityOf(item))
+  }
+
+  const revertIfDuplicate = (id: string) => {
+    const current = items.find((item) => item.id === id)
+    const snapshot = identityOnFocus.current.get(id)
+    if (!current || !snapshot) return
+    if (!findDuplicateTreatment(items.map(identityOf), identityOf(current), id)) return
+    setDuplicateNotice(duplicateTreatmentNotice(identityOf(current)))
+    onItemsChange(
+      items.map((item) => {
+        if (item.id !== id) return item
+        const restored = {
+          ...item,
+          description: snapshot.procedure ?? '',
+          code: snapshot.cupsCode ?? '',
+          toothNumber: snapshot.toothNumber,
+          fdiQuadrant: snapshot.fdiQuadrant,
+          arch: snapshot.arch,
+        }
+        return { ...restored, total: calcBudgetItemTotal(restored) }
       }),
     )
   }
@@ -100,7 +167,14 @@ export function BudgetModule({
   }
 
   const addFromTariff = (code: string) => {
-    onItemsChange([...items, addProcedureToBudget(code)])
+    const line = addProcedureToBudget(code)
+    if (findDuplicateTreatment(items.map(identityOf), identityOf(line))) {
+      setDuplicateNotice(duplicateTreatmentNotice(identityOf(line)))
+      setProcedureSearch('')
+      return
+    }
+    setDuplicateNotice(null)
+    onItemsChange([...items, line])
     setProcedureSearch('')
   }
 
@@ -113,6 +187,44 @@ export function BudgetModule({
     const currentItem = items.find((i) => i.id === id)
 
     if (tariff) {
+      const draft: BudgetItem = {
+        ...(currentItem ?? {
+          id,
+          tariffItemId: tariff.id,
+          quantity: 1,
+          unitPrice: 0,
+          discount: 0,
+          total: 0,
+        }),
+        code: tariff.code,
+        description: tariff.name,
+      }
+      if (
+        findDuplicateTreatment(
+          items.map(identityOf),
+          identityOf(draft),
+          id,
+        )
+      ) {
+        setDuplicateNotice(duplicateTreatmentNotice(identityOf(draft)))
+        const snapshot = identityOnFocus.current.get(id)
+        onItemsChange(
+          items.map((item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  code: snapshot?.cupsCode ?? '',
+                  description: snapshot?.procedure ?? item.description,
+                  total: calcBudgetItemTotal({
+                    ...item,
+                    code: snapshot?.cupsCode ?? '',
+                  }),
+                }
+              : item,
+          ),
+        )
+        return
+      }
       const patch: Partial<BudgetItem> = {
         code: tariff.code,
         tariffItemId: tariff.id,
@@ -122,6 +234,7 @@ export function BudgetModule({
       if (!currentItem || currentItem.unitPrice === 0) {
         patch.unitPrice = tariff.price
       }
+      setDuplicateNotice(null)
       updateItem(id, patch)
     } else if (/\d/.test(normalized)) {
       updateItem(id, {
@@ -211,6 +324,18 @@ export function BudgetModule({
         </div>
       )}
 
+      {duplicateNotice && (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {duplicateNotice}
+        </p>
+      )}
+      {duplicateIds.size > 0 && (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Hay tratamientos repetidos en el presupuesto. Cada procedimiento y zona solo debe
+          aparecer una vez.
+        </p>
+      )}
+
       {items.length === 0 ? (
         <p className="text-sm text-slate-500 dark:text-slate-400">
           Agregue tratamientos al presupuesto.
@@ -232,7 +357,10 @@ export function BudgetModule({
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {items.map((item) => (
-                <tr key={item.id} className="align-top">
+                <tr
+                  key={item.id}
+                  className={`align-top ${duplicateIds.has(item.id) ? 'bg-amber-50' : ''}`}
+                >
                   <td className="px-2 py-2">
                     {disabled ? (
                       <span className="block whitespace-normal break-words leading-snug text-slate-800 dark:text-slate-100">
@@ -243,7 +371,9 @@ export function BudgetModule({
                         <textarea
                           id={`budget-desc-${item.id}`}
                           value={item.description}
+                          onFocus={() => rememberIdentity(item)}
                           onChange={(e) => updateItem(item.id, { description: e.target.value })}
+                          onBlur={() => revertIfDuplicate(item.id)}
                           placeholder="Procedimiento"
                           rows={2}
                           className="input-field min-h-[2.75rem] min-w-0 flex-1 resize-y whitespace-normal break-words leading-snug"
@@ -267,8 +397,12 @@ export function BudgetModule({
                         <input
                           id={`budget-cups-${item.id}`}
                           value={item.code}
+                          onFocus={() => rememberIdentity(item)}
                           onChange={(e) => updateItem(item.id, { code: e.target.value })}
-                          onBlur={(e) => handleCodeBlur(item.id, e.target.value)}
+                          onBlur={(e) => {
+                            handleCodeBlur(item.id, e.target.value)
+                            revertIfDuplicate(item.id)
+                          }}
                           placeholder="CUPS"
                           className="input-field min-w-0 flex-1 font-mono text-xs"
                         />

@@ -12,6 +12,7 @@ import {
 } from './clinicalDiagnosisVoice'
 import { applyFaceStates, applyGlobalState } from './odontogramMutations'
 import { mergeSuggestedTreatments, suggestTreatmentFromOdontogram } from './odontogramTreatmentPlan'
+import { isSameTreatment } from './treatmentIdentity'
 import { getDefaultCie10SearchEngine } from '@/services/Cie10SearchEngine'
 import {
   describeClinicalVoiceCommand,
@@ -30,16 +31,13 @@ function mergeBudgetItems(
   current: BudgetLineItem[],
   toAdd: BudgetLineItem[],
 ): BudgetLineItem[] {
-  const existing = new Set(
-    current.map((i) => `${i.procedure.trim().toLowerCase()}|${i.toothNumber ?? ''}`),
-  )
-  const additions = toAdd.filter((item) => {
-    const key = `${item.procedure.trim().toLowerCase()}|${item.toothNumber ?? ''}`
-    if (existing.has(key)) return false
-    existing.add(key)
-    return true
-  })
-  return [...current, ...additions]
+  const additions: BudgetLineItem[] = []
+  for (const item of toAdd) {
+    const alreadyListed = [...current, ...additions].some((existing) => isSameTreatment(existing, item))
+    if (alreadyListed) continue
+    additions.push(item)
+  }
+  return additions.length > 0 ? [...current, ...additions] : current
 }
 
 function createTreatmentItem(
@@ -230,6 +228,14 @@ export function executeClinicalVoiceCommand(
     case 'budget_add': {
       const item = createBudgetItem(command.procedure, command.cupsCode, command.toothNumber)
       const budgetItems = mergeBudgetItems(clinical.budgetItems, [item])
+      if (budgetItems === clinical.budgetItems) {
+        return {
+          ok: true,
+          message: 'Ese tratamiento ya está en el presupuesto y no se agregó otra vez.',
+          command,
+          transcript: '',
+        }
+      }
       handlers.setClinicalData({
         ...clinical,
         budgetItems,
