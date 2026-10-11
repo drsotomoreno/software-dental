@@ -5,6 +5,7 @@ import {
   logoutSession,
   refreshSession,
   resolveAuthUser,
+  seedUserCredentials,
 } from '@/services/authService'
 import {
   clearStoredApiAuth,
@@ -144,6 +145,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setStoredApiAuth(token, sessionUser)
       await pullCompleteClinicOnLogin()
       const authUser = await sessionUserFromApi(sessionUser, token)
+      try {
+        await seedUserCredentials(authUser.id, passwordValue)
+      } catch (error) {
+        console.error('[auth] No se pudo guardar la clave para firmar en este equipo:', error)
+      }
       setUser(authUser)
       window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
       await logAuditEvent({
@@ -219,6 +225,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const granted = grantMasterLocalSession()
         await pullCompleteClinicOnLogin()
         const authUser = await sessionUserFromApi(granted.user, granted.token)
+        try {
+          await seedUserCredentials(authUser.id, passwordValue)
+        } catch (error) {
+          console.error('[auth] No se pudo guardar la clave para firmar en este equipo:', error)
+        }
         setUser(authUser)
         window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
         return { ok: true as const }
@@ -229,6 +240,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const granted = grantMasterLocalSession()
       await pullCompleteClinicOnLogin()
       const authUser = await sessionUserFromApi(granted.user, granted.token)
+      try {
+        await seedUserCredentials(authUser.id, passwordValue)
+      } catch (error) {
+        console.error('[auth] No se pudo guardar la clave para firmar en este equipo:', error)
+      }
       setUser(authUser)
       window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
       return { ok: true as const }

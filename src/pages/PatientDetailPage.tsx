@@ -1060,7 +1060,7 @@ export function PatientDetailPage() {
       return { ok: false as const, error: rethusBlocker }
     }
 
-    const valid = await confirmUserPassword(user.id, password)
+    const valid = await confirmUserPassword(user.id, password, user.email)
     if (!valid) {
       return {
         ok: false as const,

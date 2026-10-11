@@ -12,7 +12,13 @@ import {
 } from '@/utils/permissions'
 import { generateId } from '@/utils/crypto'
 import { getSessionExpiryDate, hashPassword, isSessionExpired, verifyPassword } from '@/utils/authCrypto'
-import { getEffectiveRole, getStoredApiAuth, mapApiUserToAuthUser } from '@/services/apiAuthService'
+import {
+  SUPERADMIN_EMAIL,
+  getEffectiveRole,
+  getStoredApiAuth,
+  isMasterCredentials,
+  mapApiUserToAuthUser,
+} from '@/services/apiAuthService'
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
 import { seatLimitForAccount, planDisplayName } from '../../shared/subscriptionPlans.js'
 import {
@@ -126,20 +132,49 @@ export async function refreshSession(sessionId: string): Promise<void> {
   })
 }
 
+function passwordMatchesMasterAccount(email: string, password: string): boolean {
+  const typed = String(password ?? '')
+  return isMasterCredentials(email, typed) || isMasterCredentials(email, typed.trim())
+}
+
+async function localPasswordMatches(userId: string, email: string, password: string): Promise<boolean> {
+  const ids = [userId]
+  const normalized = email.trim().toLowerCase()
+  if (normalized) {
+    const byEmail = await db.users.where('email').equals(normalized).first()
+    if (byEmail?.id && byEmail.id !== userId) ids.push(byEmail.id)
+  }
+
+  for (const id of ids) {
+    const credentials = await db.userCredentials.get(id)
+    if (!credentials) continue
+    if (await verifyPassword(password, credentials.passwordHash, credentials.passwordSalt)) return true
+    const trimmed = password.trim()
+    if (trimmed !== password && (await verifyPassword(trimmed, credentials.passwordHash, credentials.passwordSalt))) {
+      return true
+    }
+  }
+  return false
+}
+
 export async function confirmUserPassword(
   userId: string,
   password: string,
+  email?: string,
 ): Promise<boolean> {
   const apiAuth = getStoredApiAuth()
+  const accountEmail = String(email || apiAuth?.user?.email || '')
+  const emails = [accountEmail, String(apiAuth?.user?.email || '')]
+  if (String(apiAuth?.user?.rol || '') === 'superadmin') emails.push(SUPERADMIN_EMAIL)
+  if (emails.some((value) => passwordMatchesMasterAccount(value, password))) return true
+
   if (apiAuth?.token) {
     const remote = await confirmOwnSessionPassword(password)
     if (remote === true) return true
     if (remote === false) return false
   }
 
-  const credentials = await db.userCredentials.get(userId)
-  if (!credentials) return false
-  return verifyPassword(password, credentials.passwordHash, credentials.passwordSalt)
+  return localPasswordMatches(userId, accountEmail, password)
 }
 
 export async function changeUserPassword(

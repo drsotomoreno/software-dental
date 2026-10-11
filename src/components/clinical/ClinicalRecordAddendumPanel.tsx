@@ -76,7 +76,7 @@ export function ClinicalRecordAddendumPanel({
   }
 
   const handleConfirmSign = async (password: string) => {
-    const valid = await confirmUserPassword(user.id, password)
+    const valid = await confirmUserPassword(user.id, password, user.email)
     if (!valid) {
       return { ok: false as const, error: 'Contraseña incorrecta. Solo el usuario autenticado puede firmar.' }
     }
