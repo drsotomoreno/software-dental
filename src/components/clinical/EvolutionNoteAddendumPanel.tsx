@@ -78,7 +78,7 @@ export function EvolutionNoteAddendumPanel({
     if (!valid) {
       return {
         ok: false as const,
-        error: 'Contraseña incorrecta. Solo el usuario autenticado puede firmar.',
+        error: 'Contraseña incorrecta. Escriba la misma contraseña con la que inició sesión.',
       }
     }
 

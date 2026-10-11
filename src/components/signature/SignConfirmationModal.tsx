@@ -47,16 +47,16 @@ export function SignConfirmationModal({
         <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
         <p className="mt-2 text-sm text-slate-600">{description}</p>
 
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-          <p className="font-medium">Identificación inequívoca</p>
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-relaxed text-amber-950">
+          <p className="font-medium">Va a firmar con su usuario</p>
           <p className="mt-1">
-            Firmando como <strong>{userEmail}</strong>. Las credenciales son personales e
-            intransferibles. Esta acción quedará en la bitácora de auditoría.
+            Sesión de <strong>{userEmail}</strong>. Escriba la misma contraseña con la que inició
+            sesión. La firma queda en la bitácora.
           </p>
         </div>
 
         <div className="mt-4">
-          <label className="label-field">Confirme su contraseña</label>
+          <label className="label-field clinical-label-raw">Contraseña de inicio de sesión</label>
           <PasswordInput
             value={password}
             onChange={(e) => setPassword(e.target.value)}

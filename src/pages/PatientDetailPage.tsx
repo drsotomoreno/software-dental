@@ -1061,7 +1061,7 @@ export function PatientDetailPage() {
     if (!valid) {
       return {
         ok: false as const,
-        error: 'Contraseña incorrecta. La firma debe realizarse con su usuario personal.',
+        error: 'Contraseña incorrecta. Escriba la misma contraseña con la que inició sesión.',
       }
     }
 

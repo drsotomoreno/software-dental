@@ -48,8 +48,14 @@ export function ClinicalRecordList({ patientId, onSelectRecord }: ClinicalRecord
     return (
       <div className="card">
         <h3 className={`mb-2 ${CLINICAL_SECTION_TITLE_CLASS}`}>Historias clínicas firmadas</h3>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm font-medium text-slate-800">
           No hay historias clínicas firmadas para este paciente.
+        </p>
+        <p className="clinical-label-raw mt-2 text-sm leading-relaxed text-slate-600">
+          La historia abierta se guarda sola como borrador. Aparece en este listado cuando se
+          cierra la atención: use el botón{' '}
+          <span className="font-semibold text-slate-800">Cerrar atención (snapshot RIPS)</span>, al
+          final de la página, y escriba la misma contraseña con la que inició sesión.
         </p>
       </div>
     )
