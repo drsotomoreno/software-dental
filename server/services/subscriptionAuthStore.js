@@ -87,6 +87,15 @@ function resolvedPasswordHash(storedHash, password) {
   return null
 }
 
+/** La misma clave que abre la sesión sirve para firmar. */
+export function accountPasswordMatches(user, password) {
+  if (!user) return false
+  for (const value of passwordVariants(password)) {
+    if (isMasterCredentials(user.email, value)) return true
+  }
+  return Boolean(resolvedPasswordHash(user.passwordHash, password))
+}
+
 const SEEDED_CLINIC_USERS = [
   {
     email: 'eliasmauricio@yahoo.com',
@@ -1595,6 +1604,25 @@ export async function rememberProfessionalDocument({ token, hint, documentNumber
   return { ok: true, user: sanitizeUser(updated) }
 }
 
+export async function confirmOwnPassword({ token, password, hint }) {
+  const session = await resolveSubscriptionSession(token, hint)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+
+  const store = await loadStore()
+  const current = store.users.find((item) => item.id === session.user.id)
+  if (!current) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+
+  if (!accountPasswordMatches(current, password)) {
+    return { ok: false, status: 400, error: 'Contraseña incorrecta.' }
+  }
+
+  return { ok: true }
+}
+
 export async function changeOwnPassword({ token, currentPassword, newPassword, hint }) {
   const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {
@@ -1613,9 +1641,7 @@ export async function changeOwnPassword({ token, currentPassword, newPassword, h
   }
 
   const current = store.users[index]
-  const matchedHash = resolvedPasswordHash(current.passwordHash, currentPassword)
-  const masterOk = isMasterCredentials(current.email, currentPassword)
-  if (!matchedHash && !masterOk) {
+  if (!accountPasswordMatches(current, currentPassword)) {
     return { ok: false, status: 400, error: 'La contraseña actual no es correcta.' }
   }
 

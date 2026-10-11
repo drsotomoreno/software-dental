@@ -21,6 +21,7 @@ import {
   fetchClinicUsers,
   resetClinicMemberPassword,
   updateClinicMember,
+  confirmOwnSessionPassword,
 } from '@/services/subscriptionService'
 
 export async function getStoredSessionToken(): Promise<string | null> {
@@ -129,6 +130,13 @@ export async function confirmUserPassword(
   userId: string,
   password: string,
 ): Promise<boolean> {
+  const apiAuth = getStoredApiAuth()
+  if (apiAuth?.token) {
+    const remote = await confirmOwnSessionPassword(password)
+    if (remote === true) return true
+    if (remote === false) return false
+  }
+
   const credentials = await db.userCredentials.get(userId)
   if (!credentials) return false
   return verifyPassword(password, credentials.passwordHash, credentials.passwordSalt)
