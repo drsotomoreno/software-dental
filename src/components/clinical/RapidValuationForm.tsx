@@ -10,14 +10,12 @@ import { PatientRegistrationSection } from './PatientRegistrationSection'
 import { ConsentimientoValoracionSection } from './ConsentimientoValoracionSection'
 import { TreatmentPlanForm } from './TreatmentPlanForm'
 import { BudgetForm } from './BudgetForm'
-import type { OdontogramData } from '@/types/odontogram'
 
 interface RapidValuationFormProps {
   patientData?: PatientFormData
   onPatientDataChange?: (data: PatientFormData) => void
   patient?: Patient | null
   initialData?: Partial<ClinicalRecordFormData>
-  odontogram?: OdontogramData | null
   onChange: (data: ClinicalRecordFormData) => void
   onAcceptTreatment: () => void
   consentAccepted?: boolean
@@ -32,7 +30,6 @@ export function RapidValuationForm({
   onPatientDataChange,
   patient = null,
   initialData,
-  odontogram = null,
   onChange,
   onAcceptTreatment,
   consentAccepted = false,
@@ -157,7 +154,7 @@ export function RapidValuationForm({
           treatmentPlan={form.treatmentPlan}
           treatmentPlanNotes={form.treatmentPlanNotes}
           diagnoses={form.diagnoses}
-          odontogram={odontogram}
+          diagnosticChart={form.diagnosticChart}
           specializedAnnexes={form.specializedAnnexes}
           affectedTeeth={[...new Set(form.diagnoses.flatMap((d) => d.affectedTeeth ?? []))].sort(
             (a, b) => a - b,

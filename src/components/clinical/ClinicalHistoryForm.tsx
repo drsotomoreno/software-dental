@@ -412,7 +412,7 @@ export function ClinicalHistoryForm({
         treatmentPlan={form.treatmentPlan}
         treatmentPlanNotes={form.treatmentPlanNotes}
         diagnoses={form.diagnoses}
-        odontogram={odontogram}
+        diagnosticChart={form.diagnosticChart}
         affectedTeeth={affectedTeeth}
         specializedAnnexes={form.specializedAnnexes}
         budgetLinkedItemIds={budgetLinkedPlanItemIds}
