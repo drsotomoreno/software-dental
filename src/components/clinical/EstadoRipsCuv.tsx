@@ -1,7 +1,7 @@
-import { useEffect, useId, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Clock, Copy } from 'lucide-react'
+import { useState } from 'react'
+import { AlertTriangle, CheckCircle2, Clock, Copy, Loader2, RefreshCw } from 'lucide-react'
 import type { ClinicalRecord } from '@/types/clinicalRecord'
-import { mensajesResultadoValidacion } from '@/utils/estadoRipsCuv'
+import { textoCorreccionRips } from '@/utils/estadoRipsCuv'
 
 type EstadoRips = ClinicalRecord['estadoMuv']
 
@@ -21,20 +21,42 @@ async function copiarTexto(texto: string) {
   }
 }
 
-function PanelRechazo({ id, mensajes }: { id: string; mensajes: string[] }) {
+export interface EstadoRipsCuvProps {
+  estadoMuv?: EstadoRips
+  cuv?: string | null
+  resultadoValidacion?: unknown
+  /** Aclaración breve, por ejemplo «Última atención cerrada». */
+  contexto?: string
+  onReintentar?: () => void
+  reintentando?: boolean
+  aviso?: string | null
+}
+
+function BotonReintento({
+  onReintentar,
+  reintentando,
+}: {
+  onReintentar?: () => void
+  reintentando: boolean
+}) {
+  if (!onReintentar) return null
   return (
-    <div
-      id={id}
-      role="tooltip"
-      className="absolute right-0 top-full z-30 mt-1 w-72 rounded-lg border border-red-200 bg-white p-3 text-left text-xs leading-relaxed text-red-950 shadow-lg"
+    <button
+      type="button"
+      className="btn-secondary shrink-0 gap-2 text-sm"
+      disabled={reintentando}
+      onClick={(event) => {
+        event.stopPropagation()
+        onReintentar()
+      }}
     >
-      <p className="mb-1 font-semibold text-red-800">Estado RIPS</p>
-      <ul className="list-disc space-y-1 pl-4">
-        {mensajes.map((mensaje, index) => (
-          <li key={`${index}-${mensaje}`}>{mensaje}</li>
-        ))}
-      </ul>
-    </div>
+      {reintentando ? (
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+      ) : (
+        <RefreshCw className="h-4 w-4" aria-hidden />
+      )}
+      {reintentando ? 'Enviando al Ministerio…' : 'Reintentar Envío MUV'}
+    </button>
   )
 }
 
@@ -42,106 +64,129 @@ export function EstadoRipsCuv({
   estadoMuv,
   cuv,
   resultadoValidacion,
-}: {
-  estadoMuv?: EstadoRips
-  cuv?: string | null
-  resultadoValidacion?: unknown
-}) {
-  const panelId = useId()
-  const contenedor = useRef<HTMLDivElement>(null)
+  contexto,
+  onReintentar,
+  reintentando = false,
+  aviso,
+}: EstadoRipsCuvProps) {
   const [copiado, setCopiado] = useState(false)
-  const [sobre, setSobre] = useState(false)
-  const [fijo, setFijo] = useState(false)
-  const mensajes = mensajesResultadoValidacion(resultadoValidacion)
-  const detalleVisible = sobre || fijo
-
-  useEffect(() => {
-    if (!fijo) return
-    const cerrarSiSale = (event: MouseEvent) => {
-      if (!contenedor.current?.contains(event.target as Node)) setFijo(false)
-    }
-    const cerrarConEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setFijo(false)
-    }
-    document.addEventListener('mousedown', cerrarSiSale)
-    document.addEventListener('keydown', cerrarConEscape)
-    return () => {
-      document.removeEventListener('mousedown', cerrarSiSale)
-      document.removeEventListener('keydown', cerrarConEscape)
-    }
-  }, [fijo])
+  const codigo = cuv?.trim() ?? ''
 
   if (estadoMuv === 'APROBADO') {
     return (
-      <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
-          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
-          Aprobado
-        </span>
-        {cuv ? (
-          <>
-            <code className="max-w-[7.5rem] truncate font-mono text-[11px] text-slate-600" title={cuv}>
-              {cuv}
-            </code>
+      <div
+        role="status"
+        className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-950"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white">
+              <CheckCircle2 className="h-4 w-4" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              {contexto ? (
+                <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                  {contexto}
+                </p>
+              ) : null}
+              <p className="text-sm font-medium leading-relaxed">
+                RIPS enviado exitosamente.
+                {codigo ? (
+                  <>
+                    {' '}
+                    CUV: <span className="break-all font-mono text-[13px] font-semibold">{codigo}</span>
+                  </>
+                ) : null}
+              </p>
+              <p className="mt-1 text-xs text-emerald-800">
+                El Ministerio ya recibió este RIPS. No hace falta volver a enviarlo.
+              </p>
+            </div>
+          </div>
+          {codigo ? (
             <button
               type="button"
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+              className="btn-secondary shrink-0 gap-2 text-sm"
               aria-label="Copiar CUV"
               onClick={(event) => {
                 event.stopPropagation()
-                void copiarTexto(cuv).then(() => {
+                void copiarTexto(codigo).then(() => {
                   setCopiado(true)
                   window.setTimeout(() => setCopiado(false), 1600)
                 })
               }}
             >
-              <Copy className="h-3 w-3" aria-hidden />
-              {copiado ? 'Copiado' : 'Copiar'}
+              <Copy className="h-4 w-4" aria-hidden />
+              {copiado ? 'Copiado' : 'Copiar CUV'}
             </button>
-          </>
-        ) : null}
+          ) : null}
+        </div>
       </div>
     )
   }
 
   if (estadoMuv === 'RECHAZADO') {
+    const correccion = textoCorreccionRips(resultadoValidacion)
     return (
       <div
-        ref={contenedor}
-        className="relative"
-        onMouseEnter={() => setSobre(true)}
-        onMouseLeave={() => setSobre(false)}
+        role="alert"
+        className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-orange-950"
       >
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 hover:bg-red-200"
-          aria-expanded={detalleVisible}
-          aria-describedby={detalleVisible ? panelId : undefined}
-          aria-label="Ver por qué el RIPS fue rechazado"
-          onClick={(event) => {
-            event.stopPropagation()
-            setFijo((valor) => !valor)
-          }}
-        >
-          <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
-          Rechazado
-        </button>
-        {detalleVisible ? <PanelRechazo id={panelId} mensajes={mensajes} /> : null}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-500 text-white">
+              <AlertTriangle className="h-4 w-4" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              {contexto ? (
+                <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-orange-700">
+                  {contexto}
+                </p>
+              ) : null}
+              <p className="text-sm font-medium leading-relaxed">
+                El Ministerio solicitó una corrección en este RIPS: {correccion}
+              </p>
+              <p className="mt-1 text-xs text-orange-800">
+                La nota clínica sigue guardada. Cuando el dato esté corregido, reenvíe el RIPS desde aquí.
+              </p>
+            </div>
+          </div>
+          <BotonReintento onReintentar={onReintentar} reintentando={reintentando} />
+        </div>
+        {aviso ? <p className="mt-3 text-sm text-orange-900 sm:pl-11">{aviso}</p> : null}
       </div>
     )
   }
 
-  if (estadoMuv === 'PENDIENTE') {
-    return (
-      <span
-        className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900"
-        title="El envío al MUV está en proceso."
-      >
-        <Clock className="h-3.5 w-3.5" aria-hidden />
-        Pendiente
-      </span>
-    )
-  }
-
-  return <span className="text-xs text-slate-400">Sin RIPS</span>
+  return (
+    <div
+      role="status"
+      className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sky-950"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700">
+            {reintentando ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <Clock className="h-4 w-4" aria-hidden />
+            )}
+          </span>
+          <div className="min-w-0">
+            {contexto ? (
+              <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                {contexto}
+              </p>
+            ) : null}
+            <p className="text-sm font-medium leading-relaxed">RIPS pendiente de envío al Ministerio</p>
+            <p className="mt-1 text-xs text-sky-800">
+              La atención ya quedó guardada. Si el envío automático no salió por la red, puede reintentarlo.
+            </p>
+          </div>
+        </div>
+        <BotonReintento onReintentar={onReintentar} reintentando={reintentando} />
+      </div>
+      {aviso ? <p className="mt-3 text-sm text-sky-900 sm:pl-11">{aviso}</p> : null}
+    </div>
+  )
 }

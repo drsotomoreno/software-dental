@@ -72,7 +72,11 @@ import {
   ensureEvolutionNoteOutboxCreate,
   finalizeEvolutionNote,
 } from '@/services/evolutionNoteService'
-import { reportarAtencionCerradaAlMuv } from '@/services/finalizarConsultaMuv'
+import {
+  reintentarRadicacionDesdeHistoria,
+  reportarAtencionCerradaAlMuv,
+} from '@/services/finalizarConsultaMuv'
+import { leerEstadoMuv, leerResultadoValidacion } from '@/utils/estadoRipsCuv'
 import { isEvolutionNoteImmutable } from '@/types/evolutionNote'
 import { validateEvolutionNote } from '@/utils/evolutionNoteValidation'
 import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
@@ -178,6 +182,11 @@ export function PatientDetailPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('edit')
 
   const [viewingRecord, setViewingRecord] = useState<ClinicalRecord | null>(null)
+  const [ripsReintentoId, setRipsReintentoId] = useState<string | null>(null)
+  const [ripsReintentoAviso, setRipsReintentoAviso] = useState<{
+    id: string
+    texto: string
+  } | null>(null)
 
   const [integrityStatus, setIntegrityStatus] = useState<{
     valid: boolean
@@ -267,6 +276,11 @@ export function PatientDetailPage() {
   const professionalLicense = user?.documentNumber ?? ''
 
   const patientForeignKey = id ? toPatientForeignKey(id) : ''
+
+  const ultimaAtencionFirmada = useLiveQuery(async () => {
+    if (!patientForeignKey) return null
+    return getLatestSignedClinicalRecord(patientForeignKey)
+  }, [patientForeignKey])
 
   const clinicalEncounterId = viewingRecord?.id
     ? String(viewingRecord.id)
@@ -1310,6 +1324,48 @@ export function PatientDetailPage() {
 
 
 
+  const reintentarEnvioRips = useCallback(
+    async (record: ClinicalRecord) => {
+      if (!patient || !user || record.id == null) return
+      const idAtencion = String(record.id)
+      setRipsReintentoId(idAtencion)
+      setRipsReintentoAviso(null)
+      try {
+        const resultado = await reintentarRadicacionDesdeHistoria({
+          recordKey: record.id,
+          patient,
+          professional: user,
+          signedAt: record.signedAt ?? record.updatedAt ?? new Date().toISOString(),
+          record: {
+            patientId: record.patientId,
+            professionalId: record.professionalId,
+            diagnoses: record.diagnoses,
+            evolutionNotes: record.evolutionNotes,
+            paymentControl: record.paymentControl,
+            orthodonticsPaymentControl: record.orthodonticsPaymentControl,
+            budget: record.budget,
+            signedAt: record.signedAt,
+          },
+        })
+        if (resultado.estadoMuv) {
+          const actualizado = await db.clinicalRecords.get(toDexiePrimaryKey(idAtencion))
+          if (actualizado && viewingRecord && String(viewingRecord.id) === idAtencion) {
+            setViewingRecord(actualizado)
+          }
+        }
+        if (resultado.estadoMuv === 'APROBADO') {
+          setMessage(resultado.mensaje || 'RIPS enviado exitosamente.')
+          setRipsReintentoAviso(null)
+        } else if (resultado.mensaje) {
+          setRipsReintentoAviso({ id: idAtencion, texto: resultado.mensaje })
+        }
+      } finally {
+        setRipsReintentoId(null)
+      }
+    },
+    [patient, user, viewingRecord],
+  )
+
   const handleViewRecord = async (recordId: string) => {
     const key = toDexiePrimaryKey(recordId)
     const record = await db.clinicalRecords.get(key)
@@ -1607,7 +1663,15 @@ export function PatientDetailPage() {
 
 
       {canViewClinical && !showRapidValuation && (
-        <ClinicalRecordList patientId={patientForeignKey} onSelectRecord={handleViewRecord} />
+        <ClinicalRecordList
+          patientId={patientForeignKey}
+          onSelectRecord={handleViewRecord}
+          onReintentarEnvio={
+            can('clinical.sign') ? (record) => void reintentarEnvioRips(record) : undefined
+          }
+          reintentandoId={ripsReintentoId}
+          avisoReintento={ripsReintentoAviso}
+        />
       )}
 
       {canViewClinical && sections.length > 1 && (
@@ -1794,6 +1858,26 @@ export function PatientDetailPage() {
           patientDocumentType={patient.documentType}
           patientDocumentNumber={patient.documentNumber}
           patientEmail={patient.email}
+          estadoRips={(() => {
+            const atencion =
+              viewMode === 'view-record' && viewingRecord
+                ? viewingRecord
+                : (ultimaAtencionFirmada ?? null)
+            if (!atencion) return null
+            const idAtencion = atencion.id == null ? '' : String(atencion.id)
+            return {
+              estadoMuv: leerEstadoMuv(atencion),
+              cuv: atencion.cuv,
+              resultadoValidacion: leerResultadoValidacion(atencion),
+              contexto: viewMode === 'view-record' ? undefined : 'Última atención cerrada',
+              onReintentar: can('clinical.sign')
+                ? () => void reintentarEnvioRips(atencion)
+                : undefined,
+              reintentando: Boolean(idAtencion) && ripsReintentoId === idAtencion,
+              aviso:
+                ripsReintentoAviso?.id === idAtencion ? ripsReintentoAviso.texto : null,
+            }
+          })()}
 
         />
 
