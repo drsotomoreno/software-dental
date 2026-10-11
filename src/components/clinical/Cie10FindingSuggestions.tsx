@@ -31,7 +31,14 @@ export function Cie10FindingSuggestions({
   if (trimmed.length < minLength) return null
 
   return (
-    <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+    <ul
+      data-cie10-suggestions
+      onMouseDown={(event) => {
+        // Mantener el foco en el campo para que el clic en una opción no cierre la lista antes de seleccionar.
+        event.preventDefault()
+      }}
+      className="cie10-finding-suggestions mt-1 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm"
+    >
       {options.length === 0 ? (
         <li className="px-3 py-2 text-xs text-slate-500">Sin coincidencias en CIE-10</li>
       ) : (
