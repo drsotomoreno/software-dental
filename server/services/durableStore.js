@@ -70,28 +70,39 @@ function markPostgresUnavailable(error) {
   console.error('[store] Error de conexión a PostgreSQL:', connectionErrorText(error))
 }
 
-function poolConfig(url) {
-  const ssl = postgresSslOption(url)
+function decodeConnectionPart(value) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+export function poolConfig(url) {
+  // La URL externa de Render exige TLS. sslmode=require en la cadena, en pg 8,
+  // sustituye este objeto por ssl: true y verifica el certificado: la conexión
+  // se rechaza. El host interno (sin dominio) no habla TLS y se deja en false.
+  const ssl = postgresSslOption(url) === false ? false : { rejectUnauthorized: false }
   const common = {
     max: 2,
     connectionTimeoutMillis: 8_000,
     idleTimeoutMillis: 20_000,
-    ssl,
   }
   try {
     const parsed = new URL(url)
-    // No se pasa connectionString: un sslmode=require ahí vuelve a encender SSL
-    // y anula el bypass del host interno de Render.
+    // No se pasa connectionString: un sslmode=require ahí pisa `ssl`
+    // y anula tanto este objeto como el bypass del host interno de Render.
     return {
       ...common,
-      user: decodeURIComponent(parsed.username),
-      password: decodeURIComponent(parsed.password),
+      user: decodeConnectionPart(parsed.username),
+      password: decodeConnectionPart(parsed.password),
       host: parsed.hostname,
       port: parsed.port ? Number(parsed.port) : 5432,
-      database: decodeURIComponent(parsed.pathname.replace(/^\//, '')),
+      database: decodeConnectionPart(parsed.pathname.replace(/^\//, '')),
+      ssl,
     }
   } catch {
-    return { ...common, connectionString: url, ssl: false }
+    return { ...common, connectionString: url, ssl }
   }
 }
 
