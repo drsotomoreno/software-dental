@@ -79,9 +79,9 @@ function decodeConnectionPart(value) {
 }
 
 export function poolConfig(url) {
-  // La URL externa de Render exige TLS. sslmode=require en la cadena, en pg 8,
-  // sustituye este objeto por ssl: true y verifica el certificado: la conexión
-  // se rechaza. El host interno (sin dominio) no habla TLS y se deja en false.
+  // La URL externa de Render exige TLS sin verificar la CA. En pg 8, sslmode=require
+  // dentro de connectionString pisa este objeto y activa la verificación: la
+  // conexión se rechaza. El host interno (sin dominio) no habla TLS y se deja en false.
   const ssl = postgresSslOption(url) === false ? false : { rejectUnauthorized: false }
   const common = {
     max: 2,
