@@ -102,6 +102,28 @@ export function parseAnatomicalZone(raw: string): ParsedAnatomicalZone {
   return { anatomicalZone: normalized }
 }
 
+type AnatomicalSiteCarrier = {
+  anatomicalZone?: string
+  toothNumber?: number
+  fdiQuadrant?: ImplantFdiQuadrant
+  arch?: 'superior' | 'inferior'
+}
+
+/** Reemplaza la ubicación anatómica y descarta la pieza, cuadrante o arcada anterior. */
+export function applyAnatomicalSite<T extends AnatomicalSiteCarrier>(item: T, raw: string): T {
+  const parsed = parseAnatomicalZone(raw)
+  const next = { ...item }
+  delete next.anatomicalZone
+  delete next.toothNumber
+  delete next.fdiQuadrant
+  delete next.arch
+  if (parsed.anatomicalZone) next.anatomicalZone = parsed.anatomicalZone
+  if (parsed.toothNumber !== undefined) next.toothNumber = parsed.toothNumber
+  if (parsed.fdiQuadrant) next.fdiQuadrant = parsed.fdiQuadrant
+  if (parsed.arch) next.arch = parsed.arch
+  return next
+}
+
 /** Texto visible de la zona, incluso en registros guardados antes de `anatomicalZone`. */
 export function formatAnatomicalZone(
   item: Pick<TreatmentPlanItem, 'anatomicalZone' | 'toothNumber' | 'fdiQuadrant' | 'arch'>,

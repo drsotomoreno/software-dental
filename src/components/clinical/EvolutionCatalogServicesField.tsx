@@ -7,10 +7,11 @@ import {
   buildEvolutionNotePatchFromServices,
   getEvolutionCatalogServices,
   removeCatalogServiceFromNote,
-  updateCatalogServiceInNote,
 } from '@/utils/evolutionCatalogServices'
 import { formatCurrency } from '@/utils'
+import { applyAnatomicalSite } from '@/utils/treatmentPlanZone'
 import { AestheticServiceModal } from '@/components/checkout/AestheticServiceModal'
+import { AnatomicalSiteSelect } from './AnatomicalSiteSelect'
 import { EvolutionDentalServiceSelect } from './EvolutionDentalServiceSelect'
 
 interface EvolutionCatalogServicesFieldProps {
@@ -31,6 +32,15 @@ export function EvolutionCatalogServicesField({
   const [aestheticOpen, setAestheticOpen] = useState(false)
 
   const totalCost = displayServices.reduce((sum, service) => sum + (service.cost ?? 0), 0)
+
+  const commitService = (
+    serviceId: string,
+    nextService: (typeof displayServices)[number],
+  ) => {
+    const base = persistedServices.length > 0 ? persistedServices : displayServices
+    const next = base.map((item) => (item.id === serviceId ? nextService : item))
+    onChange(buildEvolutionNotePatchFromServices(note, next))
+  }
 
   return (
     <div className="space-y-3">
@@ -59,9 +69,9 @@ export function EvolutionCatalogServicesField({
       </div>
 
       <p className="text-[10px] text-slate-400">
-        Puede registrar varios CUPS o tratamientos realizados en la misma sesión clínica. Los
-        servicios estéticos sin CUPS se facturan a la DIAN con el nombre literal y van a RIPS como
-        Otros Servicios.
+        Puede registrar varios CUPS o tratamientos realizados en la misma sesión clínica. Indique
+        el diente o la zona de cada procedimiento. Los servicios estéticos sin CUPS se facturan a
+        la DIAN con el nombre literal y van a RIPS como Otros Servicios.
       </p>
 
       <div className="space-y-3">
@@ -100,15 +110,16 @@ export function EvolutionCatalogServicesField({
                 service={service}
                 disabled={disabled}
                 showLabel={false}
-                onChange={(nextService) => {
-                  if (persistedServices.length === 0) {
-                    onChange(buildEvolutionNotePatchFromServices(note, [nextService]))
-                    return
-                  }
-                  onChange(updateCatalogServiceInNote(note, service.id, nextService))
-                }}
+                onChange={(nextService) => commitService(service.id, nextService)}
               />
             )}
+
+            <AnatomicalSiteSelect
+              id={`evo-site-${service.id}`}
+              value={service}
+              disabled={disabled}
+              onChange={(raw) => commitService(service.id, applyAnatomicalSite(service, raw))}
+            />
           </div>
         ))}
       </div>
