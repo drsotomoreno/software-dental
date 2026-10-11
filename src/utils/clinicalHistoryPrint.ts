@@ -5,7 +5,9 @@ import {
   clinicalPrintSectionLabel,
   type ClinicalHistoryPrintSectionId,
 } from '@/constants/clinicalHistorySections'
-import { CONSENT_TEMPLATES } from '@/constants/consentTemplates'
+import { getClinicalConsentCategory } from '@/constants/consentCategories'
+import { getConsentLabel, getConsentTemplate } from '@/constants/consentTemplates'
+import { listArchivedCategoryConsents } from '@/utils/informedConsentRules'
 import {
   DIAGNOSIS_CERTAINTY_LABELS,
   PAYMENT_METHOD_LABELS,
@@ -832,32 +834,43 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
 }
 
 function buildConsentSection(data: ClinicalRecordFormData): string {
-  const consent = data.informedConsent
-  const selectedConsents = consent.selectedConsentIds
-    .map((id) => CONSENT_TEMPLATES.find((template) => template.id === id)?.label ?? id)
-    .join(', ')
+  const archived = listArchivedCategoryConsents(data.informedConsent)
+  const cards = archived
+    .map((record) => {
+      const category = getClinicalConsentCategory(record.categoryId)
+      const signedAt = record.signedAt || record.archivedAt
+      const text = getConsentTemplate(record.templateId)?.text ?? ''
+      return `
+        <article style="margin: 0 0 16px; padding: 12px; border: 1px solid #bbf7d0;">
+          <p><strong>${escapeHtml(category?.label ?? record.categoryId)}</strong> — ${escapeHtml(getConsentLabel(record.templateId))}</p>
+          <p>Firmado y archivado. Cubre las atenciones y controles de esta categoría. ${escapeHtml(category?.coverageSummary ?? '')}</p>
+          <table>
+            ${fieldRow('Fecha de archivo', signedAt ? formatDate(signedAt) : '—')}
+            ${fieldRow('Número de documento (Cédula / ReTHUS)', record.professionalLicense || record.professionalRegistry)}
+            ${fieldRow('Texto aceptado', record.textAccepted ? 'Sí' : 'No')}
+          </table>
+          <div class="consent-text" style="white-space: pre-line; font-size: 11px; margin-top: 8px;">${escapeHtml(text)}</div>
+          <div class="signatures">
+            ${
+              record.patientSignatureDataUrl
+                ? `<div class="signature-box"><p>Firma del paciente</p><img src="${record.patientSignatureDataUrl}" alt="Firma del paciente" /></div>`
+                : ''
+            }
+            ${
+              record.professionalSignatureDataUrl
+                ? `<div class="signature-box"><p>Firma del profesional</p><img src="${record.professionalSignatureDataUrl}" alt="Firma del profesional" /></div>`
+                : ''
+            }
+          </div>
+        </article>`
+    })
+    .join('')
 
   return `
     <section class="print-section">
       <h2>${printSectionHeading('consentimiento')}</h2>
-      <table>
-        ${fieldRow('Consentimientos seleccionados', selectedConsents || '—')}
-        ${fieldRow('Texto aceptado', consent.textAccepted ? 'Sí' : 'No')}
-        ${fieldRow('Número de documento (Cédula / ReTHUS)', consent.professionalLicense || consent.professionalRegistry)}
-        ${fieldRow('Fecha de firma', consent.signedAt ? formatDate(consent.signedAt) : '—')}
-      </table>
-      <div class="signatures">
-        ${
-          consent.patientSignatureDataUrl
-            ? `<div class="signature-box"><p>Firma del paciente</p><img src="${consent.patientSignatureDataUrl}" alt="Firma del paciente" /></div>`
-            : ''
-        }
-        ${
-          consent.professionalSignatureDataUrl
-            ? `<div class="signature-box"><p>Firma del profesional</p><img src="${consent.professionalSignatureDataUrl}" alt="Firma del profesional" /></div>`
-            : ''
-        }
-      </div>
+      <p>Un consentimiento por categoría clínica. No se emite un consentimiento general del plan ni uno por cita.</p>
+      ${cards || '<p>Sin consentimientos firmados y archivados.</p>'}
     </section>`
 }
 

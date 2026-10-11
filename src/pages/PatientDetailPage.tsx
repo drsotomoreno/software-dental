@@ -109,7 +109,12 @@ import { useClinicalVoiceRegistry } from '@/hooks/useClinicalVoiceRegistry'
 import { useClinicalAutoSave } from '@/hooks/useClinicalAutoSave'
 import { VoiceClinicalAssistant, type ClinicalVoiceContext } from '@/components/voice'
 import { confirmUserPassword } from '@/services/authService'
-import { createDigitalSignature, validateSignatureCapture } from '@/services/signatureService'
+import { createDigitalSignature } from '@/services/signatureService'
+import { normalizeConsent } from '@/types/consent'
+import {
+  listArchivedCategoryConsents,
+  validateInformedConsentForRecord,
+} from '@/utils/informedConsentRules'
 import { getProfessionalSignBlocker } from '@/utils/professionalSignGate'
 import type { ClinicalHistoryExportFormat } from '@/types/portability'
 import { EXPORT_FORMAT_LABELS } from '@/types/portability'
@@ -938,63 +943,14 @@ export function PatientDetailPage() {
       return false
     }
 
-    if (!clinicalData.informedConsent.selectedConsentIds?.length) {
-
-      setMessage('Debe seleccionar al menos un consentimiento informado según el procedimiento.')
-
-      return false
-
-    }
-
-    if (!clinicalData.informedConsent.textAccepted) {
-
-      setMessage('El paciente debe aceptar el consentimiento informado.')
-
-      return false
-
-    }
-
-    if (!clinicalData.informedConsent.patientSignatureDataUrl) {
-
-      setMessage('La firma del paciente es obligatoria.')
-
-      return false
-
-    }
-
-    if (!clinicalData.informedConsent.professionalSignatureDataUrl) {
-
-      setMessage('La firma del profesional es obligatoria.')
-
-      return false
-
-    }
-
-    const patientSigError = validateSignatureCapture(
-      clinicalData.informedConsent.patientSignatureDataUrl &&
-        clinicalData.informedConsent.patientSignatureMeta
-        ? {
-            dataUrl: clinicalData.informedConsent.patientSignatureDataUrl,
-            metadata: clinicalData.informedConsent.patientSignatureMeta,
-          }
-        : null,
-    )
-    if (patientSigError) {
-      setMessage(patientSigError)
-      return false
-    }
-
-    const professionalSigError = validateSignatureCapture(
-      clinicalData.informedConsent.professionalSignatureDataUrl &&
-        clinicalData.informedConsent.professionalSignatureMeta
-        ? {
-            dataUrl: clinicalData.informedConsent.professionalSignatureDataUrl,
-            metadata: clinicalData.informedConsent.professionalSignatureMeta,
-          }
-        : null,
-    )
-    if (professionalSigError) {
-      setMessage(professionalSigError)
+    const informedConsent = normalizeConsent(clinicalData.informedConsent)
+    const consentIssue = validateInformedConsentForRecord(informedConsent, {
+      treatmentPlan: clinicalData.treatmentPlan,
+      orthodonticsBudgetActive: Boolean(clinicalData.orthodonticsBudget?.active),
+      dentalImplantsBudgetActive: Boolean(clinicalData.dentalImplantsBudget?.active),
+    })
+    if (consentIssue) {
+      setMessage(consentIssue)
       return false
     }
 
@@ -1111,6 +1067,22 @@ export function PatientDetailPage() {
         }
       }
 
+      const informedConsent = {
+        ...normalizeConsent(normalizedClinicalData.informedConsent),
+        signedAt: now,
+      }
+      const archivedConsents = listArchivedCategoryConsents(informedConsent)
+      const signingConsent = [...archivedConsents]
+        .sort((a, b) => (a.signedAt ?? '').localeCompare(b.signedAt ?? ''))
+        .at(-1)
+
+      if (!signingConsent?.professionalSignatureDataUrl || !signingConsent.professionalSignatureMeta) {
+        return {
+          ok: false as const,
+          error: 'Falta la firma del profesional en el consentimiento archivado.',
+        }
+      }
+
       const recordPayload = {
 
         patientId: patientForeignKey,
@@ -1155,7 +1127,7 @@ export function PatientDetailPage() {
 
         evolutionNotes: sortedEvolutionNotes,
 
-        informedConsent: normalizedClinicalData.informedConsent,
+        informedConsent,
 
       }
 
@@ -1208,13 +1180,7 @@ export function PatientDetailPage() {
 
         evolutionNotes: sortedEvolutionNotes,
 
-        informedConsent: {
-
-          ...normalizedClinicalData.informedConsent,
-
-          signedAt: now,
-
-        },
+        informedConsent,
 
         contentHash,
 
@@ -1234,8 +1200,8 @@ export function PatientDetailPage() {
         recordId: String(recordId),
         recordType: 'clinical_record',
         capture: {
-          dataUrl: clinicalData.informedConsent.professionalSignatureDataUrl!,
-          metadata: clinicalData.informedConsent.professionalSignatureMeta!,
+          dataUrl: signingConsent.professionalSignatureDataUrl,
+          metadata: signingConsent.professionalSignatureMeta,
         },
         contentHash,
         user,
@@ -1243,13 +1209,14 @@ export function PatientDetailPage() {
         signedByDocument: user.documentNumber,
       })
 
-      if (clinicalData.informedConsent.patientSignatureDataUrl) {
+      for (const categoryConsent of archivedConsents) {
+        if (!categoryConsent.patientSignatureDataUrl || !categoryConsent.patientSignatureMeta) continue
         await createDigitalSignature({
           recordId: String(recordId),
           recordType: 'consent',
           capture: {
-            dataUrl: clinicalData.informedConsent.patientSignatureDataUrl,
-            metadata: clinicalData.informedConsent.patientSignatureMeta!,
+            dataUrl: categoryConsent.patientSignatureDataUrl,
+            metadata: categoryConsent.patientSignatureMeta,
           },
           contentHash,
           user,
@@ -1258,7 +1225,11 @@ export function PatientDetailPage() {
         })
       }
 
-      setClinicalData({ ...normalizedClinicalData, evolutionNotes: sortedEvolutionNotes })
+      setClinicalData({
+        ...normalizedClinicalData,
+        evolutionNotes: sortedEvolutionNotes,
+        informedConsent,
+      })
       setViewMode('edit')
       setViewingRecord(null)
       setIsLocked(false)
