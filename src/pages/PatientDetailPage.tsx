@@ -1021,12 +1021,12 @@ export function PatientDetailPage() {
       return
     }
 
-    const rethusBlocker = getProfessionalSignBlocker(user, clinicalData)
+    const signingUser = await ensureProfessionalDocument(user, clinicalData, applySessionUser)
+    const rethusBlocker = getProfessionalSignBlocker(signingUser, clinicalData)
     if (rethusBlocker) {
       setMessage(rethusBlocker)
       return
     }
-    void ensureProfessionalDocument(user, clinicalData, applySessionUser)
 
     if (!validateClinical()) return
 

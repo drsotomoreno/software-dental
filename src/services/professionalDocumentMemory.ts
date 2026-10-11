@@ -4,6 +4,7 @@ import {
   getStoredApiAuth,
   mapApiUserToAuthUser,
   setStoredApiAuth,
+  validateApiSession,
   type ApiSubscriptionUser,
 } from '@/services/apiAuthService'
 import { upsertProfessionalFromUser } from '@/services/dentalServiceCatalogService'
@@ -40,6 +41,35 @@ function overlaySessionDocument(user: AuthUser, documentNumber: string): AuthUse
   return { ...user, documentNumber, documentType }
 }
 
+function hasProfessionalDocument(user: Pick<AuthUser, 'documentNumber' | 'documentType'>): boolean {
+  return validateProfessionalDocumentNumber(user.documentNumber, user.documentType || 'CC').valid
+}
+
+/** La pantalla puede tener el usuario viejo, sin cédula, aunque la cuenta ya la tenga. */
+async function userFromLiveSession(
+  user: AuthUser,
+  applySessionUser?: (user: ApiSubscriptionUser) => void,
+): Promise<AuthUser> {
+  const auth = getStoredApiAuth()
+  const token = auth?.token || user.sessionId
+  if (!token) return user
+  try {
+    const validation = await validateApiSession(token)
+    if (!validation.ok || !validation.user) return user
+    if (!hasProfessionalDocument({
+      documentNumber: validation.user.documentNumber || '',
+      documentType: validation.user.documentType || user.documentType,
+    })) {
+      return user
+    }
+    setStoredApiAuth(token, validation.user)
+    applySessionUser?.(validation.user)
+    return mapApiUserToAuthUser(validation.user, token)
+  } catch {
+    return user
+  }
+}
+
 /**
  * Deja la cédula en el perfil (servidor y este equipo) cuando la atención
  * ya la tiene y la cuenta no. No reemplaza una cédula distinta ya guardada.
@@ -48,10 +78,14 @@ export async function ensureProfessionalDocument(
   user: AuthUser,
   clinical: unknown,
   applySessionUser?: (user: ApiSubscriptionUser) => void,
+  recoverFromDrafts = true,
 ): Promise<AuthUser> {
   const documentType = user.documentType || 'CC'
+  if (!hasProfessionalDocument(user)) {
+    user = await userFromLiveSession(user, applySessionUser)
+  }
   const resolved = resolveSignerDocumentNumber(user, clinical)
-  if (!resolved) return user
+  if (!resolved) return recoverFromDrafts ? recoverMissingProfessionalDocument(user) : user
 
   const current = validateProfessionalDocumentNumber(user.documentNumber, documentType)
   if (current.valid) return user
@@ -123,7 +157,10 @@ export async function recoverMissingProfessionalDocument(user: AuthUser): Promis
     return user
   }
   if (!dominant) return user
-  return ensureProfessionalDocument(user, {
-    informedConsent: { professionalLicense: dominant, professionalRegistry: dominant },
-  })
+  return ensureProfessionalDocument(
+    user,
+    { informedConsent: { professionalLicense: dominant, professionalRegistry: dominant } },
+    undefined,
+    false,
+  )
 }
