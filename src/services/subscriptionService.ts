@@ -166,6 +166,38 @@ export async function rememberOwnProfessionalDocument(documentNumber: string, do
   return { ok: true as const, user: payload.user as ApiSubscriptionUser }
 }
 
+/** true = la cuenta aceptó la clave; false = la rechazó; null = no hubo respuesta. */
+export async function confirmOwnSessionPassword(password: string): Promise<boolean | null> {
+  const value = String(password ?? '')
+  if (!value.trim()) return false
+  const auth = getStoredApiAuth()
+  if (!auth?.token) return null
+
+  const email = String(auth.user?.email || '')
+  const send = () =>
+    authFetch('/api/profile/confirm-password', {
+      method: 'POST',
+      body: JSON.stringify({ password: value }),
+    })
+
+  try {
+    if (shouldRestoreMasterSession(email)) {
+      await restoreMasterApiSession(email)
+    }
+    let { response, payload } = await send()
+    if (response.status === 401 || isSessionLostError(String(payload.error ?? ''))) {
+      const restored = await restoreMasterApiSession(email)
+      if (!restored) return null
+      ;({ response, payload } = await send())
+    }
+    if (response.ok && payload.ok !== false) return true
+    if (response.status === 400) return false
+    return null
+  } catch {
+    return null
+  }
+}
+
 export async function changeOwnPassword(input: { currentPassword: string; newPassword: string }) {
   const { response, payload } = await authFetch('/api/profile/password', {
     method: 'PUT',

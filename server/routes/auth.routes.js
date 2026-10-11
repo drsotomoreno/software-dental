@@ -14,6 +14,7 @@ import {
 } from '../controllers/subscription.controller.js'
 import {
   changeOwnPassword,
+  confirmOwnPassword,
   confirmSubscriptionPayment,
   createClinicUser,
   deleteClinicUser,
@@ -368,6 +369,30 @@ router.delete('/clinic/users/:id', async (req, res) => {
   } catch (error) {
     console.error('[Auth] Error en DELETE /clinic/users/:id:', error)
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo eliminar el colaborador.' })
+  }
+})
+
+router.post('/profile/confirm-password', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const result = await confirmOwnPassword({
+      token,
+      password: body.password,
+      hint: sessionHintFromRequest(req),
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true })
+  } catch (error) {
+    console.error('[Auth] Error en POST /profile/confirm-password:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo confirmar la contraseña.',
+    })
   }
 })
 
