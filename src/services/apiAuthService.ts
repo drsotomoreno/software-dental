@@ -38,6 +38,7 @@ export interface ApiSubscriptionUser {
   clinicId?: string
   isClinicOwner?: boolean
   accessEnabled?: boolean
+  detached?: boolean
   phone?: string
   providerType?: 'institucion' | 'profesional_independiente'
   perfilFiscal?: import('@/utils/fiscalProfile').FiscalProfile

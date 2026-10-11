@@ -14,6 +14,15 @@ import {
   planDisplayName,
 } from '../../shared/subscriptionPlans.js'
 import { readDurableJson, writeDurableJson } from './durableStore.js'
+import {
+  applyLoginClinicBinding,
+  countRealClinics,
+  findDetachedAuxiliares,
+  isSelfBound,
+  looksLikeAuxiliarRecord,
+  normalizeStaffRole,
+  recoverDetachedAuxiliares,
+} from './clinicStaffGuard.js'
 import { splitPersonName, composeLegalName } from '../../shared/personName.js'
 import { formatNitInput, validateProviderNit } from '../../shared/nit.js'
 import { sanitizeRepsInput } from '../../shared/prestadorIdentity.js'
@@ -52,7 +61,7 @@ export function isMasterCredentials(email, password) {
 
 
 function emptyStore() {
-  return { users: [], sessions: [], passwordResets: [], emailVerifications: [] }
+  return { users: [], sessions: [], passwordResets: [], emailVerifications: [], staffEvents: [] }
 }
 
 const liveSessions = new Map()
@@ -144,17 +153,7 @@ function normalizeEmail(email) {
 
 
 function normalizeRole(rol) {
-
-  const value = String(rol ?? '').trim().toLowerCase()
-
-  if (VALID_ROLES.has(value)) return value
-
-  if (value === 'administrador') return 'admin'
-
-  if (value === 'auxiliar') return 'recepcion'
-
-  return 'odontologo'
-
+  return normalizeStaffRole(rol)
 }
 
 
@@ -233,6 +232,7 @@ async function loadStore() {
     sessions: [...sessionsByToken.values()],
     passwordResets,
     emailVerifications,
+    staffEvents: Array.isArray(parsed.staffEvents) ? parsed.staffEvents : [],
   }
 }
 
@@ -582,14 +582,12 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
     store.users[userIndex] = currentUser
   }
 
-  if (!currentUser.clinicId) {
-    currentUser = { ...currentUser, clinicId: currentUser.id, updatedAt: new Date().toISOString() }
-    store.users[userIndex] = currentUser
-  }
-
-  if (!masterLogin && String(currentUser.clinicId || currentUser.id) === String(currentUser.id) && !isSuperAdminUser(currentUser)) {
-    currentUser = { ...currentUser, rol: 'admin', accessEnabled: true, updatedAt: new Date().toISOString() }
-    store.users[userIndex] = currentUser
+  if (!masterLogin) {
+    const bound = applyLoginClinicBinding(currentUser, { exempt: isSuperAdminUser(currentUser) })
+    if (bound !== currentUser) {
+      currentUser = bound
+      store.users[userIndex] = currentUser
+    }
   }
 
   if (masterLogin) {
@@ -1603,6 +1601,62 @@ export async function listAllSubscriptionUsers() {
   })
 }
 
+function rememberStaffEvent(store, event) {
+  if (!Array.isArray(store.staffEvents)) store.staffEvents = []
+  store.staffEvents.push({
+    id: randomUUID(),
+    at: new Date().toISOString(),
+    ...event,
+  })
+  if (store.staffEvents.length > 2000) {
+    store.staffEvents = store.staffEvents.slice(-2000)
+  }
+}
+
+function repairClinicRoster(store, clinicId) {
+  const lastClinic = new Map()
+  for (const event of store.staffEvents || []) {
+    if (!event?.userId || !event.clinicId) continue
+    if (event.type !== 'create' && event.type !== 'repair' && event.type !== 'reattach') continue
+    if (String(event.clinicId) === String(event.userId)) continue
+    lastClinic.set(String(event.userId), String(event.clinicId))
+  }
+  const restoredFromLog = []
+  for (let i = 0; i < store.users.length; i++) {
+    const user = store.users[i]
+    const known = lastClinic.get(String(user.id))
+    if (!known || known !== String(clinicId) || !isSelfBound(user) || !looksLikeAuxiliarRecord(user)) continue
+    store.users[i] = {
+      ...user,
+      clinicId: known,
+      rol: 'recepcion',
+      updatedAt: new Date().toISOString(),
+    }
+    restoredFromLog.push(store.users[i])
+  }
+  const soleClinic = countRealClinics(store.users) === 1
+  const recovered = recoverDetachedAuxiliares(store.users, clinicId, { soleClinic })
+  if (!recovered.changed && restoredFromLog.length === 0) return false
+  if (recovered.changed) store.users = recovered.users
+  for (const user of [...restoredFromLog, ...(recovered.repaired || [])]) {
+    rememberStaffEvent(store, {
+      type: 'repair',
+      userId: user.id,
+      clinicId: String(clinicId),
+      nombre: user.nombre || [user.firstName, user.lastName].filter(Boolean).join(' '),
+      email: user.email || '',
+      documentNumber: user.documentNumber || '',
+      reason: 'Auxiliar desvinculada: se restauró su clínica para que vuelva a la lista.',
+    })
+    console.warn(
+      '[Auth] Auxiliar recuperada en la clínica',
+      clinicId,
+      user.nombre || user.email || user.id,
+    )
+  }
+  return true
+}
+
 function clinicIdOf(user) {
   return String(user?.clinicId || user?.id || '')
 }
@@ -1680,8 +1734,25 @@ export async function listClinicUsers({ token, hint }) {
     }
     await saveStore(store)
   }
+  if (repairClinicRoster(store, clinicId)) {
+    await saveStore(store)
+  }
   const seats = clinicSeatSnapshot(store, clinicId)
-  const users = usersInClinic(store, clinicId).map(publicClinicUser)
+  const detached = isSuperAdminUser(session.user) ? findDetachedAuxiliares(store.users, clinicId) : []
+  const detachedUsers = detached.map((user) => {
+    const pub = publicClinicUser(user)
+    return {
+      ...pub,
+      detached: true,
+      isClinicOwner: false,
+      clinicId,
+      rol: looksLikeAuxiliarRecord(user) ? 'recepcion' : pub.rol,
+    }
+  })
+  const users = [
+    ...usersInClinic(store, clinicId).map(publicClinicUser),
+    ...detachedUsers,
+  ]
   return { ok: true, users, seats }
 }
 
@@ -1797,6 +1868,16 @@ export async function createClinicUser({ token, hint, member }) {
     updatedAt: now,
   }
   store.users.push(user)
+  rememberStaffEvent(store, {
+    type: 'create',
+    userId: user.id,
+    clinicId,
+    nombre: user.nombre,
+    email: user.email,
+    documentNumber: user.documentNumber,
+    rol: user.rol,
+    actorId: session.user.id,
+  })
   await saveStore(store)
   return {
     ok: true,
@@ -1944,15 +2025,78 @@ export async function deleteClinicUser({ token, hint, userId }) {
   if (isClinicOwner(target)) {
     return { ok: false, status: 400, error: 'No puede eliminar al titular de la clínica.' }
   }
+  const now = new Date().toISOString()
   store.users[index] = {
     ...target,
+    clinicId: clinicIdOf(target) || clinicId,
     passwordHash: '',
     accessEnabled: false,
-    updatedAt: new Date().toISOString(),
+    suspendedAt: now,
+    suspendedBy: session.user.id,
+    updatedAt: now,
   }
   store.sessions = store.sessions.filter((item) => item.userId !== userId)
+  rememberStaffEvent(store, {
+    type: 'suspend',
+    userId: target.id,
+    clinicId,
+    nombre: target.nombre || [target.firstName, target.lastName].filter(Boolean).join(' '),
+    email: target.email || '',
+    documentNumber: target.documentNumber || '',
+    actorId: session.user.id,
+    reason: 'Acceso suspendido. La ficha permanece en la clínica.',
+  })
   await saveStore(store)
   return { ok: true, user: publicClinicUser(store.users[index]), seats: clinicSeatSnapshot(store, clinicId) }
+}
+
+export async function reattachClinicUser({ token, hint, userId }) {
+  const session = await resolveSubscriptionSession(token, hint)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+  if (!canManageClinicTeam(session.user)) {
+    return { ok: false, status: 403, error: 'Solo el administrador de la clínica puede vincular colaboradores.' }
+  }
+  const store = await loadStore()
+  const clinicId = clinicIdOf(session.user)
+  const index = store.users.findIndex((item) => item.id === userId)
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+  const target = store.users[index]
+  const sameClinic = clinicIdOf(target) === clinicId
+  const recoverable = looksLikeAuxiliarRecord(target) && (sameClinic || isSuperAdminUser(session.user))
+  if (!recoverable && !sameClinic) {
+    return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
+  }
+  if (isClinicOwner(target) && sameClinic) {
+    return { ok: false, status: 400, error: 'El titular ya pertenece a esta clínica.' }
+  }
+  const now = new Date().toISOString()
+  const restoreAuxiliar = looksLikeAuxiliarRecord(target)
+  store.users[index] = {
+    ...target,
+    clinicId,
+    rol: restoreAuxiliar ? 'recepcion' : target.rol,
+    updatedAt: now,
+    repairedAt: now,
+  }
+  rememberStaffEvent(store, {
+    type: 'reattach',
+    userId: target.id,
+    clinicId,
+    nombre: target.nombre || [target.firstName, target.lastName].filter(Boolean).join(' '),
+    email: target.email || '',
+    documentNumber: target.documentNumber || '',
+    actorId: session.user.id,
+  })
+  await saveStore(store)
+  return {
+    ok: true,
+    user: publicClinicUser(store.users[index]),
+    seats: clinicSeatSnapshot(store, clinicId),
+  }
 }
 
 export async function selectPaidPlan({ token, planId, hint }) {

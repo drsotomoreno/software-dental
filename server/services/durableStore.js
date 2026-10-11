@@ -2,6 +2,7 @@ import { createRequire } from 'node:module'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { DATABASE_URL } from '../config.js'
+import { mergeStaffUser } from './clinicStaffGuard.js'
 
 const STORE_KEY = 'subscription-users'
 const require = createRequire(import.meta.url)
@@ -47,8 +48,12 @@ export function postgresSslOption(connectionString) {
 
 let postgresRetryAt = 0
 
+function postgresDisabled() {
+  return process.env.NODE_ENV === 'test' || process.env.SKIP_DURABLE_POSTGRES === '1'
+}
+
 function postgresCoolingDown() {
-  return Date.now() < postgresRetryAt
+  return postgresDisabled() || Date.now() < postgresRetryAt
 }
 
 function connectionErrorText(error) {
@@ -184,7 +189,7 @@ function stamp(item) {
   return Date.parse(item?.updatedAt || item?.createdAt || 0) || 0
 }
 
-function mergeByKey(secondary = [], primary = [], key, primaryWins) {
+function mergeByKey(secondary = [], primary = [], key, primaryWins, mergeItem) {
   const map = new Map()
   for (const item of secondary) {
     if (!item || item[key] == null) continue
@@ -194,9 +199,14 @@ function mergeByKey(secondary = [], primary = [], key, primaryWins) {
     if (!item || item[key] == null) continue
     const id = String(item[key])
     const prev = map.get(id)
-    if (!prev || primaryWins || stamp(item) >= stamp(prev)) {
+    if (!prev) {
       map.set(id, item)
+      continue
     }
+    const takePrimary = primaryWins || stamp(item) >= stamp(prev)
+    const winner = takePrimary ? item : prev
+    const loser = takePrimary ? prev : item
+    map.set(id, typeof mergeItem === 'function' ? mergeItem(loser, winner) : winner)
   }
   return [...map.values()]
 }
@@ -219,7 +229,7 @@ export function mergeDurableStores(primary, secondary, { primaryUserWins = false
 
   const merged = { ...secondary, ...primary }
   if (Array.isArray(primary.users) || Array.isArray(secondary.users)) {
-    merged.users = mergeByKey(secondary.users, primary.users, 'id', primaryUserWins)
+    merged.users = mergeByKey(secondary.users, primary.users, 'id', primaryUserWins, mergeStaffUser)
   }
   if (Array.isArray(primary.sessions) || Array.isArray(secondary.sessions)) {
     merged.sessions = mergeSessions(secondary.sessions, primary.sessions)
@@ -234,6 +244,11 @@ export function mergeDurableStores(primary, secondary, { primaryUserWins = false
       'tokenHash',
       primaryUserWins,
     )
+  }
+  if (Array.isArray(primary.staffEvents) || Array.isArray(secondary.staffEvents)) {
+    merged.staffEvents = mergeByKey(secondary.staffEvents, primary.staffEvents, 'id', false)
+      .sort((a, b) => stamp(a) - stamp(b))
+      .slice(-2000)
   }
   return merged
 }
@@ -263,7 +278,7 @@ export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
         storeKey,
       ])
       const current = rows[0]?.value && typeof rows[0].value === 'object' ? rows[0].value : null
-      const toWrite = current ? mergeDurableStores(value, current, { primaryUserWins: true }) : value
+      const toWrite = current ? mergeDurableStores(value, current) : value
       await client.query(
         `INSERT INTO app_json_store (key, value, updated_at)
          VALUES ($1, $2::jsonb, now())

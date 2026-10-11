@@ -219,7 +219,8 @@ export function mapClinicMemberToProfile(
   user: ApiSubscriptionUser & { rol?: string },
 ): import('@/types/user').UserProfile {
   const mapped = mapApiUserToAuthUser(user, '')
-  const { sessionId: _sessionId, ...profile } = mapped
+  const profile = { ...mapped }
+  delete profile.sessionId
   return {
     ...profile,
     email: user.email || '',
@@ -227,6 +228,7 @@ export function mapClinicMemberToProfile(
     clinicId: user.clinicId || user.id,
     isClinicOwner: user.isClinicOwner === true || String(user.clinicId || user.id) === String(user.id),
     accessEnabled: user.accessEnabled !== false,
+    detached: user.detached === true,
   }
 }
 
@@ -297,6 +299,25 @@ export async function resetClinicMemberPassword(userId: string, password: string
     }
   }
   return { ok: true as const }
+}
+
+export async function reattachClinicMember(userId: string) {
+  const { response, payload } = await authFetch(
+    `/api/clinic/users/${encodeURIComponent(userId)}/reattach`,
+    { method: 'POST' },
+  )
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      status: response.status,
+      error: String(payload.error || 'No se pudo vincular el colaborador.'),
+    }
+  }
+  return {
+    ok: true as const,
+    user: mapClinicMemberToProfile(payload.user),
+    seats: (payload.seats ?? null) as ClinicSeatSnapshot | null,
+  }
 }
 
 export async function deleteClinicMember(userId: string) {

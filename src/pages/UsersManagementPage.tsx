@@ -11,7 +11,11 @@ import {
   resetAppUserPassword,
   updateAppUser,
 } from '@/services/authService'
-import { fetchClinicUsers, type ClinicSeatSnapshot } from '@/services/subscriptionService'
+import {
+  fetchClinicUsers,
+  reattachClinicMember,
+  type ClinicSeatSnapshot,
+} from '@/services/subscriptionService'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { UserProfile, UserRole } from '@/types/user'
 import {
@@ -239,7 +243,7 @@ export function UsersManagementPage() {
   const handleDelete = async (u: UserProfile) => {
     if (!currentUser || !canManage) return
     if (!window.confirm(
-      `¿Eliminar el acceso de ${userLabel(u)}? Se cancelará su contraseña y no podrá ingresar hasta que se le asigne una nueva.`,
+      `¿Suspender el acceso de ${userLabel(u)}? La persona sigue en esta lista. No podrá ingresar hasta que usted le asigne otra clave. Esto no borra su ficha.`,
     )) {
       return
     }
@@ -255,7 +259,29 @@ export function UsersManagementPage() {
       details: `Acceso cancelado: ${userLabel(u)}`,
     })
     await reloadUsers()
-    showMsg('Acceso eliminado. El usuario no podrá ingresar hasta que se le asigne una nueva contraseña.')
+    showMsg('Acceso suspendido. La persona sigue en la lista; use Restaurar acceso para asignarle otra clave.')
+  }
+
+  const handleReattach = async (u: UserProfile) => {
+    if (!canManage) return
+    if (!window.confirm(
+      `¿Vincular de nuevo a ${userLabel(u)} como auxiliar de esta clínica? Sus datos no se habían borrado: el sistema la había separado de la clínica.`,
+    )) {
+      return
+    }
+    const result = await reattachClinicMember(u.id)
+    if (!result.ok) {
+      showErr(result.error)
+      return
+    }
+    await audit({
+      action: 'UPDATE_USER',
+      resourceType: 'user',
+      resourceId: u.id,
+      details: `Auxiliar vinculada de nuevo: ${userLabel(u)}`,
+    })
+    await reloadUsers()
+    showMsg(`${u.firstName} ${u.lastName} volvió a la clínica. Asigne una clave si no puede ingresar.`)
   }
 
   const handleRoleChange = async (u: UserProfile, role: UserRole) => {
@@ -293,7 +319,8 @@ export function UsersManagementPage() {
             <p className="mt-1 text-sm text-slate-600">
               El titular de la cuenta es administrador. Los colaboradores pueden tener otro rol.
               Para un auxiliar (personal administrativo) solo se piden cédula, correo y teléfono:
-              no tienen ReTHUS ni código REPS. El acceso es por cédula y contraseña.
+              no tienen ReTHUS ni código REPS. El acceso es por cédula y contraseña. Suspender
+              un acceso no borra a la persona: sigue en esta lista.
             </p>
           </div>
           {canManage && (
@@ -346,6 +373,15 @@ export function UsersManagementPage() {
           </div>
         )}
 
+        {users?.some((u) => u.detached) && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            Hay auxiliares que desaparecieron de esta lista porque el sistema las separó de la
+            clínica (les creó una clínica propia al iniciar sesión, o una copia vieja del
+            almacén les quitó la clínica). Sus datos no se borraron. Use «Vincular de nuevo»
+            para recuperarlas.
+          </div>
+        )}
+
         <div className="card overflow-hidden p-0">
           {!users ? (
             <p className="p-4 text-sm text-slate-500">Cargando usuarios...</p>
@@ -364,7 +400,16 @@ export function UsersManagementPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {users.map((u) => (
-                    <tr key={u.id} className={u.accessEnabled === false ? 'bg-slate-50 opacity-80' : undefined}>
+                    <tr
+                      key={u.id}
+                      className={
+                        u.detached
+                          ? 'bg-amber-50'
+                          : u.accessEnabled === false
+                            ? 'bg-slate-50 opacity-80'
+                            : undefined
+                      }
+                    >
                       <td className="px-3 py-2 font-medium text-slate-800">
                         {u.firstName} {u.lastName}
                       </td>
@@ -373,6 +418,11 @@ export function UsersManagementPage() {
                         {u.isClinicOwner ? (
                           <span className="ml-2 rounded bg-dental-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-dental-700">
                             Titular
+                          </span>
+                        ) : null}
+                        {u.detached ? (
+                          <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-800">
+                            Desvinculada
                           </span>
                         ) : null}
                         {u.accessEnabled === false ? (
@@ -386,7 +436,7 @@ export function UsersManagementPage() {
                       <td className="px-3 py-2">
                         <select
                           value={u.isClinicOwner ? 'admin' : assignableRoleValue(u.role)}
-                          disabled={!canManage || u.isClinicOwner}
+                          disabled={!canManage || u.isClinicOwner || u.detached}
                           onChange={(event) =>
                             handleRoleChange(u, event.target.value as UserRole)
                           }
@@ -403,6 +453,16 @@ export function UsersManagementPage() {
                       <td className="px-3 py-2">
                         {canManage ? (
                         <div className="flex flex-wrap gap-2">
+                          {u.detached ? (
+                            <button
+                              type="button"
+                              onClick={() => handleReattach(u)}
+                              className="text-xs font-semibold text-amber-800 hover:underline"
+                            >
+                              Vincular de nuevo
+                            </button>
+                          ) : (
+                            <>
                           <button
                             type="button"
                             onClick={() => openEdit(u)}
@@ -410,26 +470,28 @@ export function UsersManagementPage() {
                           >
                             Editar
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setResetUserId(u.id)
-                              setNewPassword('')
-                            }}
-                            className="text-xs font-medium text-slate-600 hover:underline"
-                          >
-                            Restablecer clave
-                          </button>
-                          {u.id !== currentUser?.id && !u.isClinicOwner && u.accessEnabled === false && (
-                            <span className="text-xs text-slate-400">Acceso cancelado</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setResetUserId(u.id)
+                                setNewPassword('')
+                              }}
+                              className="text-xs font-medium text-slate-600 hover:underline"
+                            >
+                              {u.accessEnabled === false ? 'Restaurar acceso' : 'Restablecer clave'}
+                            </button>
+                            </>
                           )}
-                          {u.id !== currentUser?.id && !u.isClinicOwner && u.accessEnabled !== false && (
+                          {u.id !== currentUser?.id && !u.isClinicOwner && !u.detached && u.accessEnabled === false && (
+                            <span className="text-xs text-slate-400">Acceso suspendido</span>
+                          )}
+                          {u.id !== currentUser?.id && !u.isClinicOwner && !u.detached && u.accessEnabled !== false && (
                             <button
                               type="button"
                               onClick={() => handleDelete(u)}
                               className="text-xs font-medium text-red-600 hover:underline"
                             >
-                              Eliminar usuario
+                              Suspender acceso
                             </button>
                           )}
                         </div>
