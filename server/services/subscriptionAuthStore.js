@@ -18,6 +18,7 @@ import { splitPersonName, composeLegalName } from '../../shared/personName.js'
 import { formatNitInput, validateProviderNit } from '../../shared/nit.js'
 import { sanitizeRepsInput } from '../../shared/prestadorIdentity.js'
 import { isInstitutionProvider, normalizeProviderType } from '../../shared/providerType.js'
+import { keepStoredDocumentNumber, validateProfessionalDocumentNumber } from '../../shared/professionalDocument.js'
 import {
   DEFAULT_PERFIL_FISCAL,
   isNoObligadoFev,
@@ -1341,10 +1342,11 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
   }
 
   const documentType = String(patch.documentType ?? current.documentType ?? 'CC').trim() || 'CC'
-  const incomingDocument = normalizeDocumentNumber(patch.documentNumber ?? '')
-  const documentNumber = institution
-    ? incomingDocument
-    : incomingDocument || normalizeDocumentNumber(current.documentNumber ?? '')
+  const documentNumber = keepStoredDocumentNumber(
+    current.documentNumber,
+    patch.documentNumber ?? '',
+    documentType,
+  )
   if (!institution && (!documentNumber || documentNumber.length < 6 || documentNumber.length > 12)) {
     return {
       ok: false,
@@ -1502,6 +1504,67 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
     updated.perfilFiscal = normalizePerfilFiscal(current.perfilFiscal)
   }
 
+  store.users[index] = updated
+  await saveStore(store)
+  return { ok: true, user: sanitizeUser(updated) }
+}
+
+/**
+ * Guarda la cédula que ya está en la atención cuando el perfil la perdió.
+ * No exige NIT ni REPS y no reemplaza una cédula distinta.
+ */
+export async function rememberProfessionalDocument({ token, hint, documentNumber, documentType }) {
+  const session = await resolveSubscriptionSession(token, hint)
+  if (!session?.user) {
+    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  }
+
+  const type = String(documentType || session.user.documentType || 'CC').trim() || 'CC'
+  const check = validateProfessionalDocumentNumber(documentNumber, type)
+  if (!check.valid || !check.normalized) {
+    return {
+      ok: false,
+      status: 400,
+      error: check.message || 'La cédula del profesional no es válida.',
+    }
+  }
+
+  const store = await loadStore()
+  const index = store.users.findIndex((item) => item.id === session.user.id)
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+
+  const current = store.users[index]
+  const existing = validateProfessionalDocumentNumber(current.documentNumber, current.documentType || type)
+  if (existing.valid && existing.normalized && existing.normalized !== check.normalized) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'El perfil ya tiene otra cédula. No se reemplaza con la de la atención.',
+    }
+  }
+
+  const duplicate = store.users.find(
+    (item) =>
+      item.id !== current.id &&
+      validateProfessionalDocumentNumber(item.documentNumber, item.documentType || 'CC').normalized ===
+        check.normalized,
+  )
+  if (duplicate) {
+    return { ok: false, status: 409, error: 'Ya existe un usuario con esta cédula.' }
+  }
+
+  if (existing.valid && existing.normalized === check.normalized) {
+    return { ok: true, user: sanitizeUser(current), unchanged: true }
+  }
+
+  const updated = {
+    ...current,
+    documentType: type,
+    documentNumber: check.normalized,
+    updatedAt: new Date().toISOString(),
+  }
   store.users[index] = updated
   await saveStore(store)
   return { ok: true, user: sanitizeUser(updated) }
