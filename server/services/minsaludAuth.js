@@ -1,59 +1,60 @@
-import { config, hasMinsaludCredentials } from '../config.js'
+import { config } from '../config.js'
+import { createMinsaludAuthClient } from './minsalud/authClient.js'
+import { credentialsAreConfigured } from './minsalud/settings.js'
 
-let cachedToken = null
-let tokenExpiresAt = 0
+export {
+  MinsaludAuthError,
+  MinsaludAuthConfigError,
+  MinsaludAuthUnauthorizedError,
+  MinsaludAuthForbiddenError,
+  MinsaludAuthUpstreamError,
+  MinsaludAuthNetworkError,
+  MinsaludAuthInvalidResponseError,
+} from './minsalud/errors.js'
+
+export { createMinsaludAuthClient } from './minsalud/authClient.js'
 
 /**
- * Obtiene token de autenticación técnica para el API SISPRO/PISIS.
- * Soporta client_credentials OAuth2 o usuario/contraseña según configuración.
+ * Cliente de proceso. Renueva el JWT antes de `exp` mientras el servidor vive.
+ * Las credenciales salen de `config.minsalud` (variables de entorno).
  */
-export async function getMinsaludAccessToken() {
-  if (cachedToken && Date.now() < tokenExpiresAt - 60_000) {
-    return cachedToken
-  }
+const client = createMinsaludAuthClient({
+  getConfig: () => config.minsalud,
+  autoRenew: true,
+})
 
-  if (!hasMinsaludCredentials()) {
-    return null
-  }
-
-  const { apiBaseUrl, authUrl, clientId, clientSecret, username, password } = config.minsalud
-  const tokenUrl = authUrl || `${apiBaseUrl}/oauth/token`
-
-  const body = clientId && clientSecret
-    ? new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        client_secret: clientSecret,
-        scope: 'rips.validar',
-      })
-    : new URLSearchParams({
-        grant_type: 'password',
-        username,
-        password,
-        scope: 'rips.validar',
-      })
-
-  const response = await fetch(tokenUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  })
-
-  if (!response.ok) {
-    const text = await response.text()
-    const error = new Error('Autenticación MinSalud fallida')
-    error.status = 502
-    error.details = text
-    throw error
-  }
-
-  const data = await response.json()
-  cachedToken = data.access_token
-  tokenExpiresAt = Date.now() + (data.expires_in ?? 3600) * 1000
-  return cachedToken
+/** Bearer Token vigente. Renueva solo si falta o entra en la ventana de expiración. */
+export function getMinsaludAccessToken() {
+  return client.getAccessToken()
 }
 
 export function clearMinsaludTokenCache() {
-  cachedToken = null
-  tokenExpiresAt = 0
+  client.clearTokenCache()
+}
+
+/**
+ * POST/GET al MUV con Authorization Bearer y el mismo material TLS del login.
+ * Un 401 invalida la caché y reintenta una vez con un token nuevo.
+ *
+ * @param {object} options
+ * @param {string} options.url
+ * @param {string} [options.method]
+ * @param {Record<string, string>} [options.headers]
+ * @param {string} [options.body]
+ * @param {number} [options.timeoutMs]
+ */
+export function minsaludAuthorizedRequest(options) {
+  return client.authorizedRequest(options)
+}
+
+/** Estado público, sin secretos ni token. */
+export function describeMinsaludAuth() {
+  const minsalud = config.minsalud
+  return {
+    sandbox: minsalud.sandbox,
+    authMode: minsalud.authMode,
+    credentialsConfigured: credentialsAreConfigured(minsalud),
+    tlsClientCertificate: Boolean(minsalud.tls?.cert || minsalud.tls?.certPath),
+    endpointConfigured: Boolean(minsalud.apiBaseUrl || minsalud.authUrl),
+  }
 }
