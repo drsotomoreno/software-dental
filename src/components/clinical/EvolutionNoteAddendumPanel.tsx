@@ -74,7 +74,7 @@ export function EvolutionNoteAddendumPanel({
   }
 
   const handleConfirmSign = async (password: string) => {
-    const valid = await confirmUserPassword(user.id, password)
+    const valid = await confirmUserPassword(user.id, password, user.email)
     if (!valid) {
       return {
         ok: false as const,
