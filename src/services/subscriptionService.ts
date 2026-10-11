@@ -139,6 +139,33 @@ export async function updateOwnProfile(patch: Record<string, unknown>) {
   return { ok: true as const, user: payload.user as ApiSubscriptionUser }
 }
 
+export async function rememberOwnProfessionalDocument(documentNumber: string, documentType = 'CC') {
+  const email = String(getStoredApiAuth()?.user?.email || '')
+  if (shouldRestoreMasterSession(email)) {
+    await restoreMasterApiSession(email)
+  }
+  const send = () =>
+    authFetch('/api/profile/document', {
+      method: 'PUT',
+      body: JSON.stringify({
+        documentNumber,
+        documentType,
+        clientUserId: getStoredApiAuth()?.user?.id,
+        clientEmail: getStoredApiAuth()?.user?.email,
+      }),
+    })
+  let { response, payload } = await send()
+  if (response.status === 401 || isSessionLostError(String(payload.error ?? ''))) {
+    await restoreMasterApiSession(email)
+    ;({ response, payload } = await send())
+  }
+  if (!response.ok) {
+    return { ok: false as const, error: String(payload.error || 'No se pudo guardar la cédula.') }
+  }
+  persistUser(payload.user)
+  return { ok: true as const, user: payload.user as ApiSubscriptionUser }
+}
+
 export async function changeOwnPassword(input: { currentPassword: string; newPassword: string }) {
   const { response, payload } = await authFetch('/api/profile/password', {
     method: 'PUT',

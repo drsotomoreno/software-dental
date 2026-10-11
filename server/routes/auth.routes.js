@@ -25,6 +25,7 @@ import {
   issueMasterSessionToken,
   MASTER_EMAIL,
   registerSubscriptionUser,
+  rememberProfessionalDocument,
   resetClinicUserPassword,
   resolveSubscriptionSession,
   sessionHintFromRequest,
@@ -391,6 +392,34 @@ router.put('/profile/password', async (req, res) => {
       success: false,
       ok: false,
       error: 'No se pudo actualizar la contraseña.',
+    })
+  }
+})
+
+router.put('/profile/document', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const result = await rememberProfessionalDocument({
+      token,
+      documentNumber: body.documentNumber,
+      documentType: body.documentType,
+      hint: sessionHintFromRequest(req, {
+        userId: body.clientUserId,
+        email: body.clientEmail,
+      }),
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true, user: result.user })
+  } catch (error) {
+    console.error('[Auth] Error en PUT /profile/document:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo guardar la cédula del profesional.',
     })
   }
 })

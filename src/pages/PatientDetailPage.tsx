@@ -110,6 +110,7 @@ import { useClinicalAutoSave } from '@/hooks/useClinicalAutoSave'
 import { VoiceClinicalAssistant, type ClinicalVoiceContext } from '@/components/voice'
 import { confirmUserPassword } from '@/services/authService'
 import { createDigitalSignature, validateSignatureCapture } from '@/services/signatureService'
+import { ensureProfessionalDocument } from '@/services/professionalDocumentMemory'
 import { getProfessionalSignBlocker } from '@/utils/professionalSignGate'
 import type { ClinicalHistoryExportFormat } from '@/types/portability'
 import { EXPORT_FORMAT_LABELS } from '@/types/portability'
@@ -161,7 +162,7 @@ export function PatientDetailPage() {
 
   }, [id])
 
-  const { user, can } = useAuth()
+  const { user, can, applySessionUser } = useAuth()
   const { audit } = useAudit()
   const canViewClinical = can('clinical.read')
 
@@ -1020,11 +1021,12 @@ export function PatientDetailPage() {
       return
     }
 
-    const rethusBlocker = getProfessionalSignBlocker(user)
+    const rethusBlocker = getProfessionalSignBlocker(user, clinicalData)
     if (rethusBlocker) {
       setMessage(rethusBlocker)
       return
     }
+    void ensureProfessionalDocument(user, clinicalData, applySessionUser)
 
     if (!validateClinical()) return
 
@@ -1052,7 +1054,8 @@ export function PatientDetailPage() {
       return { ok: false as const, error: 'Complete la historia clínica antes de cerrar la atención.' }
     }
 
-    const rethusBlocker = getProfessionalSignBlocker(user)
+    const signingUser = await ensureProfessionalDocument(user, clinicalData, applySessionUser)
+    const rethusBlocker = getProfessionalSignBlocker(signingUser, clinicalData)
     if (rethusBlocker) {
       return { ok: false as const, error: rethusBlocker }
     }
@@ -1093,7 +1096,7 @@ export function PatientDetailPage() {
         authorUserId: note.authorUserId ?? user.id,
         authorEmail: note.authorEmail ?? user.email,
         professionalName: note.professionalName || professionalName,
-        professionalLicense: note.professionalLicense || professionalLicense,
+        professionalLicense: note.professionalLicense || professionalLicense || signingUser.documentNumber,
       }))
 
       const signedEvolutionNotes = await Promise.all(
@@ -1240,7 +1243,7 @@ export function PatientDetailPage() {
         contentHash,
         user,
         signedByName: professionalName,
-        signedByDocument: user.documentNumber,
+        signedByDocument: signingUser.documentNumber,
       })
 
       if (clinicalData.informedConsent.patientSignatureDataUrl) {
@@ -1279,7 +1282,7 @@ export function PatientDetailPage() {
           : await reportarAtencionCerradaAlMuv({
               recordKey: recordId,
               patient,
-              professional: user,
+              professional: signingUser,
               signedAt: now,
               record: {
                 patientId: patientForeignKey,
