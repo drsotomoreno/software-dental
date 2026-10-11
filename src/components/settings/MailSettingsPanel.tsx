@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { getStoredApiAuth } from '@/services/apiAuthService'
+import { getStoredApiAuth, isUniqueSuperAdminAccount } from '@/services/apiAuthService'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 
 export function MailSettingsPanel() {
+  const allowed = isUniqueSuperAdminAccount(getStoredApiAuth()?.user?.email)
   const [from, setFrom] = useState('')
   const [brevoApiKey, setBrevoApiKey] = useState('')
   const [resendApiKey, setResendApiKey] = useState('')
@@ -12,9 +13,10 @@ export function MailSettingsPanel() {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
+    if (!allowed) return
     const auth = getStoredApiAuth()
     if (!auth?.token) {
-      setStatus('Inicie sesión como superadmin para configurar el correo.')
+      setStatus('Inicie sesión con la cuenta del superadministrador para configurar el correo.')
       return
     }
     void fetch('/api/auth/mail-settings', {
@@ -34,15 +36,17 @@ export function MailSettingsPanel() {
         )
       })
       .catch(() => setStatus('No se pudo conectar con el servidor.'))
-  }, [])
+  }, [allowed])
+
+  if (!allowed) return null
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setSaved(false)
     const auth = getStoredApiAuth()
-    if (!auth?.token) {
-      setError('Sesión de superadmin no encontrada.')
+    if (!auth?.token || !isUniqueSuperAdminAccount(auth.user?.email)) {
+      setError('Sesión del superadministrador no encontrada.')
       return
     }
     setSubmitting(true)

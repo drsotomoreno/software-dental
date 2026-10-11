@@ -1,21 +1,21 @@
-import { MASTER_EMAIL, resolveSubscriptionSession, sessionHintFromRequest } from '../services/subscriptionAuthStore.js'
+import { isUniqueSuperAdminAccount } from '../../shared/uniqueSuperAdmin.js'
+import { resolveSubscriptionSession, sessionHintFromRequest } from '../services/subscriptionAuthStore.js'
 import { isMailConfigured, mailTransportLabel } from '../services/mailer.js'
 import { loadMailSettings, publicMailStatus, saveMailSettings } from '../services/mailSettingsStore.js'
 
-async function requireSuperAdmin(req) {
+/** Solo la cuenta doctormauriciosoto@gmail.com puede leer o guardar el correo de verificación. */
+async function requireUniqueSuperAdmin(req) {
   const authHeader = req.headers.authorization ?? ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
   const session = await resolveSubscriptionSession(token, sessionHintFromRequest(req))
   if (!session?.user) return null
-  const email = String(session.user.email ?? '').toLowerCase()
-  const rol = String(session.user.rol ?? '').toLowerCase()
-  if (email !== MASTER_EMAIL && rol !== 'superadmin') return null
+  if (!isUniqueSuperAdminAccount(session.user)) return null
   return session
 }
 
 export async function getMailSettings(req, res) {
   try {
-    const session = await requireSuperAdmin(req)
+    const session = await requireUniqueSuperAdmin(req)
     if (!session) {
       return res.status(403).json({ success: false, ok: false, error: 'No autorizado.' })
     }
@@ -36,7 +36,7 @@ export async function getMailSettings(req, res) {
 
 export async function updateMailSettings(req, res) {
   try {
-    const session = await requireSuperAdmin(req)
+    const session = await requireUniqueSuperAdmin(req)
     if (!session) {
       return res.status(403).json({ success: false, ok: false, error: 'No autorizado.' })
     }
