@@ -50,6 +50,10 @@ export interface BillingModalitySettings {
   hasPurchasedPack: boolean
   /** Perfil fiscal de la clínica (Mis Cuentas y Facturas). */
   perfilFiscal: FiscalProfile
+  /**
+   * `habilitar_facturacion_eps`. False: oculta la exportación masiva de RIPS.
+   */
+  habilitarFacturacionEps: boolean
 }
 
 export const BILLING_MODALITY_STORAGE_KEY = 'dental_emr_billing_modality'
@@ -74,4 +78,5 @@ export const DEFAULT_BILLING_MODALITY_SETTINGS: BillingModalitySettings = {
   welcomeFolios: WELCOME_FOLIO_GRANT,
   hasPurchasedPack: false,
   perfilFiscal: DEFAULT_PERFIL_FISCAL,
+  habilitarFacturacionEps: false,
 }
