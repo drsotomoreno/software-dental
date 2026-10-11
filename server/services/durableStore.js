@@ -51,12 +51,22 @@ function postgresCoolingDown() {
   return Date.now() < postgresRetryAt
 }
 
+function connectionErrorText(error) {
+  const code = error && typeof error === 'object' && typeof error.code === 'string' ? error.code : ''
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  const message = raw
+    .replace(/postgres(?:ql)?:\/\/\S+/gi, 'postgresql://***')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, '')
+    .replace(/\bdpg-[a-z0-9-]+\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  if (code && message && !message.includes(code)) return `${code}: ${message}`
+  return message || code || 'error de conexión'
+}
+
 function markPostgresUnavailable(error) {
   postgresRetryAt = Date.now() + 20_000
-  console.error(
-    '[store] PostgreSQL no disponible, se usa archivo local:',
-    error instanceof Error ? error.message : error,
-  )
+  console.error('[store] Error de conexión a PostgreSQL:', connectionErrorText(error))
 }
 
 function poolConfig(url) {
