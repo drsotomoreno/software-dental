@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
 
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom'
 
@@ -101,7 +101,17 @@ import { ClinicalHistoryExportPanel } from '@/components/portability'
 import { InvoiceLedgerPanel } from '@/components/invoices/InvoiceLedgerPanel'
 import { ClinicalRecordAddendumPanel } from '@/components/clinical/ClinicalRecordAddendumPanel'
 import { SignatureAuditTrail } from '@/components/clinical/SignatureAuditTrail'
+import { MasterSignatureModal } from '@/components/signature/MasterSignatureModal'
 import { SignConfirmationModal } from '@/components/signature/SignConfirmationModal'
+import { persistMasterSignature } from '@/services/masterSignatureService'
+import type { SignatureCaptureResult } from '@/types/signature'
+import type { MasterSignatureAcceptance } from '@/utils/masterSignature'
+import {
+  isAnamnesisLegallyLocked,
+  isConsentLegallyLocked,
+  isTreatmentLegallyLocked,
+  preserveLegalSeals,
+} from '@/utils/masterSignature'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceService'
@@ -302,11 +312,31 @@ export function PatientDetailPage() {
     setBudgetAccepted(Boolean(metadata?.consentimientoValoracionAceptado))
   }, [patient?.valuationConsent, clinicalData?.valuationConsent])
 
+  const treatmentLockedNow = isTreatmentLegallyLocked(clinicalData)
+  const treatmentLockedRef = useRef(treatmentLockedNow)
+  treatmentLockedRef.current = treatmentLockedNow
+
+  const setOdontogramIfOpen = useCallback((data: OdontogramData) => {
+    if (treatmentLockedRef.current) return
+    setOdontogram(data)
+  }, [])
+
+  const setClinicalDataGuarded = useCallback<Dispatch<SetStateAction<ClinicalRecordFormData | null>>>(
+    (value) => {
+      setClinicalData((prev) => {
+        const next = typeof value === 'function' ? value(prev) : value
+        if (!prev || !next) return next
+        return preserveLegalSeals(prev, next)
+      })
+    },
+    [],
+  )
+
   useClinicalVoiceRegistry(
     odontogram,
-    setOdontogram,
+    setOdontogramIfOpen,
     clinicalData,
-    setClinicalData,
+    setClinicalDataGuarded,
     livingChartLocked,
   )
 
@@ -501,7 +531,7 @@ export function PatientDetailPage() {
         if (patientForeignKey) {
           try {
             const draft = await getPatientClinicalDraft(patientForeignKey)
-            if (draft?.clinicalDraft && !draftClinicalData) {
+            if (draft?.clinicalDraft) {
               const clinicalDraft = draft.clinicalDraft
               Object.assign(base, {
                 ...clinicalDraft,
@@ -739,6 +769,39 @@ export function PatientDetailPage() {
       setSaving(false)
     }
   }
+
+  const handleMasterSignatureSave = useCallback(
+    async (input: {
+      acceptance: MasterSignatureAcceptance
+      patientSignature: SignatureCaptureResult | null
+      professionalSignature: SignatureCaptureResult | null
+    }) => {
+      if (!id || !clinicalData) return 'No hay historia clínica cargada.'
+
+      setSaving(true)
+      setMessage('')
+      try {
+        const result = await persistMasterSignature({
+          patientRouteId: id,
+          clinicalData,
+          odontogram,
+          acceptance: input.acceptance,
+          patientSignature: input.patientSignature,
+          professionalSignature: input.professionalSignature,
+        })
+        if (!result.ok) return result.error
+        setClinicalData(result.clinicalData)
+        if (result.odontogram) setOdontogram(result.odontogram)
+        setMessage('Firmas guardadas. Las secciones aceptadas quedaron bloqueadas.')
+        return null
+      } catch {
+        return 'No se pudieron guardar las firmas.'
+      } finally {
+        setSaving(false)
+      }
+    },
+    [id, clinicalData, odontogram],
+  )
 
   const persistValuationDraft = useCallback(async () => {
     if (!id || !clinicalData || !patientForm || !odontogram) return
@@ -1137,6 +1200,8 @@ export function PatientDetailPage() {
 
         treatmentPlanNotes: normalizedClinicalData.treatmentPlanNotes ?? '',
 
+        treatmentPlanLegal: normalizedClinicalData.treatmentPlanLegal,
+
         budgetItems: normalizedClinicalData.budgetItems,
 
         orthodonticsBudget: normalizedClinicalData.orthodonticsBudget,
@@ -1189,6 +1254,8 @@ export function PatientDetailPage() {
         treatmentPlan: normalizedClinicalData.treatmentPlan,
 
         treatmentPlanNotes: normalizedClinicalData.treatmentPlanNotes ?? '',
+
+        treatmentPlanLegal: normalizedClinicalData.treatmentPlanLegal,
 
         budgetItems: normalizedClinicalData.budgetItems,
 
@@ -1755,15 +1822,21 @@ export function PatientDetailPage() {
         ) : (
         <ClinicalHistoryForm
 
-          key={viewingRecord?.id ?? 'new'}
+          key={`${viewingRecord?.id ?? 'new'}-${clinicalData.anamnesis.legalSignature?.signedAt ?? ''}-${clinicalData.treatmentPlanLegal?.signedAt ?? ''}-${clinicalData.informedConsent.legalSignature?.signedAt ?? ''}`}
 
           initialData={clinicalData}
 
           odontogram={odontogram}
 
-          onChange={setClinicalData}
+          onChange={setClinicalDataGuarded}
 
-          onOdontogramChange={setOdontogram}
+          onOdontogramChange={setOdontogramIfOpen}
+
+          anamnesisLocked={isAnamnesisLegallyLocked(clinicalData.anamnesis)}
+
+          treatmentLocked={isTreatmentLegallyLocked(clinicalData)}
+
+          consentLocked={isConsentLegallyLocked(clinicalData.informedConsent)}
 
           disabled={isArchiveView}
           lockLivingChart={livingChartLocked}
@@ -2010,6 +2083,14 @@ export function PatientDetailPage() {
         )}
 
 
+
+      {canViewClinical && clinicalData && !showRapidValuation && !isArchiveView && (
+        <MasterSignatureModal
+          clinicalData={clinicalData}
+          saving={saving}
+          onSave={handleMasterSignatureSave}
+        />
+      )}
 
       {!isArchiveView && showRapidValuation && (
         <div className="sticky bottom-4 flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">

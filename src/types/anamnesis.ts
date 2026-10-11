@@ -1,3 +1,5 @@
+import type { SectionBiometricSignature } from './sectionSignature'
+
 /** Anamnesis — Resolución 1995 de 1999 / Resolución 823 de 2017 */
 export interface AllergiesData {
   medications: string
@@ -29,6 +31,8 @@ export interface Anamnesis {
   familyHistory: string
   /** Paciente no reporta antecedentes familiares */
   familyHistoryNoReporta?: boolean
+  /** Sello de MasterSignatureModal. Presente solo si la anamnesis quedó bloqueada. */
+  legalSignature?: SectionBiometricSignature
 }
 
 export const SYSTEMIC_DISEASES_OPTIONS = [
@@ -117,5 +121,6 @@ export function normalizeAnamnesis(data: Partial<Anamnesis> | undefined): Anamne
       data.dentalHistoryNoReporta ?? isNoReportaText(data.dentalHistory ?? ''),
     familyHistoryNoReporta:
       data.familyHistoryNoReporta ?? isNoReportaText(data.familyHistory ?? ''),
+    legalSignature: data.legalSignature,
   }
 }
