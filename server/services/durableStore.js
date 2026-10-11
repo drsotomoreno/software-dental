@@ -2,6 +2,7 @@ import { createRequire } from 'node:module'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { DATABASE_URL } from '../config.js'
+import { keepStoredDocumentNumber } from '../../shared/professionalDocument.js'
 
 const STORE_KEY = 'subscription-users'
 const require = createRequire(import.meta.url)
@@ -184,6 +185,27 @@ function stamp(item) {
   return Date.parse(item?.updatedAt || item?.createdAt || 0) || 0
 }
 
+function preserveProfessionalIdentity(chosen, other) {
+  if (!chosen || typeof chosen !== 'object' || !other || typeof other !== 'object') return chosen
+  const hasDocument = chosen.documentNumber != null || other.documentNumber != null
+  const hasRethus = chosen.rethusNumber != null || other.rethusNumber != null
+  if (!hasDocument && !hasRethus) return chosen
+
+  const next = { ...chosen }
+  if (hasDocument) {
+    const type = chosen.documentType || other.documentType || 'CC'
+    const kept = keepStoredDocumentNumber(other.documentNumber, chosen.documentNumber, type)
+    if (kept) {
+      next.documentNumber = kept
+      if (!next.documentType && other.documentType) next.documentType = other.documentType
+    }
+  }
+  const chosenRethus = String(chosen.rethusNumber ?? '').trim()
+  const otherRethus = String(other.rethusNumber ?? '').trim()
+  if (!chosenRethus && otherRethus) next.rethusNumber = otherRethus
+  return next
+}
+
 function mergeByKey(secondary = [], primary = [], key, primaryWins) {
   const map = new Map()
   for (const item of secondary) {
@@ -195,7 +217,9 @@ function mergeByKey(secondary = [], primary = [], key, primaryWins) {
     const id = String(item[key])
     const prev = map.get(id)
     if (!prev || primaryWins || stamp(item) >= stamp(prev)) {
-      map.set(id, item)
+      map.set(id, prev ? preserveProfessionalIdentity(item, prev) : item)
+    } else if (prev) {
+      map.set(id, preserveProfessionalIdentity(prev, item))
     }
   }
   return [...map.values()]

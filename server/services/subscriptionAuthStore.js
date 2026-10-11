@@ -19,6 +19,7 @@ import { formatNitInput, validateProviderNit } from '../../shared/nit.js'
 import { sanitizeRepsInput } from '../../shared/prestadorIdentity.js'
 import { isInstitutionProvider, normalizeProviderType } from '../../shared/providerType.js'
 import { keepStoredDocumentNumber, validateProfessionalDocumentNumber } from '../../shared/professionalDocument.js'
+import { dominantDocumentFromClinic } from './professionalDocumentBackfill.js'
 import {
   DEFAULT_PERFIL_FISCAL,
   isNoObligadoFev,
@@ -388,12 +389,36 @@ export async function ensureSuperAdmin() {
   } else {
 
     const existing = store.users[existingIndex]
+    const documentType = existing.documentType || 'CC'
+    let documentNumber = existing.documentNumber
+    if (!validateProfessionalDocumentNumber(documentNumber, documentType).valid) {
+      try {
+        const recovered = await dominantDocumentFromClinic({ ...existing, documentType })
+        const taken = Boolean(
+          recovered &&
+            store.users.some(
+              (item) =>
+                item.id !== existing.id &&
+                validateProfessionalDocumentNumber(item.documentNumber, item.documentType || 'CC').normalized ===
+                  recovered,
+            ),
+        )
+        if (recovered && !taken) documentNumber = recovered
+      } catch (error) {
+        console.error(
+          '[Auth] No se pudo recuperar la cédula desde las atenciones:',
+          error instanceof Error ? error.message : error,
+        )
+      }
+    }
     store.users[existingIndex] = {
       ...existing,
       email,
       rol: 'superadmin',
       estado_pago: 'exento',
       passwordHash: existing.passwordHash || passwordHash,
+      documentType,
+      ...(documentNumber ? { documentNumber } : {}),
       updatedAt: now,
     }
 
