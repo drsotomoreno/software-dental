@@ -58,6 +58,12 @@ app.use(
 app.use(express.json({ limit: '250mb' }))
 app.use(express.urlencoded({ extended: true, limit: '250mb' }))
 
+// Monitor ligero de actividad (Keep-Alive) para que Render no suspenda
+// el servicio gratuito por inactividad. No toca base de datos ni correo.
+app.get('/ping', (_req, res) => {
+  res.status(200).type('text/plain').send('pong')
+})
+
 app.use('/api/health', healthRoutes)
 app.use('/api/rips', ripsRoutes)
 app.use('/api/invoices', invoicesRoutes)
