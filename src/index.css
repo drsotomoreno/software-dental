@@ -121,6 +121,13 @@
     @apply inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 bg-slate-50 text-base shadow-sm transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-dental-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
+  /* La lista de CIE-10 debe empujar la sección siguiente. Un panel absoluto
+     se pinta encima del título y del botón Todo Normal. */
+  .cie10-finding-suggestions {
+    position: static;
+    z-index: auto;
+  }
+
   .btn-voice-mic.voice-mic--listening {
     @apply border-red-500 bg-red-600 text-white ring-2 ring-red-300;
   }

@@ -1,6 +1,13 @@
+import { useState } from 'react'
 import type { ExamCie10Link } from '@/types/stomatologicalExam'
 import { VoiceDictationButton } from '@/components/voice'
 import { Cie10FindingSuggestions, SelectedCie10Badge } from './Cie10FindingSuggestions'
+
+const NORMAL_PRESET_NOTES = new Set(['normal', 'oclusión normal', 'oclusion normal'])
+
+function isNormalPresetNote(value: string): boolean {
+  return NORMAL_PRESET_NOTES.has(value.trim().toLowerCase())
+}
 
 interface ExamFindingInputWithCie10Props {
   value: string
@@ -31,12 +38,22 @@ export function ExamFindingInputWithCie10({
   showSuggestions = true,
   voiceEnabled = true,
 }: ExamFindingInputWithCie10Props) {
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+
   const handleSelect = (option: { code: string; description: string }) => {
     onCie10Change(option)
     if (!value.trim()) {
       onChange(option.description)
     }
+    setSuggestionsOpen(false)
   }
+
+  const suggestionsVisible =
+    showSuggestions &&
+    suggestionsOpen &&
+    !disabled &&
+    !cie10 &&
+    !isNormalPresetNote(value)
 
   return (
     <div>
@@ -56,7 +73,7 @@ export function ExamFindingInputWithCie10({
           />
         </div>
       )}
-      <div className="relative">
+      <div className="flex min-w-0 flex-col">
         {multiline ? (
           <textarea
             id={inputId}
@@ -64,6 +81,8 @@ export function ExamFindingInputWithCie10({
             disabled={disabled}
             value={value}
             onChange={(event) => onChange(event.target.value)}
+            onFocus={() => setSuggestionsOpen(true)}
+            onBlur={() => setSuggestionsOpen(false)}
             placeholder={placeholder}
             className={`${className} resize-y`}
           />
@@ -74,11 +93,13 @@ export function ExamFindingInputWithCie10({
             disabled={disabled}
             value={value}
             onChange={(event) => onChange(event.target.value)}
+            onFocus={() => setSuggestionsOpen(true)}
+            onBlur={() => setSuggestionsOpen(false)}
             placeholder={placeholder}
             className={className}
           />
         )}
-        {showSuggestions && !cie10 && (
+        {suggestionsVisible && (
           <Cie10FindingSuggestions
             query={value}
             onSelect={handleSelect}
