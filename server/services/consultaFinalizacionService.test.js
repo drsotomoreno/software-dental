@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import {
   finalizarConsultaEnMuv,
   interpretarRespuestaMuv,
+  prestadorDesdeSesion,
 } from './consultaFinalizacionService.js'
 import {
   SQL_ACTUALIZAR_ESTADO_MUV,
@@ -307,4 +308,28 @@ test('una consulta ya aprobada no se reenvía al MUV', async () => {
   assert.equal(llamadas, 0)
   assert.equal(result.alreadyStored, true)
   assert.equal(result.cuv, CUV)
+})
+
+test('la sesión sin NIT ni REPS usa la cédula y la sede por defecto', () => {
+  const previousNit = process.env.MINSALUD_NIT
+  const previousReps = process.env.MINSALUD_COD_PRESTADOR
+  delete process.env.MINSALUD_NIT
+  delete process.env.MINSALUD_COD_PRESTADOR
+  try {
+    const prestador = prestadorDesdeSesion({
+      providerType: 'profesional_independiente',
+      providerNit: '',
+      repsCode: '',
+      documentType: 'CC',
+      documentNumber: '79904620',
+    })
+    assert.equal(prestador.nit, '79904620')
+    assert.equal(prestador.codPrestador, '680010389801')
+    assert.equal(prestador.numeroDocumento, '79904620')
+  } finally {
+    if (previousNit === undefined) delete process.env.MINSALUD_NIT
+    else process.env.MINSALUD_NIT = previousNit
+    if (previousReps === undefined) delete process.env.MINSALUD_COD_PRESTADOR
+    else process.env.MINSALUD_COD_PRESTADOR = previousReps
+  }
 })

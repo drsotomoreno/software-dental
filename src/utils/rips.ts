@@ -19,6 +19,7 @@ import {
   REGIME_TO_TIPO_USUARIO,
   RIPS_DEFAULTS,
 } from '@/constants/rips'
+import { documentoObligadoDigits } from '@/utils/nit'
 import { extractRepsDigits, parseRepsCode } from '@/utils/repsCode'
 import { RIPS_FEV_NUMERO_PATTERN } from './ripsStructureValidation'
 import { normalizePerfilFiscal, normalizeRipsNumFactura } from './fiscalProfile'
@@ -65,10 +66,15 @@ export function normalizeCodPrestador(code: string): string {
 }
 
 export function resolveRipsNit(
-  user: Pick<UserProfile, 'providerNit'>,
+  user: Pick<UserProfile, 'providerNit'> & { documentNumber?: string | null },
   override?: string,
 ): string {
-  return normalizeNit(override ?? '') || normalizeNit(user.providerNit ?? '') || DEMO_PRESTADOR_NIT
+  return (
+    documentoObligadoDigits(override ?? '') ||
+    documentoObligadoDigits(user.providerNit ?? '') ||
+    documentoObligadoDigits(user.documentNumber ?? '') ||
+    DEMO_PRESTADOR_NIT
+  )
 }
 
 export function resolveRipsCodPrestador(

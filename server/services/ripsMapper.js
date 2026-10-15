@@ -9,6 +9,7 @@
  * el documento real.
  */
 
+import { documentoObligadoDigits } from '../../shared/nit.js'
 import { splitUsuarioDocumento } from './fevRipsService.js'
 
 const RIPS_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
@@ -96,6 +97,15 @@ function formatBogotaDateTime(date) {
 
 function digitsOnly(value) {
   return String(value ?? '').replace(/\D/g, '')
+}
+
+function firstNonBlank(values) {
+  for (const value of values) {
+    if (value == null) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return ''
 }
 
 function positiveAmount(value) {
@@ -271,12 +281,16 @@ function sexoOf(patient) {
 }
 
 function codPrestadorOf(atencion, prestador) {
-  const raw =
-    atencion?.codPrestador ??
-    atencion?.prestador?.codPrestador ??
-    atencion?.prestador?.repsCode ??
-    prestador?.codPrestador ??
-    prestador?.repsCode
+  const professional = professionalOf(atencion, prestador)
+  const raw = firstNonBlank([
+    atencion?.codPrestador,
+    atencion?.prestador?.codPrestador,
+    atencion?.prestador?.repsCode,
+    professional?.codPrestador,
+    professional?.repsCode,
+    prestador?.codPrestador,
+    prestador?.repsCode,
+  ])
   const digits = digitsOnly(raw)
   if (!/^\d{12}$/.test(digits)) {
     throw new RipsMapperError('codPrestador debe tener exactamente 12 dígitos (REPS de la sede).', 'codPrestador')
@@ -285,15 +299,22 @@ function codPrestadorOf(atencion, prestador) {
 }
 
 function nitOf(atencion, prestador) {
-  const raw =
-    atencion?.numDocumentoIdObligado ??
-    atencion?.prestador?.nit ??
-    atencion?.prestador?.providerNit ??
-    prestador?.nit ??
-    prestador?.providerNit ??
-    atencion?.professional?.providerNit ??
-    atencion?.profesional?.providerNit
-  const digits = digitsOnly(raw)
+  const professional = professionalOf(atencion, prestador)
+  // Un NIT en blanco no cuenta: el profesional independiente ya tiene la cédula en el perfil.
+  const raw = firstNonBlank([
+    atencion?.numDocumentoIdObligado,
+    atencion?.prestador?.nit,
+    atencion?.prestador?.providerNit,
+    prestador?.nit,
+    prestador?.providerNit,
+    professional?.providerNit,
+    professional?.numDocumentoIdentificacion,
+    professional?.documentNumber,
+    professional?.numeroDocumento,
+    prestador?.numeroDocumento,
+    prestador?.documentNumber,
+  ])
+  const digits = documentoObligadoDigits(raw)
   if (!digits) {
     throw new RipsMapperError('El NIT del prestador (numDocumentoIdObligado) es obligatorio.', 'numDocumentoIdObligado')
   }

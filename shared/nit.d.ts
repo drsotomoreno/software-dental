@@ -1,5 +1,6 @@
 export function extractNitDigits(value?: string | null): string
 export function computeNitDv(nitWithoutDv?: string | null): number
+export function documentoObligadoDigits(value?: string | null): string
 export function formatNitInput(value?: string | null): string
 export function validateProviderNit(value?: string | null): {
   valid: boolean

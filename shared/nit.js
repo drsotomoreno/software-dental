@@ -15,6 +15,24 @@ export function computeNitDv(nitWithoutDv) {
   return remainder > 1 ? 11 - remainder : remainder
 }
 
+/**
+ * Documento del obligado para RIPS. Si el valor trae guion y el DV es válido,
+ * se quita el DV: 79904620-4 y 79904620 identifican al mismo prestador.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function documentoObligadoDigits(value) {
+  const text = String(value ?? '').trim()
+  const digits = extractNitDigits(text)
+  if (!digits) return ''
+  if (text.includes('-') && digits.length >= 9 && digits.length <= 11) {
+    const body = digits.slice(0, -1)
+    const dv = Number(digits.slice(-1))
+    if (dv === computeNitDv(body)) return body
+  }
+  return digits
+}
+
 export function formatNitInput(value) {
   const digits = extractNitDigits(value)
   if (!digits) return ''
