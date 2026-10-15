@@ -20,6 +20,7 @@ import {
   mapApiUserToAuthUser,
 } from '@/services/apiAuthService'
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
+import { isHabilitarFacturacionEps } from '@/utils/habilitarFacturacionEps'
 import { seatLimitForAccount, planDisplayName } from '../../shared/subscriptionPlans.js'
 import {
   createClinicMember,
@@ -444,6 +445,10 @@ export async function createAppUser(
     phone: phone || undefined,
     clinicId: clinicId || undefined,
     isClinicOwner: false,
+    habilitarFacturacionEps: isHabilitarFacturacionEps(
+      (clinicId ? allUsers.find((item) => item.id === clinicId) : undefined)?.habilitarFacturacionEps ??
+        apiAuth?.user?.habilitarFacturacionEps,
+    ),
   }
 
   await db.users.add(user)

@@ -35,6 +35,12 @@ export interface UserProfile {
    * No_Obligado: RIPS temporales con numFactura null (Res. 2275).
    */
   perfilFiscal?: FiscalProfile
+  /**
+   * Facturación EPS de la clínica (`habilitar_facturacion_eps`).
+   * `false` (por defecto): odontólogo particular. No ve la exportación masiva
+   * de RIPS; el envío sin factura sigue en segundo plano por cada evolución.
+   */
+  habilitarFacturacionEps?: boolean
   /** NIT prestador — RIPS */
   providerNit?: string
   /** Código REPS de habilitación de la sede (12 dígitos, ej. 6800103898-01) */

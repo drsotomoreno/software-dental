@@ -714,6 +714,19 @@ export class DentalDatabase extends Dexie {
         }
       }
     })
+
+    this.version(29).upgrade(async (tx) => {
+      const users = await tx.table('users').toArray()
+      for (const user of users) {
+        if (!user?.id || typeof user.habilitarFacturacionEps === 'boolean') continue
+        await tx.table('users').update(user.id, { habilitarFacturacionEps: false })
+      }
+      const settings = await tx.table('clinicBillingSettings').toArray()
+      for (const row of settings) {
+        if (!row?.id || typeof row.habilitarFacturacionEps === 'boolean') continue
+        await tx.table('clinicBillingSettings').update(row.id, { habilitarFacturacionEps: false })
+      }
+    })
   }
 }
 
@@ -914,6 +927,7 @@ export async function seedDemoData(): Promise<void> {
         rehusSpecialty: 'odontologia_general',
         repsEnabledSpecialties: ['odontologia_general'],
         perfilFiscal: 'Obligado_FEV',
+        habilitarFacturacionEps: false,
       },
       {
         id: 'user-demo-admin',
@@ -931,6 +945,7 @@ export async function seedDemoData(): Promise<void> {
         repsStatus: 'activo',
         thsSpecialty: 'odontologia_general',
         perfilFiscal: 'Obligado_FEV',
+        habilitarFacturacionEps: false,
       },
     ])
   }
@@ -952,6 +967,7 @@ export async function seedDemoData(): Promise<void> {
       repsCode: '6800103898-01',
       repsStatus: 'activo',
       perfilFiscal: 'Obligado_FEV',
+      habilitarFacturacionEps: false,
     })
   }
 

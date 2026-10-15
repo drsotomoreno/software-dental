@@ -41,6 +41,8 @@ export interface ApiSubscriptionUser {
   phone?: string
   providerType?: 'institucion' | 'profesional_independiente'
   perfilFiscal?: import('@/utils/fiscalProfile').FiscalProfile
+  /** `habilitar_facturacion_eps`. Ausente equivale a false. */
+  habilitarFacturacionEps?: boolean
   prestadorVerifiedAt?: string | null
   trialLimited?: boolean
   trialLimits?: { maxPatients: number; maxVoiceNotesPerField: number } | null
@@ -292,6 +294,7 @@ export function mapApiUserToAuthUser(
     accessEnabled: user.accessEnabled !== false,
     phone: user.phone || '',
     perfilFiscal: user.perfilFiscal,
+    habilitarFacturacionEps: user.habilitarFacturacionEps === true,
     sessionId: token,
     providerNit: user.providerNit,
     repsCode: user.repsCode,

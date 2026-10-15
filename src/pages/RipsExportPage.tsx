@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { db } from '@/db/database'
 import { RequirePermission } from '@/components/auth/RequirePermission'
 import { RipsExportForm } from '@/components/rips'
@@ -10,6 +10,7 @@ import type { ClinicalRecord } from '@/types/clinicalRecord'
 import type { Patient } from '@/types/patient'
 import type { RipsSourceRecord } from '@/utils/rips'
 import { formatDate } from '@/utils'
+import { isHabilitarFacturacionEps } from '@/utils/habilitarFacturacionEps'
 
 export function RipsExportPage() {
   const { user } = useAuth()
@@ -77,6 +78,10 @@ export function RipsExportPage() {
 
   if (!user) {
     return <p className="text-slate-500">Cargando perfil del prestador...</p>
+  }
+
+  if (!isHabilitarFacturacionEps(user.habilitarFacturacionEps)) {
+    return <Navigate to="/pacientes" replace />
   }
 
   return (

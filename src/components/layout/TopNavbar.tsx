@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { APP_INITIALS, APP_SHORT_NAME } from '@/constants/branding'
 
 import { ROLE_LABELS, type Permission } from '@/utils/permissions'
+import { isHabilitarFacturacionEps } from '@/utils/habilitarFacturacionEps'
 
 function navPillClassName(isActive: boolean): string {
   return `nav-pill-top ${isActive ? 'nav-pill-active' : 'nav-pill-inactive'}`
@@ -34,6 +35,8 @@ interface TopNavItem {
   to: string
   permission: Permission
   row: NavRow
+  /** Exportación masiva: solo clínicas con facturación EPS activa. */
+  requiresEpsBilling?: boolean
   isActive?: (pathname: string) => boolean
 }
 
@@ -94,6 +97,7 @@ const TOP_NAV_ITEMS: TopNavItem[] = [
     to: '/rips',
     permission: 'export.rips',
     row: 2,
+    requiresEpsBilling: true,
   },
   {
     label: 'FHIR',
@@ -182,7 +186,11 @@ export function TopNavbar() {
     navigate('/login')
   }
 
-  const visibleItems = TOP_NAV_ITEMS.filter((item) => can(item.permission))
+  const epsBillingEnabled = isHabilitarFacturacionEps(user?.habilitarFacturacionEps)
+  const visibleItems = TOP_NAV_ITEMS.filter((item) => {
+    if (item.requiresEpsBilling && !epsBillingEnabled) return false
+    return can(item.permission)
+  })
   const primaryRow = visibleItems.filter((item) => item.row === 1)
   const secondaryRow = visibleItems.filter((item) => item.row === 2)
 
