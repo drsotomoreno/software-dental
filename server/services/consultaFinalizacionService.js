@@ -72,7 +72,7 @@ export function interpretarRespuestaMuv(httpStatus, data) {
 export function prestadorDesdeSesion(user = {}) {
   const settings = readFevRipsSettings()
   return {
-    nit: user.providerNit || user.nit || settings.nit,
+    nit: user.providerNit || user.nit || settings.nit || user.documentNumber || '',
     codPrestador: user.repsCode || user.codPrestador || settings.codPrestador,
     tipoDocumento: user.documentType || settings.tipoDocumento,
     numeroDocumento: user.documentNumber || settings.numeroDocumento,

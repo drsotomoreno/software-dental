@@ -91,6 +91,41 @@ test('en stage sustituye el documento del paciente por el del prestador', () => 
   )
 })
 
+test('un NIT en blanco usa la cédula del profesional y no se detiene en el REPS vacío', () => {
+  const mapper = new RipsMapper(
+    {
+      nit: '',
+      codPrestador: '680010389801',
+      tipoDocumento: 'CC',
+      numeroDocumento: '79904620',
+    },
+    { MINSALUD_ENV: 'production' },
+  )
+  const rips = mapper.toRipsSinFactura(
+    consultaOdontologica({
+      numDocumentoIdObligado: '',
+      codPrestador: '',
+      profesional: {
+        documentType: 'CC',
+        documentNumber: '79904620',
+        providerNit: '',
+        repsCode: '',
+      },
+    }),
+  )
+
+  assert.equal(rips.numDocumentoIdObligado, '79904620')
+  assert.equal(rips.usuarios[0].servicios.consultas[0].codPrestador, '680010389801')
+})
+
+test('el NIT con dígito de verificación se envía sin ese dígito', () => {
+  const mapper = new RipsMapper(PRESTADOR, { MINSALUD_ENV: 'production' })
+  const rips = mapper.toRipsSinFactura(
+    consultaOdontologica({ numDocumentoIdObligado: '79904620-4' }),
+  )
+  assert.equal(rips.numDocumentoIdObligado, '79904620')
+})
+
 test('un fin de atención ilegible no llega a armar el JSON', () => {
   const mapper = new RipsMapper(PRESTADOR, { MINSALUD_ENV: 'production' })
   assert.throws(

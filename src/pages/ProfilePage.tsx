@@ -512,13 +512,19 @@ export function ProfilePage() {
               value={form.providerNit}
               onChange={(e) => updateDraft({ providerNit: formatNitInput(e.target.value) })}
               className={`input-field font-mono ${fieldErrors.providerNit ? 'border-red-400' : ''}`}
-              placeholder="Ej: 79904620-4"
+              placeholder="Cédula o NIT con DV"
               inputMode="numeric"
               autoComplete="off"
               aria-invalid={Boolean(fieldErrors.providerNit)}
             />
             {fieldErrors.providerNit ? (
               <p className="mt-1 text-xs text-red-600">{fieldErrors.providerNit}</p>
+            ) : !isInstitutionProvider(providerType) &&
+              !form.providerNit.trim() &&
+              form.documentNumber.trim() ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Este campo está vacío. El RIPS usa la cédula del perfil como documento del obligado.
+              </p>
             ) : null}
             {!String(form.providerNit).includes('-') &&
             extractNitDigits(form.providerNit).length >= 8 &&
@@ -535,6 +541,12 @@ export function ProfilePage() {
             onChange={(repsCode) => updateDraft({ repsCode })}
           />
         </div>
+        {!form.repsCode.trim() ? (
+          <p className="text-xs text-slate-500">
+            El texto gris del REPS es un ejemplo, no un código guardado. Si la sede queda en blanco,
+            el RIPS envía 6800103898-01.
+          </p>
+        ) : null}
         <RethusSpecialtyField
           value={form.thsSpecialty}
           onChange={(thsSpecialty) =>

@@ -41,8 +41,13 @@ export function atencionParaMuv(input: {
   signedAt?: string
 }) {
   const { record, patient, professional } = input
+  const documentoObligado =
+    String(professional.providerNit ?? '').trim() || String(professional.documentNumber ?? '').trim()
+  const repsDigits = String(professional.repsCode ?? '').replace(/\D/g, '')
   return {
     id: input.id,
+    ...(documentoObligado ? { numDocumentoIdObligado: documentoObligado } : {}),
+    ...(repsDigits.length === 12 ? { codPrestador: repsDigits } : {}),
     patientId: record.patientId,
     professionalId: record.professionalId,
     signedAt: input.signedAt ?? record.signedAt,
