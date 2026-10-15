@@ -41,7 +41,6 @@ export function MainHistoryForm({
       return (
         <RapidValuationForm
           initialData={clinicalProps.initialData}
-          odontogram={clinicalProps.odontogram}
           onChange={clinicalProps.onChange}
           onAcceptTreatment={onAcceptTreatment}
           acceptingTreatment={acceptingTreatment}
