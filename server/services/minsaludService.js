@@ -7,6 +7,7 @@
 import http from 'node:http'
 import https from 'node:https'
 import { splitUsuarioDocumento } from './fevRipsService.js'
+import { isMinsaludSandbox, readMinsaludEnv } from './minsaludEnv.js'
 
 const SANDBOX_BASE_URL = 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
 const PRODUCTION_BASE_URL = 'https://fevrips.sispro.gov.co/fevrips-api'
@@ -20,8 +21,7 @@ const DEFAULT_TOKEN_TTL_MS = 50 * 60 * 1000
 const AUTH_ENV = ['MINSALUD_USERNAME', 'MINSALUD_PASSWORD', 'MINSALUD_NIT']
 
 function envValue(name, source = process.env) {
-  const value = source[name]
-  return typeof value === 'string' ? value.trim() : ''
+  return readMinsaludEnv(source, name)
 }
 
 function digitsOnly(value) {
@@ -53,14 +53,14 @@ export function resolveMinsaludSettings(source = process.env, overrides = {}) {
   if (!nit) missing.push('MINSALUD_NIT')
   if (missing.length > 0) {
     const error = new Error(
-      `Faltan credenciales del MUV: ${missing.join(', ')}. Copia .env.example como .env y configura los datos de prueba del prestador.`,
+      `Faltan credenciales del MUV: ${missing.join(', ')}. Defínelas en el entorno del servicio (Render o .env).`,
     )
     error.code = 'MUV_CREDENTIALS_MISSING'
     error.missing = missing
     throw error
   }
 
-  const sandbox = envValue('MINSALUD_SANDBOX', source) !== 'false'
+  const sandbox = isMinsaludSandbox(source)
   const baseUrl = (
     overrides.baseUrl ||
     envValue('MINSALUD_API_BASE_URL', source) ||

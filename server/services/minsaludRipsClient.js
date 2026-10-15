@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { config, hasMinsaludCredentials } from '../config.js'
 import { getMinsaludAccessToken } from './minsaludAuth.js'
+import { MinsaludService } from './minsaludService.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
 
 /**
@@ -63,9 +64,7 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     }
   }
 
-  const useSandbox = config.minsalud.sandbox || !hasMinsaludCredentials()
-
-  if (useSandbox) {
+  if (config.minsalud.sandbox) {
     const ministryErrors = simulateMinistryCrossValidation(rips)
     if (ministryErrors.length > 0) {
       return {
@@ -86,6 +85,10 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
       estado: 'APROBADO',
       metadatos,
     }
+  }
+
+  if (!config.minsalud.apiBaseUrl && hasMinsaludCredentials()) {
+    return submitConLoginSispro({ rips, localIssues, metadatos })
   }
 
   const token = await getMinsaludAccessToken()
@@ -151,6 +154,43 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     estado: data.Estado ?? data.estado ?? 'APROBADO',
     metadatos,
     raw: data,
+  }
+}
+
+/**
+ * Producción sin MINSALUD_API_BASE_URL: LoginSISPRO y CargarRipsSinFactura.
+ * No inventa un CUV de sandbox cuando ya hay usuario, clave y NIT.
+ */
+async function submitConLoginSispro({ rips, localIssues, metadatos }) {
+  try {
+    const envio = await new MinsaludService().enviarRipsSinFactura(rips)
+    if (!envio.resultState || !envio.CUV) {
+      return {
+        success: false,
+        source: 'minsalud',
+        localIssues,
+        ministryErrors: normalizeMinistryErrors({ ResultadosValidacion: envio.resultadosValidacion }),
+        raw: envio,
+      }
+    }
+    return {
+      success: true,
+      source: 'minsalud',
+      localIssues: localIssues.filter((issue) => issue.level === 'warning'),
+      cuv: envio.CUV,
+      procesoId: null,
+      fechaRadicacion: new Date().toISOString(),
+      estado: 'APROBADO',
+      metadatos,
+      raw: envio,
+    }
+  } catch (error) {
+    return {
+      success: false,
+      source: 'minsalud',
+      localIssues,
+      ministryErrors: [{ message: error instanceof Error ? error.message : 'No se pudo contactar el MUV.' }],
+    }
   }
 }
 

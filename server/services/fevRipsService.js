@@ -5,6 +5,7 @@
 
 import http from 'node:http'
 import https from 'node:https'
+import { isMinsaludSandbox, readMinsaludEnv } from './minsaludEnv.js'
 
 const SANDBOX_BASE_URL = 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
 const PRODUCTION_BASE_URL = 'https://fevrips.sispro.gov.co/fevrips-api'
@@ -18,8 +19,7 @@ const DEFAULT_TOKEN_TTL_MS = 50 * 60 * 1000
 const DOCUMENT_TYPE_CODES = ['CC', 'CE', 'PA', 'RC', 'TI', 'NV', 'CD', 'SC', 'PE', 'PT', 'NI']
 
 function envValue(name, source = process.env) {
-  const value = source[name]
-  return typeof value === 'string' ? value.trim() : ''
+  return readMinsaludEnv(source, name)
 }
 
 function digitsOnly(value) {
@@ -76,7 +76,7 @@ export function resolveTipoUsuario(explicit, numeroDocumento, nit) {
  * @param {object} [overrides]
  */
 export function readFevRipsSettings(source = process.env, overrides = {}) {
-  const sandbox = envValue('MINSALUD_SANDBOX', source) !== 'false'
+  const sandbox = isMinsaludSandbox(source)
   const baseUrl = (
     overrides.baseUrl ||
     envValue('MINSALUD_API_BASE_URL', source) ||

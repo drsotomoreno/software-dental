@@ -20,6 +20,67 @@ function credenciales(extra = {}) {
   }
 }
 
+test('MINSALUD_SANDBOX=false usa el host de producción y separa CC79904620', () => {
+  const service = new MinsaludService({
+    env: {
+      MINSALUD_SANDBOX: 'false',
+      MINSALUD_USERNAME: 'CC79904620',
+      MINSALUD_PASSWORD: 'clave-prueba',
+      MINSALUD_NIT: '79904620',
+    },
+  })
+  assert.equal(service.settings.sandbox, false)
+  assert.equal(service.settings.baseUrl, 'https://fevrips.sispro.gov.co/fevrips-api')
+  assert.equal(service.settings.loginUrl, 'https://fevrips.sispro.gov.co/fevrips-api/api/Auth/LoginSISPRO')
+  assert.equal(service.settings.tipoDocumento, 'CC')
+  assert.equal(service.settings.numeroDocumento, '79904620')
+  assert.equal(service.settings.nit, '79904620')
+  assert.equal(service.settings.clave, 'clave-prueba')
+  assert.equal(service.settings.tipoUsuario, 'PIN')
+})
+
+test('una bandera false con comillas o mayúsculas también sale del stage', () => {
+  for (const flag of ['FALSE', ' false ', '"false"', "'false'"]) {
+    const service = new MinsaludService({
+      env: {
+        MINSALUD_SANDBOX: flag,
+        MINSALUD_USERNAME: '"CC79904620"',
+        MINSALUD_PASSWORD: 'clave-prueba',
+        MINSALUD_NIT: '79.904.620',
+      },
+    })
+    assert.equal(service.settings.sandbox, false, flag)
+    assert.equal(service.settings.numeroDocumento, '79904620', flag)
+    assert.equal(service.settings.nit, '79904620', flag)
+    assert.match(service.settings.baseUrl, /^https:\/\/fevrips\.sispro\.gov\.co/)
+  }
+})
+
+test('con usuario, clave y NIT, y sin bandera, no se fuerza el stage', () => {
+  const service = new MinsaludService({
+    env: {
+      MINSALUD_USERNAME: 'CC79904620',
+      MINSALUD_PASSWORD: 'clave-prueba',
+      MINSALUD_NIT: '79904620',
+    },
+  })
+  assert.equal(service.settings.sandbox, false)
+  assert.match(service.settings.baseUrl, /^https:\/\/fevrips\.sispro\.gov\.co/)
+})
+
+test('MINSALUD_SANDBOX=true mantiene el stage aunque haya credenciales', () => {
+  const service = new MinsaludService({
+    env: {
+      MINSALUD_SANDBOX: 'true',
+      MINSALUD_USERNAME: 'CC79904620',
+      MINSALUD_PASSWORD: 'clave-prueba',
+      MINSALUD_NIT: '79904620',
+    },
+  })
+  assert.equal(service.settings.sandbox, true)
+  assert.match(service.settings.baseUrl, /^https:\/\/stage-fevrips\.sispropreprod\.gov\.co/)
+})
+
 test('la margen de renovación del token es de 5 minutos', () => {
   assert.equal(TOKEN_RENEW_SKEW_MS, 5 * 60 * 1000)
 })
