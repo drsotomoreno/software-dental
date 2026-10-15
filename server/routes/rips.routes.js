@@ -8,7 +8,10 @@ import {
   listTemporaryRipsRecords,
   getTemporaryRipsRecord,
 } from '../services/ripsTemporalStore.js'
-import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.controller.js'
+import {
+  processDictatedEvolution,
+  reintentarEnvioMuv,
+} from '../controllers/clinicalVoiceBilling.controller.js'
 import { getMonthlyRipsStatus, runMonthlyRipsJob } from '../controllers/monthlyRips.controller.js'
 
 const router = Router()
@@ -18,6 +21,12 @@ const router = Router()
  * Cierra la consulta: RIPS sin factura hacia el MUV, o FEV si hay factura.
  */
 router.post('/evolucion-dictada', processDictatedEvolution)
+
+/**
+ * POST /api/rips/reintentar-envio
+ * Reintento manual del RIPS ante el MUV, desde la evolución.
+ */
+router.post('/reintentar-envio', reintentarEnvioMuv)
 
 /**
  * GET /api/rips/mensual/estado

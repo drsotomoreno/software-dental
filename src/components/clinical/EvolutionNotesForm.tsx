@@ -25,6 +25,7 @@ import { RipsShieldModal } from '@/components/rips/RipsShieldModal'
 import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
 import type { RipsShieldMismatch } from '@/types/consultationCheckout'
 import { EvolutionNoteCard } from './EvolutionNoteCard'
+import { EstadoRipsCuv, type EstadoRipsCuvProps } from './EstadoRipsCuv'
 
 interface EvolutionNotesFormProps {
   notes: EvolutionNote[]
@@ -39,6 +40,8 @@ interface EvolutionNotesFormProps {
   allowAddendums?: boolean
   /** Si es false, no se muestra el alta de notas (p. ej. solo lectura). Por defecto sí se permite. */
   allowNewNotes?: boolean
+  /** Estado del envío de RIPS de la atención que agrupa estas evoluciones. */
+  estadoRips?: EstadoRipsCuvProps | null
 }
 
 export function EvolutionNotesForm({
@@ -53,6 +56,7 @@ export function EvolutionNotesForm({
   disabled = false,
   allowAddendums = true,
   allowNewNotes = true,
+  estadoRips = null,
 }: EvolutionNotesFormProps) {
   const { user } = useAuth()
   const [blockedMessage, setBlockedMessage] = useState('')
@@ -195,6 +199,12 @@ export function EvolutionNotesForm({
           </button>
         )}
       </div>
+
+      {estadoRips ? (
+        <div className="mb-4">
+          <EstadoRipsCuv {...estadoRips} />
+        </div>
+      ) : null}
 
       {blockedMessage && (
         <div

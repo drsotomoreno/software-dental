@@ -93,6 +93,31 @@ export interface DictatedEvolutionBillingResult {
  * Tras extraer CIE-10 y CUPS, el backend valida el perfil fiscal:
  * Obligado → generarFEV_y_RIPS(); No obligado → guardarRIPS_Pendiente(numFactura: null).
  */
+/**
+ * Reenvía al Ministerio el RIPS de una atención ya guardada.
+ * Mismo cuerpo que el cierre automático; el servidor no vuelve a radicar un CUV aprobado.
+ */
+export async function reintentarEnvioMuv(input: {
+  rips?: RipsTransaction
+  atencion?: object
+  invoice?: DianInvoicePayload
+  metadatos?: RipsValidateRequestMetadatos
+  cie10?: Array<string | null | undefined>
+  cups?: Array<string | null | undefined>
+  clinicalItems?: Array<{ cie10Code?: string | null; cupsCode?: string | null }>
+}): Promise<DictatedEvolutionBillingResult> {
+  const response = await fetch(`${API_BASE}/reintentar-envio`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...identityHeaders(),
+    },
+    body: JSON.stringify(input),
+  })
+  return parseJson<DictatedEvolutionBillingResult>(response)
+}
+
 export async function routeDictatedEvolutionByFiscalProfile(input: {
   rips?: RipsTransaction
   atencion?: object

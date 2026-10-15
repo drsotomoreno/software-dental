@@ -93,3 +93,26 @@ export function mensajesResultadoValidacion(value: unknown): string[] {
   }
   return ['El MUV rechazó el RIPS de esta atención.']
 }
+
+/** Quita códigos de regla y deja una frase que el odontólogo puede leer. */
+function suavizarMensajeMuv(mensaje: string): string {
+  const limpio = mensaje
+    .replace(/^Notificación por regla\s+[A-Za-z0-9]+\s*:\s*/i, '')
+    .replace(/^Rechazado por regla\s+[A-Za-z0-9]+\s*:\s*/i, '')
+    .replace(/^Rechazado:\s*/i, '')
+    .replace(/\bMUV\b/g, 'Ministerio')
+    .trim()
+  if (!limpio || /^El Ministerio rechazó el RIPS/i.test(limpio)) {
+    return 'No recibimos el detalle. Revise los datos de la atención y vuelva a enviarla.'
+  }
+  return limpio.charAt(0).toUpperCase() + limpio.slice(1)
+}
+
+/** Texto que va después de «El Ministerio solicitó una corrección en este RIPS:». */
+export function textoCorreccionRips(value: unknown): string {
+  const mensajes = mensajesResultadoValidacion(value).map(suavizarMensajeMuv).filter(Boolean)
+  if (mensajes.length === 0) {
+    return 'No recibimos el detalle. Revise los datos de la atención y vuelva a enviarla.'
+  }
+  return mensajes.join(' ')
+}

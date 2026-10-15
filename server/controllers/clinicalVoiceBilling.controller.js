@@ -33,6 +33,48 @@ function respuestaMuv(res, status, payload) {
 }
 
 /**
+ * POST /api/rips/reintentar-envio
+ * Mismo radicado que el cierre automático. Un CUV ya aprobado no se vuelve a enviar.
+ * El consultorio obligado a factura no tiene un envío suelto al MUV.
+ */
+export async function reintentarEnvioMuv(req, res, next) {
+  try {
+    const session = await resolveSubscriptionSession(bearerToken(req), sessionHintFromRequest(req))
+    if (!session?.user) {
+      return res.status(401).json({
+        success: false,
+        ok: false,
+        error: 'Sesión inválida o expirada.',
+      })
+    }
+
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const perfilFiscal = normalizePerfilFiscal(session.user.perfilFiscal)
+    if (!atencionDelCuerpo(body)) {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error: 'Falta la atención para reenviar el RIPS.',
+      })
+    }
+
+    if (isObligadoFev(perfilFiscal)) {
+      return res.status(200).json({
+        success: true,
+        ok: true,
+        perfilFiscal,
+        message:
+          'En este consultorio el RIPS sale junto con la factura electrónica. No hay un envío aparte para reintentar.',
+      })
+    }
+
+    return processDictatedEvolution(req, res, next)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
  * POST /api/rips/evolucion-dictada
  * Sin factura (no obligado): genera el RIPS, lo envía al MUV y guarda CUV y estado.
  * Con factura: conserva el enrutamiento FEV o RIPS pendiente.
