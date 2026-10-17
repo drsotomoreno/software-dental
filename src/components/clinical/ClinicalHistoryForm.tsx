@@ -67,6 +67,12 @@ interface ClinicalHistoryFormProps {
   encounterId?: string
   clinicalRecordId?: string | number
   clinicalUser?: UserProfile | null
+  /** Anamnesis sellada: solo lectura (Res. 1995/1999). */
+  anamnesisLocked?: boolean
+  /** Plan, odontograma y presupuesto sellados. */
+  treatmentLocked?: boolean
+  /** Consentimiento informado sellado. */
+  consentLocked?: boolean
   patientName?: string
   patientDocument?: string
   patientDocumentType?: string
@@ -123,6 +129,9 @@ export function ClinicalHistoryForm({
   encounterId = '',
   clinicalRecordId,
   clinicalUser = null,
+  anamnesisLocked = false,
+  treatmentLocked = false,
+  consentLocked = false,
   patientName = '',
   patientDocument = '',
 }: ClinicalHistoryFormProps) {
@@ -204,6 +213,7 @@ export function ClinicalHistoryForm({
   useEffect(() => {
     if (orthodonticsSyncRef.current) return
     orthodonticsSyncRef.current = true
+    if (treatmentLocked) return
 
     setForm((prev) => {
       try {
@@ -217,15 +227,29 @@ export function ClinicalHistoryForm({
         return prev
       }
     })
-  }, [])
+  }, [treatmentLocked])
 
   const update = (patch: Partial<ClinicalRecordFormData>) => {
     setForm((prev) => {
       const merged = { ...prev, ...patch }
-      const next =
-        patch.specializedAnnexes != null
+      const synced =
+        patch.specializedAnnexes != null && !treatmentLocked
           ? syncClinicalDataFromAnnexes(merged)
           : merged
+      const next: ClinicalRecordFormData = {
+        ...synced,
+        anamnesis: anamnesisLocked ? prev.anamnesis : synced.anamnesis,
+        treatmentPlan: treatmentLocked ? prev.treatmentPlan : synced.treatmentPlan,
+        treatmentPlanNotes: treatmentLocked ? prev.treatmentPlanNotes : synced.treatmentPlanNotes,
+        treatmentPlanLegal: treatmentLocked ? prev.treatmentPlanLegal : synced.treatmentPlanLegal,
+        budgetItems: treatmentLocked ? prev.budgetItems : synced.budgetItems,
+        budget: treatmentLocked ? prev.budget : synced.budget,
+        orthodonticsBudget: treatmentLocked ? prev.orthodonticsBudget : synced.orthodonticsBudget,
+        dentalImplantsBudget: treatmentLocked
+          ? prev.dentalImplantsBudget
+          : synced.dentalImplantsBudget,
+        informedConsent: consentLocked ? prev.informedConsent : synced.informedConsent,
+      }
       onChangeRef.current(next)
       return next
     })
@@ -295,11 +319,14 @@ export function ClinicalHistoryForm({
     <div className="clinical-history-shell clinical-history space-y-6">
       {showClinicalSection(activeSection, 'anamnesis') && (
         <div id="clinical-section-anamnesis">
+          {anamnesisLocked && (
+            <p className="mb-2 text-xs text-slate-500">Anamnesis bloqueada.</p>
+          )}
           <AnamnesisForm
             data={form.anamnesis}
             vitalSigns={form.stomatologicalExam.vitalSigns}
             onChange={(anamnesis: Anamnesis) => update({ anamnesis: normalizeAnamnesis(anamnesis) })}
-            disabled={snapshotLocked}
+            disabled={snapshotLocked || anamnesisLocked}
           />
         </div>
       )}
@@ -318,10 +345,13 @@ export function ClinicalHistoryForm({
 
       {showClinicalSection(activeSection, 'odontograma') && odontogram && onOdontogramChange && (
         <div id="clinical-section-odontograma" className="space-y-4">
+          {treatmentLocked && (
+            <p className="text-xs text-slate-500">Odontograma bloqueado.</p>
+          )}
           <Odontogram
             data={odontogram}
-            onChange={onOdontogramChange}
-            disabled={livingLocked}
+            onChange={treatmentLocked ? () => undefined : onOdontogramChange}
+            disabled={livingLocked || treatmentLocked}
           />
         </div>
       )}
@@ -408,6 +438,9 @@ export function ClinicalHistoryForm({
 
       {showClinicalSection(activeSection, 'tratamiento') && (
         <div id="clinical-section-tratamiento" className="space-y-6">
+      {treatmentLocked && (
+        <p className="text-xs text-slate-500">Plan de tratamiento y presupuesto bloqueados.</p>
+      )}
       <TreatmentPlanForm
         treatmentPlan={form.treatmentPlan}
         treatmentPlanNotes={form.treatmentPlanNotes}
@@ -416,7 +449,7 @@ export function ClinicalHistoryForm({
         affectedTeeth={affectedTeeth}
         specializedAnnexes={form.specializedAnnexes}
         budgetLinkedItemIds={budgetLinkedPlanItemIds}
-        disabled={livingLocked}
+        disabled={livingLocked || treatmentLocked}
         onChange={(patch) => update(patch)}
         onMoveToBudget={moveTreatmentPlanItemToBudget}
       />
@@ -427,7 +460,7 @@ export function ClinicalHistoryForm({
         dentalImplantsBudget={form.dentalImplantsBudget}
         budget={form.budget}
         treatmentPlan={form.treatmentPlan}
-        disabled={livingLocked}
+        disabled={livingLocked || treatmentLocked}
         onChange={(patch) => update(patch)}
       />
         </div>
@@ -461,10 +494,13 @@ export function ClinicalHistoryForm({
 
       {showClinicalSection(activeSection, 'consentimiento') && (
         <div id="clinical-section-consentimiento">
+      {consentLocked && (
+        <p className="mb-2 text-xs text-slate-500">Consentimiento informado bloqueado.</p>
+      )}
       <InformedConsentForm
         data={form.informedConsent}
         onChange={(informedConsent: InformedConsent) => update({ informedConsent })}
-        disabled={snapshotLocked}
+        disabled={snapshotLocked || consentLocked}
       />
         </div>
       )}

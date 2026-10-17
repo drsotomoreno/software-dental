@@ -25,6 +25,7 @@ export function buildRecordHashPayload(record: ClinicalRecord) {
     findings: record.findings,
     treatmentPlan: record.treatmentPlan,
     treatmentPlanNotes: record.treatmentPlanNotes ?? '',
+    treatmentPlanLegal: record.treatmentPlanLegal,
     budgetItems: record.budgetItems,
     orthodonticsBudget: record.orthodonticsBudget,
     dentalImplantsBudget: record.dentalImplantsBudget,

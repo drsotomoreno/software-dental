@@ -1,4 +1,5 @@
 import type { SignatureCaptureMetadata } from './signature'
+import type { SectionBiometricSignature } from './sectionSignature'
 
 /** Consentimiento informado — procedimientos odontológicos Colombia */
 import type { ConsentTemplateId } from '@/constants/consentTemplates'
@@ -14,6 +15,8 @@ export interface InformedConsent {
   /** Conservado por compatibilidad de historias firmadas; se iguala a la cédula. */
   professionalRegistry: string
   signedAt?: string
+  /** Sello de MasterSignatureModal. Presente solo si el consentimiento quedó bloqueado. */
+  legalSignature?: SectionBiometricSignature
 }
 
 export function createEmptyConsent(

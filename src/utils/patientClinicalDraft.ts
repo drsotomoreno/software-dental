@@ -8,6 +8,7 @@ import { normalizeAnamnesis } from '@/types/anamnesis'
 import { normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import { sortEvolutionNotesChronologically } from './recordIntegrity'
 import { toPatientForeignKey } from './patientId'
+import { preserveLegalSeals } from './masterSignature'
 
 function preserveImmutableEvolutionNotes(
   incoming: EvolutionNote[],
@@ -86,13 +87,13 @@ export async function savePatientClinicalDraft(
       existing?.evolutionNotes,
     ),
     valuationDraft: existing?.valuationDraft ?? null,
-    clinicalDraft: {
+    clinicalDraft: preserveLegalSeals(existing?.clinicalDraft ?? null, {
       ...normalized,
       evolutionNotes: preserveImmutableEvolutionNotes(
         normalized.evolutionNotes ?? [],
         existing?.clinicalDraft?.evolutionNotes,
       ),
-    },
+    }),
     odontogramDraft: odontogramDraft ?? existing?.odontogramDraft ?? null,
     updatedAt: now,
   })
