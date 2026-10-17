@@ -17,13 +17,13 @@ import {
   getAppointmentDisplayClasses,
   PROCEDURE_TYPE_CONFIG,
 } from '@/constants/procedures'
-import { isDayFullyBlocked, countDayBlocks } from '@/utils/scheduleBlocks'
+import { isDayFullyBlocked, countDayBlocks } from '../storage/scheduleBlocks'
 import {
   buildColumnIndexMap,
   getChairAbbreviation,
   getChairDisplayStyle,
-} from '@/utils/scheduleColumnStyles'
-import { usePatientPrecautionAlert } from '@/hooks/usePatientPrecautionAlert'
+} from '../storage/scheduleColumnStyles'
+import { useAgendaPrecautionActive } from '../core/clinicalBridge'
 
 interface MonthAppointmentEntryProps {
   apt: Appointment
@@ -50,8 +50,7 @@ function MonthAppointmentEntry({
   onAppointmentClick,
   onAppointmentContextMenu,
 }: MonthAppointmentEntryProps) {
-  const precautionAlert = usePatientPrecautionAlert(apt.patientId)
-  const hasPrecaution = precautionAlert?.active ?? false
+  const hasPrecaution = useAgendaPrecautionActive(apt.patientId)
 
   return (
     <button

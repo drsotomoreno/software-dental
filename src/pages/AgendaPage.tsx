@@ -1,4 +1,4 @@
-import { AgendaScheduler } from '@/components/agenda'
+import { AgendaScheduler } from '@/modules/agenda'
 
 export function AgendaPage() {
   return (
