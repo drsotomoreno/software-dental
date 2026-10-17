@@ -132,6 +132,8 @@ function getAgeYears(birthDate) {
   return age
 }
 
+export const validateRipsPackage = validateRipsPackageLocally
+
 export function hasBlockingValidationErrors(issues) {
   return issues.some((issue) => issue.level === 'error')
 }
