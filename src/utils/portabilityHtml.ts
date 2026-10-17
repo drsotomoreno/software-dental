@@ -2,6 +2,7 @@ import type { ClinicalHistoryExportPackage } from '@/types/portability'
 import { APP_NAME } from '@/constants/branding'
 import { formatDate } from './crypto'
 import { getEvolutionCatalogServices } from '@/utils/evolutionCatalogServices'
+import { formatAnatomicalZone } from '@/utils/treatmentPlanZone'
 
 function truncateHash(hash?: string, len = 16): string {
   if (!hash) return '—'
@@ -29,7 +30,13 @@ export function buildPortabilityHtml(pkg: ClinicalHistoryExportPackage): string 
                   .filter(Boolean)
                   .join(' · ')
               : n.procedure
-          return `<tr><td>${formatDate(n.date || n.createdAt)}</td><td>${procedureLabel}</td><td>${n.prescriptions || '—'}</td></tr>`
+          const siteLabel =
+            catalogServices.length > 0
+              ? catalogServices
+                  .map((service) => formatAnatomicalZone(service) || '—')
+                  .join(', ')
+              : '—'
+          return `<tr><td>${formatDate(n.date || n.createdAt)}</td><td>${procedureLabel}</td><td>${siteLabel}</td><td>${n.prescriptions || '—'}</td></tr>`
         })
         .join('')
 
@@ -49,7 +56,7 @@ export function buildPortabilityHtml(pkg: ClinicalHistoryExportPackage): string 
         ${
           notes
             ? `<h4>Notas de evolución</h4>
-        <table><thead><tr><th>Fecha</th><th>Procedimiento</th><th>Prescripciones</th></tr></thead><tbody>${notes}</tbody></table>`
+        <table><thead><tr><th>Fecha</th><th>Procedimiento</th><th>Diente / Zona</th><th>Prescripciones</th></tr></thead><tbody>${notes}</tbody></table>`
             : ''
         }
       </section>`

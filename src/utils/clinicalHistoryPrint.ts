@@ -807,10 +807,17 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
           : note.serviceName
             ? `${escapeHtml(note.serviceName)}${isNonRips ? ' (sin RIPS)' : ''}`
             : procedureFallback
+      const siteLabel =
+        catalogServices.length > 0
+          ? catalogServices
+              .map((service) => escapeHtml(formatAnatomicalZone(service) || '—'))
+              .join('<br>')
+          : '—'
 
       return `<tr>
           <td>${formatDate(note.date || note.createdAt)}</td>
           <td>${serviceLabel}</td>
+          <td>${siteLabel}</td>
           <td>${noteOrRx}</td>
           <td>${escapeHtml(note.professionalName)}</td>
         </tr>`
@@ -823,7 +830,7 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
       ${
         rows
           ? `<table>
-        <thead><tr><th>Fecha</th><th>Procedimiento</th><th>Nota de evolución / Prescripciones</th><th>Profesional</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Procedimiento</th><th>Diente / Zona</th><th>Nota de evolución / Prescripciones</th><th>Profesional</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`
           : '<p>Sin notas de evolución.</p>'

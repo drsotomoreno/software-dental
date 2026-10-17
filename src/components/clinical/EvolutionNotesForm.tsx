@@ -208,7 +208,8 @@ export function EvolutionNotesForm({
       {notes.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center">
           <p className="text-sm text-slate-600">
-            No hay notas de evolución. Registre cada cita con fecha, procedimiento y nota clínica.
+            No hay notas de evolución. Registre cada cita con fecha, procedimiento, diente o zona y
+            nota clínica.
           </p>
           {canAddNote && (
             <button type="button" onClick={addNote} className="btn-primary mt-4 text-sm">
