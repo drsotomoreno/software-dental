@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
+import { credentialsAreConfigured, readMinsaludAuthSettings } from './services/minsalud/settings.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const port = Number(process.env.PORT) || 3000
@@ -32,14 +33,8 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   minsalud: {
     sandbox: process.env.MINSALUD_SANDBOX !== 'false',
-    apiBaseUrl: (process.env.MINSALUD_API_BASE_URL ?? '').replace(/\/$/, ''),
-    authUrl: process.env.MINSALUD_AUTH_URL ?? '',
     validatePath: process.env.MINSALUD_VALIDATE_URL ?? '/api/v1/rips/validar',
-    clientId: process.env.MINSALUD_CLIENT_ID ?? '',
-    clientSecret: process.env.MINSALUD_CLIENT_SECRET ?? '',
-    username: process.env.MINSALUD_USERNAME ?? '',
-    password: process.env.MINSALUD_PASSWORD ?? '',
-    nit: process.env.MINSALUD_NIT ?? '',
+    ...readMinsaludAuthSettings(process.env),
   },
   dian: {
     softwareId: process.env.DIAN_SOFTWARE_ID ?? 'SOFTWARE-DENTAL-EMR',
@@ -76,13 +71,9 @@ export const config = {
   },
 }
 
-/** Credenciales completas para modo producción contra el API del ministerio. */
+/** Credenciales completas para LoginSISPRO o para el gateway client_credentials. */
 export function hasMinsaludCredentials() {
-  const { clientId, clientSecret, username, password, apiBaseUrl } = config.minsalud
-  return Boolean(
-    apiBaseUrl &&
-      ((clientId && clientSecret) || (username && password)),
-  )
+  return credentialsAreConfigured(config.minsalud)
 }
 
 export default config
