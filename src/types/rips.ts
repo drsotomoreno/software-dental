@@ -12,6 +12,8 @@ export interface RipsTransaction {
   tipoNota: string | null
   numNota: string | null
   usuarios: RipsUsuario[]
+  /** Acuerdo de voluntades / CUCON. Opcional mientras el cronograma SIIFA no lo exija. */
+  acuerdoVoluntades?: RipsAcuerdoVoluntades | null
   /** CUV MinSalud asociado a esta transacción (marca blanca / FEV) */
   cuv?: string | null
   /** CUFE DIAN asociado a la FEV */
@@ -34,12 +36,34 @@ export interface RipsUsuario {
   servicios: RipsServicios
 }
 
+export interface RipsRecienNacido {
+  codPrestador: string
+  tipoDocumentoIdentificacion: string
+  numDocumentoIdentificacion: string
+  fechaNacimiento: string
+  edadGestacional: number
+  numConsultasCPrenatal: number
+  codSexoBiologico: string
+  /** Gramos. RVC058 admite 400 a 6000. */
+  peso: number
+  codDiagnosticoPrincipal: string
+  consecutivo: number
+}
+
+export interface RipsAcuerdoVoluntades {
+  cucon?: string | null
+  numeroPoliza?: string | null
+  justificacionSinContrato?: string | null
+  coberturaPlanBeneficios?: string | null
+  modalidadPago?: string | null
+}
+
 export interface RipsServicios {
   consultas: RipsConsulta[]
   procedimientos: RipsProcedimiento[]
   urgencias: []
   hospitalizacion: []
-  recienNacidos: []
+  recienNacidos: RipsRecienNacido[]
   medicamentos: []
   otrosServicios: RipsOtroServicio[]
 }

@@ -98,6 +98,9 @@ export function buildHealthElectronicInvoiceDocument(
       conceptoRecaudo: invoice.healthSector.conceptoRecaudo,
       valorPagoModerador: invoice.healthSector.valorPagoModerador,
       numFEVPagoModerador: invoice.healthSector.numFEVPagoModerador ?? null,
+      cucon: invoice.healthSector.cucon ?? null,
+      numeroPoliza: invoice.healthSector.numeroPoliza ?? null,
+      justificacionSinContrato: invoice.healthSector.justificacionSinContrato ?? null,
       procedures: invoice.items.map((item) => ({
         lineNumber: item.lineNumber,
         cupsCode: item.cupsCode ?? null,

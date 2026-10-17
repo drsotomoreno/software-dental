@@ -8,6 +8,7 @@ import {
   DIAN_IVA_EXCLUIDO_NORMA,
   buildExcludedIvaBreakdown,
 } from '../../shared/dianHealthTax.js'
+import { renderAcuerdoVoluntadesXml } from '../../shared/fevRips/acuerdoVoluntades.js'
 
 function escapeXml(value) {
   return String(value ?? '')
@@ -59,6 +60,9 @@ ${indent}</cac:TaxTotal>`
  * @param {string} params.issueDate
  * @param {number} params.payableAmount
  * @param {string} [params.codPrestadorReps]
+ * @param {string} [params.modalidadPago]
+ * @param {string} [params.coberturaPlanBeneficios]
+ * @param {object} [params.acuerdoVoluntades]
  */
 export function buildDianHealthInvoiceXml({
   cuv,
@@ -71,6 +75,9 @@ export function buildDianHealthInvoiceXml({
   payableAmount,
   lines = [],
   codPrestadorReps,
+  modalidadPago,
+  coberturaPlanBeneficios,
+  acuerdoVoluntades,
 }) {
   if (!cuv?.trim()) {
     throw new Error('El CUV es obligatorio para generar la FEV-Salud ante la DIAN.')
@@ -82,6 +89,14 @@ export function buildDianHealthInvoiceXml({
   const repsXml = reps.valid
     ? `
           <salud:CodigoPrestadorREPS>${escapeXml(reps.digits)}</salud:CodigoPrestadorREPS>`
+    : ''
+  const acuerdoXml = renderAcuerdoVoluntadesXml(acuerdoVoluntades, {
+    modalidadPago,
+    coberturaPlanBeneficios,
+  })
+  const acuerdoBlock = acuerdoXml
+    ? `
+          ${acuerdoXml}`
     : ''
 
   const lineXml = lines
@@ -123,8 +138,8 @@ ${excludedIvaTaxTotalXml(lineExtension, '      ')}
         </sts:DianExtensions>
         <salud:SectorSalud>
           <salud:CodigoUnicoValidacion>${escapeXml(cuv)}</salud:CodigoUnicoValidacion>${repsXml}
-          <salud:NumeroFacturaVinculada>${escapeXml(numFactura)}</salud:NumeroFacturaVinculada>
-          <salud:ResolucionAplicable>Resolución 2275 de 2023</salud:ResolucionAplicable>
+          <salud:NumeroFacturaVinculada>${escapeXml(numFactura)}</salud:NumeroFacturaVinculada>${acuerdoBlock}
+          <salud:ResolucionAplicable>Resolución 948 de 2026</salud:ResolucionAplicable>
         </salud:SectorSalud>
       </ext:ExtensionContent>
     </ext:UBLExtension>

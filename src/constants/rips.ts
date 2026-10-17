@@ -1,4 +1,4 @@
-import type { DocumentType, RegimeType } from '@/types/patient'
+import type { DocumentType } from '@/types/patient'
 import type { DiagnosisCertainty } from '@/types/clinicalRecord'
 
 /** CUPS — Consulta de primera vez por odontología general (89.0.2.03) */
@@ -154,13 +154,8 @@ export const RIPS_DEFAULTS = {
   codServicio: 1,
 } as const
 
-/** tipoUsuario según catálogo MinSalud / SISPRO */
-export const REGIME_TO_TIPO_USUARIO: Record<RegimeType, string> = {
-  contributivo: '01',
-  subsidiado: '02',
-  especial: '03',
-  particular: '04',
-}
+/** tipoUsuario RIPSTipoUsuarioVersion2. El subsidiado es 04, no 02. */
+export { REGIME_TO_TIPO_USUARIO } from '../../shared/fevRips/suggestSector.js'
 
 export const DOCUMENT_TYPE_RIPS: Record<DocumentType, string> = {
   CC: 'CC',
@@ -191,16 +186,17 @@ export const DIAGNOSIS_CERTAINTY_TO_RIPS: Record<DiagnosisCertainty, string> = {
 
 export const TIPO_USUARIO_LABELS: Record<string, string> = {
   '01': 'Contributivo cotizante',
-  '02': 'Subsidiado',
-  '03': 'Vinculado',
-  '04': 'Particular',
-  '05': 'Tomador / Amparado ARL',
-  '06': 'Tomador / Amparado SOAT',
-  '07': 'Tomador / Amparado planes voluntarios',
-  '08': 'Tomador / Amparado planes de salud',
-  '09': 'Tomador / Amparado Fosyga',
-  '10': 'Tomador / Amparado SOAT',
-  '11': 'Tomador / Amparado otros',
-  '12': 'Especial o Excepción cotizante',
-  '13': 'Especial o Excepción beneficiario',
+  '02': 'Contributivo beneficiario',
+  '03': 'Contributivo adicional',
+  '04': 'Subsidiado',
+  '05': 'No afiliado',
+  '06': 'Especial o de excepción cotizante',
+  '07': 'Especial o de excepción beneficiario',
+  '08': 'Persona privada de la libertad a cargo del FNSPPL',
+  '09': 'Tomador / amparado ARL',
+  '10': 'Tomador / amparado SOAT',
+  '11': 'Tomador / amparado planes voluntarios de salud',
+  '12': 'Particular',
+  '13': 'Especial o de excepción no cotizante',
+  '14': 'Lesionado en accidente de tránsito sin seguro SOAT',
 }

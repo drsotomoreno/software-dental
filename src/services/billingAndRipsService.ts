@@ -7,6 +7,7 @@ import type {
 import type { ElectronicInvoice } from '@/types/invoice'
 import type { Patient } from '@/types/patient'
 import { DOCUMENT_TYPE_RIPS, REGIME_TO_TIPO_USUARIO } from '@/constants/rips'
+import { suggestFevSector } from '../../shared/fevRips/suggestSector.js'
 import { validateRipsWithMinistry, routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
 import {
   buildDianProviderPayload,
@@ -178,8 +179,7 @@ export async function processClinicalSession(
         buyerName: mapPatientBillingData(patient).fullName,
         healthSector: {
           codPrestadorReps: metadata.codPrestador,
-          modalidadPago: '01',
-          coberturaPlanBeneficios: '01',
+          ...suggestFevSector(patient.regime),
           tipoUsuario: mapPatientBillingData(patient).tipoUsuario,
         },
         subtotal: 0,

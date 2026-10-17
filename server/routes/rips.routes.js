@@ -106,10 +106,16 @@ router.post('/validate-local', (req, res) => {
     return res.status(400).json({ success: false, error: 'El cuerpo debe incluir rips.' })
   }
 
+  const fev = req.body?.fev ?? {}
   const issues = validateRipsPackageLocally(rips, {
     crossValidateAgeSex: true,
     perfilFiscal: perfilFiscal ?? metadatos?.perfilFiscal,
     esRipsTemporal: esRipsTemporal ?? metadatos?.esRipsTemporal,
+    coberturaPlanBeneficios: fev.coberturaPlanBeneficios ?? metadatos?.coberturaPlanBeneficios,
+    modalidadPago: fev.modalidadPago ?? metadatos?.modalidadPago,
+    acuerdoVoluntades: fev.acuerdoVoluntades ?? metadatos?.acuerdoVoluntades,
+    checkAcuerdo: true,
+    requireSectorFields: Boolean(fev.coberturaPlanBeneficios || fev.modalidadPago),
   })
   res.json({
     success: !hasBlockingValidationErrors(issues),

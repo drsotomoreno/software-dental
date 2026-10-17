@@ -59,6 +59,9 @@ export interface MinSaludHealthSectorData {
   conceptoRecaudo?: string
   valorPagoModerador?: number
   numFEVPagoModerador?: string | null
+  cucon?: string | null
+  numeroPoliza?: string | null
+  justificacionSinContrato?: string | null
   procedures: Array<{
     lineNumber: number
     cupsCode: string | null

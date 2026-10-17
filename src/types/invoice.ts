@@ -12,17 +12,28 @@ export type InvoiceStatus =
   | 'cancelled'
   | 'voided_by_credit_note'
 
-/** Modalidad de pago sector salud (RIPS / FEV-Salud) */
-export type HealthPaymentModality = '01' | '02' | '03' | '04'
+/** Modalidad de pago sector salud (RIPS / FEV-Salud, Res. 948) */
+export type HealthPaymentModality = '01' | '02' | '03' | '04' | '05'
 
-/** Cobertura o plan de beneficios */
+/** Cobertura o plan de beneficios. 01 está inactiva; UPC vigente es 16 o 17. */
 export type HealthCoveragePlan =
-  | '01' // Plan de beneficios en salud
-  | '02' // Presupuesto máximo
-  | '03' // Prima
-  | '04' // Cobertura Póliza SOAT
-  | '05' // Cobertura ARL
-  | '09' // Otra
+  | '01'
+  | '02'
+  | '03'
+  | '04'
+  | '05'
+  | '06'
+  | '07'
+  | '08'
+  | '09'
+  | '10'
+  | '11'
+  | '12'
+  | '13'
+  | '14'
+  | '15'
+  | '16'
+  | '17'
 
 /** Campos sectoriales obligatorios MinSalud / DIAN FEV-Salud */
 export interface HealthSectorInvoiceFields {
@@ -42,6 +53,15 @@ export interface HealthSectorInvoiceFields {
   valorPagoModerador?: number
   /** Nº FEV del pago moderador (si aplica) */
   numFEVPagoModerador?: string | null
+  /**
+   * CUCON (Res. 948). Transitorio: si falta, la generación no se bloquea.
+   * 64 caracteres hexadecimales cuando SIIFA ya lo entregó.
+   */
+  cucon?: string | null
+  /** Póliza SOAT o de plan voluntario, cuando la cobertura lo exige. */
+  numeroPoliza?: string | null
+  /** Código de la tabla «Justificación facturas sin contrato» cuando no hay CUCON. */
+  justificacionSinContrato?: string | null
 }
 
 /** Línea de detalle de factura electrónica */

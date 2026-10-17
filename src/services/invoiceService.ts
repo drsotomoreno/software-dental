@@ -14,7 +14,8 @@ import type {
 import type { DianInvoicePayload } from '@/types/ripsCuv'
 import type { RipsExportMetadata } from '@/types/rips'
 import type { UserProfile } from '@/types/user'
-import { DOCUMENT_TYPE_RIPS, REGIME_TO_TIPO_USUARIO, RIPS_DEFAULTS } from '@/constants/rips'
+import { DOCUMENT_TYPE_RIPS, RIPS_DEFAULTS } from '@/constants/rips'
+import { suggestFevSector } from '../../shared/fevRips/suggestSector.js'
 import { DEFAULT_ODONTOLOGY_CONSULTATION_CUPS } from '@/constants/rips'
 import { normalizeCupsCode } from '@/services/catalogService'
 import { validateRipsWithMinistry } from '@/services/ripsApiService'
@@ -69,20 +70,20 @@ function buildHealthSectorDefaults(
   professional: UserProfile,
   overrides?: Partial<HealthSectorInvoiceFields>,
 ): HealthSectorInvoiceFields {
-  const tipoUsuario =
-    patient.regime != null
-      ? REGIME_TO_TIPO_USUARIO[patient.regime]
-      : REGIME_TO_TIPO_USUARIO.particular
+  const sector = suggestFevSector(patient.regime ?? 'particular')
 
   return {
     codPrestadorReps: normalizeCodPrestador(professional.repsCode ?? ''),
-    modalidadPago: '01',
-    coberturaPlanBeneficios: '01',
-    tipoUsuario,
+    modalidadPago: sector.modalidadPago,
+    coberturaPlanBeneficios: sector.coberturaPlanBeneficios,
+    tipoUsuario: sector.tipoUsuario,
     numAutorizacion: null,
-    conceptoRecaudo: RIPS_DEFAULTS.conceptoRecaudoParticular,
+    conceptoRecaudo: sector.conceptoRecaudo ?? RIPS_DEFAULTS.conceptoRecaudoParticular,
     valorPagoModerador: 0,
     numFEVPagoModerador: null,
+    cucon: null,
+    numeroPoliza: null,
+    justificacionSinContrato: null,
     ...overrides,
   }
 }

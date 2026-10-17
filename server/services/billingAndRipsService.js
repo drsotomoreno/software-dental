@@ -93,10 +93,16 @@ export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user })
     clinicId: metadatos.clinicId || user?.clinicId || user?.id || null,
   }
 
+  const sector = invoice?.healthSector ?? {}
   const localIssues = validateRipsPackageLocally(payload, {
     perfilFiscal,
     esRipsTemporal: false,
     crossValidateAgeSex: true,
+    coberturaPlanBeneficios: sector.coberturaPlanBeneficios ?? invoice?.coberturaPlanBeneficios,
+    modalidadPago: sector.modalidadPago ?? invoice?.modalidadPago,
+    acuerdoVoluntades: invoice?.acuerdoVoluntades ?? sector,
+    checkAcuerdo: true,
+    requireSectorFields: Boolean(sector.coberturaPlanBeneficios || invoice?.coberturaPlanBeneficios),
   })
   if (hasBlockingValidationErrors(localIssues)) {
     return {
@@ -150,6 +156,9 @@ export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user })
       payableAmount: invoice.payableAmount,
       lines: invoice.lines ?? [],
       codPrestadorReps: invoice.codPrestadorReps,
+      modalidadPago: invoice.modalidadPago ?? invoice.healthSector?.modalidadPago,
+      coberturaPlanBeneficios: invoice.coberturaPlanBeneficios ?? invoice.healthSector?.coberturaPlanBeneficios,
+      acuerdoVoluntades: invoice.acuerdoVoluntades ?? invoice.healthSector,
     })
     cuvRecord.dianXmlGenerated = true
   }

@@ -4,6 +4,7 @@
  */
 
 import { validateRipsStructureSyntax } from '../../shared/ripsStructureValidation.js'
+import { validateFevRipsSchemas } from '../../shared/fevRips/validateFevRipsSchemas.js'
 
 function pushError(errors, field, message, extra = {}) {
   errors.push({ level: 'error', field, message, ...extra })
@@ -29,6 +30,20 @@ function normalizeCups(code) {
  */
 export function validateRipsPackageLocally(rips, context = {}) {
   const errors = []
+  const acuerdo = context.acuerdoVoluntades ?? rips?.acuerdoVoluntades
+  const coberturaPlanBeneficios = context.coberturaPlanBeneficios ?? acuerdo?.coberturaPlanBeneficios
+  const modalidadPago = context.modalidadPago ?? acuerdo?.modalidadPago
+
+  errors.push(...validateFevRipsSchemas({
+    rips,
+    fev: {
+      coberturaPlanBeneficios,
+      modalidadPago,
+      acuerdoVoluntades: acuerdo,
+    },
+    enforceCrossMatrix: context.requireSectorFields === true || Boolean(coberturaPlanBeneficios || modalidadPago),
+    checkAcuerdo: context.checkAcuerdo === true || Boolean(acuerdo),
+  }))
 
   const structureIssues = validateRipsStructureSyntax(rips, {
     fechaGeneracion: context.fechaGeneracion ?? new Date(),
