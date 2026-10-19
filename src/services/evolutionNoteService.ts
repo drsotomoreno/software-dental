@@ -1,55 +1,26 @@
 import { db } from '@/db/database'
-import type { EvolutionNote } from '@/types/evolutionNote'
+import type { EvolutionNote, Evolucion } from '@/types/evolutionNote'
 import {
-  EVOLUTION_NOTE_IMMUTABILITY_MESSAGE,
+  EvolutionNoteImmutableError,
   isEvolutionNoteImmutable,
 } from '@/types/evolutionNote'
+import { finalizeEvolutionNote } from '@/services/evolutionNoteIntegrity'
 import type { EvolutionNoteAddendum } from '@/types/evolutionNoteAddendum'
 import type { SyncOutboxEntityType, SyncOutboxEntry } from '@/types/syncOutbox'
 import { computeContentHash, generateId, serializeForHash } from '@/utils'
 
-export class EvolutionNoteImmutableError extends Error {
-  constructor(message = EVOLUTION_NOTE_IMMUTABILITY_MESSAGE) {
-    super(message)
-    this.name = 'EvolutionNoteImmutableError'
-  }
-}
+export { EvolutionNoteImmutableError } from '@/types/evolutionNote'
+export {
+  buildEvolutionNoteHashPayload,
+  computeEvolutionNoteContentHash,
+  finalizeEvolutionNote,
+} from '@/services/evolutionNoteIntegrity'
 
 export function assertEvolutionNoteMutable(
-  note: Pick<EvolutionNote, 'id' | 'signedAt' | 'contentHash' | 'isLocked'>,
+  note: Pick<EvolutionNote, 'id' | 'signedAt' | 'contentHash' | 'isLocked' | 'status' | 'isSigned'>,
 ): void {
   if (isEvolutionNoteImmutable(note)) {
     throw new EvolutionNoteImmutableError()
-  }
-}
-
-/** Payload canónico para hash SHA-256 de una nota de evolución. */
-export function buildEvolutionNoteHashPayload(note: EvolutionNote) {
-  return {
-    id: note.id,
-    kind: note.kind ?? 'evolution',
-    parentEvolutionNoteId: note.parentEvolutionNoteId ?? null,
-    parentEvolutionNoteHash: note.parentEvolutionNoteHash ?? null,
-    addendumReason: note.addendumReason ?? null,
-    date: note.date,
-    procedure: note.procedure,
-    anesthesia: note.anesthesia,
-    prescriptions: note.prescriptions,
-    professionalName: note.professionalName,
-    professionalLicense: note.professionalLicense,
-    authorUserId: note.authorUserId ?? null,
-    authorEmail: note.authorEmail ?? null,
-    createdAt: note.createdAt,
-    catalogServices: note.catalogServices ?? null,
-    dentalServiceId: note.dentalServiceId ?? null,
-    serviceName: note.serviceName ?? null,
-    requiereCupsRips: note.requiereCupsRips ?? null,
-    clinicalNote: note.clinicalNote ?? null,
-    cupsCode: note.cupsCode ?? null,
-    professionalSignatureDataUrl: note.professionalSignatureDataUrl ?? null,
-    professionalSignatureMeta: note.professionalSignatureMeta ?? null,
-    cost: note.cost ?? null,
-    isBillable: note.isBillable ?? null,
   }
 }
 
@@ -79,28 +50,10 @@ export function buildEvolutionAddendumHashPayload(
   }
 }
 
-export async function computeEvolutionNoteContentHash(note: EvolutionNote): Promise<string> {
-  return computeContentHash(serializeForHash(buildEvolutionNoteHashPayload(note)))
-}
-
 export async function computeEvolutionAddendumContentHash(
   addendum: Omit<EvolutionNoteAddendum, 'contentHash'>,
 ): Promise<string> {
   return computeContentHash(serializeForHash(buildEvolutionAddendumHashPayload(addendum)))
-}
-
-/** Marca la nota como grabada/firmada con timestamp UTC y hash SHA-256. */
-export async function finalizeEvolutionNote(
-  note: EvolutionNote,
-  signedAtUtc = new Date().toISOString(),
-): Promise<EvolutionNote> {
-  const contentHash = await computeEvolutionNoteContentHash(note)
-  return {
-    ...note,
-    signedAt: signedAtUtc,
-    contentHash,
-    isLocked: true,
-  }
 }
 
 export async function finalizeEvolutionNotes(
@@ -159,6 +112,8 @@ export function createAddendumDraftNote(
     createdAt: new Date().toISOString(),
     clinicalNote: '',
     requiereCupsRips: false,
+    status: 'borrador',
+    isSigned: false,
     isLocked: false,
   }
 }
@@ -215,13 +170,33 @@ export async function persistEvolutionNoteAddendum(
   )
 }
 
+/** Guarda la evolución ya firmada. No toca la fila de la historia ni su apertura. */
+export async function guardarEvolucionFirmada(
+  patientId: string,
+  note: EvolutionNote,
+  clinicalRecordId?: string,
+): Promise<Evolucion> {
+  const row: Evolucion = {
+    ...note,
+    patientId,
+    clinicalRecordId,
+    status: 'firmada',
+    isSigned: true,
+    isLocked: true,
+    signedBy: note.signedBy ?? note.authorUserId ?? '',
+    signatureData: note.signatureData ?? note.professionalSignatureDataUrl ?? '',
+  }
+  await db.evolutions.put(row)
+  await ensureEvolutionNoteOutboxCreate(patientId, row)
+  return row
+}
+
 export async function persistSignedEvolutionNoteCreate(
   patientId: string,
   note: EvolutionNote,
+  clinicalRecordId?: string,
 ): Promise<EvolutionNote> {
   const signed = await finalizeEvolutionNote(note)
-  const entityType =
-    signed.kind === 'addendum' ? 'evolution_note_addendum' : 'evolution_note'
-  await enqueueEvolutionOutboxCreate(patientId, entityType, signed.id, signed)
+  await guardarEvolucionFirmada(patientId, signed, clinicalRecordId)
   return signed
 }

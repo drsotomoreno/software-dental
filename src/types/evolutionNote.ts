@@ -2,8 +2,18 @@ import type { SignatureCaptureMetadata } from '@/types/signature'
 
 export type EvolutionNoteKind = 'evolution' | 'addendum'
 
+/** Ciclo de vida de una evolución. Independiente de la firma de apertura de la historia. */
+export type EvolutionStatus = 'borrador' | 'firmada'
+
 export const EVOLUTION_NOTE_IMMUTABILITY_MESSAGE =
   'Por norma legal (Res. 1995/1999), las notas clínicas firmadas son inmutables. Debe realizar una nota aclaratoria (Addendum).'
+
+export class EvolutionNoteImmutableError extends Error {
+  constructor(message = EVOLUTION_NOTE_IMMUTABILITY_MESSAGE) {
+    super(message)
+    this.name = 'EvolutionNoteImmutableError'
+  }
+}
 
 /** Notas de evolución clínica por sesión */
 export interface AnesthesiaRecord {
@@ -66,13 +76,28 @@ export interface EvolutionNote {
   isBillable?: boolean
   /**
    * Bloqueo de este folio/sesión (Res. 1995/1999).
-   * No congela la historia del paciente ni el odontograma general.
+   * No congela la historia del paciente, la firma de apertura ni el odontograma general.
    */
   isLocked?: boolean
+  /** borrador = editable; firmada = inalterable. No re-firma la apertura de la historia. */
+  status?: EvolutionStatus
+  /** Firma propia de esta evolución. Distinta de `HistoriaClinica.isSigned`. */
+  isSigned?: boolean
+  /** Profesional tratante que firmó esta evolución. */
+  signedBy?: string
+  /** Trazo de la firma de esta evolución (data URL). No reemplaza la firma de apertura. */
+  signatureData?: string
   /** Marca UTC de grabación/firma — activa inmutabilidad (Res. 1995/1999). */
   signedAt?: string
   /** SHA-256 del contenido de la nota (Ley 527 de 1999). */
   contentHash?: string
+}
+
+/** Evolución persistida como registro hijo de la historia clínica. */
+export interface Evolucion extends EvolutionNote {
+  patientId: string
+  /** Historia de apertura a la que pertenece. No se reescribe al firmar la evolución. */
+  clinicalRecordId?: string
 }
 
 /** Folio / sesión clínica — unidad de bloqueo de la HCE (Res. 1995/1999). */
@@ -87,19 +112,24 @@ export function isEvolutionNoteAddendum(
 }
 
 export function isEvolutionFolioLocked(
-  note: Pick<EvolutionNote, 'isLocked' | 'signedAt' | 'contentHash'>,
+  note: Pick<EvolutionNote, 'isLocked' | 'signedAt' | 'contentHash' | 'status' | 'isSigned'>,
 ): boolean {
-  return note.isLocked === true || Boolean(note.signedAt?.trim() && note.contentHash?.trim())
+  return (
+    note.isLocked === true ||
+    note.isSigned === true ||
+    note.status === 'firmada' ||
+    Boolean(note.signedAt?.trim() && note.contentHash?.trim())
+  )
 }
 
 export function isEvolutionNoteImmutable(
-  note: Pick<EvolutionNote, 'isLocked' | 'signedAt' | 'contentHash'>,
+  note: Pick<EvolutionNote, 'isLocked' | 'signedAt' | 'contentHash' | 'status' | 'isSigned'>,
 ): boolean {
   return isEvolutionFolioLocked(note)
 }
 
 export function isEvolutionNoteMutable(
-  note: Pick<EvolutionNote, 'isLocked' | 'signedAt' | 'contentHash'>,
+  note: Pick<EvolutionNote, 'isLocked' | 'signedAt' | 'contentHash' | 'status' | 'isSigned'>,
 ): boolean {
   return !isEvolutionNoteImmutable(note)
 }
@@ -123,6 +153,8 @@ export function createEmptyEvolutionNote(
     createdAt: new Date().toISOString(),
     catalogServices: [],
     kind: 'evolution',
+    status: 'borrador',
+    isSigned: false,
     isLocked: false,
   }
 }

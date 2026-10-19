@@ -3,6 +3,7 @@ import {
   isEvolutionNoteAddendum,
   isEvolutionNoteImmutable,
 } from '@/types/evolutionNote'
+import { textoEstadoEvolucion } from '@/services/clinicalHistorySignature'
 import { formatDate } from '@/utils'
 import { VoiceDictationButton } from '@/components/voice'
 import { DigitalSignatureCanvas } from '@/components/signature'
@@ -67,16 +68,20 @@ export function EvolutionNoteCard({
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-slate-700">
-            {isAddendum ? 'Aclaratoria' : `Nota #${index + 1}`}
-            {note.date && (
-              <span className="ml-2 font-normal text-slate-500">— {formatDate(note.date)}</span>
+            {isAddendum ? 'Aclaratoria' : `Evolución del ${note.date ? formatDate(note.date) : 'hoy'}`}
+            {!isAddendum && (
+              <span className="ml-2 font-normal text-slate-400">#{index + 1}</span>
             )}
           </span>
-          {immutable && (
-            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-              Firmada — inmutable
-            </span>
-          )}
+          <span
+            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              immutable
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-amber-100 text-amber-900'
+            }`}
+          >
+            {textoEstadoEvolucion(note)}
+          </span>
           {isAddendum && (
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
               Addendum
@@ -105,7 +110,7 @@ export function EvolutionNoteCard({
               onClick={onSign}
               className="text-xs font-medium text-dental-700 hover:text-dental-900"
             >
-              Firmar y grabar
+              Firmar evolución
             </button>
           )}
           {!readOnly && !immutable && (
