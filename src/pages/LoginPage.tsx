@@ -56,13 +56,18 @@ export function LoginPage() {
     e.preventDefault()
     setError('')
     setSubmitting(true)
-    const result = await login(email, password.trim())
-    setSubmitting(false)
-    if (!result.ok) {
-      setError(result.error)
-      return
+    try {
+      const result = await login(email, password.trim())
+      if (!result.ok) {
+        setError(result.error)
+        return
+      }
+      navigate(result.requiresSubscription ? '/welcome-trial' : afterLogin, { replace: true })
+    } catch {
+      setError('No se pudo conectar con el servidor. Intente de nuevo.')
+    } finally {
+      setSubmitting(false)
     }
-    navigate(result.requiresSubscription ? '/welcome-trial' : afterLogin, { replace: true })
   }
 
   const requestCode = async () => {

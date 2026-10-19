@@ -87,6 +87,8 @@ export function poolConfig(url) {
     max: 2,
     connectionTimeoutMillis: 8_000,
     idleTimeoutMillis: 20_000,
+    // Una consulta colgada no puede retener el único hilo del login.
+    query_timeout: 8_000,
   }
   try {
     const parsed = new URL(url)

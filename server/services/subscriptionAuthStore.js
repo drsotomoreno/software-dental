@@ -19,7 +19,6 @@ import { formatNitInput, validateProviderNit } from '../../shared/nit.js'
 import { sanitizeRepsInput } from '../../shared/prestadorIdentity.js'
 import { isInstitutionProvider, normalizeProviderType } from '../../shared/providerType.js'
 import { keepStoredDocumentNumber, validateProfessionalDocumentNumber } from '../../shared/professionalDocument.js'
-import { dominantDocumentFromClinic } from './professionalDocumentBackfill.js'
 import {
   DEFAULT_PERFIL_FISCAL,
   isNoObligadoFev,
@@ -355,92 +354,57 @@ function createSessionForUser(user) {
 
 
 
-/** Crea o actualiza la cuenta SuperAdmin por defecto al iniciar el servidor. */
-
+/**
+ * Crea o actualiza la cuenta SuperAdmin.
+ * No lee el snapshot clínico: esa lectura (historias y archivos) bloqueaba
+ * el proceso en cada inicio de sesión y dejaba el botón en «Ingresando…».
+ * La cédula se recupera al abrir la historia, no aquí.
+ */
 export async function ensureSuperAdmin() {
-
   const store = await loadStore()
-
   const email = SUPERADMIN_EMAIL
-
   const now = new Date().toISOString()
-
   const passwordHash = hashPasswordSha256(MASTER_PASSWORD)
-
   const existingIndex = store.users.findIndex((user) => normalizeEmail(user.email) === email)
-
-
+  let changed = false
 
   if (existingIndex === -1) {
-
     store.users.push({
-
       id: randomUUID(),
-
       nombre: config.superAdmin.nombre,
-
       email,
-
       passwordHash,
-
       rol: 'superadmin',
-
       estado_pago: 'exento',
-
       fecha_vencimiento: null,
-
       createdAt: now,
-
       updatedAt: now,
-
     })
-
+    changed = true
   } else {
-
     const existing = store.users[existingIndex]
-    const documentType = existing.documentType || 'CC'
-    let documentNumber = existing.documentNumber
-    if (!validateProfessionalDocumentNumber(documentNumber, documentType).valid) {
-      try {
-        const recovered = await dominantDocumentFromClinic({ ...existing, documentType })
-        const taken = Boolean(
-          recovered &&
-            store.users.some(
-              (item) =>
-                item.id !== existing.id &&
-                validateProfessionalDocumentNumber(item.documentNumber, item.documentType || 'CC').normalized ===
-                  recovered,
-            ),
-        )
-        if (recovered && !taken) documentNumber = recovered
-      } catch (error) {
-        console.error(
-          '[Auth] No se pudo recuperar la cédula desde las atenciones:',
-          error instanceof Error ? error.message : error,
-        )
+    const nextHash = existing.passwordHash || passwordHash
+    const same =
+      normalizeEmail(existing.email) === email &&
+      normalizeRole(existing.rol) === 'superadmin' &&
+      existing.estado_pago === 'exento' &&
+      existing.passwordHash === nextHash
+    if (!same) {
+      store.users[existingIndex] = {
+        ...existing,
+        email,
+        rol: 'superadmin',
+        estado_pago: 'exento',
+        passwordHash: nextHash,
+        updatedAt: now,
       }
+      changed = true
     }
-    store.users[existingIndex] = {
-      ...existing,
-      email,
-      rol: 'superadmin',
-      estado_pago: 'exento',
-      passwordHash: existing.passwordHash || passwordHash,
-      documentType,
-      ...(documentNumber ? { documentNumber } : {}),
-      updatedAt: now,
-    }
-
   }
 
-
-
-  seedClinicUsers(store)
-
-  await saveStore(store)
-
+  if (seedClinicUsers(store)) changed = true
+  if (changed) await saveStore(store)
   console.log(`[Auth] SuperAdmin listo: ${email}`)
-
 }
 
 
@@ -833,6 +797,28 @@ export async function issueMasterSessionToken(existingToken) {
   const token = existingToken || randomBytes(32).toString('hex')
   await adoptSessionToken(store, token, user)
   return { ok: true, token, user: sanitizeUser(user), expiresAt: addDays(new Date(), 3650) }
+}
+
+/** Sesión de superadmin sin tocar PostgreSQL. Sirve cuando la base no responde. */
+export function issueMasterSessionFallback(existingToken) {
+  const token = existingToken || `superadmin-local-${randomBytes(16).toString('hex')}`
+  const expiresAt = addDays(new Date(), 3650)
+  const user = {
+    id: 'superadmin-session',
+    nombre: config.superAdmin.nombre,
+    email: MASTER_EMAIL,
+    rol: 'superadmin',
+    estado_pago: 'exento',
+    fecha_vencimiento: null,
+  }
+  rememberLiveSession({
+    token,
+    userId: user.id,
+    rol: 'superadmin',
+    createdAt: new Date().toISOString(),
+    expiresAt,
+  })
+  return { ok: true, token, user, expiresAt }
 }
 
 export async function resolveSubscriptionSession(token, hint = {}) {
