@@ -37,28 +37,28 @@ test('una copia más nueva sin cédula no borra la que ya estaba guardada', () =
   assert.equal(merged.users[0].rethusNumber, '12345678')
 })
 
-test('la URL externa de Render usa SSL sin verificar la CA', () => {
+test('el endpoint de RDS usa SSL sin verificar la CA', () => {
   const config = poolConfig(
-    'postgresql://user:secret@dpg-abc123-a.oregon-postgres.render.com:5432/mydb?sslmode=require',
+    'postgresql://user:secret@software-dental.abc123.us-east-1.rds.amazonaws.com:5432/mydb?sslmode=require',
   )
   assert.deepEqual(config.ssl, { rejectUnauthorized: false })
-  assert.equal(config.host, 'dpg-abc123-a.oregon-postgres.render.com')
+  assert.equal(config.host, 'software-dental.abc123.us-east-1.rds.amazonaws.com')
   assert.equal(config.port, 5432)
   assert.equal(config.database, 'mydb')
   assert.equal(config.connectionString, undefined)
 })
 
-test('el host interno de Render y localhost no fuerzan TLS', () => {
-  assert.equal(poolConfig('postgresql://user:secret@dpg-abc123-a/mydb').ssl, false)
+test('localhost y un host sin dominio no fuerzan TLS', () => {
+  assert.equal(poolConfig('postgresql://user:secret@postgres/mydb').ssl, false)
   assert.equal(
     poolConfig('postgresql://postgres:postgres@localhost:5432/software_dental').ssl,
     false,
   )
 })
 
-test('una contraseña con % no apaga el SSL de la base externa', () => {
+test('una contraseña con % no apaga el SSL de RDS', () => {
   const config = poolConfig(
-    'postgresql://user:100%@dpg-abc123-a.oregon-postgres.render.com/mydb',
+    'postgresql://user:100%@software-dental.abc123.us-east-1.rds.amazonaws.com/mydb',
   )
   assert.deepEqual(config.ssl, { rejectUnauthorized: false })
   assert.equal(config.password, '100%')

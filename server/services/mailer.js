@@ -264,13 +264,13 @@ function describeMailError(error) {
     .join(' ')
 
   if (/MAIL_NOT_CONFIGURED/i.test(raw)) {
-    return 'El servidor no tiene correo configurado. Agregue RESEND_API_KEY en Render o guarde la clave en Perfil → Correo de verificación.'
+    return 'El servidor no tiene correo configurado. Agregue RESEND_API_KEY en el .env de la instancia EC2 (pm2 restart software-dental --update-env) o guarde la clave en Perfil → Correo de verificación.'
   }
   if (/MAIL_MISSING_RECIPIENT/i.test(raw)) {
     return 'No se pudo enviar el código porque falta el correo del usuario que se está registrando.'
   }
   if (/invalid.*api key|unauthorized|401/i.test(raw)) {
-    return 'La clave de Resend no es válida. Revise RESEND_API_KEY en Render.'
+    return 'La clave de Resend no es válida. Revise RESEND_API_KEY en el .env de la instancia EC2 y reinicie con pm2 restart software-dental --update-env.'
   }
   if (/own email|testing emails/i.test(raw)) {
     return 'Resend en modo prueba rechaza el envío a correos distintos de la cuenta de Resend. El código debe ir al correo del formulario (Yahoo u otro); para permitirlo hay que verificar mihistoriadental.com en resend.com/domains.'
