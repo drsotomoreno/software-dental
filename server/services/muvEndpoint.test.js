@@ -3,8 +3,10 @@ import test from 'node:test'
 import { readFevRipsSettings } from './fevRipsService.js'
 import { resolveMinsaludSettings } from './minsaludService.js'
 import {
+  MUV_PRODUCTION_APP_VERSION,
   MUV_PRODUCTION_BASE_URL,
   MUV_SANDBOX_BASE_URL,
+  MUV_STAGE_APP_VERSION,
   resolveMuvEndpoint,
 } from './muvEndpoint.js'
 
@@ -62,11 +64,14 @@ test('MinsaludService y el cliente FEV radican en el host que corresponde', () =
   const production = resolveMinsaludSettings({ ...CREDENCIALES, MINSALUD_ENV: 'production' })
   const sandboxOff = readFevRipsSettings({ ...CREDENCIALES, MINSALUD_SANDBOX: 'false' })
 
+  assert.equal(stage.appVersion, MUV_STAGE_APP_VERSION)
+  assert.equal(production.appVersion, MUV_PRODUCTION_APP_VERSION)
   assert.equal(stage.baseUrl, MUV_SANDBOX_BASE_URL)
   assert.equal(stage.loginUrl, `${MUV_SANDBOX_BASE_URL}/api/Auth/LoginSISPRO`)
   assert.equal(stage.cargarSinFacturaUrl, `${MUV_SANDBOX_BASE_URL}/api/PaquetesFevRips/CargarRipsSinFactura`)
   assert.equal(production.baseUrl, MUV_PRODUCTION_BASE_URL)
   assert.equal(production.cargarSinFacturaUrl, `${MUV_PRODUCTION_BASE_URL}/api/PaquetesFevRips/CargarRipsSinFactura`)
+  assert.equal(sandboxOff.appVersion, MUV_PRODUCTION_APP_VERSION)
   assert.equal(sandboxOff.baseUrl, MUV_PRODUCTION_BASE_URL)
   assert.equal(sandboxOff.loginUrl, `${MUV_PRODUCTION_BASE_URL}/api/Auth/LoginSISPRO`)
 })

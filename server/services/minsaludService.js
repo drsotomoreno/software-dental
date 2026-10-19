@@ -7,11 +7,10 @@
 import http from 'node:http'
 import https from 'node:https'
 import { splitUsuarioDocumento } from './fevRipsService.js'
-import { resolveMuvEndpoint } from './muvEndpoint.js'
+import { resolveMuvAppVersion, resolveMuvEndpoint } from './muvEndpoint.js'
 
 const LOGIN_PATH = '/api/Auth/LoginSISPRO'
 const CARGAR_SIN_FACTURA_PATH = '/api/PaquetesFevRips/CargarRipsSinFactura'
-const DEFAULT_APP_VERSION = '5.4.11'
 const DEFAULT_TIPO_MECANISMO = 1
 const TOKEN_RENEW_SKEW_MS = 5 * 60 * 1000
 const DEFAULT_TOKEN_TTL_MS = 50 * 60 * 1000
@@ -60,6 +59,7 @@ export function resolveMinsaludSettings(source = process.env, overrides = {}) {
   }
 
   const { sandbox, baseUrl } = resolveMuvEndpoint(source, overrides)
+  const appVersion = resolveMuvAppVersion(source, overrides, sandbox)
   const identidad = splitUsuarioDocumento(
     username,
     overrides.tipoDocumento ?? (envValue('MINSALUD_TIPO_DOCUMENTO', source) || 'CC'),
@@ -75,7 +75,7 @@ export function resolveMinsaludSettings(source = process.env, overrides = {}) {
     clave: password,
     nit,
     tipoUsuario: 'PIN',
-    appVersion: overrides.appVersion || envValue('MINSALUD_APP_VERSION', source) || DEFAULT_APP_VERSION,
+    appVersion,
     tipoMecanismoValidacion: Number(
       overrides.tipoMecanismoValidacion ??
         (envValue('MINSALUD_TIPO_MECANISMO', source) || DEFAULT_TIPO_MECANISMO),
