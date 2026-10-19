@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
+import type { ClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import type { Cie10Diagnosis, TreatmentPlanItem } from '@/types/clinicalRecord'
-import type { OdontogramData } from '@/types/odontogram'
 import type { SpecializedAnnexes } from '@/types/specializedAnnexes'
 import { COMMON_CIE10_CODES } from '@/constants/dental'
 import {
@@ -15,15 +15,15 @@ import { useCatalogSearch } from '@/hooks/useCatalogSearch'
 import { useTariffSync } from '@/modules/tariff/useTariffSync'
 import { useTariffStore } from '@/store/useTariffStore'
 import { formatCurrency, generateId } from '@/utils'
-import {
-  mergeSuggestedTreatments,
-  suggestTreatmentFromOdontogram,
-} from '@/utils/odontogramTreatmentPlan'
 import { resolveTariffUnitPrice } from '@/utils/tariffLookup'
 import { getDefaultQuantityForCups } from '@/utils/cupsBillingRules'
 import { formatCupsCodeDotted } from '@/services/catalogService'
 import { searchGeneralDentistryCups } from '@/utils/cupsGeneralDentistry'
 import { importAnnexesToTreatmentPlan, previewAnnexTreatmentImports } from '@/utils/treatmentPlanAnnexImport'
+import {
+  importDiagnosesToTreatmentPlan,
+  previewDiagnosisTreatmentImports,
+} from '@/utils/treatmentPlanDiagnosisImport'
 import { sumTreatmentPlanPrices } from '@/utils/treatmentPlanPricing'
 import {
   ANATOMICAL_ZONE_PRESETS,
@@ -35,7 +35,8 @@ interface TreatmentPlanFormProps {
   treatmentPlan: TreatmentPlanItem[]
   treatmentPlanNotes?: string
   diagnoses?: Cie10Diagnosis[]
-  odontogram?: OdontogramData | null
+  /** Esquema de la sección 4. Cada pieza asignada se importa como fila del plan. */
+  diagnosticChart?: ClinicalDiagnosticChart | null
   affectedTeeth?: number[]
   specializedAnnexes?: SpecializedAnnexes
   budgetLinkedItemIds?: string[]
@@ -103,7 +104,8 @@ function PriceCell({
 export function TreatmentPlanForm({
   treatmentPlan,
   treatmentPlanNotes = '',
-  odontogram,
+  diagnoses = [],
+  diagnosticChart,
   specializedAnnexes,
   disabled = false,
   onChange,
@@ -135,6 +137,16 @@ export function TreatmentPlanForm({
   const annexPreview = useMemo(
     () => previewAnnexTreatmentImports(specializedAnnexes, treatmentPlan),
     [specializedAnnexes, treatmentPlan],
+  )
+
+  const diagnosisPreview = useMemo(
+    () =>
+      previewDiagnosisTreatmentImports(
+        diagnoses,
+        treatmentPlan,
+        diagnosticChart?.entries ?? [],
+      ),
+    [diagnoses, treatmentPlan, diagnosticChart],
   )
 
   const cieOptions = useMemo(() => {
@@ -181,14 +193,10 @@ export function TreatmentPlanForm({
     emit([...treatmentPlan, item])
   }
 
-  const suggestFromOdontogram = () => {
-    if (!odontogram) return
-    const suggested = suggestTreatmentFromOdontogram(odontogram).map((item) => ({
-      ...item,
-      anatomicalZone: item.toothNumber ? String(item.toothNumber) : item.anatomicalZone,
-      unitPrice: catalogUnitPrice(item.cupsCode) || item.unitPrice,
-    }))
-    emit(mergeSuggestedTreatments(treatmentPlan, suggested))
+  const importFromDiagnoses = () => {
+    emit(
+      importDiagnosesToTreatmentPlan(diagnoses, treatmentPlan, diagnosticChart?.entries ?? []),
+    )
   }
 
   const importFromAnnexes = () => {
@@ -224,11 +232,11 @@ export function TreatmentPlanForm({
         <div className="mb-3 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={suggestFromOdontogram}
-            disabled={!odontogram}
+            onClick={importFromDiagnoses}
+            disabled={diagnosisPreview.length === 0}
             className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Importar desde odontograma
+            Importar diagnósticos
           </button>
           <button
             type="button"

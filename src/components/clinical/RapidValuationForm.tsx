@@ -32,7 +32,6 @@ export function RapidValuationForm({
   onPatientDataChange,
   patient = null,
   initialData,
-  odontogram = null,
   onChange,
   onAcceptTreatment,
   consentAccepted = false,
@@ -157,7 +156,7 @@ export function RapidValuationForm({
           treatmentPlan={form.treatmentPlan}
           treatmentPlanNotes={form.treatmentPlanNotes}
           diagnoses={form.diagnoses}
-          odontogram={odontogram}
+          diagnosticChart={form.diagnosticChart}
           specializedAnnexes={form.specializedAnnexes}
           affectedTeeth={[...new Set(form.diagnoses.flatMap((d) => d.affectedTeeth ?? []))].sort(
             (a, b) => a - b,
