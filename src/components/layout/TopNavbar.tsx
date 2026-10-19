@@ -96,12 +96,6 @@ const TOP_NAV_ITEMS: TopNavItem[] = [
     row: 2,
   },
   {
-    label: 'FHIR',
-    to: '/fhir',
-    permission: 'export.fhir',
-    row: 2,
-  },
-  {
     label: 'Catálogos',
     to: '/catalogos',
     permission: 'catalogs.manage',
