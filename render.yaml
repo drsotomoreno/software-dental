@@ -12,11 +12,12 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
-      # Documento real del paciente. El host del MUV sigue en MINSALUD_SANDBOX
-      # o MINSALUD_API_BASE_URL, que se editan en el dashboard.
+      # Documento real del paciente. false apunta a fevrips.sispro.gov.co.
       - key: MINSALUD_ENV
         value: production
-      # Usuario, clave y NIT del prestador ya viven en el dashboard.
+      - key: MINSALUD_SANDBOX
+        value: "false"
+      # Usuario, clave y NIT del prestador se cargan en el dashboard. No van en el repo.
       - key: MINSALUD_USERNAME
         sync: false
       - key: MINSALUD_PASSWORD
