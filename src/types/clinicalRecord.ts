@@ -59,6 +59,8 @@ export interface TreatmentPlanItem {
     | 'endodontics_annex'
     | 'oral_surgery_annex'
     | 'periodontics_annex'
+    | 'rehabilitation_annex'
+    | 'dental_implants_annex'
     | 'diagnostico'
   /** Diagnóstico CIE-10 vinculado al importar desde la sección 4 */
   diagnosisCode?: string

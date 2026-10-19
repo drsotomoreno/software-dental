@@ -19,7 +19,7 @@ import { resolveTariffUnitPrice } from '@/utils/tariffLookup'
 import { getDefaultQuantityForCups } from '@/utils/cupsBillingRules'
 import { formatCupsCodeDotted } from '@/services/catalogService'
 import { searchGeneralDentistryCups } from '@/utils/cupsGeneralDentistry'
-import { importAnnexesToTreatmentPlan, previewAnnexTreatmentImports } from '@/utils/treatmentPlanAnnexImport'
+import { importAnnexesToTreatmentPlan } from '@/utils/treatmentPlanAnnexImport'
 import {
   importDiagnosesToTreatmentPlan,
   previewDiagnosisTreatmentImports,
@@ -134,11 +134,6 @@ export function TreatmentPlanForm({
     tariffMap[cupsCode?.trim().toUpperCase() ?? '']?.price ??
     resolveTariffUnitPrice(cupsCode)
 
-  const annexPreview = useMemo(
-    () => previewAnnexTreatmentImports(specializedAnnexes, treatmentPlan),
-    [specializedAnnexes, treatmentPlan],
-  )
-
   const diagnosisPreview = useMemo(
     () =>
       previewDiagnosisTreatmentImports(
@@ -200,7 +195,9 @@ export function TreatmentPlanForm({
   }
 
   const importFromAnnexes = () => {
-    emit(importAnnexesToTreatmentPlan(specializedAnnexes, treatmentPlan, catalogUnitPrice))
+    const next = importAnnexesToTreatmentPlan(specializedAnnexes, treatmentPlan, catalogUnitPrice)
+    if (next === treatmentPlan) return
+    emit(next)
   }
 
   const updateTreatmentItem = (id: string, patch: Partial<TreatmentPlanItem>) => {
@@ -238,12 +235,7 @@ export function TreatmentPlanForm({
           >
             Importar diagnósticos
           </button>
-          <button
-            type="button"
-            onClick={importFromAnnexes}
-            disabled={annexPreview.length === 0}
-            className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <button type="button" onClick={importFromAnnexes} className="btn-secondary text-xs">
             Importar desde anexos
           </button>
           <button type="button" onClick={addTreatmentItem} className="btn-primary text-xs">
