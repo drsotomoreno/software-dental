@@ -9,12 +9,16 @@ type RecordKey = number | string
 
 function notaParaRips(note: ClinicalRecord['evolutionNotes'][number]) {
   return {
+    id: note.id,
     signedAt: note.signedAt,
     date: note.date,
+    isLocked: note.isLocked,
+    procedure: note.procedure,
     cupsCode: note.cupsCode,
     cost: note.cost,
     isBillable: note.isBillable,
     catalogServices: (note.catalogServices ?? []).map((service) => ({
+      procedure: service.procedure,
       cupsCode: service.cupsCode,
       cost: service.cost,
       isBillable: service.isBillable,

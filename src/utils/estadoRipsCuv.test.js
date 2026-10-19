@@ -8,14 +8,26 @@ import {
 
 test('traduce RVC091 y el detalle guardado por el mapper', () => {
   assert.deepEqual(mensajesResultadoValidacion([{ Clase: 'RECHAZADO', Codigo: 'RVC091' }]), [
-    'Rechazado por regla RVC091: el valor pagado por el paciente no puede ser 0.',
+    'El valor del servicio no se informó. En un RIPS sin factura ese valor se envía en cero.',
   ])
   assert.deepEqual(
     mensajesResultadoValidacion({
-      error: 'RVC091: vrServicio no puede ser 0, null ni indefinido.',
+      error: 'RVC091: vrServicio no puede ser null ni indefinido.',
       field: 'vrServicio',
     }),
-    ['Rechazado por regla RVC091: el valor pagado por el paciente no puede ser 0.'],
+    ['El valor del servicio no se informó. En un RIPS sin factura ese valor se envía en cero.'],
+  )
+  assert.deepEqual(
+    mensajesResultadoValidacion([
+      {
+        Clase: 'NOTIFICACION',
+        Codigo: 'RVC091',
+        Descripcion: 'Tener en cuenta que está informando RIPS sin una FEV en salud y no es posible incluir un valor',
+      },
+    ]),
+    [
+      'Notificación por regla RVC091: Tener en cuenta que está informando RIPS sin una FEV en salud y no es posible incluir un valor',
+    ],
   )
 })
 
@@ -36,7 +48,7 @@ test('lee estado_muv y traduce una fecha inválida', () => {
   )
   assert.deepEqual(
     mensajesResultadoValidacion('{"field":"vrServicio","error":"vrServicio es 0"}'),
-    ['Rechazado por regla RVC091: el valor pagado por el paciente no puede ser 0.'],
+    ['El valor del servicio no se informó. En un RIPS sin factura ese valor se envía en cero.'],
   )
 })
 
