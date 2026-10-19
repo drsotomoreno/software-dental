@@ -17,10 +17,10 @@ import { logAuditEvent } from '@/services/auditService'
 import {
   EvolutionNoteImmutableError,
   createAddendumDraftNote,
-  persistSignedEvolutionNoteCreate,
   removeEvolutionNoteFromList,
   updateEvolutionNoteInList,
 } from '@/services/evolutionNoteService'
+import { firmarEvolucionPersistida } from '@/services/clinicalHistorySignatureService'
 import { RipsShieldModal } from '@/components/rips/RipsShieldModal'
 import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
 import type { RipsShieldMismatch } from '@/types/consultationCheckout'
@@ -137,19 +137,34 @@ export function EvolutionNotesForm({
     }
 
     try {
-      const signed = await persistSignedEvolutionNoteCreate(patientId, note)
-      onChange(notes.map((item) => (item.id === id ? signed : item)))
-      if (user) {
+      const signedNotes = await firmarEvolucionPersistida({
+        patientId,
+        notes,
+        evolucionId: id,
+        clinicalRecordId: parentRecordId,
+        firma: {
+          signedAt: new Date().toISOString(),
+          signatureData: note.professionalSignatureDataUrl ?? note.signatureData ?? '',
+          signedBy: user?.id ?? note.authorUserId ?? '',
+        },
+      })
+      onChange(signedNotes)
+      const signed = signedNotes.find((item) => item.id === id)
+      if (user && signed) {
         await logAuditEvent({
           action: 'CREATE_EVOLUTION_NOTE',
           resourceType: 'clinical_record',
           resourceId: signed.id,
-          details: `Nota de evolución firmada — ${signed.procedure?.slice(0, 80) ?? ''}`,
+          details: `Evolución firmada — ${signed.procedure?.slice(0, 80) ?? ''}. No modifica la apertura.`,
           user,
         })
       }
-    } catch {
-      showBlocked('No se pudo firmar y grabar la nota de evolución.')
+    } catch (error) {
+      if (error instanceof EvolutionNoteImmutableError) {
+        showBlocked(error.message)
+        return
+      }
+      showBlocked('No se pudo firmar la evolución.')
     }
   }
 
@@ -184,9 +199,9 @@ export function EvolutionNotesForm({
             )}
           </h3>
           <p className="mt-1 text-xs text-slate-500">
-            Res. 1995/1999: el bloqueo es por folio. Una evolución firmada no se edita ni se
-            elimina; use «Agregar Nota de Aclaración». El odontograma y el resto del expediente
-            siguen abiertos.
+            Cada evolución tiene su propia firma. Un borrador se puede editar; al firmarla, la nota,
+            los procedimientos y los diagnósticos de esa atención quedan inalterables (Res.
+            1995/1999). Esa firma no modifica la apertura de la historia.
           </p>
         </div>
         {canAddNote && (

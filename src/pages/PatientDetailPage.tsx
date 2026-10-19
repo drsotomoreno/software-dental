@@ -56,6 +56,8 @@ import {
 
   serializeForHash,
 
+  formatDate,
+
   getPatientByRouteId,
 
   getOdontogramByPatientRouteId,
@@ -67,17 +69,13 @@ import {
   validateClinicalRecordDraft,
 } from '@/utils'
 import { getFirstBlockingClinicalBudgetIssue } from '@/utils/clinicalRipsValidation'
-import { sortEvolutionNotesChronologically, verifyClinicalRecordIntegrity } from '@/utils/recordIntegrity'
+import { buildRecordHashPayload, sortEvolutionNotesChronologically, verifyClinicalRecordIntegrity } from '@/utils/recordIntegrity'
 import {
-  ensureEvolutionNoteOutboxCreate,
-  finalizeEvolutionNote,
-} from '@/services/evolutionNoteService'
-import { reportarAtencionCerradaAlMuv } from '@/services/finalizarConsultaMuv'
-import { isEvolutionNoteImmutable } from '@/types/evolutionNote'
-import { validateEvolutionNote } from '@/utils/evolutionNoteValidation'
-import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
-import type { RipsShieldMismatch } from '@/types/consultationCheckout'
-import { RipsShieldModal } from '@/components/rips/RipsShieldModal'
+  firmarAperturaHistoria,
+  fusionarEvolucionesFirmadas,
+  leerApertura,
+} from '@/services/clinicalHistorySignature'
+import { listarEvolucionesDelPaciente, listarHistoriasDelPaciente } from '@/services/clinicalHistorySignatureService'
 import {
   clearPatientClinicalDraft,
   getPatientClinicalDraft,
@@ -186,7 +184,6 @@ export function PatientDetailPage() {
   } | null>(null)
 
   const [showSignConfirm, setShowSignConfirm] = useState(false)
-  const [ripsShieldMismatches, setRipsShieldMismatches] = useState<RipsShieldMismatch[]>([])
   const [missingFieldErrors, setMissingFieldErrors] = useState<string[]>([])
 
   const [activeSection, setActiveSection] = useState<string>('all')
@@ -269,6 +266,16 @@ export function PatientDetailPage() {
 
   const patientForeignKey = id ? toPatientForeignKey(id) : ''
 
+  const aperturaHistoria = useLiveQuery(async () => {
+    if (!patientForeignKey) return null
+    return leerApertura(await listarHistoriasDelPaciente(patientForeignKey))
+  }, [patientForeignKey])
+
+  const evolucionesFirmadas = useLiveQuery(async () => {
+    if (!patientForeignKey) return []
+    return listarEvolucionesDelPaciente(patientForeignKey)
+  }, [patientForeignKey])
+
   const clinicalEncounterId = viewingRecord?.id
     ? String(viewingRecord.id)
     : `draft-${patientForeignKey}`
@@ -323,6 +330,16 @@ export function PatientDetailPage() {
       })
     },
   })
+
+  useEffect(() => {
+    if (!evolucionesFirmadas?.length) return
+    setClinicalData((prev) => {
+      if (!prev) return prev
+      const merged = fusionarEvolucionesFirmadas(prev.evolutionNotes ?? [], evolucionesFirmadas)
+      if (merged === prev.evolutionNotes) return prev
+      return { ...prev, evolutionNotes: merged }
+    })
+  }, [evolucionesFirmadas])
 
   const clinicalAutoSaveLabel = clinicalAutoSaving
     ? 'Guardando…'
@@ -1030,11 +1047,10 @@ export function PatientDetailPage() {
 
     if (!validateClinical()) return
 
-    const mismatches = (clinicalData.evolutionNotes ?? []).flatMap((note) =>
-      evaluateEvolutionRipsShield(note, user),
-    )
-    if (mismatches.length > 0) {
-      setRipsShieldMismatches(mismatches)
+    if (aperturaHistoria) {
+      setMessage(
+        `La historia clínica ya fue firmada el ${formatDate(aperturaHistoria.signedAt)}. Para la atención de hoy firme la evolución. Esa firma no modifica la apertura.`,
+      )
       return
     }
 
@@ -1075,6 +1091,14 @@ export function PatientDetailPage() {
       details: `Confirmación de identidad antes de firmar — ${user.email}`,
     })
 
+    const aperturaExistente = leerApertura(await listarHistoriasDelPaciente(patientForeignKey))
+    if (aperturaExistente) {
+      setShowSignConfirm(false)
+      const error = `La historia clínica ya fue firmada el ${formatDate(aperturaExistente.signedAt)}. Para la atención de hoy firme la evolución. Esa firma no modifica la apertura.`
+      setMessage(error)
+      return { ok: false as const, error }
+    }
+
     setSaving(true)
     setMessage('')
 
@@ -1098,21 +1122,7 @@ export function PatientDetailPage() {
         professionalName: note.professionalName || professionalName,
         professionalLicense: note.professionalLicense || professionalLicense || signingUser.documentNumber,
       }))
-
-      const signedEvolutionNotes = await Promise.all(
-        preparedNotes.map(async (note) => {
-          if (isEvolutionNoteImmutable(note)) return note
-          if (validateEvolutionNote(note).length > 0) return note
-          return finalizeEvolutionNote(note, now)
-        }),
-      )
-      const sortedEvolutionNotes = sortEvolutionNotesChronologically(signedEvolutionNotes)
-
-      for (const note of sortedEvolutionNotes) {
-        if (isEvolutionNoteImmutable(note)) {
-          await ensureEvolutionNoteOutboxCreate(patientForeignKey, note)
-        }
-      }
+      const sortedEvolutionNotes = sortEvolutionNotesChronologically(preparedNotes)
 
       const recordPayload = {
 
@@ -1164,72 +1174,36 @@ export function PatientDetailPage() {
 
 
 
-      const contentHash = await computeContentHash(serializeForHash(recordPayload))
-
-
-      const recordId = await db.clinicalRecords.add({
-
-        patientId: patientForeignKey,
-
-        professionalId: user.id,
-
-        anamnesis: normalizedClinicalData.anamnesis,
-
-        stomatologicalExam: normalizedClinicalData.stomatologicalExam,
-
-        specializedAnnexes: normalizedClinicalData.specializedAnnexes,
-
-        diagnosticChart: normalizedClinicalData.diagnosticChart,
-
-        odontogramSnapshot,
-
-        diagnoses: normalizedClinicalData.diagnoses,
-
-        diagnosisNotes: normalizedClinicalData.diagnosisNotes ?? '',
-
-        findings: normalizedClinicalData.findings,
-
-        treatmentPlan: normalizedClinicalData.treatmentPlan,
-
-        treatmentPlanNotes: normalizedClinicalData.treatmentPlanNotes ?? '',
-
-        budgetItems: normalizedClinicalData.budgetItems,
-
-        orthodonticsBudget: normalizedClinicalData.orthodonticsBudget,
-
-        dentalImplantsBudget: normalizedClinicalData.dentalImplantsBudget,
-
-        budget: normalizedClinicalData.budget,
-
-        paymentPlan: normalizedClinicalData.paymentPlan,
-
-        paymentControl: normalizedClinicalData.paymentControl,
-
-        paymentControlLines: normalizedClinicalData.paymentControlLines ?? [],
-
-        orthodonticsPaymentControl: normalizedClinicalData.orthodonticsPaymentControl ?? [],
-
-        evolutionNotes: sortedEvolutionNotes,
-
+      const contentHash = await computeContentHash(serializeForHash(buildRecordHashPayload({
+        ...recordPayload,
         informedConsent: {
-
           ...normalizedClinicalData.informedConsent,
-
           signedAt: now,
-
         },
+      } as ClinicalRecord)))
 
-        contentHash,
+      const recordToSave = firmarAperturaHistoria(
+        {
+          ...recordPayload,
+          informedConsent: {
+            ...normalizedClinicalData.informedConsent,
+            signedAt: now,
+          },
+          contentHash,
+          isLocked: true,
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          signedAt: now,
+          signatureData: clinicalData.informedConsent.professionalSignatureDataUrl ?? '',
+          signedBy: user.id,
+          signedByName: professionalName,
+          contentHash,
+        },
+      )
 
-        isLocked: true,
-
-        signedAt: now,
-
-        createdAt: now,
-
-        updatedAt: now,
-
-      })
+      const recordId = await db.clinicalRecords.add(recordToSave)
 
 
 
@@ -1273,34 +1247,11 @@ export function PatientDetailPage() {
         action: 'SIGN_CLINICAL_RECORD',
         resourceType: 'clinical_record',
         resourceId: String(recordId),
-        details: `Paciente ${patient.documentType} ${patient.documentNumber} — usuario ${user.email}`,
+        details: `Apertura de historia clínica — ${patient.documentType} ${patient.documentNumber} — usuario ${user.email}`,
       })
 
-      const muvNotice =
-        recordId == null
-          ? ''
-          : await reportarAtencionCerradaAlMuv({
-              recordKey: recordId,
-              patient,
-              professional: signingUser,
-              signedAt: now,
-              record: {
-                patientId: patientForeignKey,
-                professionalId: user.id,
-                diagnoses: normalizedClinicalData.diagnoses,
-                evolutionNotes: sortedEvolutionNotes,
-                paymentControl: normalizedClinicalData.paymentControl,
-                orthodonticsPaymentControl: normalizedClinicalData.orthodonticsPaymentControl ?? [],
-                budget: normalizedClinicalData.budget,
-                signedAt: now,
-              },
-            })
-
       setMessage(
-        'Atención cerrada para facturación. Las evoluciones firmadas quedaron bloqueadas como folio (Res. 1995/1999). Odontograma, plan y exámenes siguen editables. Hash: ' +
-          contentHash.slice(0, 16) +
-          '…' +
-          (muvNotice ? ` ${muvNotice}` : ''),
+        `Historia clínica firmada el ${formatDate(now)} — Cerrada/Activa. Las evoluciones se firman por separado y no modifican esta apertura.`,
       )
       return { ok: true as const }
     } catch {
@@ -2045,7 +1996,7 @@ export function PatientDetailPage() {
 
           </button>
 
-          {can('clinical.sign') && (
+          {can('clinical.sign') && aperturaHistoria === null && (
           <button
 
             type="button"
@@ -2058,9 +2009,15 @@ export function PatientDetailPage() {
 
           >
 
-            {saving ? 'Cerrando atención...' : 'Cerrar atención (snapshot RIPS)'}
+            {saving ? 'Firmando apertura...' : 'Firmar apertura de la historia'}
 
           </button>
+          )}
+          {aperturaHistoria && (
+            <p className="self-center text-sm text-emerald-900">
+              Historia clínica firmada el {formatDate(aperturaHistoria.signedAt)} — Cerrada/Activa.
+              Firme la evolución del día en su nota. Esa firma no modifica la apertura.
+            </p>
           )}
 
         </div>
@@ -2071,15 +2028,10 @@ export function PatientDetailPage() {
         errors={missingFieldErrors}
         onClose={() => setMissingFieldErrors([])}
       />
-      <RipsShieldModal
-        open={ripsShieldMismatches.length > 0}
-        mismatches={ripsShieldMismatches}
-        onChangeProcedure={() => setRipsShieldMismatches([])}
-      />
       <SignConfirmationModal
         open={showSignConfirm}
-        title="Cerrar atención y firmar evoluciones"
-        description="Se firmarán las evoluciones completas (folios inmutables, Res. 1995/1999) y se guardará un snapshot para facturación/RIPS. El odontograma, los datos demográficos, el plan futuro y los exámenes del expediente no se bloquean. Las correcciones de un folio firmado se hacen con notas de aclaración."
+        title="Firmar apertura de la historia clínica"
+        description="Se firma una sola vez la apertura: anamnesis, antecedentes, odontograma inicial y consentimiento. La historia queda Cerrada/Activa. Las evoluciones del día se firman aparte y no modifican esta firma."
         userEmail={user?.email ?? ''}
         onConfirm={executeSignAndLock}
         onCancel={() => setShowSignConfirm(false)}

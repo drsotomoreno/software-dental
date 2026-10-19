@@ -251,7 +251,20 @@ export interface OrthodonticsPaymentRecord {
   notes?: string
 }
 
-/** Registro clínico inmutable tras firma (Ley 527 / Res. 1995 de 1999) */
+/**
+ * Firma de apertura de la historia clínica (documento padre).
+ * Se otorga una sola vez. Firmar una evolución no la modifica.
+ */
+export interface HistoriaClinicaApertura {
+  signedAt: string
+  signatureData: string
+  isSigned: true
+  signedBy: string
+  signedByName?: string
+  contentHash?: string
+}
+
+/** Registro clínico. La apertura se firma una vez; cada evolución tiene su propia firma. */
 export interface ClinicalRecord {
   id?: number | string
   patientId: string
@@ -298,13 +311,21 @@ export interface ClinicalRecord {
   signatureId?: string
   patientSignatureId?: string
   contentHash?: string
+  /**
+   * Fecha de la firma de apertura, o de un cierre legado anterior a la separación.
+   * No se actualiza cuando se firma una evolución posterior.
+   */
   signedAt?: string
   /**
-   * Snapshot de atención cerrado para facturación / RIPS / integridad del paquete.
-   * No bloquea la HCE viva: odontograma, demografía, plan futuro ni nuevos folios.
-   * El bloqueo legal (Res. 1995/1999) aplica a cada `EvolutionNote` firmada.
+   * Documento de apertura cerrado (Cerrada/Activa).
+   * Sigue admitiendo evoluciones nuevas en la tabla `evolutions`; no se re-firma.
    */
   isLocked: boolean
+  /** Firma de apertura. Independiente de `evolutionNotes[].isSigned`. */
+  apertura?: HistoriaClinicaApertura
+  isSigned?: boolean
+  signatureData?: string
+  signedBy?: string
   /** CUV entregado por el MUV al cerrar la atención sin factura. */
   cuv?: string | null
   /** PENDIENTE, APROBADO o RECHAZADO. */

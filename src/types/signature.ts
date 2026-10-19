@@ -17,7 +17,7 @@ export interface SignatureCaptureResult {
 export interface DigitalSignature {
   id?: string
   recordId: string
-  recordType: 'clinical_record' | 'consent' | 'budget' | 'addendum'
+  recordType: 'clinical_record' | 'consent' | 'budget' | 'addendum' | 'evolution_note'
   signatureDataUrl: string
   /** Usuario autenticado que firmó — identificación inequívoca */
   authorUserId?: string

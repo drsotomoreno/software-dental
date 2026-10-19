@@ -9,6 +9,7 @@ import type { PriceItem, UserProfile } from '@/types/user'
 import type { AuthSession, UserCredentials } from '@/types/auth'
 import type { AuditLogEntry } from '@/types/audit'
 import type { ClinicalRecordAddendum } from '@/types/addendum'
+import type { Evolucion } from '@/types/evolutionNote'
 import type { EvolutionNoteAddendum } from '@/types/evolutionNoteAddendum'
 import type { SyncOutboxEntry } from '@/types/syncOutbox'
 import type { SyncQueueAttachment } from '@/types/syncQueue'
@@ -49,6 +50,7 @@ export class DentalDatabase extends Dexie {
   patients!: EntityTable<Patient, 'id'>
   odontograms!: EntityTable<OdontogramData, 'id'>
   clinicalRecords!: EntityTable<ClinicalRecord, 'id'>
+  evolutions!: EntityTable<Evolucion, 'id'>
   signatures!: EntityTable<DigitalSignature, 'id'>
   appointments!: EntityTable<Appointment, 'id'>
   scheduleColumns!: EntityTable<ScheduleColumn, 'id'>
@@ -714,6 +716,77 @@ export class DentalDatabase extends Dexie {
         }
       }
     })
+
+    this.version(29)
+      .stores({
+        clinicalRecords:
+          '++id, patientId, professionalId, signedAt, isLocked, isSigned, syncId, clinicId, pendingSync',
+        evolutions: 'id, patientId, clinicalRecordId, status, signedAt, signedBy, createdAt',
+      })
+      .upgrade(async (tx) => {
+        const records = await tx.table('clinicalRecords').toArray()
+        const byPatient = new Map<string, typeof records>()
+        for (const record of records) {
+          if (!record?.isLocked || !record.signedAt || record.patientId == null) continue
+          const key = String(record.patientId)
+          const list = byPatient.get(key) ?? []
+          list.push(record)
+          byPatient.set(key, list)
+        }
+
+        for (const list of byPatient.values()) {
+          list.sort(
+            (a, b) => new Date(a.signedAt ?? 0).getTime() - new Date(b.signedAt ?? 0).getTime(),
+          )
+          const opening = list[0]
+          if (!opening?.id || opening.apertura?.isSigned) continue
+          const signatureData =
+            opening.signatureData ||
+            opening.informedConsent?.professionalSignatureDataUrl ||
+            ''
+          const signedBy = opening.signedBy || opening.professionalId || ''
+          await tx.table('clinicalRecords').update(opening.id, {
+            isSigned: true,
+            signedBy,
+            signatureData,
+            apertura: {
+              isSigned: true,
+              signedAt: opening.signedAt,
+              signedBy,
+              signatureData,
+              contentHash: opening.contentHash,
+            },
+          })
+        }
+
+        const seen = new Set<string>()
+        const ordered = [...records].sort(
+          (a, b) => new Date(a.signedAt ?? a.createdAt ?? 0).getTime() - new Date(b.signedAt ?? b.createdAt ?? 0).getTime(),
+        )
+        for (const record of ordered) {
+          const notes = Array.isArray(record.evolutionNotes) ? record.evolutionNotes : []
+          for (const note of notes) {
+            if (!note?.id || seen.has(note.id)) continue
+            const firmada =
+              note.isLocked === true ||
+              note.isSigned === true ||
+              note.status === 'firmada' ||
+              Boolean(note.signedAt && note.contentHash)
+            if (!firmada || record.patientId == null) continue
+            seen.add(note.id)
+            await tx.table('evolutions').put({
+              ...note,
+              patientId: String(record.patientId),
+              clinicalRecordId: record.id != null ? String(record.id) : undefined,
+              status: 'firmada',
+              isSigned: true,
+              isLocked: true,
+              signedBy: note.signedBy || note.authorUserId || record.professionalId || '',
+              signatureData: note.signatureData || note.professionalSignatureDataUrl || '',
+            })
+          }
+        }
+      })
   }
 }
 
