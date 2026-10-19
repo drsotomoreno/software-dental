@@ -10,7 +10,7 @@ import {
 
   ClinicalHistoryForm,
 
-  ClinicalRecordList,
+  ClinicalSignatureStatus,
 
   PatientIdentificationSummary,
 
@@ -67,7 +67,7 @@ import {
   validateClinicalRecordDraft,
 } from '@/utils'
 import { getFirstBlockingClinicalBudgetIssue } from '@/utils/clinicalRipsValidation'
-import { sortEvolutionNotesChronologically, verifyClinicalRecordIntegrity } from '@/utils/recordIntegrity'
+import { sortEvolutionNotesChronologically } from '@/utils/recordIntegrity'
 import {
   ensureEvolutionNoteOutboxCreate,
   finalizeEvolutionNote,
@@ -1313,47 +1313,6 @@ export function PatientDetailPage() {
 
 
 
-  const handleViewRecord = async (recordId: string) => {
-    const key = toDexiePrimaryKey(recordId)
-    const record = await db.clinicalRecords.get(key)
-
-    if (!record) return
-
-    const integrity = await verifyClinicalRecordIntegrity(record)
-    setIntegrityStatus({ valid: integrity.valid, computedHash: integrity.computedHash })
-    await audit({
-      action: integrity.valid ? 'VIEW_CLINICAL_RECORD' : 'VERIFY_INTEGRITY',
-      resourceType: 'clinical_record',
-      resourceId: recordId,
-      details: integrity.valid
-        ? `Historia firmada ${record.signedAt?.slice(0, 10) ?? ''}`
-        : 'Integridad comprometida — hash no coincide',
-      success: integrity.valid,
-    })
-
-    const safeRecord = normalizeClinicalRecordForExport(record)
-
-    setViewingRecord(safeRecord)
-
-    setViewMode('view-record')
-
-    setClinicalData(clinicalRecordToFormData(safeRecord, professionalLicense))
-
-    const liveOdontogram = id ? await getOdontogramByPatientRouteId(id) : null
-    if (liveOdontogram) {
-      setOdontogram({
-        ...liveOdontogram,
-        dentitionType: liveOdontogram.dentitionType ?? 'permanente',
-        isInitialState: liveOdontogram.isInitialState ?? false,
-      })
-    } else if (safeRecord.odontogramSnapshot) {
-      setOdontogram(safeRecord.odontogramSnapshot)
-    }
-
-    setIsLocked(true)
-
-  }
-
   const handleExportPortabilityAudit = async (
     format: ClinicalHistoryExportFormat,
     recordCount: number,
@@ -1571,6 +1530,10 @@ export function PatientDetailPage() {
 
         <div className="flex flex-wrap items-center gap-2">
 
+          {canViewClinical && !showRapidValuation && !isArchiveView && (
+            <ClinicalSignatureStatus patientId={patientForeignKey} />
+          )}
+
           {clinicalAutoSaveLabel && !isArchiveView && (
             <span
               className={`rounded-full px-3 py-1 text-sm font-medium ${
@@ -1608,10 +1571,6 @@ export function PatientDetailPage() {
       </div>
 
 
-
-      {canViewClinical && !showRapidValuation && (
-        <ClinicalRecordList patientId={patientForeignKey} onSelectRecord={handleViewRecord} />
-      )}
 
       {canViewClinical && sections.length > 1 && (
       <div className="clinical-section-nav space-y-2">
