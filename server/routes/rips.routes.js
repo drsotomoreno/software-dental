@@ -15,7 +15,7 @@ const router = Router()
 
 /**
  * POST /api/rips/evolucion-dictada
- * Cierra la consulta: RIPS sin factura hacia el MUV, o FEV si hay factura.
+ * Cierra la consulta. modo sin_factura radica en el MUV; modo con_factura enruta FEV o RIPS pendiente.
  */
 router.post('/evolucion-dictada', processDictatedEvolution)
 

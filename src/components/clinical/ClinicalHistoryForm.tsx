@@ -34,6 +34,7 @@ import {
   normalizeClinicalDiagnosticChart,
 } from '@/types/clinicalDiagnosticChart'
 import type { EvolutionNote } from '@/types/evolutionNote'
+import type { Patient } from '@/types/patient'
 import type { InformedConsent } from '@/types/consent'
 import type { UserProfile } from '@/types/user'
 import { createEmptyConsent } from '@/types/consent'
@@ -72,6 +73,7 @@ interface ClinicalHistoryFormProps {
   patientDocumentType?: string
   patientDocumentNumber?: string
   patientEmail?: string
+  patient?: Patient | null
 }
 
 function showClinicalSection(activeSection: string, section: string): boolean {
@@ -125,6 +127,7 @@ export function ClinicalHistoryForm({
   clinicalUser = null,
   patientName = '',
   patientDocument = '',
+  patient = null,
 }: ClinicalHistoryFormProps) {
   const snapshotLocked = disabled
   const livingLocked = lockLivingChart
@@ -483,6 +486,16 @@ export function ClinicalHistoryForm({
         disabled={livingLocked}
         allowNewNotes
         allowAddendums
+        ripsContext={
+          patient && clinicalUser
+            ? {
+                patient,
+                professional: clinicalUser,
+                form,
+                clinicalRecordId,
+              }
+            : null
+        }
       />
         </div>
       )}

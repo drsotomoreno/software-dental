@@ -215,6 +215,46 @@ export async function persistEvolutionNoteAddendum(
   )
 }
 
+export interface EvolutionNoteRipsStamp {
+  ripsModo: 'sin_factura' | 'con_factura'
+  cuv?: string | null
+  estadoMuv?: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | null
+  numFactura?: string | null
+  ripsResultadoMensaje?: string
+}
+
+/** Escribe solo el resultado RIPS. No reabre el folio ni cambia el hash clínico. */
+export function stampEvolutionNoteRipsResult(
+  notes: EvolutionNote[],
+  noteId: string,
+  stamp: EvolutionNoteRipsStamp,
+): EvolutionNote[] {
+  return notes.map((note) => (note.id === noteId ? { ...note, ...stamp } : note))
+}
+
+function clinicalRecordKey(id: number | string): number | string {
+  if (typeof id === 'number') return id
+  return /^\d+$/.test(id) ? Number.parseInt(id, 10) : id
+}
+
+/**
+ * Actualiza el resultado RIPS de una nota ya guardada.
+ * No toca el CUV del cierre de toda la atención.
+ */
+export async function persistEvolutionNoteRipsResult(
+  recordKey: number | string,
+  noteId: string,
+  stamp: EvolutionNoteRipsStamp,
+): Promise<void> {
+  const key = clinicalRecordKey(recordKey)
+  const record = await db.clinicalRecords.get(key)
+  if (!record?.evolutionNotes?.some((note) => note.id === noteId)) return
+  await db.clinicalRecords.update(key, {
+    evolutionNotes: stampEvolutionNoteRipsResult(record.evolutionNotes, noteId, stamp),
+    updatedAt: new Date().toISOString(),
+  })
+}
+
 export async function persistSignedEvolutionNoteCreate(
   patientId: string,
   note: EvolutionNote,

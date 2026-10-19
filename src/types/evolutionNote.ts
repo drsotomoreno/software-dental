@@ -73,6 +73,15 @@ export interface EvolutionNote {
   signedAt?: string
   /** SHA-256 del contenido de la nota (Ley 527 de 1999). */
   contentHash?: string
+  /**
+   * Resultado operativo del RIPS de esta nota.
+   * No entra en el hash del folio: se escribe después de la firma.
+   */
+  ripsModo?: 'sin_factura' | 'con_factura'
+  cuv?: string | null
+  estadoMuv?: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | null
+  numFactura?: string | null
+  ripsResultadoMensaje?: string
 }
 
 /** Folio / sesión clínica — unidad de bloqueo de la HCE (Res. 1995/1999). */
