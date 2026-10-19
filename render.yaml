@@ -12,8 +12,8 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
-      # Documento real del paciente. El host del MUV sigue en MINSALUD_SANDBOX
-      # o MINSALUD_API_BASE_URL, que se editan en el dashboard.
+      # production usa el host oficial del MUV. MINSALUD_SANDBOX=false también.
+      # MINSALUD_API_BASE_URL, si se define en el dashboard, reemplaza ese host.
       - key: MINSALUD_ENV
         value: production
       # Usuario, clave y NIT del prestador ya viven en el dashboard.
