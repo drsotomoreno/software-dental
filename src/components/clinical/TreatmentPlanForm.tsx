@@ -11,7 +11,9 @@ import {
   CLINICAL_SECTION_TITLE_CLASS,
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
+import { Toast } from '@/components/ui/Toast'
 import { useCatalogSearch } from '@/hooks/useCatalogSearch'
+import { useToast } from '@/hooks/useToast'
 import { useTariffSync } from '@/modules/tariff/useTariffSync'
 import { useTariffStore } from '@/store/useTariffStore'
 import { formatCurrency, generateId } from '@/utils'
@@ -19,7 +21,10 @@ import { resolveTariffUnitPrice } from '@/utils/tariffLookup'
 import { getDefaultQuantityForCups } from '@/utils/cupsBillingRules'
 import { formatCupsCodeDotted } from '@/services/catalogService'
 import { searchGeneralDentistryCups } from '@/utils/cupsGeneralDentistry'
-import { importAnnexesToTreatmentPlan, previewAnnexTreatmentImports } from '@/utils/treatmentPlanAnnexImport'
+import {
+  applyAnnexCatalogPrices,
+  previewAnnexTreatmentImports,
+} from '@/utils/treatmentPlanAnnexImport'
 import {
   importDiagnosesToTreatmentPlan,
   previewDiagnosisTreatmentImports,
@@ -46,6 +51,13 @@ interface TreatmentPlanFormProps {
 }
 
 const DEFAULT_TREATMENT_PHASE = 'fase_ii' as const
+
+const ANNEX_SOURCE_LABEL: Record<string, string> = {
+  endodontics_annex: 'Endodoncia',
+  orthodontics_annex: 'Ortodoncia',
+  oral_surgery_annex: 'Cirugía oral / implantes',
+  periodontics_annex: 'Periodoncia',
+}
 
 interface CieOption {
   code: string
@@ -113,6 +125,10 @@ export function TreatmentPlanForm({
   const [openMenu, setOpenMenu] = useState<{ id: string; field: 'cie' | 'cups'; query: string } | null>(
     null,
   )
+  const [annexPickerOpen, setAnnexPickerOpen] = useState(false)
+  const [annexChoices, setAnnexChoices] = useState<TreatmentPlanItem[]>([])
+  const [selectedAnnexIds, setSelectedAnnexIds] = useState<string[]>([])
+  const { toastMessage, showToast, clearToast } = useToast()
   const cieQuery = openMenu?.field === 'cie' ? openMenu.query : ''
   const cupsQuery = openMenu?.field === 'cups' ? openMenu.query : ''
   const cieCatalog = useCatalogSearch('cie10', cieQuery, 20)
@@ -133,11 +149,6 @@ export function TreatmentPlanForm({
     tariffMap[cupsCode ?? '']?.price ??
     tariffMap[cupsCode?.trim().toUpperCase() ?? '']?.price ??
     resolveTariffUnitPrice(cupsCode)
-
-  const annexPreview = useMemo(
-    () => previewAnnexTreatmentImports(specializedAnnexes, treatmentPlan),
-    [specializedAnnexes, treatmentPlan],
-  )
 
   const diagnosisPreview = useMemo(
     () =>
@@ -200,7 +211,36 @@ export function TreatmentPlanForm({
   }
 
   const importFromAnnexes = () => {
-    emit(importAnnexesToTreatmentPlan(specializedAnnexes, treatmentPlan, catalogUnitPrice))
+    const fresh = previewAnnexTreatmentImports(specializedAnnexes, treatmentPlan)
+    if (fresh.length === 0) {
+      const stored = previewAnnexTreatmentImports(specializedAnnexes, [])
+      showToast(
+        stored.length === 0
+          ? 'No se encontraron planes de tratamiento en los anexos'
+          : 'Los procedimientos de los anexos ya están en el plan de tratamiento',
+      )
+      return
+    }
+    const priced = applyAnnexCatalogPrices(fresh, catalogUnitPrice)
+    setAnnexChoices(priced)
+    setSelectedAnnexIds(priced.map((item) => item.id))
+    setAnnexPickerOpen(true)
+  }
+
+  const toggleAnnexChoice = (id: string) => {
+    setSelectedAnnexIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    )
+  }
+
+  const confirmAnnexImport = () => {
+    const chosen = annexChoices.filter((item) => selectedAnnexIds.includes(item.id))
+    if (chosen.length === 0) {
+      showToast('Seleccione al menos un procedimiento para importar')
+      return
+    }
+    emit([...treatmentPlan, ...chosen])
+    setAnnexPickerOpen(false)
   }
 
   const updateTreatmentItem = (id: string, patch: Partial<TreatmentPlanItem>) => {
@@ -238,12 +278,7 @@ export function TreatmentPlanForm({
           >
             Importar diagnósticos
           </button>
-          <button
-            type="button"
-            onClick={importFromAnnexes}
-            disabled={annexPreview.length === 0}
-            className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <button type="button" onClick={importFromAnnexes} className="btn-secondary text-xs">
             Importar desde anexos
           </button>
           <button type="button" onClick={addTreatmentItem} className="btn-primary text-xs">
@@ -450,6 +485,95 @@ export function TreatmentPlanForm({
           <option key={zone} value={zone} />
         ))}
       </datalist>
+
+      {annexPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="annex-import-title"
+            className="flex max-h-[min(36rem,90vh)] w-full max-w-3xl flex-col rounded-xl border border-slate-200 bg-white shadow-xl"
+          >
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h4 id="annex-import-title" className="text-base font-semibold text-slate-900">
+                Importar desde anexos
+              </h4>
+              <p className="mt-1 text-sm text-slate-600">
+                Elija los procedimientos del paciente que desea agregar al plan. El valor total se
+                recalcula al insertarlos.
+              </p>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="w-8 py-2">
+                      <input
+                        type="checkbox"
+                        aria-label="Seleccionar todos"
+                        checked={selectedAnnexIds.length === annexChoices.length && annexChoices.length > 0}
+                        onChange={() =>
+                          setSelectedAnnexIds(
+                            selectedAnnexIds.length === annexChoices.length
+                              ? []
+                              : annexChoices.map((item) => item.id),
+                          )
+                        }
+                      />
+                    </th>
+                    <th className="px-2 py-2">Diente / Zona</th>
+                    <th className="px-2 py-2">Diagnóstico CIE</th>
+                    <th className="px-2 py-2">Procedimiento</th>
+                    <th className="px-2 py-2 text-right">Precio</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {annexChoices.map((item) => {
+                    const checked = selectedAnnexIds.includes(item.id)
+                    const source = item.source ? ANNEX_SOURCE_LABEL[item.source] : ''
+                    return (
+                      <tr key={item.id} className="border-b border-slate-100">
+                        <td className="py-2">
+                          <input
+                            type="checkbox"
+                            aria-label={`Importar ${item.procedure}`}
+                            checked={checked}
+                            onChange={() => toggleAnnexChoice(item.id)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">{formatAnatomicalZone(item) || '—'}</td>
+                        <td className="px-2 py-2">{formatCieLabel(item) || '—'}</td>
+                        <td className="px-2 py-2">
+                          <span className="block">{item.procedure}</span>
+                          {source && <span className="text-xs text-slate-400">{source}</span>}
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums">
+                          {formatCurrency(item.unitPrice || 0)}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+              <button type="button" onClick={() => setAnnexPickerOpen(false)} className="btn-secondary">
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmAnnexImport}
+                disabled={selectedAnnexIds.length === 0}
+                className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Importar seleccionados
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Toast message={toastMessage} onDismiss={clearToast} />
     </section>
   )
 }

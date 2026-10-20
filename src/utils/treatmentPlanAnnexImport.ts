@@ -161,15 +161,26 @@ export function previewAnnexTreatmentImports(
   return collectAnnexItems(annexes).filter((item) => !alreadyImported(plan, item))
 }
 
+/** Completa el precio de catálogo cuando el anexo no trae valor propio. */
+export function applyAnnexCatalogPrices(
+  items: TreatmentPlanItem[],
+  resolvePrice: (cupsCode?: string) => number = () => 0,
+): TreatmentPlanItem[] {
+  return items.map((item) => {
+    if ((item.unitPrice ?? 0) > 0) return item
+    const price = resolvePrice(item.cupsCode)
+    return price > 0 ? { ...item, unitPrice: price } : item
+  })
+}
+
 export function importAnnexesToTreatmentPlan(
   annexes: SpecializedAnnexes | undefined,
   plan: TreatmentPlanItem[],
   resolvePrice: (cupsCode?: string) => number = () => 0,
 ): TreatmentPlanItem[] {
-  const additions = previewAnnexTreatmentImports(annexes, plan).map((item) => {
-    if ((item.unitPrice ?? 0) > 0) return item
-    const price = resolvePrice(item.cupsCode)
-    return price > 0 ? { ...item, unitPrice: price } : item
-  })
+  const additions = applyAnnexCatalogPrices(
+    previewAnnexTreatmentImports(annexes, plan),
+    resolvePrice,
+  )
   return additions.length > 0 ? [...plan, ...additions] : plan
 }
