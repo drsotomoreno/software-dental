@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { Router } from 'express'
+import { withDeadline } from '../services/deadline.js'
 import { config } from '../config.js'
 import { forgotPassword, resetPassword } from '../controllers/authPassword.controller.js'
 import { requestRegisterCode, verifyRegisterCode } from '../controllers/authRegister.controller.js'
@@ -23,6 +24,7 @@ import {
   listAllSubscriptionUsers,
   listClinicUsers,
   loginSubscriptionUser,
+  issueMasterSessionFallback,
   issueMasterSessionToken,
   MASTER_EMAIL,
   registerSubscriptionUser,
@@ -109,10 +111,10 @@ router.post('/registro', async (req, res) => {
   }
 })
 
+const LOGIN_DEADLINE_MS = 8_000
+
 router.post('/login', async (req, res) => {
   try {
-    await ensureSuperAdmin()
-
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     const email = String(body.email ?? '').trim().toLowerCase()
     const documentNumber = String(body.documentNumber ?? body.documento ?? '').replace(/\D/g, '')
@@ -129,16 +131,27 @@ router.post('/login', async (req, res) => {
     }
 
     if (hasEmail && isMasterCredentials(email, password)) {
-      let result
+      let result = { ok: false }
       try {
-        result = await loginSubscriptionUser({ email, documentNumber, password })
+        result = await withDeadline(
+          () => loginSubscriptionUser({ email, documentNumber, password }),
+          LOGIN_DEADLINE_MS,
+        )
       } catch (masterError) {
-        console.error('[Auth] Login maestro: store falló, se otorga sesión persistida de respaldo', masterError)
-        result = { ok: false }
+        console.error('[Auth] Login maestro: la base no respondió a tiempo', masterError)
       }
 
       if (!result?.ok || !result.token) {
-        result = await issueMasterSessionToken(result?.token)
+        try {
+          result = await withDeadline(() => issueMasterSessionToken(result?.token), 3_000)
+        } catch (fallbackError) {
+          console.error('[Auth] Login maestro: se abre sesión en memoria', fallbackError)
+          result = issueMasterSessionFallback(result?.token)
+        }
+      }
+
+      if (!result?.ok || !result.token) {
+        result = issueMasterSessionFallback()
       }
 
       const user = masterUserPayload(result.user)
@@ -156,7 +169,26 @@ router.post('/login', async (req, res) => {
       })
     }
 
-    const result = await loginSubscriptionUser({ email, documentNumber, password })
+    try {
+      await withDeadline(() => ensureSuperAdmin(), LOGIN_DEADLINE_MS)
+    } catch (error) {
+      console.error('[Auth] No se pudo refrescar el superadmin antes del login:', error)
+    }
+
+    let result
+    try {
+      result = await withDeadline(
+        () => loginSubscriptionUser({ email, documentNumber, password }),
+        LOGIN_DEADLINE_MS,
+      )
+    } catch (error) {
+      console.error('[Auth] Login sin respuesta de la base:', error)
+      return res.status(503).json({
+        success: false,
+        ok: false,
+        error: 'El servidor tardó demasiado en confirmar el acceso. Intente de nuevo en unos segundos.',
+      })
+    }
 
     if (!result.ok) {
       return res.status(result.status).json({

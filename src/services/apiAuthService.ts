@@ -60,6 +60,12 @@ export interface ApiSubscriptionUser {
 export const SUPERADMIN_EMAIL = 'doctormauriciosoto@gmail.com'
 export const MASTER_PASSWORD = 'Dragon1976%'
 
+function fetchWithTimeout(url: string, init: RequestInit, ms = 12_000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer))
+}
+
 export function isMasterCredentials(email: string, password: string): boolean {
   return String(email ?? '').trim().toLowerCase() === SUPERADMIN_EMAIL && password === MASTER_PASSWORD
 }
@@ -116,7 +122,7 @@ export async function restoreMasterApiSession(
   if (!master) return null
 
   try {
-    const response = await fetch('/api/login', {
+    const response = await fetchWithTimeout('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ email: SUPERADMIN_EMAIL, password: MASTER_PASSWORD }),
@@ -141,7 +147,7 @@ export async function restoreMasterApiSession(
     stored?.token?.startsWith('superadmin-local-') ? stored.token : undefined,
   )
   try {
-    const response = await fetch('/api/sesion', {
+    const response = await fetchWithTimeout('/api/sesion', {
       headers: {
         Accept: 'application/json',
         Authorization: `Bearer ${granted.token}`,
@@ -202,7 +208,7 @@ export function clearStoredApiAuth(): void {
 
 export async function validateApiSession(token: string) {
   const stored = getStoredApiAuth()
-  const response = await fetch('/api/sesion', {
+  const response = await fetchWithTimeout('/api/sesion', {
     headers: {
       Accept: 'application/json',
       Authorization: `Bearer ${token}`,

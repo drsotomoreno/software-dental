@@ -302,7 +302,7 @@ async function pullAndMerge(includeBlobs = false): Promise<boolean> {
   return applyFullClinicPull(payload, { hydrateBlobs: includeBlobs })
 }
 
-/** Pull forzado al iniciar sesión: snapshot completo con archivos antes de renderizar. */
+/** Pull al iniciar sesión. Sin archivos: hidratarlos aquí dejaba «Ingresando…» hasta que llegaba toda la clínica. */
 export async function pullCompleteClinicOnLogin(): Promise<boolean> {
   const auth = getStoredApiAuth()
   if (!auth?.token) return false
@@ -318,7 +318,7 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
     const cached = await readCachedClinicPull()
     if (cached) await applyFullClinicPull(cached)
     if (!getCurrentClinicId()) return Boolean(cached)
-    const merged = await pullAndMerge(true)
+    const merged = await pullAndMerge(false)
     await syncCitasToLocalStorage()
     renderCitas()
     return merged

@@ -60,66 +60,68 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useClinicalPullSync(Boolean(user) && !isLoading)
 
   const loadSession = useCallback(async () => {
-    const storedRole = localStorage.getItem('doctorSEO_rol')
-    const storedToken = localStorage.getItem('doctorSEO_token')
-    let apiAuth = getStoredApiAuth()
+    try {
+      const storedRole = localStorage.getItem('doctorSEO_rol')
+      const storedToken = localStorage.getItem('doctorSEO_token')
+      let apiAuth = getStoredApiAuth()
 
-    if (!apiAuth && storedToken && storedRole === 'superadmin') {
-      const fallbackUser = {
-        id: 'superadmin-session',
-        nombre: 'Dr. Mauricio Soto',
-        firstName: 'Mauricio',
-        lastName: 'Soto',
-        email: SUPERADMIN_EMAIL,
-        rol: 'superadmin' as const,
-        estado_pago: 'exento' as const,
-        fecha_vencimiento: null,
-      }
-      setStoredApiAuth(storedToken, fallbackUser)
-      apiAuth = { token: storedToken, user: fallbackUser }
-    }
-
-    if (apiAuth) {
-      let validation = await validateApiSession(apiAuth.token)
-      if (!validation.ok && isApiSuperAdmin(apiAuth.user)) {
-        const restored = await restoreMasterApiSession()
-        if (restored) {
-          validation = {
-            ok: true as const,
-            user: restored.user,
-            expiresAt: null as unknown as string,
-            rol: 'superadmin' as const,
-          }
-          apiAuth = restored
+      if (!apiAuth && storedToken && storedRole === 'superadmin') {
+        const fallbackUser = {
+          id: 'superadmin-session',
+          nombre: 'Dr. Mauricio Soto',
+          firstName: 'Mauricio',
+          lastName: 'Soto',
+          email: SUPERADMIN_EMAIL,
+          rol: 'superadmin' as const,
+          estado_pago: 'exento' as const,
+          fecha_vencimiento: null,
         }
+        setStoredApiAuth(storedToken, fallbackUser)
+        apiAuth = { token: storedToken, user: fallbackUser }
       }
-      if (validation.ok) {
-        setStoredApiAuth(apiAuth.token, validation.user)
-        await pullCompleteClinicOnLogin()
-        setUser(await sessionUserFromApi(validation.user, apiAuth.token))
-        setIsLoading(false)
-        return
-      }
-      if (validation.requiresPayment && validation.user) {
-        setStoredApiAuth(apiAuth.token, validation.user)
-        await pullCompleteClinicOnLogin()
-        setUser(await sessionUserFromApi(validation.user, apiAuth.token))
-        setIsLoading(false)
-        return
-      }
-      if (isApiSuperAdmin(apiAuth.user)) {
-        await pullCompleteClinicOnLogin()
-        setUser(await sessionUserFromApi(apiAuth.user, apiAuth.token))
-        setIsLoading(false)
-        return
-      }
-      clearStoredApiAuth()
-    }
 
-    const token = await getStoredSessionToken()
-    const authUser = await resolveAuthUser(token)
-    setUser(authUser ? await recoverMissingProfessionalDocument(authUser) : null)
-    setIsLoading(false)
+      if (apiAuth) {
+        let validation = await validateApiSession(apiAuth.token)
+        if (!validation.ok && isApiSuperAdmin(apiAuth.user)) {
+          const restored = await restoreMasterApiSession()
+          if (restored) {
+            validation = {
+              ok: true as const,
+              user: restored.user,
+              expiresAt: null as unknown as string,
+              rol: 'superadmin' as const,
+            }
+            apiAuth = restored
+          }
+        }
+        if (validation.ok) {
+          setStoredApiAuth(apiAuth.token, validation.user)
+          setUser(await sessionUserFromApi(validation.user, apiAuth.token))
+          void pullCompleteClinicOnLogin()
+          return
+        }
+        if (validation.requiresPayment && validation.user) {
+          setStoredApiAuth(apiAuth.token, validation.user)
+          setUser(await sessionUserFromApi(validation.user, apiAuth.token))
+          void pullCompleteClinicOnLogin()
+          return
+        }
+        if (isApiSuperAdmin(apiAuth.user)) {
+          setUser(await sessionUserFromApi(apiAuth.user, apiAuth.token))
+          void pullCompleteClinicOnLogin()
+          return
+        }
+        clearStoredApiAuth()
+      }
+
+      const token = await getStoredSessionToken()
+      const authUser = await resolveAuthUser(token)
+      setUser(authUser ? await recoverMissingProfessionalDocument(authUser) : null)
+    } catch (error) {
+      console.error('[auth] No se pudo restaurar la sesión:', error)
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -141,10 +143,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const passwordValue = password.trim()
     const masterLogin = isMasterCredentials(normalizedEmail, passwordValue)
 
-    const completeApiLogin = async (token: string, sessionUser: ApiSubscriptionUser) => {
+    const openSession = async (token: string, sessionUser: ApiSubscriptionUser) => {
       setStoredApiAuth(token, sessionUser)
-      await pullCompleteClinicOnLogin()
-      const authUser = await sessionUserFromApi(sessionUser, token)
+      const authUser = mapApiUserToAuthUser(sessionUser, token)
       try {
         await seedUserCredentials(authUser.id, passwordValue)
       } catch (error) {
@@ -152,7 +153,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setUser(authUser)
       window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
-      await logAuditEvent({
+      void pullCompleteClinicOnLogin()
+      void sessionUserFromApi(sessionUser, token).then((recovered) => setUser(recovered))
+      void logAuditEvent({
         action: 'LOGIN_SUCCESS',
         resourceType: 'session',
         resourceId: token,
@@ -166,6 +169,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       document.documentElement.dataset.superadmin = 'true'
     }
 
+    const controller = new AbortController()
+    const loginTimer = setTimeout(() => controller.abort(), 12_000)
     try {
       const response = await fetch('/api/login', {
         method: 'POST',
@@ -175,6 +180,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             ? { email: normalizedEmail, password: passwordValue }
             : { documentNumber, password: passwordValue },
         ),
+        signal: controller.signal,
       })
       const payload = await response.json().catch(() => ({}))
 
@@ -183,7 +189,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const sessionUser = payload.user
           ? { ...payload.user, rol: 'superadmin' as const, estado_pago: 'exento' as const, email: SUPERADMIN_EMAIL }
           : granted.user
-        return completeApiLogin(granted.token, sessionUser)
+        return openSession(granted.token, sessionUser)
       }
 
       if (
@@ -192,11 +198,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         payload.user &&
         (payload.success === true || payload.ok === true || payload.success === undefined)
       ) {
-        return completeApiLogin(payload.token, payload.user)
+        return openSession(payload.token, payload.user)
       }
 
       if (response.status === 402 && payload.user && payload.token) {
-        return completeApiLogin(payload.token, payload.user)
+        return openSession(payload.token, payload.user)
       }
 
       if (response.status === 402 && payload.user) {
@@ -223,31 +229,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       if (masterLogin) {
         const granted = grantMasterLocalSession()
-        await pullCompleteClinicOnLogin()
-        const authUser = await sessionUserFromApi(granted.user, granted.token)
-        try {
-          await seedUserCredentials(authUser.id, passwordValue)
-        } catch (error) {
-          console.error('[auth] No se pudo guardar la clave para firmar en este equipo:', error)
-        }
-        setUser(authUser)
-        window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
-        return { ok: true as const }
+        return openSession(granted.token, granted.user)
       }
+    } finally {
+      clearTimeout(loginTimer)
     }
 
     if (masterLogin) {
       const granted = grantMasterLocalSession()
-      await pullCompleteClinicOnLogin()
-      const authUser = await sessionUserFromApi(granted.user, granted.token)
-      try {
-        await seedUserCredentials(authUser.id, passwordValue)
-      } catch (error) {
-        console.error('[auth] No se pudo guardar la clave para firmar en este equipo:', error)
-      }
-      setUser(authUser)
-      window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
-      return { ok: true as const }
+      return openSession(granted.token, granted.user)
     }
 
     const result = await authenticateUser(isEmail ? normalizedEmail : documentNumber, passwordValue)

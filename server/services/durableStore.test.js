@@ -42,6 +42,7 @@ test('la URL externa de Render usa SSL sin verificar la CA', () => {
     'postgresql://user:secret@dpg-abc123-a.oregon-postgres.render.com:5432/mydb?sslmode=require',
   )
   assert.deepEqual(config.ssl, { rejectUnauthorized: false })
+  assert.equal(config.query_timeout, 8_000)
   assert.equal(config.host, 'dpg-abc123-a.oregon-postgres.render.com')
   assert.equal(config.port, 5432)
   assert.equal(config.database, 'mydb')
