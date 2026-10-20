@@ -3,6 +3,8 @@
  * Base: capítulo K (boca, dientes, maxilares) + códigos traumatológicos frecuentes.
  */
 
+import { PREVENTIVE_DENTAL_EXAM_CIE10 } from '../constants/dental'
+
 export interface Cie10DataEntry {
   code: string
   description: string
@@ -26,6 +28,7 @@ const KEYWORDS_BY_CODE: Record<string, string[]> = {
   'K12.0': ['aftas', 'estomatitis aftosa'],
   'K13.0': ['queilitis', 'labios'],
   'S02.5': ['fractura dental', 'diente fracturado'],
+  'Z01.2': ['z012', 'paciente sano', 'examen odontologico', 'preventivo'],
 }
 
 const BASE_ENTRIES: Omit<Cie10DataEntry, 'keywords'>[] = [
@@ -158,6 +161,10 @@ const BASE_ENTRIES: Omit<Cie10DataEntry, 'keywords'>[] = [
   { code: 'S02.76', description: 'Fractura de hueso palatino' },
   { code: 'S02.77', description: 'Fractura de hueso vomer' },
   { code: 'S02.78', description: 'Fractura de otros huesos del cráneo y de la cara' },
+  {
+    code: PREVENTIVE_DENTAL_EXAM_CIE10.code,
+    description: PREVENTIVE_DENTAL_EXAM_CIE10.description,
+  },
   { code: 'Z01.20', description: 'Examen dental sin anormalidades' },
   { code: 'Z01.21', description: 'Encuentro para examen dental con anormalidades' },
   { code: 'Z46.3', description: 'Ajuste y manipulación de dispositivo dental protésico' },

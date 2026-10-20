@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import type { ClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import type { Cie10Diagnosis, TreatmentPlanItem } from '@/types/clinicalRecord'
 import type { SpecializedAnnexes } from '@/types/specializedAnnexes'
-import { COMMON_CIE10_CODES } from '@/constants/dental'
+import { COMMON_CIE10_CODES, cie10CodeMatchesQuery } from '@/constants/dental'
 import {
   CLINICAL_HISTORY_SECTION_NUMBERS,
   CLINICAL_SECTION_TITLE_CLASS,
@@ -167,11 +167,7 @@ export function TreatmentPlanForm({
     for (const item of pool) {
       const code = item.code.trim().toUpperCase()
       if (!code) continue
-      if (
-        query &&
-        !code.toLowerCase().includes(query) &&
-        !item.description.toLowerCase().includes(query)
-      ) {
+      if (query && !cie10CodeMatchesQuery(code, item.description, query)) {
         continue
       }
       map.set(code, { code, description: item.description })

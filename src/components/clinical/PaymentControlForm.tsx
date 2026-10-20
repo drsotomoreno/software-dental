@@ -19,7 +19,7 @@ import {
   CLINICAL_SECTION_TITLE_CLASS,
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
-import { COMMON_CIE10_CODES } from '@/constants/dental'
+import { COMMON_CIE10_CODES, cie10CodeMatchesQuery } from '@/constants/dental'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCatalogSearch } from '@/hooks/useCatalogSearch'
 import { useTariffSync } from '@/modules/tariff/useTariffSync'
@@ -299,11 +299,7 @@ export function PaymentControlForm({
     for (const item of pool) {
       const code = item.code.trim().toUpperCase()
       if (!code) continue
-      if (
-        query &&
-        !code.toLowerCase().includes(query) &&
-        !item.description.toLowerCase().includes(query)
-      ) {
+      if (query && !cie10CodeMatchesQuery(code, item.description, query)) {
         continue
       }
       map.set(code, { code, description: item.description })

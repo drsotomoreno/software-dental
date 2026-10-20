@@ -1,4 +1,5 @@
 import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
+import { isPreventiveDentalExamCie10 } from '@/constants/dental'
 
 const MISSING_CHIEF_COMPLAINT = 'Falta registrar el motivo de consulta'
 const MISSING_DIAGNOSIS = 'Falta registrar al menos un diagnóstico en el esquema'
@@ -28,7 +29,10 @@ export function validateClinicalRecordDraft(
     chartEntries.some(
       (entry) => hasText(entry?.diagnosisCode) || hasText(entry?.diagnosisDescription),
     )
-  if (!hasDiagnosis) {
+  const diagnoses = draft?.diagnoses ?? []
+  const principal = diagnoses.find((item) => item.type === 'principal') ?? diagnoses[0]
+  const hasPreventiveExam = isPreventiveDentalExamCie10(principal?.code)
+  if (!hasDiagnosis && !hasPreventiveExam) {
     issues.push(MISSING_DIAGNOSIS)
   }
 

@@ -72,6 +72,23 @@ test('en producción arma usuarios, servicios y consultas con el documento real'
   )
 })
 
+test('el examen odontológico preventivo exporta Z012 y la caries sigue como K021', () => {
+  const mapper = new RipsMapper(PRESTADOR, { MINSALUD_ENV: 'production' })
+
+  for (const code of ['Z01.2', 'Z012']) {
+    const rips = mapper.toRipsSinFactura(
+      consultaOdontologica({
+        id: `consulta-${code}`,
+        diagnoses: [{ code, type: 'principal', certainty: 'confirmado' }],
+      }),
+    )
+    assert.equal(rips.usuarios[0].servicios.consultas[0].codDiagnosticoPrincipal, 'Z012')
+  }
+
+  const patologico = mapper.toRipsSinFactura(consultaOdontologica())
+  assert.equal(patologico.usuarios[0].servicios.consultas[0].codDiagnosticoPrincipal, 'K021')
+})
+
 test('en stage sustituye el documento del paciente por el del prestador', () => {
   const produccion = new RipsMapper(PRESTADOR, { MINSALUD_ENV: 'production' })
   const stage = new RipsMapper(PRESTADOR, { MINSALUD_ENV: 'stage' })

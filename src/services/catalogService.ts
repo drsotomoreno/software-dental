@@ -27,6 +27,7 @@ import {
   cupsOdontologyToCatalogItems,
   getCupsOdontologyCount,
 } from '@/constants/cupsOdontologyData'
+import { PREVENTIVE_DENTAL_EXAM_CIE10 } from '@/constants/dental'
 import type {
   CatalogImportPayload,
   CatalogItem,
@@ -51,7 +52,9 @@ export function isValidCupsFormat(code: string): boolean {
 }
 
 export function isValidCie10Format(code: string): boolean {
-  return /^[A-Z]\d{2}(\.\d{1,2})?$/i.test(code.trim())
+  const trimmed = code.trim()
+  if (/^Z012$/i.test(trimmed)) return true
+  return /^[A-Z]\d{2}(\.\d{1,2})?$/i.test(trimmed)
 }
 
 export function normalizeCie10Code(code: string): string {
@@ -101,9 +104,11 @@ export async function searchCatalog(
       const dotted =
         catalogType === 'cups' ? formatCupsCodeDotted(item.code).toLowerCase() : ''
       const description = item.description.toLowerCase()
+      const compactCode = catalogType === 'cie10' ? code.replace(/\./g, '') : ''
+      const compactQuery = catalogType === 'cie10' ? q.replace(/\./g, '') : ''
 
       let score = 0
-      if (code === qDigits || code === q) score = 100
+      if (code === qDigits || code === q || (compactQuery.length > 0 && compactCode === compactQuery)) score = 100
       else if (dotted === q) score = 95
       else if (code.startsWith(qDigits) && qDigits.length >= 3) score = 80
       else if (code.includes(qDigits) && qDigits.length >= 2) score = 60
@@ -209,6 +214,42 @@ export async function seedCatalogsIfEmpty(): Promise<void> {
 
   await syncOdontologyCupsPatches()
   await ensureFullOdontologyCupsCatalog()
+  await ensurePreventiveDentalExamCie10()
+}
+
+/** Inserta Z01.2 en catálogos CIE-10 ya sembrados, sin reimportar el resto. */
+export async function ensurePreventiveDentalExamCie10(): Promise<void> {
+  const code = PREVENTIVE_DENTAL_EXAM_CIE10.code
+  const description = PREVENTIVE_DENTAL_EXAM_CIE10.description
+  const id = catalogItemId('cie10', code)
+  const existing = await db.catalogItems.get(id)
+  if (existing?.active && existing.description === description) return
+
+  const now = new Date().toISOString()
+  await db.transaction('rw', db.catalogItems, db.catalogMeta, async () => {
+    const current = await db.catalogItems.get(id)
+    if (!current) {
+      await db.catalogItems.put({
+        id,
+        catalogType: 'cie10',
+        code,
+        description,
+        chapter: 'Z00-Z99',
+        specialty: 'odontologia',
+        active: true,
+      })
+      const meta = await db.catalogMeta.get('cie10')
+      if (meta) {
+        await db.catalogMeta.update('cie10', {
+          recordCount: meta.recordCount + 1,
+          updatedAt: now,
+          updatedBy: 'system',
+        })
+      }
+      return
+    }
+    await db.catalogItems.update(id, { description, active: true, specialty: 'odontologia' })
+  })
 }
 
 /**

@@ -27,6 +27,36 @@ export const ALL_DECIDUOUS_TEETH: DeciduousToothNumber[] = [
   ...DECIDUOUS_LOWER_RIGHT,
 ]
 
+/** Examen odontológico preventivo — CIE-10 colombiano Z01.2, RIPS Z012. */
+export const PREVENTIVE_DENTAL_EXAM_CIE10 = {
+  code: 'Z01.2',
+  ripsCode: 'Z012',
+  description: 'Examen odontológico / Paciente odontoestomatológicamente sano',
+  label: 'Z012 - Examen odontológico / Paciente odontoestomatológicamente sano',
+} as const
+
+export function compactCie10Code(code: string | null | undefined): string {
+  return String(code ?? '').replace(/\./g, '').trim().toUpperCase()
+}
+
+export function isPreventiveDentalExamCie10(code: string | null | undefined): boolean {
+  return compactCie10Code(code) === PREVENTIVE_DENTAL_EXAM_CIE10.ripsCode
+}
+
+/** Coincide código con o sin punto (Z01.2 y Z012) y la descripción. */
+export function cie10CodeMatchesQuery(code: string, description: string, query: string): boolean {
+  const normalizedQuery = query.trim().toLowerCase()
+  if (!normalizedQuery) return true
+  const normalizedCode = code.trim().toLowerCase()
+  const normalizedDescription = description.trim().toLowerCase()
+  if (normalizedCode.includes(normalizedQuery) || normalizedDescription.includes(normalizedQuery)) {
+    return true
+  }
+  const compactQuery = normalizedQuery.replace(/\./g, '')
+  if (!compactQuery) return false
+  return normalizedCode.replace(/\./g, '').includes(compactQuery)
+}
+
 /** CIE-10 odontología — códigos frecuentes en Colombia */
 export const COMMON_CIE10_CODES = [
   { code: 'K02.0', description: 'Caries limitada al esmalte' },
@@ -64,6 +94,10 @@ export const COMMON_CIE10_CODES = [
   { code: 'K13.0', description: 'Enfermedades de los labios' },
   { code: 'K13.7', description: 'Otras lesiones y alteraciones de la mucosa bucal' },
   { code: 'S02.5', description: 'Fractura de diente' },
+  {
+    code: PREVENTIVE_DENTAL_EXAM_CIE10.code,
+    description: PREVENTIVE_DENTAL_EXAM_CIE10.description,
+  },
 ]
 
 export const DIAGNOSIS_CERTAINTY_LABELS: Record<DiagnosisCertainty, string> = {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Cie10Diagnosis, DiagnosisCertainty } from '@/types/clinicalRecord'
-import { DIAGNOSIS_CERTAINTY_LABELS } from '@/constants/dental'
+import { DIAGNOSIS_CERTAINTY_LABELS, PREVENTIVE_DENTAL_EXAM_CIE10 } from '@/constants/dental'
 import { ENDO_FDI_TEETH } from '@/types/endoAnnex.types'
 import {
   CLINICAL_HISTORY_SECTION_NUMBERS,
@@ -108,6 +108,15 @@ export function Cie10DiagnosisSearchSection({
             </div>
           )}
           <div>
+          <button
+            type="button"
+            onClick={() =>
+              addDiagnosis(PREVENTIVE_DENTAL_EXAM_CIE10.code, PREVENTIVE_DENTAL_EXAM_CIE10.description)
+            }
+            className="mb-3 inline-flex rounded-full border border-dental-200 bg-dental-50 px-3 py-1.5 text-left text-xs font-medium text-dental-800 hover:bg-dental-100"
+          >
+            {PREVENTIVE_DENTAL_EXAM_CIE10.label}
+          </button>
           <div className="mb-1 flex items-center justify-between gap-2">
             <label className="text-xs font-medium text-slate-600" htmlFor="rapid-cie10-search">
               Buscador CIE-10

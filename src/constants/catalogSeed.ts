@@ -1,4 +1,5 @@
 import type { CatalogImportPayload } from '@/types/catalog'
+import { PREVENTIVE_DENTAL_EXAM_CIE10 } from '@/constants/dental'
 import {
   CUPS_ODONTOLOGIA_VERSION,
   cupsOdontologyToCatalogItems,
@@ -82,6 +83,12 @@ export const CIE10_SEED_ITEMS: CatalogImportPayload['items'] = [
   { code: 'K13.0', description: 'Enfermedades de los labios', chapter: 'K00-K14' },
   { code: 'K13.7', description: 'Otras lesiones y alteraciones de la mucosa bucal', chapter: 'K00-K14' },
   { code: 'S02.5', description: 'Fractura de diente', chapter: 'S00-S09' },
+  {
+    code: PREVENTIVE_DENTAL_EXAM_CIE10.code,
+    description: PREVENTIVE_DENTAL_EXAM_CIE10.description,
+    chapter: 'Z00-Z99',
+    specialty: 'odontologia',
+  },
 ]
 
 /** CUPS odontología — base MinSalud Colombia (actualizable vía importación) */
