@@ -106,6 +106,10 @@ export function BudgetModule({
     setProcedureSearch('')
   }
 
+  const lineGridClass = disabled
+    ? 'grid grid-cols-[minmax(0,2.5fr)_minmax(6.5rem,0.9fr)_minmax(7.5rem,1fr)_minmax(4.5rem,0.6fr)_minmax(7.5rem,0.9fr)_minmax(6.5rem,0.75fr)_minmax(5rem,0.6fr)] gap-x-2'
+    : 'grid grid-cols-[minmax(0,2.5fr)_minmax(6.5rem,0.9fr)_minmax(7.5rem,1fr)_minmax(4.5rem,0.6fr)_minmax(7.5rem,0.9fr)_minmax(6.5rem,0.75fr)_minmax(5rem,0.6fr)_2rem] gap-x-2'
+
   const handleCodeBlur = (id: string, rawCode: string) => {
     const code = rawCode.trim()
     if (!code) return
@@ -224,23 +228,25 @@ export function BudgetModule({
         </p>
       ) : (
         <div id="clinical-budget-lines" className="mb-4 overflow-x-auto">
-          <table className="w-full min-w-[920px] table-fixed text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                <th className="w-[38%] px-2 py-2 font-medium">Procedimiento</th>
-                <th className="w-[12%] px-2 py-2 font-medium">CUPS</th>
-                <th className="w-[12%] px-2 py-2 font-medium">Pieza</th>
-                <th className="w-[8%] px-2 py-2 font-medium">Cant.</th>
-                <th className="w-[12%] px-2 py-2 font-medium">Precio unit.</th>
-                <th className="w-[10%] px-2 py-2 font-medium">Desc.</th>
-                <th className="w-[8%] px-2 py-2 font-medium">Total</th>
-                {!disabled && <th className="w-[4%] px-2 py-2" />}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {items.map((item) => (
-                <tr key={item.id} className="align-top">
-                  <td className="px-2 py-2">
+          <div className="min-w-[920px]">
+            <div
+              className={`${lineGridClass} mb-2 items-end border border-transparent px-3.5 text-left text-sm font-bold text-slate-800 dark:text-slate-100`}
+            >
+              <span>Procedimiento</span>
+              <span>CUPS</span>
+              <span>Pieza</span>
+              <span>Cant.</span>
+              <span>Precio unit.</span>
+              <span>Desc.</span>
+              <span>Total</span>
+              {!disabled && <span className="sr-only">Quitar</span>}
+            </div>
+            {items.map((item) => (
+              <div
+                key={item.id}
+                className={`${lineGridClass} mb-3 items-start rounded-xl border border-blue-100 bg-blue-50/80 p-3.5 dark:border-sky-800/60 dark:bg-sky-950/40 [&_input]:bg-white [&_select]:bg-white [&_textarea]:bg-white dark:[&_input]:bg-slate-900 dark:[&_select]:bg-slate-900 dark:[&_textarea]:bg-slate-900`}
+              >
+                <div className="min-w-0">
                     {disabled ? (
                       <span className="block whitespace-normal break-words leading-snug text-slate-800 dark:text-slate-100">
                         {item.description || '—'}
@@ -252,8 +258,9 @@ export function BudgetModule({
                           value={item.description}
                           onChange={(e) => updateItem(item.id, { description: e.target.value })}
                           placeholder="Procedimiento"
+                          aria-label="Procedimiento"
                           rows={2}
-                          className="input-field min-h-[2.75rem] min-w-0 flex-1 resize-y whitespace-normal break-words leading-snug"
+                          className="input-field min-h-[2.75rem] min-w-0 flex-1 resize-y whitespace-normal break-words bg-white leading-snug dark:bg-slate-900"
                         />
                         <VoiceDictationButton
                           targetInputId={`budget-desc-${item.id}`}
@@ -265,8 +272,8 @@ export function BudgetModule({
                         />
                       </div>
                     )}
-                  </td>
-                  <td className="px-2 py-2">
+                  </div>
+                  <div className="min-w-0">
                     {disabled ? (
                       <span className="font-mono text-xs">{item.code || '—'}</span>
                     ) : (
@@ -277,7 +284,8 @@ export function BudgetModule({
                           onChange={(e) => updateItem(item.id, { code: e.target.value })}
                           onBlur={(e) => handleCodeBlur(item.id, e.target.value)}
                           placeholder="CUPS"
-                          className="input-field min-w-0 flex-1 font-mono text-xs"
+                          aria-label="CUPS"
+                          className="input-field min-w-0 flex-1 bg-white font-mono text-xs dark:bg-slate-900"
                         />
                         <VoiceDictationButton
                           targetInputId={`budget-cups-${item.id}`}
@@ -287,8 +295,8 @@ export function BudgetModule({
                         />
                       </div>
                     )}
-                  </td>
-                  <td className="px-2 py-2 align-top">
+                  </div>
+                  <div className="min-w-0">
                     {item.anatomicalZone &&
                       (!item.code || item.anatomicalZone !== String(item.toothNumber ?? '')) && (
                         <span className="mb-1 block text-xs leading-snug text-slate-700">
@@ -310,8 +318,8 @@ export function BudgetModule({
                     ) : !item.anatomicalZone ? (
                       <span className="text-xs text-slate-400">—</span>
                     ) : null}
-                  </td>
-                  <td className="px-2 py-2">
+                  </div>
+                  <div className="min-w-0">
                     {disabled ? (
                       item.quantity
                     ) : (
@@ -324,8 +332,8 @@ export function BudgetModule({
                         compact
                       />
                     )}
-                  </td>
-                  <td className="px-2 py-2">
+                  </div>
+                  <div className="min-w-0">
                     {disabled ? (
                       formatCurrency(item.unitPrice)
                     ) : (
@@ -338,7 +346,8 @@ export function BudgetModule({
                           onChange={(e) =>
                             updateItem(item.id, { unitPrice: Number(e.target.value) })
                           }
-                          className="input-field min-w-0 w-28 flex-1"
+                          aria-label="Precio unitario"
+                          className="input-field min-w-0 w-full flex-1 bg-white dark:bg-slate-900"
                           title="Precio puntual del presupuesto (no altera el tarifario global)"
                         />
                         <VoiceDictationButton
@@ -354,8 +363,8 @@ export function BudgetModule({
                         />
                       </div>
                     )}
-                  </td>
-                  <td className="px-2 py-2">
+                  </div>
+                  <div className="min-w-0">
                     {disabled ? (
                       formatCurrency(item.discount)
                     ) : (
@@ -368,7 +377,8 @@ export function BudgetModule({
                           onChange={(e) =>
                             updateItem(item.id, { discount: Number(e.target.value) })
                           }
-                          className="input-field min-w-0 w-24 flex-1"
+                          aria-label="Descuento"
+                          className="input-field min-w-0 w-full flex-1 bg-white dark:bg-slate-900"
                         />
                         <VoiceDictationButton
                           targetInputId={`budget-disc-${item.id}`}
@@ -383,23 +393,25 @@ export function BudgetModule({
                         />
                       </div>
                     )}
-                  </td>
-                  <td className="px-2 py-2 font-medium">{formatCurrency(item.total)}</td>
+                  </div>
+                  <div className="pt-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    {formatCurrency(item.total)}
+                  </div>
                   {!disabled && (
-                    <td className="px-2 py-2 text-right">
+                    <div className="pt-1.5 text-right">
                       <button
                         type="button"
                         onClick={() => removeItem(item.id)}
                         className="text-red-500 hover:text-red-700"
+                        aria-label="Quitar procedimiento"
                       >
                         ✕
                       </button>
-                    </td>
+                    </div>
                   )}
-                </tr>
+                </div>
               ))}
-            </tbody>
-          </table>
+          </div>
         </div>
       )}
 
