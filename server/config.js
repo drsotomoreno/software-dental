@@ -3,11 +3,27 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const port = Number(process.env.PORT ?? 3000)
+const port = Number(process.env.PORT) || 3000
 
-/** URL de PostgreSQL requerida por la aplicación (local o producción). */
-export const DATABASE_URL =
-  process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/software_dental'
+const LOCAL_DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/software_dental'
+
+function resolveDatabaseUrl(fromEnv = process.env.DATABASE_URL) {
+  const trimmed = typeof fromEnv === 'string' ? fromEnv.trim() : ''
+  return trimmed || LOCAL_DATABASE_URL
+}
+
+function redactDatabaseUrl(url) {
+  try {
+    const parsed = new URL(url)
+    if (parsed.password) parsed.password = '***'
+    return parsed.toString()
+  } catch {
+    return '(sin URL)'
+  }
+}
+
+/** URL de PostgreSQL: la de Render (DATABASE_URL) o el Postgres local de desarrollo. */
+export const DATABASE_URL = resolveDatabaseUrl()
 
 export const config = {
   port,
@@ -76,6 +92,6 @@ const invokedDirectly =
 
 if (invokedDirectly) {
   console.log('[config] Módulo válido')
-  console.log(`[config] DATABASE_URL=${config.databaseUrl}`)
+  console.log(`[config] DATABASE_URL=${redactDatabaseUrl(config.databaseUrl)}`)
   console.log(`[config] SuperAdmin=${config.superAdmin.email} rol=superadmin estado_pago=exento`)
 }

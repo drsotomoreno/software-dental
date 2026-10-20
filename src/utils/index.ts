@@ -16,6 +16,8 @@ export {
 } from './patientId'
 export {
   deriveDiagnosesFromOdontogram,
+  collectOdontogramCieDiagnoses,
+  importOdontogramCieDiagnoses,
   formatOdontogramFindings,
   mergeDiagnosesWithOdontogram,
   syncClinicalDataFromOdontogram,
@@ -29,6 +31,7 @@ export {
 export { syncClinicalDataFromOrthodonticsAnnex } from './orthodonticsAnnexSync'
 export { syncClinicalDataFromEndodonticsAnnex } from './endodonticsAnnexSync'
 export { validateAcceptTreatment } from './patientPhase'
+export { validateClinicalRecordDraft } from './validateClinicalRecordDraft'
 export {
   buildValuationConsentMetadata,
   getOrCreateDeviceId,

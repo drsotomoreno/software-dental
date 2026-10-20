@@ -94,7 +94,7 @@ function identityDraftFromUser(
     lastName: names.lastName,
     legalName: institution ? user.legalName ?? '' : '',
     documentType: user.documentType || 'CC',
-    documentNumber: institution ? '' : user.documentNumber ?? '',
+    documentNumber: user.documentNumber ?? '',
     rethusNumber: institution ? '' : user.rethusNumber ?? '',
     clinicName: user.clinicName ?? '',
     providerNit: formatNitInput(user.providerNit ?? ''),
@@ -193,7 +193,7 @@ export function ProfilePage() {
         lastName: identity.lastName,
         legalName: isInstitutionProvider(identity.providerType) ? identity.legalName : '',
         documentType: identity.documentType,
-        documentNumber: isInstitutionProvider(identity.providerType) ? '' : identity.documentNumber,
+        documentNumber: identity.documentNumber,
         rethusNumber: isInstitutionProvider(identity.providerType) ? '' : identity.rethusNumber,
         clinicName: identity.clinicName,
         providerNit: identity.providerNitDisplay || identity.providerNit,
@@ -456,18 +456,16 @@ export function ProfilePage() {
             El correo de sesión no se modifica desde aquí.
           </p>
         </div>
-        {!isInstitutionProvider(providerType) ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <DocumentIdentityField
-              compact
-              required
-              documentType={form.documentType}
-              documentNumber={form.documentNumber}
-              error={fieldErrors.documentNumber}
-              onChange={(patch) => updateDraft(patch)}
-            />
-          </div>
-        ) : null}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <DocumentIdentityField
+            compact
+            required={!isInstitutionProvider(providerType)}
+            documentType={form.documentType}
+            documentNumber={form.documentNumber}
+            error={fieldErrors.documentNumber}
+            onChange={(patch) => updateDraft(patch)}
+          />
+        </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {!isInstitutionProvider(providerType) ? (
             <RethusCodeField
@@ -514,13 +512,19 @@ export function ProfilePage() {
               value={form.providerNit}
               onChange={(e) => updateDraft({ providerNit: formatNitInput(e.target.value) })}
               className={`input-field font-mono ${fieldErrors.providerNit ? 'border-red-400' : ''}`}
-              placeholder="Ej: 79904620-4"
+              placeholder="Cédula o NIT con DV"
               inputMode="numeric"
               autoComplete="off"
               aria-invalid={Boolean(fieldErrors.providerNit)}
             />
             {fieldErrors.providerNit ? (
               <p className="mt-1 text-xs text-red-600">{fieldErrors.providerNit}</p>
+            ) : !isInstitutionProvider(providerType) &&
+              !form.providerNit.trim() &&
+              form.documentNumber.trim() ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Este campo está vacío. El RIPS usa la cédula del perfil como documento del obligado.
+              </p>
             ) : null}
             {!String(form.providerNit).includes('-') &&
             extractNitDigits(form.providerNit).length >= 8 &&
@@ -537,6 +541,12 @@ export function ProfilePage() {
             onChange={(repsCode) => updateDraft({ repsCode })}
           />
         </div>
+        {!form.repsCode.trim() ? (
+          <p className="text-xs text-slate-500">
+            El texto gris del REPS es un ejemplo, no un código guardado. Si la sede queda en blanco,
+            el RIPS envía 6800103898-01.
+          </p>
+        ) : null}
         <RethusSpecialtyField
           value={form.thsSpecialty}
           onChange={(thsSpecialty) =>

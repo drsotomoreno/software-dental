@@ -9,9 +9,8 @@ import { CONSENT_TEMPLATES } from '@/constants/consentTemplates'
 import {
   DIAGNOSIS_CERTAINTY_LABELS,
   PAYMENT_METHOD_LABELS,
-  TREATMENT_PHASE_LABELS,
 } from '@/constants/dental'
-import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
+import type { ClinicalRecordFormData, PaymentPlanItem } from '@/types/clinicalRecord'
 import { formatClinicalDiagnosticChartSummary, normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import { NO_REPORTA_LABEL } from '@/types/anamnesis'
 import { formatVitalSignsSummary } from '@/types/stomatologicalExam'
@@ -38,6 +37,19 @@ import { formatEdentulousImplantPlanSummary } from '@/types/dentalImplantsPlanni
 import { formatImplantMedicalAnamnesisSummary } from '@/types/implantMedicalAnamnesis'
 import { formatImplantPeriodontalAssessmentSummary } from '@/types/implantPeriodontalAssessment'
 import { formatOralSurgeryAnnexSummary } from '@/types/oralSurgeryAnnex'
+import { formatAnatomicalZone } from '@/utils/treatmentPlanZone'
+import { sumTreatmentPlanPrices } from '@/utils/treatmentPlanPricing'
+import {
+  lineBillablePrice,
+  sumPaymentControlPrices,
+  treatmentPaymentBalance,
+} from '@/utils/paymentControlLines'
+import {
+  orthodonticsPlanItems,
+  planItemForLine,
+  supplementalPlanItems,
+} from '@/utils/paymentSectionMerge'
+import { ORTHODONTICS_PAYMENT_TYPE_LABELS, orthodonticsPaymentBalance } from '@/utils/orthodonticsPaymentControl'
 import { formatEndoAnnexSummary } from '@/utils/endoAnnex'
 import { formatOrthodonticBudgetSummary } from '@/components/clinical/orthodontics/calculator/types'
 import {
@@ -553,19 +565,22 @@ function buildAnnexesSection(data: ClinicalRecordFormData): string {
 }
 
 function buildTreatmentSection(data: ClinicalRecordFormData): string {
-  const rows = data.treatmentPlan
-    .filter((item) => item.procedure.trim())
-    .map(
-      (item) =>
-        `<tr>
-          <td>${escapeHtml(TREATMENT_PHASE_LABELS[item.phase])}</td>
-          <td>${escapeHtml(item.procedure)}</td>
-          <td>${item.toothNumber ?? '—'}</td>
-          <td>${item.quantity}</td>
-          <td>${escapeHtml(item.notes || '—')}</td>
-        </tr>`,
-    )
+  const visible = data.treatmentPlan.filter(
+    (item) => item.procedure.trim() || item.diagnosisCode || item.cupsCode || item.unitPrice > 0,
+  )
+  const rows = visible
+    .map((item) => {
+      const cie = [item.diagnosisCode, item.diagnosisDescription].filter(Boolean).join(' ')
+      const procedure = [item.procedure, item.cupsCode].filter(Boolean).join(' · ')
+      return `<tr>
+          <td>${escapeHtml(formatAnatomicalZone(item) || '—')}</td>
+          <td>${escapeHtml(cie || '—')}</td>
+          <td>${escapeHtml(procedure || '—')}</td>
+          <td>${formatCurrency(item.unitPrice)}</td>
+        </tr>`
+    })
     .join('')
+  const total = sumTreatmentPlanPrices(visible)
 
   return `
     <section class="print-section">
@@ -573,8 +588,9 @@ function buildTreatmentSection(data: ClinicalRecordFormData): string {
       ${
         rows
           ? `<table>
-        <thead><tr><th>Fase</th><th>Procedimiento</th><th>Pieza</th><th>Cant.</th><th>Notas</th></tr></thead>
+        <thead><tr><th>Diente / Zona</th><th>Diagnóstico CIE</th><th>Procedimiento</th><th>Precio</th></tr></thead>
         <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="3">Valor Total</td><td>${formatCurrency(total)}</td></tr></tfoot>
       </table>`
           : '<p>Sin procedimientos en el plan de tratamiento.</p>'
       }
@@ -616,61 +632,154 @@ function buildBudgetSection(data: ClinicalRecordFormData): string {
     </section>`
 }
 
-function buildPaymentPlanSection(data: ClinicalRecordFormData): string {
-  const rows = data.paymentPlan
-    .filter((item) => item.procedure.trim())
-    .map(
-      (item) =>
-        `<tr>
-          <td>${escapeHtml(item.procedure)}</td>
-          <td>${formatCurrency(item.totalAmount)}</td>
-          <td>${escapeHtml(PAYMENT_METHOD_LABELS[item.paymentMethod])}</td>
-          <td>${item.installments ?? '—'}</td>
-          <td>${item.dueDate ? formatDate(item.dueDate) : '—'}</td>
-          <td>${escapeHtml(item.scheduleNotes || '—')}</td>
-        </tr>`,
-    )
-    .join('')
-
-  return `
-    <section class="print-section">
-      <h2>${printSectionHeading('planPagos')}</h2>
-      ${
-        rows
-          ? `<table>
-        <thead><tr><th>Procedimiento</th><th>Total</th><th>Forma de pago</th><th>Cuotas</th><th>Fecha</th><th>Observaciones</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`
-          : '<p>Sin plan de pagos registrado.</p>'
-      }
-    </section>`
+function agreementFieldRows(item?: PaymentPlanItem): string {
+  if (!item) {
+    return [
+      fieldRow('Forma de pago', '—'),
+      fieldRow('Cuotas', '—'),
+      fieldRow('Abono', '—'),
+      fieldRow('Valor cuota', '—'),
+      fieldRow('Fecha', '—'),
+      fieldRow('Observaciones', '—'),
+    ].join('')
+  }
+  return [
+    fieldRow('Forma de pago', PAYMENT_METHOD_LABELS[item.paymentMethod]),
+    fieldRow('Cuotas', item.installments != null ? String(item.installments) : '—'),
+    fieldRow('Abono', item.initialPayment != null ? formatCurrency(item.initialPayment) : '—'),
+    fieldRow('Valor cuota', item.installmentAmount != null ? formatCurrency(item.installmentAmount) : '—'),
+    fieldRow('Fecha', item.dueDate ? formatDate(item.dueDate) : '—'),
+    fieldRow('Observaciones', item.scheduleNotes || '—'),
+  ].join('')
 }
 
-function buildPaymentControlSection(data: ClinicalRecordFormData): string {
-  const rows = data.paymentControl
+function paymentProcedureBox(index: number, title: string, rows: string): string {
+  return `<article class="procedure-box">
+      <h3>Procedimiento ${index} — ${escapeHtml(title.trim() || 'Sin nombre')}</h3>
+      <table><tbody>${rows}</tbody></table>
+    </article>`
+}
+
+function buildPaymentsSection(data: ClinicalRecordFormData): string {
+  const lines = data.paymentControlLines ?? []
+  const plan = data.paymentPlan ?? []
+  const visible = lines.filter(
+    (item) => item.procedure.trim() || item.diagnosisCode || item.cupsCode || item.unitPrice > 0,
+  )
+  const extraAgreements = [
+    ...supplementalPlanItems(visible, plan),
+    ...orthodonticsPlanItems(plan),
+  ].filter((item) => item.procedure.trim() || item.totalAmount > 0)
+  const total = sumPaymentControlPrices(visible)
+  const balance = treatmentPaymentBalance(visible, data.paymentControl)
+  const lineBoxes = visible
+    .map((item, index) => {
+      const cie = [item.diagnosisCode, item.diagnosisDescription].filter(Boolean).join(' ')
+      const procedure = [item.procedure, item.cupsCode].filter(Boolean).join(' · ')
+      const agreement = planItemForLine(item, plan)
+      return paymentProcedureBox(
+        index + 1,
+        item.procedure,
+        [
+          fieldRow('Diente / Zona', formatAnatomicalZone(item) || '—'),
+          fieldRow('Diagnóstico CIE', cie || '—'),
+          fieldRow('Procedimiento', procedure || '—'),
+          fieldRow('Precio', formatCurrency(lineBillablePrice(item))),
+          agreementFieldRows(agreement),
+        ].join(''),
+      )
+    })
+    .join('')
+  const agreementBoxes = extraAgreements
+    .map((item, index) =>
+      paymentProcedureBox(
+        visible.length + index + 1,
+        item.procedure,
+        [
+          fieldRow('Diente / Zona', '—'),
+          fieldRow('Diagnóstico CIE', '—'),
+          fieldRow('Procedimiento', item.procedure || '—'),
+          fieldRow('Precio', formatCurrency(item.totalAmount)),
+          agreementFieldRows(item),
+        ].join(''),
+      ),
+    )
+    .join('')
+  const rows = `${lineBoxes}${agreementBoxes}`
+  const unlinkedPayments = data.paymentControl.filter((payment) => !payment.paymentControlLineId)
+  const unlinkedRows = unlinkedPayments
     .map(
       (payment) =>
         `<tr>
           <td>${formatDate(payment.paymentDate)}</td>
           <td>${formatCurrency(payment.amount)}</td>
           <td>${escapeHtml(PAYMENT_METHOD_LABELS[payment.paymentMethod])}</td>
-          <td>${escapeHtml(payment.treatingDentistName || '—')}</td>
           <td>${escapeHtml(payment.paymentReason)}</td>
-          <td>${escapeHtml(payment.notes || '—')}</td>
         </tr>`,
     )
     .join('')
+  const orthoPayments = (data.orthodonticsPaymentControl ?? [])
+    .map(
+      (payment) =>
+        `<tr>
+          <td>${formatDate(payment.paymentDate)}</td>
+          <td>${escapeHtml(ORTHODONTICS_PAYMENT_TYPE_LABELS[payment.paymentType] ?? payment.paymentType)}</td>
+          <td>${formatCurrency(payment.amount)}</td>
+          <td>${escapeHtml(PAYMENT_METHOD_LABELS[payment.paymentMethod])}</td>
+          <td>${escapeHtml(payment.paymentReason || '—')}</td>
+        </tr>`,
+    )
+    .join('')
+  const orthoBalance =
+    data.orthodonticsBudget?.active
+      ? orthodonticsPaymentBalance(data.orthodonticsBudget, data.orthodonticsPaymentControl ?? [])
+      : null
 
   return `
     <section class="print-section">
-      <h2>${printSectionHeading('controlPagos')}</h2>
+      <h2>${printSectionHeading('planPagos')}</h2>
       ${
         rows
-          ? `<table>
-        <thead><tr><th>Fecha</th><th>Valor</th><th>Método</th><th>Odontólogo tratante</th><th>Concepto</th><th>Notas</th></tr></thead>
-        <tbody>${rows}</tbody>
+          ? `${rows}
+        ${
+          visible.length > 0
+            ? `<table>
+          <tbody>
+            <tr><th>Valor total</th><td>${formatCurrency(total)}</td></tr>
+            <tr><th>Saldo del tratamiento</th><td>${formatCurrency(balance)}</td></tr>
+          </tbody>
+        </table>`
+            : ''
+        }`
+          : unlinkedRows
+            ? `<table>
+        <thead><tr><th>Fecha</th><th>Valor</th><th>Método</th><th>Concepto</th></tr></thead>
+        <tbody>${unlinkedRows}</tbody>
       </table>`
-          : '<p>Sin pagos registrados.</p>'
+            : '<p>Sin procedimientos en el plan y control de pagos.</p>'
+      }
+      ${
+        rows && unlinkedRows
+          ? `<h3>Abonos sin procedimiento</h3>
+      <table>
+        <thead><tr><th>Fecha</th><th>Valor</th><th>Método</th><th>Concepto</th></tr></thead>
+        <tbody>${unlinkedRows}</tbody>
+      </table>`
+          : ''
+      }
+      ${
+        orthoPayments
+          ? `<h3>Pagos de ortodoncia</h3>
+      <table>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Valor</th><th>Forma de pago</th><th>Concepto</th></tr></thead>
+        <tbody>${orthoPayments}</tbody>
+        ${
+          orthoBalance != null
+            ? `<tfoot><tr><td colspan="2">Saldo de ortodoncia</td><td>${formatCurrency(orthoBalance)}</td><td colspan="2"></td></tr></tfoot>`
+            : ''
+        }
+      </table>`
+          : ''
       }
     </section>`
 }
@@ -781,8 +890,7 @@ const SECTION_BUILDERS: Record<
   anexos: ({ clinicalData }) => buildAnnexesSection(clinicalData),
   tratamiento: ({ clinicalData }) => buildTreatmentSection(clinicalData),
   presupuesto: ({ clinicalData }) => buildBudgetSection(clinicalData),
-  planPagos: ({ clinicalData }) => buildPaymentPlanSection(clinicalData),
-  controlPagos: ({ clinicalData }) => buildPaymentControlSection(clinicalData),
+  planPagos: ({ clinicalData }) => buildPaymentsSection(clinicalData),
   evolucion: ({ clinicalData }) => buildEvolutionSection(clinicalData),
   consentimiento: ({ clinicalData }) => buildConsentSection(clinicalData),
   exportacionHistoria: () => buildExportSection(),
@@ -811,6 +919,8 @@ export function buildClinicalHistoryPrintHtml(input: ClinicalHistoryPrintInput):
     h3 { font-size: 0.95rem; margin: 1rem 0 0.35rem; color: #0f172a; }
     .meta { font-size: 0.85rem; color: #475569; margin-bottom: 1.5rem; }
     .print-section { page-break-inside: avoid; margin-bottom: 1.25rem; }
+    .procedure-box { border: 1px solid #94a3b8; border-radius: 10px; padding: 0.7rem 0.85rem 0.85rem; margin: 0.75rem 0; page-break-inside: avoid; }
+    .procedure-box h3 { margin: 0 0 0.35rem; }
     table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.5rem; }
     th, td { border: 1px solid #e2e8f0; padding: 0.4rem 0.55rem; text-align: left; vertical-align: top; }
     th { background: #f8fafc; width: 32%; font-weight: 600; }

@@ -12,11 +12,15 @@ import {
 
   ClinicalRecordList,
 
+  ClinicalSignatureStatus,
+
   PatientIdentificationSummary,
 
   RapidValuationForm,
 
   ExternalHistoryRdaPanel,
+
+  MissingFieldsAlert,
 
   createEmptyClinicalForm,
 
@@ -62,7 +66,7 @@ import {
 
   toPatientForeignKey,
 
-  calcOrthodonticsBudgetTotal,
+  validateClinicalRecordDraft,
 } from '@/utils'
 import { getFirstBlockingClinicalBudgetIssue } from '@/utils/clinicalRipsValidation'
 import { sortEvolutionNotesChronologically, verifyClinicalRecordIntegrity } from '@/utils/recordIntegrity'
@@ -70,6 +74,7 @@ import {
   ensureEvolutionNoteOutboxCreate,
   finalizeEvolutionNote,
 } from '@/services/evolutionNoteService'
+import { reportarAtencionCerradaAlMuv } from '@/services/finalizarConsultaMuv'
 import { isEvolutionNoteImmutable } from '@/types/evolutionNote'
 import { validateEvolutionNote } from '@/utils/evolutionNoteValidation'
 import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
@@ -107,6 +112,7 @@ import { useClinicalAutoSave } from '@/hooks/useClinicalAutoSave'
 import { VoiceClinicalAssistant, type ClinicalVoiceContext } from '@/components/voice'
 import { confirmUserPassword } from '@/services/authService'
 import { createDigitalSignature, validateSignatureCapture } from '@/services/signatureService'
+import { ensureProfessionalDocument } from '@/services/professionalDocumentMemory'
 import { getProfessionalSignBlocker } from '@/utils/professionalSignGate'
 import type { ClinicalHistoryExportFormat } from '@/types/portability'
 import { EXPORT_FORMAT_LABELS } from '@/types/portability'
@@ -191,7 +197,7 @@ export function PatientDetailPage() {
 
   }, [id])
 
-  const { user, can } = useAuth()
+  const { user, can, applySessionUser } = useAuth()
   const { audit } = useAudit()
   const canViewClinical = can('clinical.read')
 
@@ -220,6 +226,7 @@ export function PatientDetailPage() {
 
   const [showSignConfirm, setShowSignConfirm] = useState(false)
   const [ripsShieldMismatches, setRipsShieldMismatches] = useState<RipsShieldMismatch[]>([])
+  const [missingFieldErrors, setMissingFieldErrors] = useState<string[]>([])
 
   const [activeSection, setActiveSection] = useState<string>('all')
 
@@ -260,6 +267,7 @@ export function PatientDetailPage() {
     setViewingRecord(null)
     setIntegrityStatus(null)
     setMessage('')
+    setMissingFieldErrors([])
     viewedPatientRef.current = null
     clinicalInitForPatientRef.current = null
     window.scrollTo({ top: 0, behavior: 'auto' })
@@ -1029,48 +1037,6 @@ export function PatientDetailPage() {
 
     if (!clinicalData) return false
 
-    if (!clinicalData.anamnesis.chiefComplaint.trim()) {
-
-      setMessage('El motivo de consulta es obligatorio.')
-
-      return false
-
-    }
-
-    if (
-      clinicalData.diagnoses.length === 0 &&
-      clinicalData.diagnosticChart.entries.length === 0
-    ) {
-
-      setMessage('Debe registrar al menos un diagnóstico en el esquema por pieza.')
-
-      return false
-
-    }
-
-    if (!clinicalData.treatmentPlan.some((item) => item.procedure.trim())) {
-
-      setMessage('El plan de tratamiento debe incluir al menos un procedimiento.')
-
-      return false
-
-    }
-
-    const hasOrthodonticsBudget =
-      clinicalData.orthodonticsBudget?.active &&
-      calcOrthodonticsBudgetTotal(clinicalData.orthodonticsBudget) > 0
-
-    if (
-      !clinicalData.budgetItems.some((item) => item.procedure.trim()) &&
-      !hasOrthodonticsBudget
-    ) {
-
-      setMessage('El presupuesto debe incluir al menos un tratamiento o el presupuesto de ortodoncia.')
-
-      return false
-
-    }
-
     const ripsLocationIssue = getFirstBlockingClinicalBudgetIssue(clinicalData.budgetItems)
     if (ripsLocationIssue) {
       setMessage(ripsLocationIssue.message)
@@ -1145,6 +1111,13 @@ export function PatientDetailPage() {
 
   const handleSignAndLock = async () => {
 
+    const draftIssues = validateClinicalRecordDraft(clinicalData)
+    if (draftIssues.length > 0) {
+      setMissingFieldErrors(draftIssues)
+      return
+    }
+    setMissingFieldErrors([])
+
     if (!id || !clinicalData || !odontogram || !user) return
 
     if (!can('clinical.sign')) {
@@ -1152,7 +1125,8 @@ export function PatientDetailPage() {
       return
     }
 
-    const rethusBlocker = getProfessionalSignBlocker(user)
+    const signingUser = await ensureProfessionalDocument(user, clinicalData, applySessionUser)
+    const rethusBlocker = getProfessionalSignBlocker(signingUser, clinicalData)
     if (rethusBlocker) {
       setMessage(rethusBlocker)
       return
@@ -1177,12 +1151,20 @@ export function PatientDetailPage() {
       return { ok: false as const, error: 'Datos incompletos para firmar.' }
     }
 
-    const rethusBlocker = getProfessionalSignBlocker(user)
+    const draftIssues = validateClinicalRecordDraft(clinicalData)
+    if (draftIssues.length > 0) {
+      setShowSignConfirm(false)
+      setMissingFieldErrors(draftIssues)
+      return { ok: false as const, error: 'Complete la historia clínica antes de cerrar la atención.' }
+    }
+
+    const signingUser = await ensureProfessionalDocument(user, clinicalData, applySessionUser)
+    const rethusBlocker = getProfessionalSignBlocker(signingUser, clinicalData)
     if (rethusBlocker) {
       return { ok: false as const, error: rethusBlocker }
     }
 
-    const valid = await confirmUserPassword(user.id, password)
+    const valid = await confirmUserPassword(user.id, password, user.email)
     if (!valid) {
       return {
         ok: false as const,
@@ -1218,7 +1200,7 @@ export function PatientDetailPage() {
         authorUserId: note.authorUserId ?? user.id,
         authorEmail: note.authorEmail ?? user.email,
         professionalName: note.professionalName || professionalName,
-        professionalLicense: note.professionalLicense || professionalLicense,
+        professionalLicense: note.professionalLicense || professionalLicense || signingUser.documentNumber,
       }))
 
       const signedEvolutionNotes = await Promise.all(
@@ -1274,6 +1256,8 @@ export function PatientDetailPage() {
 
         paymentControl: normalizedClinicalData.paymentControl,
 
+        paymentControlLines: normalizedClinicalData.paymentControlLines ?? [],
+
         orthodonticsPaymentControl: normalizedClinicalData.orthodonticsPaymentControl ?? [],
 
         evolutionNotes: sortedEvolutionNotes,
@@ -1325,6 +1309,8 @@ export function PatientDetailPage() {
 
         paymentControl: normalizedClinicalData.paymentControl,
 
+        paymentControlLines: normalizedClinicalData.paymentControlLines ?? [],
+
         orthodonticsPaymentControl: normalizedClinicalData.orthodonticsPaymentControl ?? [],
 
         evolutionNotes: sortedEvolutionNotes,
@@ -1361,7 +1347,7 @@ export function PatientDetailPage() {
         contentHash,
         user,
         signedByName: professionalName,
-        signedByDocument: user.documentNumber,
+        signedByDocument: signingUser.documentNumber,
       })
 
       if (clinicalData.informedConsent.patientSignatureDataUrl) {
@@ -1397,10 +1383,31 @@ export function PatientDetailPage() {
         details: `Paciente ${patient.documentType} ${patient.documentNumber} — usuario ${user.email}`,
       })
 
+      const muvNotice =
+        recordId == null
+          ? ''
+          : await reportarAtencionCerradaAlMuv({
+              recordKey: recordId,
+              patient,
+              professional: signingUser,
+              signedAt: now,
+              record: {
+                patientId: patientForeignKey,
+                professionalId: user.id,
+                diagnoses: normalizedClinicalData.diagnoses,
+                evolutionNotes: sortedEvolutionNotes,
+                paymentControl: normalizedClinicalData.paymentControl,
+                orthodonticsPaymentControl: normalizedClinicalData.orthodonticsPaymentControl ?? [],
+                budget: normalizedClinicalData.budget,
+                signedAt: now,
+              },
+            })
+
       setMessage(
         'Atención cerrada para facturación. Las evoluciones firmadas quedaron bloqueadas como folio (Res. 1995/1999). Odontograma, plan y exámenes siguen editables. Hash: ' +
           contentHash.slice(0, 16) +
-          '…',
+          '…' +
+          (muvNotice ? ` ${muvNotice}` : ''),
       )
       return { ok: true as const }
     } catch {
@@ -1530,10 +1537,9 @@ export function PatientDetailPage() {
         { id: 'examenes', label: 'Exámenes', row: 1 },
         { id: 'anexos', label: 'Anexos', row: 1 },
         { id: 'tratamiento', label: 'Tratamiento', row: 1 },
-        { id: 'plan-pagos', label: 'Plan de pagos', row: 1 },
+        { id: 'plan-pagos', label: 'Plan y control de pagos', row: 1 },
         { id: 'consentimiento', label: 'Consentimiento', row: 1 },
         { id: 'evolucion', label: 'Evolución', row: 1 },
-        { id: 'control-pagos', label: 'Control de pagos', row: 1 },
         ...(can('invoices.read')
           ? [
               {
@@ -1690,6 +1696,10 @@ export function PatientDetailPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+
+          {canViewClinical && !showRapidValuation && !isArchiveView && (
+            <ClinicalSignatureStatus patientId={patientForeignKey} />
+          )}
 
           {clinicalAutoSaveLabel && !isArchiveView && (
             <span
@@ -2055,7 +2065,7 @@ export function PatientDetailPage() {
 
         <div
 
-          className={`rounded-lg px-4 py-3 text-sm ${
+          className={`whitespace-pre-line rounded-lg px-4 py-3 text-sm ${
 
             message.includes('correctamente') || message.includes('guardado')
 
@@ -2189,6 +2199,10 @@ export function PatientDetailPage() {
 
       )}
 
+      <MissingFieldsAlert
+        errors={missingFieldErrors}
+        onClose={() => setMissingFieldErrors([])}
+      />
       <RipsShieldModal
         open={ripsShieldMismatches.length > 0}
         mismatches={ripsShieldMismatches}

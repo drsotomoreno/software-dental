@@ -10,8 +10,7 @@ export const CLINICAL_HISTORY_SECTION_NUMBERS = {
   planPagos: 9,
   consentimiento: 10,
   evolucion: 11,
-  controlPagos: 12,
-  exportacionHistoria: 13,
+  exportacionHistoria: 12,
 } as const
 
 export type ClinicalHistoryPrintSectionId =
@@ -24,7 +23,6 @@ export type ClinicalHistoryPrintSectionId =
   | 'tratamiento'
   | 'presupuesto'
   | 'planPagos'
-  | 'controlPagos'
   | 'evolucion'
   | 'consentimiento'
   | 'examenesComplementarios'
@@ -80,7 +78,7 @@ export const CLINICAL_HISTORY_PRINT_SECTIONS: ClinicalHistoryPrintSection[] = [
   },
   {
     id: 'planPagos',
-    label: 'Plan de Pagos',
+    label: 'Plan y Control de Pagos',
     number: CLINICAL_HISTORY_SECTION_NUMBERS.planPagos,
   },
   {
@@ -94,18 +92,14 @@ export const CLINICAL_HISTORY_PRINT_SECTIONS: ClinicalHistoryPrintSection[] = [
     number: CLINICAL_HISTORY_SECTION_NUMBERS.evolucion,
   },
   {
-    id: 'controlPagos',
-    label: 'Control de Pagos',
-    number: CLINICAL_HISTORY_SECTION_NUMBERS.controlPagos,
-  },
-  {
     id: 'exportacionHistoria',
     label: 'Exportación de Historia Clínica',
     number: CLINICAL_HISTORY_SECTION_NUMBERS.exportacionHistoria,
   },
 ]
 
-export const CLINICAL_SECTION_TITLE_CLASS = 'text-base font-bold text-dental-700'
+export const CLINICAL_SECTION_TITLE_CLASS =
+  'inline-block rounded-xl bg-dental-600 px-4 py-2 text-base font-semibold text-white shadow-sm'
 
 export const CLINICAL_HISTORY_PAGE_TITLE_CLASS = 'text-2xl font-bold text-dental-700'
 

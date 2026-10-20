@@ -178,6 +178,105 @@ export function mergeFindingsWithOdontogram(
   return `${odontogramFindings}${MANUAL_FINDINGS_MARKER}${manual}`
 }
 
+function sameAffectedTeeth(left: number[] | undefined, right: number[] | undefined): boolean {
+  const a = left ?? []
+  const b = right ?? []
+  return a.length === b.length && a.every((tooth, index) => tooth === b[index])
+}
+
+function mergeDiagnosisDescriptions(current: string, incoming: string): string {
+  if (current === incoming || current.includes(incoming)) return current
+  if (incoming.includes(current)) return incoming
+  return `${current} · ${incoming}`
+}
+
+/** Diagnósticos CIE-10 derivados del odontograma, sin códigos repetidos. */
+export function collectOdontogramCieDiagnoses(
+  odontogram: OdontogramData | null | undefined,
+): Cie10Diagnosis[] {
+  if (!odontogram) return []
+
+  const byCode = new Map<string, Cie10Diagnosis>()
+  for (const diagnosis of [
+    ...deriveDiagnosesFromOdontogram(odontogram),
+    ...deriveSupplementaryDiagnoses(odontogram),
+  ]) {
+    const existing = byCode.get(diagnosis.code)
+    if (!existing) {
+      byCode.set(diagnosis.code, {
+        ...diagnosis,
+        affectedTeeth: diagnosis.affectedTeeth ? [...diagnosis.affectedTeeth] : undefined,
+      })
+      continue
+    }
+
+    const teeth = [
+      ...new Set([...(existing.affectedTeeth ?? []), ...(diagnosis.affectedTeeth ?? [])]),
+    ].sort((a, b) => a - b)
+    byCode.set(diagnosis.code, {
+      ...existing,
+      description: mergeDiagnosisDescriptions(existing.description, diagnosis.description),
+      affectedTeeth: teeth.length > 0 ? teeth : undefined,
+    })
+  }
+
+  return [...byCode.values()]
+}
+
+export interface OdontogramCieImportResult {
+  diagnoses: Cie10Diagnosis[]
+  added: number
+  updated: number
+}
+
+/**
+ * Copia los CIE del odontograma a la sección 4.
+ * No duplica códigos ya registrados y conserva el tipo elegido por el odontólogo.
+ */
+export function importOdontogramCieDiagnoses(
+  current: Cie10Diagnosis[],
+  incoming: Cie10Diagnosis[],
+): OdontogramCieImportResult {
+  if (incoming.length === 0) {
+    return { diagnoses: current, added: 0, updated: 0 }
+  }
+
+  const next = current.map((diagnosis) => ({
+    ...diagnosis,
+    affectedTeeth: diagnosis.affectedTeeth ? [...diagnosis.affectedTeeth] : undefined,
+  }))
+  let added = 0
+  let updated = 0
+  let hasPrincipal = next.some((diagnosis) => diagnosis.type === 'principal')
+
+  for (const diagnosis of incoming) {
+    const index = next.findIndex((item) => item.code === diagnosis.code)
+    if (index < 0) {
+      const type: Cie10Diagnosis['type'] = hasPrincipal ? 'relacionado' : 'principal'
+      hasPrincipal = true
+      next.push({
+        ...diagnosis,
+        type,
+        affectedTeeth: diagnosis.affectedTeeth ? [...diagnosis.affectedTeeth] : undefined,
+      })
+      added += 1
+      continue
+    }
+
+    const existing = next[index]
+    const mergedTeeth = [
+      ...new Set([...(existing.affectedTeeth ?? []), ...(diagnosis.affectedTeeth ?? [])]),
+    ].sort((a, b) => a - b)
+    const nextTeeth = mergedTeeth.length > 0 ? mergedTeeth : undefined
+    if (!sameAffectedTeeth(existing.affectedTeeth, nextTeeth)) {
+      next[index] = { ...existing, affectedTeeth: nextTeeth }
+      updated += 1
+    }
+  }
+
+  return { diagnoses: next, added, updated }
+}
+
 /** Combina diagnósticos del odontograma con los añadidos manualmente */
 export function mergeDiagnosesWithOdontogram(
   derived: Cie10Diagnosis[],
@@ -206,15 +305,10 @@ export function syncClinicalDataFromOdontogram(
 ): { diagnoses: Cie10Diagnosis[]; findings: string } {
   const odontogramFindings = formatOdontogramFindings(odontogram)
 
-  // Los diagnósticos CIE-10 se registran solo en la sección 4 (búsqueda manual).
-  // El odontograma alimenta únicamente el texto de hallazgos clínicos.
-  const manualDiagnoses = clinical.diagnoses.filter(
-    (diagnosis) =>
-      diagnosis.source !== 'odontograma' && diagnosis.source !== 'odontograma_suplementario',
-  )
-
+  // Los CIE del odontograma entran a la sección 4 solo con el botón de importación.
+  // Este sincronizador actualiza hallazgos y conserva los diagnósticos ya registrados.
   return {
-    diagnoses: manualDiagnoses,
+    diagnoses: clinical.diagnoses,
     findings: mergeFindingsWithOdontogram(odontogramFindings, clinical.findings),
   }
 }

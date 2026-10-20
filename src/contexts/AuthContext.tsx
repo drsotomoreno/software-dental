@@ -5,6 +5,7 @@ import {
   logoutSession,
   refreshSession,
   resolveAuthUser,
+  seedUserCredentials,
 } from '@/services/authService'
 import {
   clearStoredApiAuth,
@@ -29,6 +30,7 @@ import { canManageClinicTeam, normalizeRole } from '@/utils/permissions'
 import type { UserRole } from '@/types/user'
 import { userHasTrialLimits, userNeedsWelcome } from '@/utils/subscriptionAccess'
 import { useClinicalPullSync } from '@/hooks/useClinicalPullSync'
+import { recoverMissingProfessionalDocument } from '@/services/professionalDocumentMemory'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -47,6 +49,10 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
+
+async function sessionUserFromApi(apiUser: ApiSubscriptionUser, token: string) {
+  return recoverMissingProfessionalDocument(mapApiUserToAuthUser(apiUser, token))
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -90,20 +96,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (validation.ok) {
         setStoredApiAuth(apiAuth.token, validation.user)
         await pullCompleteClinicOnLogin()
-        setUser(mapApiUserToAuthUser(validation.user, apiAuth.token))
+        setUser(await sessionUserFromApi(validation.user, apiAuth.token))
         setIsLoading(false)
         return
       }
       if (validation.requiresPayment && validation.user) {
         setStoredApiAuth(apiAuth.token, validation.user)
         await pullCompleteClinicOnLogin()
-        setUser(mapApiUserToAuthUser(validation.user, apiAuth.token))
+        setUser(await sessionUserFromApi(validation.user, apiAuth.token))
         setIsLoading(false)
         return
       }
       if (isApiSuperAdmin(apiAuth.user)) {
         await pullCompleteClinicOnLogin()
-        setUser(mapApiUserToAuthUser(apiAuth.user, apiAuth.token))
+        setUser(await sessionUserFromApi(apiAuth.user, apiAuth.token))
         setIsLoading(false)
         return
       }
@@ -112,7 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const token = await getStoredSessionToken()
     const authUser = await resolveAuthUser(token)
-    setUser(authUser)
+    setUser(authUser ? await recoverMissingProfessionalDocument(authUser) : null)
     setIsLoading(false)
   }, [])
 
@@ -138,7 +144,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const completeApiLogin = async (token: string, sessionUser: ApiSubscriptionUser) => {
       setStoredApiAuth(token, sessionUser)
       await pullCompleteClinicOnLogin()
-      const authUser = mapApiUserToAuthUser(sessionUser, token)
+      const authUser = await sessionUserFromApi(sessionUser, token)
+      try {
+        await seedUserCredentials(authUser.id, passwordValue)
+      } catch (error) {
+        console.error('[auth] No se pudo guardar la clave para firmar en este equipo:', error)
+      }
       setUser(authUser)
       window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
       await logAuditEvent({
@@ -213,7 +224,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (masterLogin) {
         const granted = grantMasterLocalSession()
         await pullCompleteClinicOnLogin()
-        const authUser = mapApiUserToAuthUser(granted.user, granted.token)
+        const authUser = await sessionUserFromApi(granted.user, granted.token)
+        try {
+          await seedUserCredentials(authUser.id, passwordValue)
+        } catch (error) {
+          console.error('[auth] No se pudo guardar la clave para firmar en este equipo:', error)
+        }
         setUser(authUser)
         window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
         return { ok: true as const }
@@ -223,7 +239,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (masterLogin) {
       const granted = grantMasterLocalSession()
       await pullCompleteClinicOnLogin()
-      const authUser = mapApiUserToAuthUser(granted.user, granted.token)
+      const authUser = await sessionUserFromApi(granted.user, granted.token)
+      try {
+        await seedUserCredentials(authUser.id, passwordValue)
+      } catch (error) {
+        console.error('[auth] No se pudo guardar la clave para firmar en este equipo:', error)
+      }
       setUser(authUser)
       window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
       return { ok: true as const }
@@ -241,7 +262,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { ok: false as const, error: 'Documento o contraseña incorrectos.' }
     }
 
-    const authUser: AuthUser = { ...result.user, sessionId: result.session.id }
+    const authUser = await recoverMissingProfessionalDocument({
+      ...result.user,
+      sessionId: result.session.id,
+    })
     setUser(authUser)
 
     await logAuditEvent({

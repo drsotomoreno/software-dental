@@ -31,6 +31,9 @@ export function buildRecordHashPayload(record: ClinicalRecord) {
     budget: record.budget,
     paymentPlan: record.paymentPlan,
     paymentControl: record.paymentControl,
+    ...(Array.isArray(record.paymentControlLines)
+      ? { paymentControlLines: record.paymentControlLines }
+      : {}),
     orthodonticsPaymentControl: record.orthodonticsPaymentControl ?? [],
     evolutionNotes: sortEvolutionNotesChronologically(record.evolutionNotes ?? []),
     informedConsent: record.informedConsent,

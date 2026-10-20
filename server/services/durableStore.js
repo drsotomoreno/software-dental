@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { DATABASE_URL } from '../config.js'
+import { keepStoredDocumentNumber } from '../../shared/professionalDocument.js'
 
 const STORE_KEY = 'subscription-users'
 const require = createRequire(import.meta.url)
@@ -23,19 +25,128 @@ function loadPgPool() {
   return PoolCtor
 }
 
+/**
+ * El host interno de Render (dpg-…-a, sin dominio) no habla TLS.
+ * sslmode en la URL no se reenvía al pool: pg lo interpretaría y el handshake
+ * dejaría el arranque colgado. Fuera de ese host se usa SSL sin verificar CA.
+ */
+export function postgresSslOption(connectionString) {
+  try {
+    const host = new URL(connectionString).hostname
+    const internal =
+      !host ||
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      !host.includes('.') ||
+      /^dpg-[a-z0-9-]+$/i.test(host)
+    if (internal) return false
+    return { rejectUnauthorized: false }
+  } catch {
+    return false
+  }
+}
+
+let postgresRetryAt = 0
+
+function postgresCoolingDown() {
+  return Date.now() < postgresRetryAt
+}
+
+function connectionErrorText(error) {
+  const code = error && typeof error === 'object' && typeof error.code === 'string' ? error.code : ''
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  const message = raw
+    .replace(/postgres(?:ql)?:\/\/\S+/gi, 'postgresql://***')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, '')
+    .replace(/\bdpg-[a-z0-9-]+\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  if (code && message && !message.includes(code)) return `${code}: ${message}`
+  return message || code || 'error de conexión'
+}
+
+function markPostgresUnavailable(error) {
+  postgresRetryAt = Date.now() + 20_000
+  console.error('[store] Error de conexión a PostgreSQL:', connectionErrorText(error))
+}
+
+function decodeConnectionPart(value) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+export function poolConfig(url) {
+  // La URL externa de Render exige TLS sin verificar la CA. En pg 8, sslmode=require
+  // dentro de connectionString pisa este objeto y activa la verificación: la
+  // conexión se rechaza. El host interno (sin dominio) no habla TLS y se deja en false.
+  const ssl = postgresSslOption(url) === false ? false : { rejectUnauthorized: false }
+  const common = {
+    max: 2,
+    connectionTimeoutMillis: 8_000,
+    idleTimeoutMillis: 20_000,
+  }
+  try {
+    const parsed = new URL(url)
+    // No se pasa connectionString: un sslmode=require ahí pisa `ssl`
+    // y anula tanto este objeto como el bypass del host interno de Render.
+    return {
+      ...common,
+      user: decodeConnectionPart(parsed.username),
+      password: decodeConnectionPart(parsed.password),
+      host: parsed.hostname,
+      port: parsed.port ? Number(parsed.port) : 5432,
+      database: decodeConnectionPart(parsed.pathname.replace(/^\//, '')),
+      ssl,
+    }
+  } catch {
+    return { ...common, connectionString: url, ssl }
+  }
+}
+
+/**
+ * Ejecuta trabajo contra el Postgres de mihistoriadental.
+ * No convierte un error de SQL en enfriamiento: solo un fallo de conexión.
+ * @param {(client: import('pg').PoolClient) => Promise<unknown>} fn
+ */
+export async function withPgClient(fn) {
+  const db = getPool()
+  if (!db) {
+    const error = new Error('PostgreSQL no está configurado.')
+    error.code = 'PG_UNAVAILABLE'
+    throw error
+  }
+  let client
+  try {
+    client = await db.connect()
+  } catch (error) {
+    markPostgresUnavailable(error)
+    throw error
+  }
+  try {
+    return await fn(client)
+  } finally {
+    client.release()
+  }
+}
+
 function getPool() {
   if (pool !== undefined) return pool
   const Pool = loadPgPool()
-  const url = process.env.DATABASE_URL
+  const url = DATABASE_URL
   if (!Pool || !url) {
     pool = null
     return null
   }
-  const local = /localhost|127\.0\.0\.1/.test(url)
-  pool = new Pool({
-    connectionString: url,
-    max: 2,
-    ssl: local ? false : { rejectUnauthorized: false },
+  pool = new Pool(poolConfig(url))
+  // Sin este listener, node-pg emite 'error' en un cliente inactivo y Node apaga el proceso.
+  pool.on('error', (err) => {
+    console.error(
+      '[store] Cliente PostgreSQL inactivo desconectado:',
+      err instanceof Error ? err.message : err,
+    )
   })
   return pool
 }
@@ -60,6 +171,7 @@ async function readJsonFile(filePath) {
 }
 
 async function readPostgresJson(storeKey) {
+  if (postgresCoolingDown()) return null
   const db = getPool()
   if (!db) return null
   try {
@@ -75,16 +187,34 @@ async function readPostgresJson(storeKey) {
       client.release()
     }
   } catch (error) {
-    console.error(
-      '[store] PostgreSQL no disponible, se usa archivo local:',
-      error instanceof Error ? error.message : error,
-    )
+    markPostgresUnavailable(error)
     return null
   }
 }
 
 function stamp(item) {
   return Date.parse(item?.updatedAt || item?.createdAt || 0) || 0
+}
+
+function preserveProfessionalIdentity(chosen, other) {
+  if (!chosen || typeof chosen !== 'object' || !other || typeof other !== 'object') return chosen
+  const hasDocument = chosen.documentNumber != null || other.documentNumber != null
+  const hasRethus = chosen.rethusNumber != null || other.rethusNumber != null
+  if (!hasDocument && !hasRethus) return chosen
+
+  const next = { ...chosen }
+  if (hasDocument) {
+    const type = chosen.documentType || other.documentType || 'CC'
+    const kept = keepStoredDocumentNumber(other.documentNumber, chosen.documentNumber, type)
+    if (kept) {
+      next.documentNumber = kept
+      if (!next.documentType && other.documentType) next.documentType = other.documentType
+    }
+  }
+  const chosenRethus = String(chosen.rethusNumber ?? '').trim()
+  const otherRethus = String(other.rethusNumber ?? '').trim()
+  if (!chosenRethus && otherRethus) next.rethusNumber = otherRethus
+  return next
 }
 
 function mergeByKey(secondary = [], primary = [], key, primaryWins) {
@@ -98,7 +228,9 @@ function mergeByKey(secondary = [], primary = [], key, primaryWins) {
     const id = String(item[key])
     const prev = map.get(id)
     if (!prev || primaryWins || stamp(item) >= stamp(prev)) {
-      map.set(id, item)
+      map.set(id, prev ? preserveProfessionalIdentity(item, prev) : item)
+    } else if (prev) {
+      map.set(id, preserveProfessionalIdentity(prev, item))
     }
   }
   return [...map.values()]
@@ -155,6 +287,7 @@ export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
   await mkdir(dirname(filePath), { recursive: true })
   await writeFile(filePath, JSON.stringify(value, null, 2), 'utf8')
 
+  if (postgresCoolingDown()) return
   const db = getPool()
   if (!db) return
   try {
@@ -176,17 +309,14 @@ export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
       client.release()
     }
   } catch (error) {
-    console.error(
-      '[store] No se pudo persistir el perfil en PostgreSQL; se conserva el archivo local:',
-      error instanceof Error ? error.message : error,
-    )
+    markPostgresUnavailable(error)
   }
 }
 
 /** Lectura con fusionador propio (no usar mergeDurableStores de usuarios/sesiones). */
 export async function readDurableJsonWithMerge(filePath, fallback, storeKey, mergeFn) {
   const fileValue = await readJsonFile(filePath)
-  const pgValue = await readPostgresJson(storeKey)
+  const pgValue = postgresCoolingDown() ? null : await readPostgresJson(storeKey)
   const base = fallback && typeof fallback === 'object' ? fallback : {}
 
   if (pgValue && fileValue && typeof mergeFn === 'function') {
@@ -205,6 +335,7 @@ export async function writeDurableJsonWithMerge(filePath, value, storeKey, merge
   await mkdir(dirname(filePath), { recursive: true })
   await writeFile(filePath, JSON.stringify(value, null, 2), 'utf8')
 
+  if (postgresCoolingDown()) return
   const db = getPool()
   if (!db) return
   try {
@@ -227,9 +358,6 @@ export async function writeDurableJsonWithMerge(filePath, value, storeKey, merge
       client.release()
     }
   } catch (error) {
-    console.error(
-      '[store] No se pudo persistir el almacén en PostgreSQL; se conserva el archivo local:',
-      error instanceof Error ? error.message : error,
-    )
+    markPostgresUnavailable(error)
   }
 }

@@ -15,7 +15,7 @@ const router = Router()
 
 /**
  * POST /api/rips/evolucion-dictada
- * Motor de dictado terminó: valida perfil fiscal y enruta FEV+RIPS o RIPS pendiente.
+ * Cierra la consulta: RIPS sin factura hacia el MUV, o FEV si hay factura.
  */
 router.post('/evolucion-dictada', processDictatedEvolution)
 

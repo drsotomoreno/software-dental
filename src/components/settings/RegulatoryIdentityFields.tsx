@@ -160,7 +160,7 @@ export function RethusCodeField({
         value={sanitizeRethusInput(value)}
         onChange={(e) => onChange(sanitizeRethusInput(e.target.value))}
         className={`input-field font-mono ${error || (format && !format.valid) ? 'border-red-400' : ''}`}
-        placeholder={`Ej: ${VERIFIED_RETHUS_EXAMPLE}`}
+        placeholder="6 a 12 dígitos"
         inputMode="numeric"
         autoComplete="off"
         required={required}
@@ -208,7 +208,7 @@ export function RepsHabilitationField({
         value={sanitizeRepsInput(value)}
         onChange={(e) => onChange(sanitizeRepsInput(e.target.value))}
         className={`input-field font-mono ${error || (value.trim() && !parsed.valid) ? 'border-red-400' : ''}`}
-        placeholder={`Ej: ${VERIFIED_REPS_EXAMPLE_DISPLAY}`}
+        placeholder="12 dígitos de la sede"
         autoComplete="off"
         aria-invalid={Boolean(error || (value.trim() && !parsed.valid))}
       />

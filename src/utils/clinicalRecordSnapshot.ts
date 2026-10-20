@@ -1,5 +1,6 @@
 import { db } from '@/db/database'
 import type { ClinicalRecord, ClinicalRecordFormData, TreatmentPlanItem } from '@/types/clinicalRecord'
+import { normalizePaymentControlLines } from '@/utils/paymentControlLines'
 import { normalizeAnamnesis } from '@/types/anamnesis'
 import { normalizeConsent } from '@/types/consent'
 import { normalizeSpecializedAnnexes } from '@/types/specializedAnnexes'
@@ -24,6 +25,9 @@ function normalizeTreatmentPlanItems(
     procedure: item?.procedure ?? '',
     cupsCode: item?.cupsCode,
     toothNumber: item?.toothNumber,
+    fdiQuadrant: item?.fdiQuadrant,
+    arch: item?.arch,
+    anatomicalZone: item?.anatomicalZone,
     quantity: item?.quantity ?? 1,
     unitPrice: item?.unitPrice ?? 0,
     notes: item?.notes,
@@ -64,6 +68,7 @@ export function normalizeClinicalRecordForExport(record: ClinicalRecord): Clinic
     budget: migrated.budget ?? { subtotal: 0, discount: 0, total: 0, currency: 'COP' },
     paymentPlan: Array.isArray(record.paymentPlan) ? record.paymentPlan : [],
     paymentControl: Array.isArray(record.paymentControl) ? record.paymentControl : [],
+    paymentControlLines: normalizePaymentControlLines(record.paymentControlLines),
     orthodonticsPaymentControl: Array.isArray(record.orthodonticsPaymentControl)
       ? record.orthodonticsPaymentControl
       : [],
@@ -104,6 +109,7 @@ export function clinicalRecordToFormData(
     budget: migrated.budget ?? { subtotal: 0, discount: 0, total: 0, currency: 'COP' },
     paymentPlan: Array.isArray(record.paymentPlan) ? record.paymentPlan : [],
     paymentControl: Array.isArray(record.paymentControl) ? record.paymentControl : [],
+    paymentControlLines: normalizePaymentControlLines(record.paymentControlLines),
     orthodonticsPaymentControl: Array.isArray(record.orthodonticsPaymentControl)
       ? record.orthodonticsPaymentControl
       : [],

@@ -176,6 +176,15 @@ export function timeToMinutes(time: string): number {
   return h * 60 + m
 }
 
+/** Franja habitual de almuerzo: 12:00 inclusive hasta 14:00 exclusive. */
+export const LUNCH_START_MINUTES = 12 * 60
+export const LUNCH_END_MINUTES = 14 * 60
+
+export function isLunchHourSlot(slot: string): boolean {
+  const minutes = timeToMinutes(slot)
+  return minutes >= LUNCH_START_MINUTES && minutes < LUNCH_END_MINUTES
+}
+
 export function minutesToTime(minutes: number): string {
   const h = Math.floor(minutes / 60)
   const m = minutes % 60

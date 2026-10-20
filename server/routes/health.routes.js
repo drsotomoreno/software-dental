@@ -5,6 +5,15 @@ import { isMailConfigured, mailTransportLabel } from '../services/mailer.js'
 const router = Router()
 
 router.get('/', async (_req, res) => {
+  let mail = { configured: false, transport: 'none' }
+  try {
+    mail = {
+      configured: await isMailConfigured(),
+      transport: await mailTransportLabel(),
+    }
+  } catch (error) {
+    console.error('[health] No se pudo leer el correo:', error instanceof Error ? error.message : error)
+  }
   res.json({
     service: 'doctorSEOlabs Historia Dental Dictada por Voz — API RIPS / CUV / DIAN',
     version: '1.0.0',
@@ -12,10 +21,7 @@ router.get('/', async (_req, res) => {
       sandbox: config.minsalud.sandbox,
       credentialsConfigured: hasMinsaludCredentials(),
     },
-    mail: {
-      configured: await isMailConfigured(),
-      transport: await mailTransportLabel(),
-    },
+    mail,
     ripsMonthly: {
       timezone: 'America/Bogota',
       cron: '0 2 1 * *',

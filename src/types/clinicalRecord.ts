@@ -40,6 +40,11 @@ export interface TreatmentPlanItem {
   fdiQuadrant?: ImplantFdiQuadrant
   /** Arcada para procedimientos mucosoportados o de arcada completa */
   arch?: 'superior' | 'inferior'
+  /**
+   * Texto de la columna Diente / Zona.
+   * Pieza (16), rango (14-18), cuadrante (Q1) o alcance (General, Arcada Superior, Arcada Inferior).
+   */
+  anatomicalZone?: string
   quantity: number
   unitPrice: number
   notes?: string
@@ -47,7 +52,14 @@ export interface TreatmentPlanItem {
   executionStatus: TreatmentExecutionStatus
   sessionDate?: string
   /** Origen del ítem — las sugerencias del odontograma son editables por el odontólogo */
-  source?: 'manual' | 'sugerencia' | 'orthodontics_annex' | 'endodontics_annex' | 'diagnostico'
+  source?:
+    | 'manual'
+    | 'sugerencia'
+    | 'orthodontics_annex'
+    | 'endodontics_annex'
+    | 'oral_surgery_annex'
+    | 'periodontics_annex'
+    | 'diagnostico'
   /** Diagnóstico CIE-10 vinculado al importar desde la sección 4 */
   diagnosisCode?: string
   diagnosisDescription?: string
@@ -99,6 +111,13 @@ export interface BudgetLineItem {
   fdiQuadrant?: ImplantFdiQuadrant
   /** Arcada para procedimientos mucosoportados o de arcada completa */
   arch?: 'superior' | 'inferior'
+  /**
+   * Texto de Diente / Zona copiado del plan.
+   * Conserva rangos y combinaciones (16, 14-18, Q1) que no caben en una sola pieza.
+   */
+  anatomicalZone?: string
+  diagnosisCode?: string
+  diagnosisDescription?: string
   quantity: number
   unitPrice: number
   source?: 'manual' | 'treatment_plan' | 'endodontics_annex'
@@ -114,11 +133,42 @@ export type PaymentMethod =
   | 'mixto'
   | 'otro'
 
+/**
+ * Fila de Control de Pagos.
+ * Vive dentro del registro clínico (Dexie) y alimenta el JSON RIPS
+ * cuando el procedimiento no está ya cubierto por presupuesto o plan.
+ */
+export interface PaymentControlLine {
+  id: string
+  procedure: string
+  /** CUPS — Codificación Única de Procedimientos en Salud */
+  cupsCode?: string
+  toothNumber?: number
+  /** Cuadrante FDI (Q1–Q4) */
+  fdiQuadrant?: ImplantFdiQuadrant
+  /** Arcada para procedimientos de arcada completa */
+  arch?: 'superior' | 'inferior'
+  /**
+   * Texto de la columna Diente / Zona.
+   * Pieza (16), rango (14-18), cuadrante (Q1) o alcance (General, Arcada Superior, Arcada Inferior).
+   */
+  anatomicalZone?: string
+  quantity: number
+  unitPrice: number
+  diagnosisCode?: string
+  diagnosisDescription?: string
+  /** Ítem de presupuesto del que se importó la fila */
+  budgetItemId?: string
+  source?: 'manual' | 'budget'
+}
+
 /** Forma de pago acordada por procedimiento */
 export interface PaymentPlanItem {
   id: string
   /** Vínculo con ítem del presupuesto */
   budgetItemId?: string
+  /** Fila de la tabla clínica (zona, CIE, CUPS) a la que pertenece este acuerdo */
+  paymentControlLineId?: string
   /** Fila creada manualmente en el plan de pagos */
   source?: 'custom' | 'budget'
   procedure: string
@@ -166,6 +216,8 @@ export interface PaymentRecord {
   id: string
   /** Vínculo opcional con fila del plan de pagos */
   paymentPlanItemId?: string
+  /** Vínculo con la fila de Control de Pagos que originó el abono */
+  paymentControlLineId?: string
   paymentDate: string
   amount: number
   paymentMethod: PaymentMethod
@@ -229,10 +281,12 @@ export interface ClinicalRecord {
   orthodonticsBudget?: OrthodonticsBudget
   dentalImplantsBudget?: DentalImplantsBudget
   budget: BudgetSummary
-  /** Sección 7: Plan de pagos por procedimiento */
+  /** Sección 9: acuerdo de pago por procedimiento */
   paymentPlan: PaymentPlanItem[]
-  /** Sección 8: Control de pagos y facturas */
+  /** Sección 9: abonos, facturas y saldo */
   paymentControl: PaymentRecord[]
+  /** Filas clínicas de la sección 9 (zona, CIE, CUPS y precio) */
+  paymentControlLines?: PaymentControlLine[]
   orthodonticsPaymentControl: OrthodonticsPaymentRecord[]
   /** Sección 9: Notas de evolución */
   evolutionNotes: EvolutionNote[]
@@ -251,6 +305,12 @@ export interface ClinicalRecord {
    * El bloqueo legal (Res. 1995/1999) aplica a cada `EvolutionNote` firmada.
    */
   isLocked: boolean
+  /** CUV entregado por el MUV al cerrar la atención sin factura. */
+  cuv?: string | null
+  /** PENDIENTE, APROBADO o RECHAZADO. */
+  estadoMuv?: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | null
+  /** Notificaciones o errores de ResultadosValidacion. */
+  resultadoValidacion?: unknown
   createdAt: string
   updatedAt: string
   syncId?: string
@@ -276,6 +336,7 @@ export interface ClinicalRecordFormData {
   budget: BudgetSummary
   paymentPlan: PaymentPlanItem[]
   paymentControl: PaymentRecord[]
+  paymentControlLines: PaymentControlLine[]
   orthodonticsPaymentControl: OrthodonticsPaymentRecord[]
   evolutionNotes: EvolutionNote[]
   informedConsent: InformedConsent

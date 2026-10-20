@@ -7,9 +7,36 @@ import {
   SUPERADMIN_EMAIL,
   type ApiSubscriptionUser,
 } from '@/services/apiAuthService'
-import { PAID_PLANS, TRIAL_DAYS } from '../../shared/subscriptionPlans.js'
+import { PAID_PLANS, TRIAL_DAYS, TTC_MESSAGE_PACKAGES } from '../../shared/subscriptionPlans.js'
 
-export { PAID_PLANS, TRIAL_DAYS }
+export { PAID_PLANS, TRIAL_DAYS, TTC_MESSAGE_PACKAGES }
+
+export interface TitularProducts {
+  titular: {
+    id: string
+    nombre: string
+    email: string
+    documentNumber: string
+    clinicName: string
+    isSelf: boolean
+  }
+  plan: {
+    id: string | null
+    estado_pago: ApiSubscriptionUser['estado_pago']
+    fecha_vencimiento: string | null
+  }
+  packages: NonNullable<ApiSubscriptionUser['messagePackages']>
+  canPurchase: boolean
+}
+
+function snapshotFromPayload(payload: Record<string, unknown>): TitularProducts {
+  const titular = (payload.titular ?? {}) as TitularProducts['titular']
+  const plan = (payload.plan ?? {}) as TitularProducts['plan']
+  const packages = Array.isArray(payload.packages)
+    ? (payload.packages as TitularProducts['packages'])
+    : []
+  return { titular, plan, packages, canPurchase: payload.canPurchase !== false }
+}
 
 function identityHeaders(auth = getStoredApiAuth()) {
   return {
@@ -112,6 +139,65 @@ export async function updateOwnProfile(patch: Record<string, unknown>) {
   return { ok: true as const, user: payload.user as ApiSubscriptionUser }
 }
 
+export async function rememberOwnProfessionalDocument(documentNumber: string, documentType = 'CC') {
+  const email = String(getStoredApiAuth()?.user?.email || '')
+  if (shouldRestoreMasterSession(email)) {
+    await restoreMasterApiSession(email)
+  }
+  const send = () =>
+    authFetch('/api/profile/document', {
+      method: 'PUT',
+      body: JSON.stringify({
+        documentNumber,
+        documentType,
+        clientUserId: getStoredApiAuth()?.user?.id,
+        clientEmail: getStoredApiAuth()?.user?.email,
+      }),
+    })
+  let { response, payload } = await send()
+  if (response.status === 401 || isSessionLostError(String(payload.error ?? ''))) {
+    await restoreMasterApiSession(email)
+    ;({ response, payload } = await send())
+  }
+  if (!response.ok) {
+    return { ok: false as const, error: String(payload.error || 'No se pudo guardar la cédula.') }
+  }
+  persistUser(payload.user)
+  return { ok: true as const, user: payload.user as ApiSubscriptionUser }
+}
+
+/** true = la cuenta aceptó la clave; false = la rechazó; null = no hubo respuesta. */
+export async function confirmOwnSessionPassword(password: string): Promise<boolean | null> {
+  const value = String(password ?? '')
+  if (!value.trim()) return false
+  const auth = getStoredApiAuth()
+  if (!auth?.token) return null
+
+  const email = String(auth.user?.email || '')
+  const send = () =>
+    authFetch('/api/profile/confirm-password', {
+      method: 'POST',
+      body: JSON.stringify({ password: value }),
+    })
+
+  try {
+    if (shouldRestoreMasterSession(email)) {
+      await restoreMasterApiSession(email)
+    }
+    let { response, payload } = await send()
+    if (response.status === 401 || isSessionLostError(String(payload.error ?? ''))) {
+      const restored = await restoreMasterApiSession(email)
+      if (!restored) return null
+      ;({ response, payload } = await send())
+    }
+    if (response.ok && payload.ok !== false) return true
+    if (response.status === 400) return false
+    return null
+  } catch {
+    return null
+  }
+}
+
 export async function changeOwnPassword(input: { currentPassword: string; newPassword: string }) {
   const { response, payload } = await authFetch('/api/profile/password', {
     method: 'PUT',
@@ -121,6 +207,50 @@ export async function changeOwnPassword(input: { currentPassword: string; newPas
     return { ok: false as const, error: String(payload.error || 'No se pudo actualizar la contraseña.') }
   }
   return { ok: true as const }
+}
+
+export async function fetchTitularProducts() {
+  const { response, payload } = await authFetch('/api/subscription/account')
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      error: String(payload.error || 'No se pudo leer la suscripción del titular.'),
+    }
+  }
+  if (payload.user) persistUser(payload.user as ApiSubscriptionUser)
+  return { ok: true as const, ...snapshotFromPayload(payload) }
+}
+
+export async function purchaseTitularPlan(planId: string) {
+  const { response, payload } = await authFetch('/api/subscription/account/plan', {
+    method: 'POST',
+    body: JSON.stringify({ planId }),
+  })
+  if (!response.ok) {
+    return { ok: false as const, error: String(payload.error || 'No se pudo adquirir el plan.') }
+  }
+  if (payload.user) persistUser(payload.user as ApiSubscriptionUser)
+  return {
+    ok: true as const,
+    message: String(payload.message || 'Plan adquirido.'),
+    ...snapshotFromPayload(payload),
+  }
+}
+
+export async function purchaseTitularMessagePackage(packageId: string) {
+  const { response, payload } = await authFetch('/api/subscription/account/package', {
+    method: 'POST',
+    body: JSON.stringify({ packageId }),
+  })
+  if (!response.ok) {
+    return { ok: false as const, error: String(payload.error || 'No se pudo adquirir el paquete.') }
+  }
+  if (payload.user) persistUser(payload.user as ApiSubscriptionUser)
+  return {
+    ok: true as const,
+    message: String(payload.message || 'Paquete adquirido.'),
+    ...snapshotFromPayload(payload),
+  }
 }
 
 export async function activatePaidPlan(planId: string) {

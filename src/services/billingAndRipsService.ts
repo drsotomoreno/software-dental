@@ -244,13 +244,39 @@ export async function processClinicalSession(
     try {
       const routed = await routeDictatedEvolutionByFiscalProfile({
         rips: ripsPayload,
+        atencion: noObligado
+          ? {
+              ...record,
+              id: String(record.id ?? sessionId),
+              patient,
+              professional,
+              signedAt: record.signedAt,
+            }
+          : undefined,
         invoice: dianInvoice,
         metadatos,
         cie10: extractedCie10,
         cups: extractedCups,
         clinicalItems,
       })
-      if (routed.ok && routed.route === 'generarFEV_y_RIPS' && routed.cuv && routed.cuvRecordId) {
+      if (routed.estadoMuv === 'APROBADO' && routed.cuv) {
+        cuv = routed.cuv
+        pendingWithoutInvoice = false
+        ministryResponse = {
+          success: true,
+          approved: true,
+          cuv: routed.cuv,
+          cuvRecordId: routed.consultaId || routed.cuv,
+          source: 'minsalud',
+        }
+      } else if (routed.estadoMuv === 'RECHAZADO') {
+        pendingWithoutInvoice = true
+        validationIssues.push({
+          level: 'warning',
+          field: routed.field || 'muv',
+          message: routed.error || routed.message || 'El MUV rechazó el RIPS de la consulta.',
+        })
+      } else if (routed.ok && routed.route === 'generarFEV_y_RIPS' && routed.cuv && routed.cuvRecordId) {
         cuv = routed.cuv
         pendingWithoutInvoice = false
         ministryResponse = {
@@ -309,7 +335,7 @@ export async function processClinicalSession(
     })
   }
 
-  if (esRipsTemporal || pendingWithoutInvoice) {
+  if ((esRipsTemporal || pendingWithoutInvoice) && !cuv) {
     await saveTemporaryRips({
       clinicId: professional.clinicId || professional.id,
       patientId: String(patient.id),

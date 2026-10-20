@@ -26,6 +26,7 @@ interface BudgetModuleProps {
   hideSummary?: boolean
   onImportFromTreatmentPlan?: () => void
   canImportFromTreatmentPlan?: boolean
+  importNotice?: string | null
 }
 
 export function BudgetModule({
@@ -39,6 +40,7 @@ export function BudgetModule({
   hideSummary = false,
   onImportFromTreatmentPlan,
   canImportFromTreatmentPlan = false,
+  importNotice = null,
 }: BudgetModuleProps) {
   const tariffMap = useTariffStore((state) => state.tariffMap)
   const [procedureSearch, setProcedureSearch] = useState('')
@@ -159,6 +161,11 @@ export function BudgetModule({
               >
                 Importar desde plan de tratamiento
               </button>
+              {importNotice && (
+                <p className="mt-2 text-xs text-dental-700" role="status">
+                  {importNotice}
+                </p>
+              )}
             </div>
           )}
 
@@ -216,7 +223,7 @@ export function BudgetModule({
           Agregue tratamientos al presupuesto.
         </p>
       ) : (
-        <div className="mb-4 overflow-x-auto">
+        <div id="clinical-budget-lines" className="mb-4 overflow-x-auto">
           <table className="w-full min-w-[920px] table-fixed text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
@@ -282,9 +289,15 @@ export function BudgetModule({
                     )}
                   </td>
                   <td className="px-2 py-2 align-top">
+                    {item.anatomicalZone &&
+                      (!item.code || item.anatomicalZone !== String(item.toothNumber ?? '')) && (
+                        <span className="mb-1 block text-xs leading-snug text-slate-700">
+                          {item.anatomicalZone}
+                        </span>
+                      )}
                     {disabled ? (
-                      item.toothNumber ?? item.fdiQuadrant ?? item.arch ?? '—'
-                    ) : (
+                      item.toothNumber ?? item.fdiQuadrant ?? item.arch ?? item.anatomicalZone ?? '—'
+                    ) : item.code ? (
                       <CupsAnatomicalLocationField
                         cupsCode={item.code}
                         toothNumber={item.toothNumber}
@@ -294,7 +307,9 @@ export function BudgetModule({
                         onFdiQuadrantChange={(fdiQuadrant) => updateItem(item.id, { fdiQuadrant })}
                         onArchChange={(arch) => updateItem(item.id, { arch })}
                       />
-                    )}
+                    ) : !item.anatomicalZone ? (
+                      <span className="text-xs text-slate-400">—</span>
+                    ) : null}
                   </td>
                   <td className="px-2 py-2">
                     {disabled ? (

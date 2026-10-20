@@ -14,6 +14,7 @@ import type { SignatureCaptureResult } from '@/types/signature'
 import { computeContentHash, formatDate, serializeForHash } from '@/utils'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 import { collectSignatureContext } from '@/utils/clientContext'
+import { ensureProfessionalDocument } from '@/services/professionalDocumentMemory'
 import { getProfessionalSignBlocker } from '@/utils/professionalSignGate'
 
 interface ClinicalRecordAddendumPanelProps {
@@ -66,7 +67,7 @@ export function ClinicalRecordAddendumPanel({
       setError('El registro original no tiene hash de integridad.')
       return
     }
-    const rethusBlocker = getProfessionalSignBlocker(user)
+    const rethusBlocker = getProfessionalSignBlocker(user, record)
     if (rethusBlocker) {
       setError(rethusBlocker)
       return
@@ -75,13 +76,19 @@ export function ClinicalRecordAddendumPanel({
   }
 
   const handleConfirmSign = async (password: string) => {
-    const valid = await confirmUserPassword(user.id, password)
+    const valid = await confirmUserPassword(user.id, password, user.email)
     if (!valid) {
       return { ok: false as const, error: 'Contraseña incorrecta. Solo el usuario autenticado puede firmar.' }
     }
 
     if (!record.contentHash) {
       return { ok: false as const, error: 'El registro original no tiene hash de integridad.' }
+    }
+
+    const signingUser = await ensureProfessionalDocument(user, record)
+    const rethusBlocker = getProfessionalSignBlocker(signingUser, record)
+    if (rethusBlocker) {
+      return { ok: false as const, error: rethusBlocker }
     }
 
     setBusy(true)
@@ -97,7 +104,7 @@ export function ClinicalRecordAddendumPanel({
         authorUserId: user.id,
         authorEmail: user.email,
         authorName: `${user.firstName} ${user.lastName}`,
-        authorDocument: user.documentNumber,
+        authorDocument: signingUser.documentNumber,
         sessionId: user.sessionId,
         parentRecordHash: record.contentHash,
         signedAt: now,
@@ -120,7 +127,7 @@ export function ClinicalRecordAddendumPanel({
         contentHash,
         user,
         signedByName: `${user.firstName} ${user.lastName}`,
-        signedByDocument: user.documentNumber,
+        signedByDocument: signingUser.documentNumber || user.documentNumber,
       })
 
       await logAuditEvent({

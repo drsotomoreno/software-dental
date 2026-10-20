@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -63,6 +63,7 @@ import { DentalImplantsBudgetSection } from './DentalImplantsBudgetSection'
 import { FieldVoiceHeader } from '@/components/voice'
 
 import { parseDictatedInteger } from '@/utils/voiceDictation'
+import { calcBillableLineTotal } from '@/utils/cupsBillingRules'
 
 
 
@@ -160,6 +161,8 @@ export function BudgetForm({
 
   useTariffSync(user?.id)
 
+  const [importNotice, setImportNotice] = useState<string | null>(null)
+
 
 
   const moduleItems = useMemo(() => mapLinesToBudgetItems(budgetItems), [budgetItems])
@@ -252,11 +255,53 @@ export function BudgetForm({
 
   const importFromTreatmentPlan = () => {
 
+    const previousIds = new Set(budgetItems.map((item) => item.id))
+
     const lines = buildBudgetFromTreatmentPlan(treatmentPlan, budgetItems)
 
-    const items = mapLinesToBudgetItems(lines)
+    const added = lines.filter((line) => !previousIds.has(line.id)).length
 
-    emitItemsWithDiscount(items, budget.discount)
+    const subtotal = lines.reduce(
+
+      (sum, line) => sum + calcBillableLineTotal(line.unitPrice, line.quantity, line.cupsCode),
+
+      0,
+
+    )
+
+    onChange({
+
+      budgetItems: lines,
+
+      orthodonticsBudget,
+
+      dentalImplantsBudget,
+
+      budget: buildClinicalBudgetSummary(subtotal, budget.discount, orthodonticsBudget, dentalImplantsBudget),
+
+    })
+
+    setImportNotice(
+
+      added > 0
+
+        ? `Se agregaron ${added} procedimiento${added === 1 ? '' : 's'} del plan de tratamiento.`
+
+        : 'Los procedimientos del plan ya están en el presupuesto.',
+
+    )
+
+    window.requestAnimationFrame(() => {
+
+      document.getElementById('clinical-budget-lines')?.scrollIntoView({
+
+        behavior: 'smooth',
+
+        block: 'nearest',
+
+      })
+
+    })
 
   }
 
@@ -307,6 +352,7 @@ export function BudgetForm({
           onGlobalDiscountChange={(discount) => emitItemsWithDiscount(moduleItems, discount)}
           canImportFromTreatmentPlan={treatmentPlan.some((t) => (t.procedure ?? '').trim())}
           onImportFromTreatmentPlan={importFromTreatmentPlan}
+          importNotice={importNotice}
           hideSummary
         />
       )}

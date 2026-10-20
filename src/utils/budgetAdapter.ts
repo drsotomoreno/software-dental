@@ -12,6 +12,11 @@ export function budgetLineToItem(line: BudgetLineItem): BudgetItem {
     toothNumber: line.toothNumber,
     fdiQuadrant: line.fdiQuadrant,
     arch: line.arch,
+    anatomicalZone: line.anatomicalZone,
+    diagnosisCode: line.diagnosisCode,
+    diagnosisDescription: line.diagnosisDescription,
+    treatmentPlanItemId: line.treatmentPlanItemId,
+    source: line.source,
     quantity: line.quantity,
     unitPrice: line.unitPrice,
     discount: 0,
@@ -25,14 +30,18 @@ export function budgetItemToLine(
 ): BudgetLineItem {
   return {
     id: item.id,
-    treatmentPlanItemId: existing?.treatmentPlanItemId,
+    treatmentPlanItemId: item.treatmentPlanItemId ?? existing?.treatmentPlanItemId,
     procedure: item.description,
-    cupsCode: item.code || undefined,
-    toothNumber: item.toothNumber,
-    fdiQuadrant: item.fdiQuadrant,
-    arch: item.arch,
+    cupsCode: item.code || existing?.cupsCode || undefined,
+    toothNumber: item.toothNumber ?? existing?.toothNumber,
+    fdiQuadrant: item.fdiQuadrant ?? existing?.fdiQuadrant,
+    arch: item.arch ?? existing?.arch,
+    anatomicalZone: item.anatomicalZone ?? existing?.anatomicalZone,
+    diagnosisCode: item.diagnosisCode ?? existing?.diagnosisCode,
+    diagnosisDescription: item.diagnosisDescription ?? existing?.diagnosisDescription,
     quantity: item.quantity,
     unitPrice: item.unitPrice,
+    source: item.source ?? existing?.source,
   }
 }
 

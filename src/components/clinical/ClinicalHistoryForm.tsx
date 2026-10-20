@@ -7,6 +7,8 @@ import {
   syncClinicalDataFromOdontogram,
   syncClinicalDataFromOrthodonticsAnnex,
   syncClinicalDataFromEndodonticsAnnex,
+  collectOdontogramCieDiagnoses,
+  importOdontogramCieDiagnoses,
   createEmptyOrthodonticsBudget,
   createEmptyDentalImplantsBudget,
 } from '@/utils'
@@ -26,7 +28,11 @@ import type { StomatologicalExam } from '@/types/stomatologicalExam'
 import type { SpecializedAnnexes } from '@/types/specializedAnnexes'
 import { createEmptySpecializedAnnexes } from '@/types/specializedAnnexes'
 import { createEmptyStomatologicalExam } from '@/types/stomatologicalExam'
-import { createEmptyClinicalDiagnosticChart, normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
+import {
+  appendUnassignedDiagnosticChartEntries,
+  createEmptyClinicalDiagnosticChart,
+  normalizeClinicalDiagnosticChart,
+} from '@/types/clinicalDiagnosticChart'
 import type { EvolutionNote } from '@/types/evolutionNote'
 import type { InformedConsent } from '@/types/consent'
 import type { UserProfile } from '@/types/user'
@@ -38,7 +44,6 @@ import { EvolutionNotesForm } from './EvolutionNotesForm'
 import { InformedConsentForm } from './InformedConsentForm'
 import { TreatmentPlanForm } from './TreatmentPlanForm'
 import { BudgetForm } from './BudgetForm'
-import { PaymentPlanForm } from './PaymentPlanForm'
 import { PaymentControlForm } from './PaymentControlForm'
 import { Odontogram } from '@/components/odontogram'
 import { DiagnosticOdontogramSection } from '@/components/clinical/diagnostics'
@@ -70,7 +75,8 @@ interface ClinicalHistoryFormProps {
 }
 
 function showClinicalSection(activeSection: string, section: string): boolean {
-  return activeSection === 'all' || activeSection === section
+  const normalized = activeSection === 'control-pagos' ? 'plan-pagos' : activeSection
+  return normalized === 'all' || normalized === section
 }
 
 export function createEmptyClinicalForm(
@@ -93,6 +99,7 @@ export function createEmptyClinicalForm(
     budget: { subtotal: 0, discount: 0, total: 0, currency: 'COP' },
     paymentPlan: [],
     paymentControl: [],
+    paymentControlLines: [],
     orthodonticsPaymentControl: [],
     evolutionNotes: [],
     informedConsent: createEmptyConsent(professionalLicense, professionalRegistry),
@@ -118,9 +125,6 @@ export function ClinicalHistoryForm({
   clinicalUser = null,
   patientName = '',
   patientDocument = '',
-  patientDocumentType,
-  patientDocumentNumber,
-  patientEmail,
 }: ClinicalHistoryFormProps) {
   const snapshotLocked = disabled
   const livingLocked = lockLivingChart
@@ -239,6 +243,28 @@ export function ClinicalHistoryForm({
     [form.diagnoses],
   )
 
+  const odontogramCieDiagnoses = useMemo(
+    () => collectOdontogramCieDiagnoses(odontogram),
+    [odontogram],
+  )
+
+  const importOdontogramDiagnoses = () => {
+    const result = importOdontogramCieDiagnoses(form.diagnoses, odontogramCieDiagnoses)
+    const currentChart = normalizeClinicalDiagnosticChart(form.diagnosticChart)
+    const diagnosticChart = appendUnassignedDiagnosticChartEntries(
+      currentChart,
+      odontogramCieDiagnoses,
+    )
+    const chartChanged = diagnosticChart.entries.length !== currentChart.entries.length
+    if (result.added > 0 || result.updated > 0 || chartChanged) {
+      update({
+        diagnoses: result.diagnoses,
+        ...(chartChanged ? { diagnosticChart } : {}),
+      })
+    }
+    return { added: result.added, updated: result.updated }
+  }
+
   const budgetLinkedPlanItemIds = useMemo(
     () =>
       form.budgetItems
@@ -304,6 +330,8 @@ export function ClinicalHistoryForm({
         <DiagnosticOdontogramSection
           value={form.diagnosticChart}
           diagnoses={form.diagnoses}
+          odontogramCieDiagnoses={odontogramCieDiagnoses}
+          onImportOdontogramDiagnoses={importOdontogramDiagnoses}
           onChange={(diagnosticChart) => update({ diagnosticChart })}
           onEnsureDiagnosis={({ code, description, toothId }) => {
             const toothNumber = Number(toothId)
@@ -346,7 +374,14 @@ export function ClinicalHistoryForm({
           }}
           onUpdateDiagnosis={updateDiagnosis}
           onRemoveAdditionalDiagnosis={(code) => {
-            update({ diagnoses: form.diagnoses.filter((diagnosis) => diagnosis.code !== code) })
+            const diagnosticChart = normalizeClinicalDiagnosticChart(form.diagnosticChart)
+            update({
+              diagnoses: form.diagnoses.filter((diagnosis) => diagnosis.code !== code),
+              diagnosticChart: {
+                ...diagnosticChart,
+                entries: diagnosticChart.entries.filter((entry) => entry.diagnosisCode !== code),
+              },
+            })
           }}
           disabled={livingLocked}
         />
@@ -377,8 +412,9 @@ export function ClinicalHistoryForm({
         treatmentPlan={form.treatmentPlan}
         treatmentPlanNotes={form.treatmentPlanNotes}
         diagnoses={form.diagnoses}
-        odontogram={odontogram}
+        diagnosticChart={form.diagnosticChart}
         affectedTeeth={affectedTeeth}
+        specializedAnnexes={form.specializedAnnexes}
         budgetLinkedItemIds={budgetLinkedPlanItemIds}
         disabled={livingLocked}
         onChange={(patch) => update(patch)}
@@ -399,12 +435,26 @@ export function ClinicalHistoryForm({
 
       {showClinicalSection(activeSection, 'plan-pagos') && (
         <div id="clinical-section-plan-pagos">
-          <PaymentPlanForm
+          <PaymentControlForm
+            paymentControlLines={form.paymentControlLines ?? []}
             paymentPlan={form.paymentPlan}
-            budgetItems={form.budgetItems}
+            paymentControl={form.paymentControl}
+            orthodonticsPaymentControl={form.orthodonticsPaymentControl}
             orthodonticsBudget={form.orthodonticsBudget}
             dentalImplantsBudget={form.dentalImplantsBudget}
-            disabled={livingLocked}
+            budgetItems={form.budgetItems}
+            treatmentPlan={form.treatmentPlan}
+            disabled={snapshotLocked}
+            patientId={patientId}
+            clinicalRecordId={clinicalRecordId}
+            patientName={patientName}
+            patientDocument={patientDocument}
+            onLinesChange={(paymentControlLines) => update({ paymentControlLines })}
+            onPaymentPlanChange={(paymentPlan) => update({ paymentPlan })}
+            onChange={(paymentControl) => update({ paymentControl })}
+            onOrthodonticsPaymentControlChange={(orthodonticsPaymentControl) =>
+              update({ orthodonticsPaymentControl })
+            }
           />
         </div>
       )}
@@ -434,32 +484,6 @@ export function ClinicalHistoryForm({
         allowNewNotes
         allowAddendums
       />
-        </div>
-      )}
-
-      {showClinicalSection(activeSection, 'control-pagos') && (
-        <div id="clinical-section-control-pagos">
-          <PaymentControlForm
-            paymentControl={form.paymentControl}
-            orthodonticsPaymentControl={form.orthodonticsPaymentControl}
-            orthodonticsBudget={form.orthodonticsBudget}
-            paymentPlan={form.paymentPlan}
-            budget={form.budget}
-            disabled={snapshotLocked}
-            patientId={patientId}
-            clinicalRecordId={clinicalRecordId}
-            patientName={patientName}
-            patientDocument={patientDocument}
-            patientDocumentType={patientDocumentType}
-            patientDocumentNumber={patientDocumentNumber}
-            patientEmail={patientEmail}
-            evolutionNotes={form.evolutionNotes}
-            budgetItems={form.budgetItems}
-            onChange={(paymentControl) => update({ paymentControl })}
-            onOrthodonticsPaymentControlChange={(orthodonticsPaymentControl) =>
-              update({ orthodonticsPaymentControl })
-            }
-          />
         </div>
       )}
 

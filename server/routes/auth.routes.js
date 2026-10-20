@@ -5,12 +5,16 @@ import { forgotPassword, resetPassword } from '../controllers/authPassword.contr
 import { requestRegisterCode, verifyRegisterCode } from '../controllers/authRegister.controller.js'
 import { getMailSettings, updateMailSettings } from '../controllers/authMailSettings.controller.js'
 import {
+  buyTitularMessagePackage,
+  buyTitularPlan,
   choosePaidPlan,
   getSubscriptionStatus,
+  getTitularProducts,
   requestRethusTrial,
 } from '../controllers/subscription.controller.js'
 import {
   changeOwnPassword,
+  confirmOwnPassword,
   confirmSubscriptionPayment,
   createClinicUser,
   deleteClinicUser,
@@ -22,6 +26,7 @@ import {
   issueMasterSessionToken,
   MASTER_EMAIL,
   registerSubscriptionUser,
+  rememberProfessionalDocument,
   resetClinicUserPassword,
   resolveSubscriptionSession,
   sessionHintFromRequest,
@@ -234,6 +239,9 @@ router.post('/auth/register/verify', verifyRegisterCode)
 router.get('/auth/mail-settings', getMailSettings)
 router.put('/auth/mail-settings', updateMailSettings)
 router.get('/subscription', getSubscriptionStatus)
+router.get('/subscription/account', getTitularProducts)
+router.post('/subscription/account/plan', buyTitularPlan)
+router.post('/subscription/account/package', buyTitularMessagePackage)
 router.post('/subscription/trial', requestRethusTrial)
 router.post('/subscription/plan', choosePaidPlan)
 
@@ -364,6 +372,30 @@ router.delete('/clinic/users/:id', async (req, res) => {
   }
 })
 
+router.post('/profile/confirm-password', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const result = await confirmOwnPassword({
+      token,
+      password: body.password,
+      hint: sessionHintFromRequest(req),
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true })
+  } catch (error) {
+    console.error('[Auth] Error en POST /profile/confirm-password:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo confirmar la contraseña.',
+    })
+  }
+})
+
 router.put('/profile/password', async (req, res) => {
   try {
     const authHeader = req.headers.authorization ?? ''
@@ -385,6 +417,34 @@ router.put('/profile/password', async (req, res) => {
       success: false,
       ok: false,
       error: 'No se pudo actualizar la contraseña.',
+    })
+  }
+})
+
+router.put('/profile/document', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const result = await rememberProfessionalDocument({
+      token,
+      documentNumber: body.documentNumber,
+      documentType: body.documentType,
+      hint: sessionHintFromRequest(req, {
+        userId: body.clientUserId,
+        email: body.clientEmail,
+      }),
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({ success: true, ok: true, user: result.user })
+  } catch (error) {
+    console.error('[Auth] Error en PUT /profile/document:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo guardar la cédula del profesional.',
     })
   }
 })

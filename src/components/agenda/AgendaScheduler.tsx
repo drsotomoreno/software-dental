@@ -1,4 +1,12 @@
-import { useMemo, useState, useEffect, useCallback, type MouseEvent } from 'react'
+import {
+  useMemo,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type MouseEvent,
+  type PointerEvent,
+} from 'react'
 import {
   addDays,
   addMonths,
@@ -23,6 +31,8 @@ import { CreateAppointmentModal, type SlotSelection } from './CreateAppointmentM
 import { BlockSlotModal } from './BlockSlotModal'
 import { AgendaCitasList } from './AgendaCitasList'
 import { AgendaContextMenu, type AgendaContextMenuItem } from './AgendaContextMenu'
+import { AgendaSlotBulkBar } from './AgendaSlotBulkBar'
+import { AgendaSlotActionDialog } from './AgendaSlotActionDialog'
 import { AppointmentDetailPanel } from './AppointmentDetailPanel'
 import { ColumnManager } from './ColumnManager'
 import { db } from '@/db/database'
@@ -33,17 +43,33 @@ import {
 } from '@/utils/agendaStorage'
 import {
   clearAgendaClipboard,
-  copiarCita,
-  cortarCita,
-  pegarCita,
+  copiarCitas,
+  cortarCitas,
+  hasAgendaClipboard,
+  pegarCitasEn,
 } from '@/utils/agendaClipboard'
+import { noteTextForSlot, readSlotNotes, writeSlotNotes } from '@/utils/agendaSlotNotes'
 import { useAgendaClipboard } from '@/hooks/useAgendaClipboard'
 import { useScheduleColumns } from '@/hooks/useScheduleColumns'
 import { useAppointmentsRange } from '@/hooks/useAppointments'
 import { useScheduleBlocks } from '@/hooks/useScheduleBlocks'
 import type { Appointment } from '@/types/appointment'
 import type { ScheduleBlock } from '@/types/scheduleBlock'
-import { findBlockAtSlot } from '@/utils/scheduleBlocks'
+import { findBlockAtSlot, isSlotBlocked } from '@/utils/scheduleBlocks'
+import { generateTimeSlots } from '@/constants/procedures'
+import {
+  appointmentsCoveringSlots,
+  mergeBlockInputs,
+  parseSlotKey,
+  rewriteBlocksForSlotSelection,
+  selectionForRightClick,
+  selectionFromMouseGesture,
+  selectionToBlockInputs,
+  singleContiguousRange,
+  SLOT_DRAG_THRESHOLD_PX,
+  slotFromClientPoint,
+  type AgendaSlotRef,
+} from '@/utils/agendaSlotSelection'
 import { markAppointmentNoShow } from '@/utils/appointmentNoShow'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -54,6 +80,12 @@ export function AgendaScheduler() {
   const [modalOpen, setModalOpen] = useState(false)
   const [blockModalOpen, setBlockModalOpen] = useState(false)
   const [blockMode, setBlockMode] = useState(false)
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [slotGestureActive, setSlotGestureActive] = useState(false)
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
+  const [bulkReason, setBulkReason] = useState('')
+  const [bulkSaving, setBulkSaving] = useState(false)
+  const [bulkError, setBulkError] = useState('')
   const [slotSelection, setSlotSelection] = useState<SlotSelection | null>(null)
   const [blockSelection, setBlockSelection] = useState<SlotSelection | null>(null)
   const [blockModalType, setBlockModalType] = useState<'full_day' | 'time_range'>('time_range')
@@ -66,6 +98,11 @@ export function AgendaScheduler() {
     y: number
     items: AgendaContextMenuItem[]
   } | null>(null)
+  const [slotAction, setSlotAction] = useState<
+    | { kind: 'block'; slots: AgendaSlotRef[] }
+    | { kind: 'note'; slots: AgendaSlotRef[]; initial: string }
+    | null
+  >(null)
 
   const { clipboard, hasClipboard } = useAgendaClipboard()
 
@@ -124,7 +161,35 @@ export function AgendaScheduler() {
     isLoading: blocksLoading,
     createBlock,
     deleteBlock,
+    applyBlockRewrite,
   } = useScheduleBlocks(dateRange.start, dateRange.end)
+
+  const timeSlots = useMemo(() => generateTimeSlots(), [])
+  const slotAxes = useMemo(() => {
+    if (activeView === 'week') {
+      return weekDays.flatMap((day) => columns.map((column) => ({ date: day, columnId: column.id })))
+    }
+    return columns.map((column) => ({ date: currentDate, columnId: column.id }))
+  }, [activeView, weekDays, columns, currentDate])
+
+  const selectedKeysRef = useRef(selectedKeys)
+  selectedKeysRef.current = selectedKeys
+  const selectionModeRef = useRef(selectionMode)
+  selectionModeRef.current = selectionMode
+  const anchorRef = useRef<AgendaSlotRef | null>(null)
+  const timeSlotsRef = useRef(timeSlots)
+  timeSlotsRef.current = timeSlots
+  const slotAxesRef = useRef(slotAxes)
+  slotAxesRef.current = slotAxes
+  const gestureCleanupRef = useRef<(() => void) | null>(null)
+  const suppressContextMenuRef = useRef(false)
+  const menuOpenedRef = useRef(false)
+  const appointmentsRef = useRef(appointments)
+  appointmentsRef.current = appointments
+  const blocksRef = useRef(blocks)
+  blocksRef.current = blocks
+  const columnsRef = useRef(columns)
+  columnsRef.current = columns
 
   const openRescheduleModal = useCallback((appointment: Appointment) => {
     setEditingAppointment(appointment)
@@ -158,94 +223,156 @@ export function AgendaScheduler() {
 
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
 
-  const openContextMenu = useCallback(
-    (event: MouseEvent, items: AgendaContextMenuItem[]) => {
-      event.preventDefault()
-      event.stopPropagation()
-      setContextMenu({
-        x: event.clientX,
-        y: event.clientY,
-        items: items.map((item) => ({
-          ...item,
-          onClick: () => {
-            item.onClick()
-            closeContextMenu()
-          },
-        })),
-      })
-    },
-    [closeContextMenu],
-  )
+  const openSelectionMenuRef = useRef<
+    (x: number, y: number, clicked: AgendaSlotRef, keys: string[]) => void
+  >(() => {})
 
-  const handleAppointmentContextMenu = useCallback(
-    (event: MouseEvent, appointment: Appointment) => {
-      openContextMenu(event, [
-        {
-          id: 'cut',
-          label: 'Cortar cita',
-          icon: '✂️',
-          onClick: () => {
-            void cortarCita(appointment).then((ok) => {
-              if (ok && selectedAppointment?.id === appointment.id) {
-                setSelectedAppointment(null)
-              }
-            })
-          },
-        },
-        {
-          id: 'copy',
-          label: 'Copiar cita',
-          icon: '📋',
-          onClick: () => copiarCita(appointment),
-        },
-        {
-          id: 'delete',
-          label: 'Eliminar cita',
-          icon: '🗑️',
-          danger: true,
-          onClick: () => void handleDeleteAppointment(appointment),
-        },
-      ])
-    },
-    [openContextMenu, handleDeleteAppointment, selectedAppointment?.id],
-  )
+  openSelectionMenuRef.current = (x, y, clicked, keys) => {
+    const slots = keys
+      .map((key) => parseSlotKey(key))
+      .filter((slot): slot is AgendaSlotRef => slot != null)
+    const covered = appointmentsCoveringSlots(appointmentsRef.current, slots)
+    const blockedCount = slots.filter((slot) =>
+      isSlotBlocked(slot.date, slot.startTime, slot.columnId, blocksRef.current),
+    ).length
+    const columnIds = columnsRef.current.map((column) => column.id)
+    const anchor = { date: clicked.date, startTime: clicked.startTime, columnId: clicked.columnId }
+    const range = singleContiguousRange(slots)
 
-  const handleSlotContextMenu = useCallback(
-    (event: MouseEvent, selection: SlotSelection) => {
-      const items: AgendaContextMenuItem[] = []
-
-      if (hasClipboard) {
-        const modeLabel = clipboard?.mode === 'cut' ? 'cortada' : 'copiada'
-        items.push({
-          id: 'paste',
-          label: `Pegar cita ${modeLabel}`,
-          icon: '📌',
-          onClick: () => {
-            void pegarCita({
-              date: selection.date,
-              startTime: selection.startTime,
-              columnId: selection.columnId,
-            })
-          },
-        })
-      }
-
-      items.push({
+    const items: AgendaContextMenuItem[] = [
+      {
         id: 'new',
         label: 'Nueva cita',
         icon: '➕',
         onClick: () => {
-          setSlotSelection(selection)
+          setSlotSelection(range ?? clicked)
           setSelectedAppointment(null)
           setEditingAppointment(null)
           setModalOpen(true)
         },
-      })
+      },
+      {
+        id: 'cut',
+        label: 'Cortar',
+        icon: '✂️',
+        disabled: covered.length === 0,
+        onClick: () => {
+          void cortarCitas(covered, anchor).then((ok) => {
+            if (ok) setSelectedAppointment(null)
+          })
+        },
+      },
+      {
+        id: 'copy',
+        label: 'Copiar',
+        icon: '📋',
+        disabled: covered.length === 0,
+        onClick: () => copiarCitas(covered, anchor),
+      },
+      {
+        id: 'paste',
+        label: 'Pegar',
+        icon: '📌',
+        disabled: !hasAgendaClipboard(),
+        onClick: () => {
+          void pegarCitasEn(anchor, columnIds)
+        },
+      },
+      {
+        id: 'block',
+        label: 'Bloquear hora',
+        icon: '🚫',
+        disabled: slots.length === 0,
+        onClick: () => setSlotAction({ kind: 'block', slots }),
+      },
+      {
+        id: 'unblock',
+        label: 'Desbloquear hora',
+        icon: '🔓',
+        disabled: blockedCount === 0,
+        onClick: () => {
+          void unblockSlots(slots)
+        },
+      },
+      {
+        id: 'note',
+        label: 'Insertar nota',
+        icon: '📝',
+        disabled: slots.length === 0,
+        onClick: () => {
+          const initial =
+            covered.length === 1
+              ? covered[0].notes ?? ''
+              : noteTextForSlot(readSlotNotes(), clicked)
+          setSlotAction({ kind: 'note', slots, initial })
+        },
+      },
+    ]
 
-      openContextMenu(event, items)
-    },
-    [clipboard?.mode, hasClipboard, openContextMenu],
-  )
+    if (covered.length > 0) {
+      items.push({
+        id: 'delete',
+        label: covered.length > 1 ? 'Eliminar citas' : 'Eliminar cita',
+        icon: '🗑️',
+        danger: true,
+        onClick: () => {
+          for (const appointment of covered) void handleDeleteAppointment(appointment)
+        },
+      })
+    }
+
+    setContextMenu({ x, y, items })
+  }
+
+  const presentSelectionMenu = (x: number, y: number, slot: AgendaSlotRef) => {
+    const keys = selectionForRightClick(slot, selectedKeysRef.current)
+    const next = new Set(keys)
+    selectedKeysRef.current = next
+    setSelectedKeys(next)
+    setSelectionMode(true)
+    openSelectionMenuRef.current(x, y, slot, keys)
+  }
+
+  const handleAppointmentContextMenu = useCallback((event: MouseEvent, appointment: Appointment) => {
+    if (menuOpenedRef.current || suppressContextMenuRef.current) {
+      menuOpenedRef.current = false
+      suppressContextMenuRef.current = false
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    presentSelectionMenu(event.clientX, event.clientY, {
+      columnId: appointment.columnId,
+      date: appointment.startTime.slice(0, 10),
+      startTime: appointment.startTime.slice(11, 16),
+    })
+  }, [])
+
+  const handleSlotContextMenu = useCallback((event: MouseEvent, selection: SlotSelection) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (menuOpenedRef.current || suppressContextMenuRef.current) {
+      menuOpenedRef.current = false
+      suppressContextMenuRef.current = false
+      return
+    }
+    presentSelectionMenu(event.clientX, event.clientY, selection)
+  }, [])
+
+  const handleColumnContextMenu = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (menuOpenedRef.current || suppressContextMenuRef.current) {
+      menuOpenedRef.current = false
+      suppressContextMenuRef.current = false
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    const slot = slotFromClientPoint(event.clientX, event.clientY)
+    if (!slot) return
+    event.preventDefault()
+    event.stopPropagation()
+    presentSelectionMenu(event.clientX, event.clientY, slot)
+  }, [])
 
   const handleMonthDayContextMenu = useCallback(
     (event: MouseEvent, date: string) => {
@@ -296,7 +423,7 @@ export function AgendaScheduler() {
     renderCitas()
   }
 
-  const handleSlotClick = (selection: SlotSelection) => {
+  const handleSlotClick = useCallback((selection: SlotSelection) => {
     const existingBlock = findBlockAtSlot(
       selection.date,
       selection.startTime,
@@ -321,6 +448,265 @@ export function AgendaScheduler() {
     setSelectedAppointment(null)
     setEditingAppointment(null)
     setModalOpen(true)
+  }, [blocks, blockMode])
+
+  const selectedSlots = useMemo(() => {
+    const slots: AgendaSlotRef[] = []
+    for (const key of selectedKeys) {
+      const slot = parseSlotKey(key)
+      if (slot && timeSlots.includes(slot.startTime)) slots.push(slot)
+    }
+    return slots
+  }, [selectedKeys, timeSlots])
+
+  const blockedSelectionCount = useMemo(
+    () =>
+      selectedSlots.filter((slot) =>
+        isSlotBlocked(slot.date, slot.startTime, slot.columnId, blocks),
+      ).length,
+    [selectedSlots, blocks],
+  )
+
+  const contiguousRange = useMemo(
+    () => singleContiguousRange(selectedSlots),
+    [selectedSlots],
+  )
+
+  const selectionSummary = useMemo(() => {
+    return selectionToBlockInputs(selectedSlots).map((input) => {
+      const columnName = columns.find((column) => column.id === input.columnId)?.name ?? 'Silla'
+      const when = format(parseISO(`${input.date}T12:00:00`), "EEE d MMM", { locale: es })
+      return `${when} · ${columnName} · ${input.startTime}–${input.endTime}`
+    })
+  }, [selectedSlots, columns])
+
+  const clearSlotSelection = useCallback(() => {
+    setSelectedKeys(new Set())
+    anchorRef.current = null
+    setBulkError('')
+  }, [])
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false)
+    setBulkReason('')
+    clearSlotSelection()
+  }, [clearSlotSelection])
+
+  const handleSlotPress = useCallback(
+    (_event: MouseEvent<HTMLButtonElement>, slot: AgendaSlotRef) => {
+      if (selectionModeRef.current) return
+      handleSlotClick(slot)
+    },
+    [handleSlotClick],
+  )
+
+  const handleColumnPointerDown = useCallback((event: PointerEvent<HTMLElement>) => {
+    if (event.button !== 0 && event.button !== 2) return
+
+    const origin = slotFromClientPoint(event.clientX, event.clientY)
+    if (!origin) return
+
+    gestureCleanupRef.current?.()
+
+    const gesture = {
+      pointerId: event.pointerId,
+      button: event.button === 2 ? 'right' as const : 'left' as const,
+      origin,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+      base: new Set(selectedKeysRef.current),
+    }
+    anchorRef.current = origin
+
+    const paint = (target: AgendaSlotRef, moved: boolean) => {
+      const keys = selectionFromMouseGesture({
+        button: gesture.button,
+        moved,
+        selectionMode: selectionModeRef.current || moved,
+        origin: gesture.origin,
+        target,
+        selectedKeys: gesture.base,
+        timeSlots: timeSlotsRef.current,
+        axes: slotAxesRef.current,
+      })
+      if (!keys) return false
+      setSelectedKeys(new Set(keys))
+      return true
+    }
+
+    const stopSelecting = () => {
+      document.querySelector('.agenda-scheduler-root')?.classList.remove('agenda-selecting')
+    }
+
+    const suppressFollowingClick = () => {
+      const stop = (clickEvent: Event) => {
+        const target = clickEvent.target
+        if (!(target instanceof Element)) return
+        if (!target.closest('[data-agenda-column]')) return
+        clickEvent.preventDefault()
+        clickEvent.stopPropagation()
+      }
+      window.addEventListener('click', stop, true)
+      window.addEventListener('auxclick', stop, true)
+      window.setTimeout(() => {
+        window.removeEventListener('click', stop, true)
+        window.removeEventListener('auxclick', stop, true)
+      }, 400)
+    }
+
+    const move = (pointerEvent: globalThis.PointerEvent) => {
+      if (pointerEvent.pointerId !== gesture.pointerId) return
+      const distance = Math.hypot(pointerEvent.clientX - gesture.startX, pointerEvent.clientY - gesture.startY)
+      if (distance < SLOT_DRAG_THRESHOLD_PX) return
+      if (!gesture.moved) setSlotGestureActive(true)
+      gesture.moved = true
+      if (gesture.button === 'right') suppressContextMenuRef.current = true
+      document.querySelector('.agenda-scheduler-root')?.classList.add('agenda-selecting')
+      const target = slotFromClientPoint(pointerEvent.clientX, pointerEvent.clientY)
+      if (!target) return
+      pointerEvent.preventDefault()
+      paint(target, true)
+    }
+
+    const finish = (pointerEvent: globalThis.PointerEvent) => {
+      if (pointerEvent.pointerId !== gesture.pointerId) return
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      gestureCleanupRef.current = null
+      stopSelecting()
+      setSlotGestureActive(false)
+
+      if (gesture.button === 'right' && !gesture.moved) {
+        const keys = selectionForRightClick(gesture.origin, selectedKeysRef.current)
+        const next = new Set(keys)
+        selectedKeysRef.current = next
+        setSelectedKeys(next)
+        setSelectionMode(true)
+        menuOpenedRef.current = true
+        openSelectionMenuRef.current(pointerEvent.clientX, pointerEvent.clientY, gesture.origin, keys)
+        return
+      }
+
+      if (gesture.moved) {
+        const target = slotFromClientPoint(pointerEvent.clientX, pointerEvent.clientY) ?? gesture.origin
+        paint(target, true)
+        setSelectionMode(true)
+        suppressFollowingClick()
+        return
+      }
+
+      const changed = paint(gesture.origin, false)
+      if (changed) {
+        setSelectionMode(true)
+        suppressFollowingClick()
+      }
+    }
+
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+    gestureCleanupRef.current = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      stopSelecting()
+    }
+
+    if (event.button === 2) event.preventDefault()
+  }, [])
+
+  useEffect(() => () => gestureCleanupRef.current?.(), [])
+
+  useEffect(() => {
+    setSelectedKeys(new Set())
+    anchorRef.current = null
+  }, [activeView, currentDate])
+
+  const rewriteSlots = async (slots: AgendaSlotRef[], block: boolean, reason?: string) => {
+    const columnIds = columns.map((column) => column.id)
+    const rewrite = rewriteBlocksForSlotSelection(blocks, slots, columnIds)
+    await applyBlockRewrite(
+      block
+        ? {
+            deleteIds: rewrite.deleteIds,
+            create: mergeBlockInputs([
+              ...rewrite.create,
+              ...selectionToBlockInputs(slots, reason),
+            ]),
+          }
+        : rewrite,
+    )
+    setSelectedBlock(null)
+    clearSlotSelection()
+  }
+
+  const blockSlots = async (slots: AgendaSlotRef[], reason?: string) => {
+    if (slots.length === 0) return
+    setBulkSaving(true)
+    setBulkError('')
+    try {
+      await rewriteSlots(slots, true, reason)
+    } catch {
+      setBulkError('No se pudo bloquear la selección.')
+    } finally {
+      setBulkSaving(false)
+    }
+  }
+
+  const unblockSlots = async (slots: AgendaSlotRef[]) => {
+    if (slots.length === 0) return
+    setBulkSaving(true)
+    setBulkError('')
+    try {
+      await rewriteSlots(slots, false)
+    } catch {
+      setBulkError('No se pudo desbloquear la selección.')
+    } finally {
+      setBulkSaving(false)
+    }
+  }
+
+  const handleBulkBlock = async () => {
+    await blockSlots(selectedSlots, bulkReason.trim() || undefined)
+  }
+
+  const handleBulkUnblock = async () => {
+    if (blockedSelectionCount === 0) return
+    await unblockSlots(selectedSlots)
+  }
+
+  const saveSlotNote = async (slots: AgendaSlotRef[], text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    const covered = appointmentsCoveringSlots(appointments, slots)
+    if (covered.length === 1 && covered[0].id != null) {
+      await updateAppointmentNotes(covered[0].id, trimmed)
+    } else {
+      for (const appointment of covered) {
+        if (appointment.id == null) continue
+        const previous = appointment.notes?.trim()
+        const next = previous ? `${previous}\n${trimmed}` : trimmed
+        await updateAppointmentNotes(appointment.id, next)
+      }
+    }
+    writeSlotNotes(slots, trimmed)
+    renderCitas()
+  }
+
+  const handleBulkCreateAppointment = () => {
+    if (!contiguousRange) return
+    setSlotSelection(contiguousRange)
+    setSelectedAppointment(null)
+    setEditingAppointment(null)
+    setModalOpen(true)
+    clearSlotSelection()
+  }
+
+  const handleViewChange = (view: AgendaViewMode) => {
+    setActiveView(view)
+    if (view === 'month') exitSelectionMode()
   }
 
   const openBlockDayModal = () => {
@@ -388,7 +774,7 @@ export function AgendaScheduler() {
     >
       <div className="card">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <AgendaViewTabs activeView={activeView} onChange={setActiveView} />
+          <AgendaViewTabs activeView={activeView} onChange={handleViewChange} />
 
           <div className="flex flex-wrap items-center gap-2">
             {activeView === 'day' && (
@@ -402,6 +788,23 @@ export function AgendaScheduler() {
             <button type="button" onClick={goToday} className="btn-secondary text-xs">
               Hoy
             </button>
+            {activeView !== 'month' && (
+              <button
+                type="button"
+                aria-pressed={selectionMode}
+                onClick={() => {
+                  if (selectionMode) exitSelectionMode()
+                  else setSelectionMode(true)
+                }}
+                className={`text-xs ${
+                  selectionMode
+                    ? 'rounded-lg bg-dental-600 px-3 py-1.5 font-medium text-white'
+                    : 'btn-secondary'
+                }`}
+              >
+                {selectionMode ? 'Selección activa' : 'Seleccionar casillas'}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setBlockMode((prev) => !prev)}
@@ -443,7 +846,7 @@ export function AgendaScheduler() {
             {clipboard.appointment.patientName}
             <span className="text-dental-700">
               {' '}
-              — clic derecho en un horario vacío para pegar
+              — clic derecho en una casilla y elija Pegar
             </span>
           </p>
           <button
@@ -454,6 +857,24 @@ export function AgendaScheduler() {
             Cancelar
           </button>
         </div>
+      )}
+
+      {selectionMode && activeView !== 'month' && (
+        <AgendaSlotBulkBar
+          count={selectedSlots.length}
+          summary={slotGestureActive ? [] : selectionSummary}
+          blockedCount={slotGestureActive ? 0 : blockedSelectionCount}
+          reason={bulkReason}
+          saving={bulkSaving}
+          error={slotGestureActive ? '' : bulkError}
+          canCreateAppointment={!slotGestureActive && contiguousRange != null}
+          onReasonChange={setBulkReason}
+          onBlock={() => void handleBulkBlock()}
+          onUnblock={() => void handleBulkUnblock()}
+          onCreateAppointment={handleBulkCreateAppointment}
+          onClear={clearSlotSelection}
+          onExit={exitSelectionMode}
+        />
       )}
 
       {isLoading ? (
@@ -473,11 +894,15 @@ export function AgendaScheduler() {
                 appointments={appointments}
                 blocks={blocks}
                 blockMode={blockMode}
-                onSlotClick={handleSlotClick}
                 onAppointmentClick={setSelectedAppointment}
                 onAppointmentContextMenu={handleAppointmentContextMenu}
                 onSlotContextMenu={handleSlotContextMenu}
                 onBlockClick={setSelectedBlock}
+                selectionMode={selectionMode}
+                selectedKeys={selectedKeys}
+                onSlotPress={handleSlotPress}
+                onColumnPointerDown={handleColumnPointerDown}
+                onColumnContextMenu={handleColumnContextMenu}
               />
             )}
 
@@ -493,11 +918,15 @@ export function AgendaScheduler() {
                   appointments={appointments}
                   blocks={blocks}
                   blockMode={blockMode}
-                  onSlotClick={handleSlotClick}
                   onAppointmentClick={setSelectedAppointment}
                   onAppointmentContextMenu={handleAppointmentContextMenu}
                   onSlotContextMenu={handleSlotContextMenu}
                   onBlockClick={setSelectedBlock}
+                  selectionMode={selectionMode}
+                  selectedKeys={selectedKeys}
+                  onSlotPress={handleSlotPress}
+                  onColumnPointerDown={handleColumnPointerDown}
+                  onColumnContextMenu={handleColumnContextMenu}
                 />
               ))}
 
@@ -650,6 +1079,36 @@ export function AgendaScheduler() {
         onClose={() => setBlockModalOpen(false)}
         onSubmit={createBlock}
       />
+
+      {slotAction?.kind === 'block' && (
+        <AgendaSlotActionDialog
+          title="Bloquear hora"
+          description="Las casillas seleccionadas quedan cerradas en la agenda."
+          label="Motivo"
+          placeholder="Reunión, mantenimiento, almuerzo..."
+          confirmLabel="Bloquear"
+          onClose={() => setSlotAction(null)}
+          onConfirm={async (reason) => {
+            await blockSlots(slotAction.slots, reason || undefined)
+          }}
+        />
+      )}
+
+      {slotAction?.kind === 'note' && (
+        <AgendaSlotActionDialog
+          title="Insertar nota"
+          description="La nota queda en las casillas seleccionadas y en la cita, si ya existe."
+          label="Nota"
+          initialValue={slotAction.initial}
+          placeholder="Indicación para este horario..."
+          confirmLabel="Guardar nota"
+          required
+          onClose={() => setSlotAction(null)}
+          onConfirm={async (text) => {
+            await saveSlotNote(slotAction.slots, text)
+          }}
+        />
+      )}
 
       {contextMenu && (
         <AgendaContextMenu
