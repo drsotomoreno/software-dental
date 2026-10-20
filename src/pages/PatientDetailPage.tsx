@@ -153,8 +153,24 @@ function stableStringify(value: unknown): string {
   return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
 }
 
-function clinicalFormBaseline(data: ClinicalRecordFormData): string {
-  return stableStringify(data)
+function markHistorySigned(
+  setHistorySignature: (status: 'loading' | 'signed' | 'pending') => void,
+  followSignatureHydrationRef: { current: boolean },
+  signatureBaselineRef: { current: string | null },
+) {
+  followSignatureHydrationRef.current = true
+  signatureBaselineRef.current = null
+  setHistorySignature('signed')
+}
+
+function markHistoryPending(
+  setHistorySignature: (status: 'loading' | 'signed' | 'pending') => void,
+  followSignatureHydrationRef: { current: boolean },
+  signatureBaselineRef: { current: string | null },
+) {
+  followSignatureHydrationRef.current = false
+  signatureBaselineRef.current = null
+  setHistorySignature('pending')
 }
 
 
@@ -183,7 +199,9 @@ export function PatientDetailPage() {
 
   const [clinicalData, setClinicalData] = useState<ClinicalRecordFormData | null>(null)
 
-  const [signedFormBaseline, setSignedFormBaseline] = useState<string | null>(null)
+  const [historySignature, setHistorySignature] = useState<'loading' | 'signed' | 'pending'>('loading')
+  const followSignatureHydrationRef = useRef(false)
+  const signatureBaselineRef = useRef<string | null>(null)
 
   const [isLocked, setIsLocked] = useState(false)
 
@@ -234,7 +252,9 @@ export function PatientDetailPage() {
 
   useEffect(() => {
     setClinicalData(null)
-    setSignedFormBaseline(null)
+    followSignatureHydrationRef.current = false
+    signatureBaselineRef.current = null
+    setHistorySignature('loading')
     setIsLocked(false)
     setViewMode('edit')
     setViewingRecord(null)
@@ -291,12 +311,46 @@ export function PatientDetailPage() {
   const isTreatmentCompleted = patient ? isCompletedPatient(patient) : false
 
   const isArchiveView = viewMode === 'view-record'
-  const historyIsSigned =
-    isArchiveView ||
-    (signedFormBaseline !== null &&
-      clinicalData !== null &&
-      clinicalFormBaseline(clinicalData) === signedFormBaseline)
-  const showHistorySignatureBadge = canViewClinical && clinicalData !== null
+  const historyIsSigned = isArchiveView || historySignature === 'signed'
+  const showHistorySignatureBadge =
+    canViewClinical && clinicalData !== null && historySignature !== 'loading'
+
+  useEffect(() => {
+    if (!followSignatureHydrationRef.current || !clinicalData) return
+    signatureBaselineRef.current = stableStringify(clinicalData)
+  }, [clinicalData])
+
+  useEffect(() => {
+    if (followSignatureHydrationRef.current || historySignature !== 'signed' || !clinicalData) return
+    if (signatureBaselineRef.current === null) return
+    if (stableStringify(clinicalData) !== signatureBaselineRef.current) {
+      setHistorySignature('pending')
+    }
+  }, [clinicalData, historySignature])
+
+  useEffect(() => {
+    if (historySignature !== 'signed') return
+    const timer = window.setTimeout(() => {
+      followSignatureHydrationRef.current = false
+    }, 2000)
+    return () => window.clearTimeout(timer)
+  }, [id, historySignature])
+
+  useEffect(() => {
+    const freezeSignatureBaseline = (event: Event) => {
+      if (!followSignatureHydrationRef.current) return
+      const target = event.target
+      if (!(target instanceof Element) || !target.closest('.clinical-history-shell')) return
+      followSignatureHydrationRef.current = false
+    }
+    window.addEventListener('pointerdown', freezeSignatureBaseline, true)
+    window.addEventListener('keydown', freezeSignatureBaseline, true)
+    return () => {
+      window.removeEventListener('pointerdown', freezeSignatureBaseline, true)
+      window.removeEventListener('keydown', freezeSignatureBaseline, true)
+    }
+  }, [id])
+
   const livingChartLocked = false
 
   const showRapidValuation =
@@ -456,9 +510,11 @@ export function PatientDetailPage() {
         setMessage('La historia guardada tiene un formato antiguo. Se muestra la estructura base.')
       }
       setClinicalData(form)
-      setSignedFormBaseline(
-        !loadedWithWarning && safeRecord.isLocked ? clinicalFormBaseline(form) : null,
-      )
+      if (!loadedWithWarning && safeRecord.isLocked) {
+        markHistorySigned(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
+      } else {
+        markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
+      }
       await loadOdontogramFromDb()
       setIsLocked(archive)
       setActiveSection('all')
@@ -573,8 +629,21 @@ export function PatientDetailPage() {
           await loadOdontogramFromDb()
         }
 
+        let hasSignedRecord = false
+        if (patientForeignKey) {
+          try {
+            const signedRecord = await getLatestSignedClinicalRecord(patientForeignKey)
+            hasSignedRecord = Boolean(signedRecord?.isLocked)
+          } catch {
+            hasSignedRecord = false
+          }
+        }
         setClinicalData(base)
-        setSignedFormBaseline(null)
+        if (hasSignedRecord) {
+          markHistorySigned(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
+        } else {
+          markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
+        }
         clinicalInitForPatientRef.current = id
         loadCompleted = true
         if (patient?.treatmentCompleted) {
@@ -595,7 +664,7 @@ export function PatientDetailPage() {
       } catch {
         if (cancelled) return
         setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
-        setSignedFormBaseline(null)
+        markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
         clinicalInitForPatientRef.current = id
         loadCompleted = true
         setMessage('No se pudo cargar la historia clínica. Intente abrir el paciente de nuevo.')
@@ -1312,7 +1381,8 @@ export function PatientDetailPage() {
 
       const signedForm = { ...normalizedClinicalData, evolutionNotes: sortedEvolutionNotes }
       setClinicalData(signedForm)
-      setSignedFormBaseline(clinicalFormBaseline(signedForm))
+      markHistorySigned(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
+      signatureBaselineRef.current = stableStringify(signedForm)
       setViewMode('edit')
       setViewingRecord(null)
       setIsLocked(false)
@@ -1413,14 +1483,18 @@ export function PatientDetailPage() {
           professionalLicense,
         )
         setClinicalData(form)
-        setSignedFormBaseline(latest.isLocked ? clinicalFormBaseline(form) : null)
+        if (latest.isLocked) {
+          markHistorySigned(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
+        } else {
+          markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
+        }
       } else {
         setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
-        setSignedFormBaseline(null)
+        markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
       }
     } else {
       setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
-      setSignedFormBaseline(null)
+      markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
     }
 
     if (id) {
