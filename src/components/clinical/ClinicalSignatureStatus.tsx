@@ -1,32 +1,34 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { getLatestSignedClinicalRecord } from '@/utils/clinicalRecordSnapshot'
+import { formatDate } from '@/utils'
+import { getMainHistorySignatureStatus } from '@/utils/clinicalRecordSnapshot'
 
 interface ClinicalSignatureStatusProps {
   patientId: string
 }
 
 /**
- * Estado de la firma de la historia clínica (registro clínico bloqueado).
- * No indica si las notas de evolución están firmadas: cada evolución se firma aparte.
+ * Estado de la firma de la historia clínica principal (odontólogo tratante).
+ * No indica si las notas de evolución o el consentimiento están firmados.
  */
 export function ClinicalSignatureStatus({ patientId }: ClinicalSignatureStatusProps) {
-  const signedRecord = useLiveQuery(
-    () => (patientId ? getLatestSignedClinicalRecord(patientId) : null),
+  const status = useLiveQuery(
+    () => (patientId ? getMainHistorySignatureStatus(patientId) : null),
     [patientId],
   )
 
-  if (signedRecord === undefined) return null
+  if (status === undefined || status === null) return null
 
-  const firmada = signedRecord != null
-  const label = firmada ? 'Historia clínica firmada' : 'Historia clínica pendiente de firmar'
+  const firmada = status.signed
+  const when = firmada && status.signedAt ? formatDate(status.signedAt) : ''
+  const label = firmada ? (when ? `Firmada · ${when}` : 'Firmada') : 'Pendiente de firmar'
 
   return (
     <span
       role="status"
       title={
         firmada
-          ? 'La historia clínica está firmada. Cada evolución se firma por separado.'
-          : 'La historia clínica está pendiente de firmar. Cada evolución se firma por separado.'
+          ? 'La historia clínica principal está firmada por el odontólogo tratante. Las evoluciones y el consentimiento se firman aparte.'
+          : 'La historia clínica principal está pendiente de la firma del odontólogo tratante.'
       }
       className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${
         firmada ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'

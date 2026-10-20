@@ -6,6 +6,7 @@ import type { InformedConsent } from './consent'
 import type { ValuationConsentMetadata } from './valuationConsent'
 import type { OdontogramData } from './odontogram'
 import type { ClinicalDiagnosticChart } from './clinicalDiagnosticChart'
+import type { SignatureCaptureMetadata } from './signature'
 import type { ImplantFdiQuadrant } from '@/constants/implantPlanning'
 
 /** Tipo de certeza diagnóstica CIE-10 */
@@ -251,6 +252,23 @@ export interface OrthodonticsPaymentRecord {
   notes?: string
 }
 
+/**
+ * Firma única del odontólogo tratante sobre la historia clínica principal
+ * (Res. 1995/1999). No es el consentimiento ni la firma de una evolución.
+ */
+export interface TreatingDentistSignature {
+  professionalId: string
+  professionalName: string
+  /** Cédula, llave de consulta en ReTHUS. */
+  professionalDocument: string
+  rethusNumber?: string
+  signatureDataUrl: string
+  signatureMeta: SignatureCaptureMetadata
+  signedAt: string
+  signatureId?: string
+  contentHash?: string
+}
+
 /** Registro clínico inmutable tras firma (Ley 527 / Res. 1995 de 1999) */
 export interface ClinicalRecord {
   id?: number | string
@@ -298,7 +316,17 @@ export interface ClinicalRecord {
   signatureId?: string
   patientSignatureId?: string
   contentHash?: string
+  /**
+   * Cierre de la historia clínica principal por el odontólogo tratante.
+   * En atenciones antiguas también marca el snapshot RIPS (`isLocked`).
+   */
   signedAt?: string
+  /**
+   * Firma única de la historia principal (Res. 1995/1999).
+   * No se apaga al agregar evoluciones ni sustituye el consentimiento.
+   */
+  isSigned?: boolean
+  treatingDentistSignature?: TreatingDentistSignature | null
   /**
    * Snapshot de atención cerrado para facturación / RIPS / integridad del paquete.
    * No bloquea la HCE viva: odontograma, demografía, plan futuro ni nuevos folios.

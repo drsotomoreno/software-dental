@@ -84,9 +84,11 @@ function buildCustodyChain(
           contentHash: sig.contentHash ?? record.contentHash,
           signedBy: sig.signedBy,
           description:
-            sig.recordType === 'clinical_record'
-              ? 'Firma electrónica del profesional (Ley 527)'
-              : 'Firma electrónica del paciente — consentimiento informado',
+            sig.recordType === 'main_clinical_history'
+              ? 'Firma del odontólogo tratante — historia clínica principal (Res. 1995/1999)'
+              : sig.recordType === 'clinical_record'
+                ? 'Firma electrónica del profesional (Ley 527)'
+                : 'Firma electrónica del paciente — consentimiento informado',
         })
       }
     } else if (record.signedAt && record.contentHash) {

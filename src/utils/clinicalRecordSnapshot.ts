@@ -1,5 +1,10 @@
 import { db } from '@/db/database'
-import type { ClinicalRecord, ClinicalRecordFormData, TreatmentPlanItem } from '@/types/clinicalRecord'
+import type {
+  ClinicalRecord,
+  ClinicalRecordFormData,
+  TreatingDentistSignature,
+  TreatmentPlanItem,
+} from '@/types/clinicalRecord'
 import { normalizePaymentControlLines } from '@/utils/paymentControlLines'
 import { normalizeAnamnesis } from '@/types/anamnesis'
 import { normalizeConsent } from '@/types/consent'
@@ -125,9 +130,9 @@ export function clinicalRecordToFormData(
   })
 }
 
-export async function getLatestClinicalRecord(
+export async function listPatientClinicalRecords(
   patientRouteId: string,
-): Promise<ClinicalRecord | null> {
+): Promise<ClinicalRecord[]> {
   const patientId = toPatientForeignKey(patientRouteId)
   const numericKey = toDexiePrimaryKey(patientRouteId)
 
@@ -138,43 +143,82 @@ export async function getLatestClinicalRecord(
     byNumeric = await db.clinicalRecords.where('patientId').equals(numericKey).toArray()
   }
 
-  const merged = [...new Map([...byString, ...byNumeric].map((record) => [record.id, record])).values()]
-  if (merged.length === 0) return null
+  return [...new Map([...byString, ...byNumeric].map((record) => [record.id, record])).values()]
+}
 
-  return merged.sort((a, b) =>
+function latestClinicalRecord(records: ClinicalRecord[]): ClinicalRecord | null {
+  if (records.length === 0) return null
+  return [...records].sort((a, b) =>
     (b.signedAt ?? b.updatedAt ?? b.createdAt ?? '').localeCompare(
       a.signedAt ?? a.updatedAt ?? a.createdAt ?? '',
     ),
   )[0]
 }
 
+export async function getLatestClinicalRecord(
+  patientRouteId: string,
+): Promise<ClinicalRecord | null> {
+  return latestClinicalRecord(await listPatientClinicalRecords(patientRouteId))
+}
+
 export async function getLatestSignedClinicalRecord(
   patientRouteId: string,
 ): Promise<ClinicalRecord | null> {
-  const patientId = toPatientForeignKey(patientRouteId)
-  const numericKey = toDexiePrimaryKey(patientRouteId)
+  const records = await listPatientClinicalRecords(patientRouteId)
+  return latestClinicalRecord(records.filter((record) => record.isLocked))
+}
 
-  const byString = await db.clinicalRecords
-    .where('patientId')
-    .equals(patientId)
-    .filter((record) => record.isLocked)
-    .toArray()
+export interface MainHistorySignatureStatus {
+  signed: boolean
+  signedAt?: string
+  signature: TreatingDentistSignature | null
+}
 
-  let byNumeric: ClinicalRecord[] = []
-  if (typeof numericKey === 'number') {
-    byNumeric = await db.clinicalRecords
-      .where('patientId')
-      .equals(numericKey)
-      .filter((record) => record.isLocked)
-      .toArray()
+export function treatingDentistSignatureOf(
+  record: ClinicalRecord,
+): TreatingDentistSignature | null {
+  const signature = record.treatingDentistSignature
+  if (!signature?.signedAt || !signature.signatureDataUrl) return null
+  return signature
+}
+
+/** Firma de la historia principal. Los snapshots RIPS antiguos cuentan como firmados. */
+export async function getMainHistorySignatureStatus(
+  patientRouteId: string,
+): Promise<MainHistorySignatureStatus> {
+  if (!patientRouteId) return { signed: false, signature: null }
+
+  const records = await listPatientClinicalRecords(patientRouteId)
+  const signatures = records
+    .map((record) => treatingDentistSignatureOf(record))
+    .filter((signature): signature is TreatingDentistSignature => signature != null)
+    .sort((a, b) => b.signedAt.localeCompare(a.signedAt))
+
+  if (signatures[0]) {
+    return {
+      signed: true,
+      signedAt: signatures[0].signedAt,
+      signature: signatures[0],
+    }
   }
 
-  const merged = [...new Map([...byString, ...byNumeric].map((record) => [record.id, record])).values()]
-  if (merged.length === 0) return null
+  const legacy = latestClinicalRecord(
+    records.filter((record) => record.isLocked && Boolean(record.signedAt?.trim())),
+  )
+  if (legacy?.signedAt) {
+    return { signed: true, signedAt: legacy.signedAt, signature: null }
+  }
 
-  return merged.sort((a, b) =>
-    (b.signedAt ?? b.updatedAt ?? b.createdAt ?? '').localeCompare(
-      a.signedAt ?? a.updatedAt ?? a.createdAt ?? '',
-    ),
-  )[0]
+  const flagged = latestClinicalRecord(
+    records.filter((record) => record.isSigned === true && Boolean(record.signedAt?.trim())),
+  )
+  if (flagged?.signedAt) {
+    return {
+      signed: true,
+      signedAt: flagged.signedAt,
+      signature: treatingDentistSignatureOf(flagged),
+    }
+  }
+
+  return { signed: false, signature: null }
 }

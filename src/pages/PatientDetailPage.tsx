@@ -112,6 +112,8 @@ import { useClinicalAutoSave } from '@/hooks/useClinicalAutoSave'
 import { VoiceClinicalAssistant, type ClinicalVoiceContext } from '@/components/voice'
 import { confirmUserPassword } from '@/services/authService'
 import { createDigitalSignature, validateSignatureCapture } from '@/services/signatureService'
+import { registerTreatingDentistSignature } from '@/services/treatingDentistSignatureService'
+import type { SignatureCaptureResult } from '@/types/signature'
 import { ensureProfessionalDocument } from '@/services/professionalDocumentMemory'
 import { getProfessionalSignBlocker } from '@/utils/professionalSignGate'
 import type { ClinicalHistoryExportFormat } from '@/types/portability'
@@ -146,41 +148,6 @@ function patientToFormData(patient: NonNullable<Awaited<ReturnType<typeof getPat
   return formData
 }
 
-function stableStringify(value: unknown): string {
-  if (value === undefined) return 'null'
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(',')}]`
-  }
-  const record = value as Record<string, unknown>
-  const keys = Object.keys(record)
-    .filter((key) => record[key] !== undefined)
-    .sort()
-  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
-}
-
-function markHistorySigned(
-  setHistorySignature: (status: 'loading' | 'signed' | 'pending') => void,
-  followSignatureHydrationRef: { current: boolean },
-  signatureBaselineRef: { current: string | null },
-) {
-  followSignatureHydrationRef.current = true
-  signatureBaselineRef.current = null
-  setHistorySignature('signed')
-}
-
-function markHistoryPending(
-  setHistorySignature: (status: 'loading' | 'signed' | 'pending') => void,
-  followSignatureHydrationRef: { current: boolean },
-  signatureBaselineRef: { current: string | null },
-) {
-  followSignatureHydrationRef.current = false
-  signatureBaselineRef.current = null
-  setHistorySignature('pending')
-}
-
-
-
 export function PatientDetailPage() {
 
   const { id } = useParams<{ id: string }>()
@@ -204,10 +171,6 @@ export function PatientDetailPage() {
   const [odontogram, setOdontogram] = useState<OdontogramData | null>(null)
 
   const [clinicalData, setClinicalData] = useState<ClinicalRecordFormData | null>(null)
-
-  const [historySignature, setHistorySignature] = useState<'loading' | 'signed' | 'pending'>('loading')
-  const followSignatureHydrationRef = useRef(false)
-  const signatureBaselineRef = useRef<string | null>(null)
 
   const [isLocked, setIsLocked] = useState(false)
 
@@ -259,9 +222,6 @@ export function PatientDetailPage() {
 
   useEffect(() => {
     setClinicalData(null)
-    followSignatureHydrationRef.current = false
-    signatureBaselineRef.current = null
-    setHistorySignature('loading')
     setIsLocked(false)
     setViewMode('edit')
     setViewingRecord(null)
@@ -309,6 +269,18 @@ export function PatientDetailPage() {
 
   const professionalLicense = user?.documentNumber ?? ''
 
+  const savedProfile = useLiveQuery(
+    () => (user?.id ? db.users.get(user.id) : undefined),
+    [user?.id],
+  )
+  const savedSignature: SignatureCaptureResult | null =
+    savedProfile?.savedSignatureDataUrl && savedProfile.savedSignatureMeta
+      ? {
+          dataUrl: savedProfile.savedSignatureDataUrl,
+          metadata: savedProfile.savedSignatureMeta,
+        }
+      : null
+
   const patientForeignKey = id ? toPatientForeignKey(id) : ''
 
   const clinicalEncounterId = viewingRecord?.id
@@ -319,45 +291,6 @@ export function PatientDetailPage() {
   const isTreatmentCompleted = patient ? isCompletedPatient(patient) : false
 
   const isArchiveView = viewMode === 'view-record'
-  const historyIsSigned = isArchiveView || historySignature === 'signed'
-  const showHistorySignatureBadge =
-    canViewClinical && clinicalData !== null && historySignature !== 'loading'
-
-  useEffect(() => {
-    if (!followSignatureHydrationRef.current || !clinicalData) return
-    signatureBaselineRef.current = stableStringify(clinicalData)
-  }, [clinicalData])
-
-  useEffect(() => {
-    if (followSignatureHydrationRef.current || historySignature !== 'signed' || !clinicalData) return
-    if (signatureBaselineRef.current === null) return
-    if (stableStringify(clinicalData) !== signatureBaselineRef.current) {
-      setHistorySignature('pending')
-    }
-  }, [clinicalData, historySignature])
-
-  useEffect(() => {
-    if (historySignature !== 'signed') return
-    const timer = window.setTimeout(() => {
-      followSignatureHydrationRef.current = false
-    }, 2000)
-    return () => window.clearTimeout(timer)
-  }, [id, historySignature])
-
-  useEffect(() => {
-    const freezeSignatureBaseline = (event: Event) => {
-      if (!followSignatureHydrationRef.current) return
-      const target = event.target
-      if (!(target instanceof Element) || !target.closest('.clinical-history-shell')) return
-      followSignatureHydrationRef.current = false
-    }
-    window.addEventListener('pointerdown', freezeSignatureBaseline, true)
-    window.addEventListener('keydown', freezeSignatureBaseline, true)
-    return () => {
-      window.removeEventListener('pointerdown', freezeSignatureBaseline, true)
-      window.removeEventListener('keydown', freezeSignatureBaseline, true)
-    }
-  }, [id])
 
   const livingChartLocked = false
 
@@ -518,11 +451,6 @@ export function PatientDetailPage() {
         setMessage('La historia guardada tiene un formato antiguo. Se muestra la estructura base.')
       }
       setClinicalData(form)
-      if (!loadedWithWarning && safeRecord.isLocked) {
-        markHistorySigned(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
-      } else {
-        markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
-      }
       await loadOdontogramFromDb()
       setIsLocked(archive)
       setActiveSection('all')
@@ -637,21 +565,7 @@ export function PatientDetailPage() {
           await loadOdontogramFromDb()
         }
 
-        let hasSignedRecord = false
-        if (patientForeignKey) {
-          try {
-            const signedRecord = await getLatestSignedClinicalRecord(patientForeignKey)
-            hasSignedRecord = Boolean(signedRecord?.isLocked)
-          } catch {
-            hasSignedRecord = false
-          }
-        }
         setClinicalData(base)
-        if (hasSignedRecord) {
-          markHistorySigned(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
-        } else {
-          markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
-        }
         clinicalInitForPatientRef.current = id
         loadCompleted = true
         if (patient?.treatmentCompleted) {
@@ -672,7 +586,6 @@ export function PatientDetailPage() {
       } catch {
         if (cancelled) return
         setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
-        markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
         clinicalInitForPatientRef.current = id
         loadCompleted = true
         setMessage('No se pudo cargar la historia clínica. Intente abrir el paciente de nuevo.')
@@ -1109,6 +1022,85 @@ export function PatientDetailPage() {
 
 
 
+  const handleSaveProfileSignature = async (capture: SignatureCaptureResult) => {
+    if (!user) {
+      throw new Error('No hay un profesional en sesión.')
+    }
+    const existing = await db.users.get(user.id)
+    if (!existing) {
+      throw new Error('No se encontró el perfil local para guardar la firma.')
+    }
+    await db.users.update(user.id, {
+      savedSignatureDataUrl: capture.dataUrl,
+      savedSignatureMeta: capture.metadata,
+    })
+    await audit({
+      action: 'UPDATE_PROFILE',
+      resourceType: 'profile',
+      resourceId: user.id,
+      details: 'Firma guardada en el perfil del profesional',
+    })
+    setMessage('Firma guardada en el perfil.')
+  }
+
+  const registerMainHistorySignature = async (
+    capture: SignatureCaptureResult,
+    password: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    if (!id || !clinicalData || !user || !patient) {
+      return { ok: false, error: 'Datos incompletos para firmar.' }
+    }
+    if (!can('clinical.sign')) {
+      return { ok: false, error: 'No tiene permisos para firmar historias clínicas.' }
+    }
+
+    const signingUser = await ensureProfessionalDocument(user, clinicalData, applySessionUser)
+    const rethusBlocker = getProfessionalSignBlocker(signingUser, clinicalData)
+    if (rethusBlocker) return { ok: false, error: rethusBlocker }
+
+    const valid = await confirmUserPassword(user.id, password, user.email)
+    if (!valid) {
+      return {
+        ok: false,
+        error: 'Contraseña incorrecta. La firma debe realizarse con su usuario personal.',
+      }
+    }
+
+    await audit({
+      action: 'CONFIRM_SIGN_PASSWORD',
+      resourceType: 'clinical_record',
+      resourceId: patientForeignKey,
+      details: `Confirmación de identidad antes de firmar la historia principal — ${user.email}`,
+    })
+
+    let result: Awaited<ReturnType<typeof registerTreatingDentistSignature>>
+    try {
+      result = await registerTreatingDentistSignature({
+        patientId: patientForeignKey,
+        professionalId: user.id,
+        professionalName,
+        professionalDocument: signingUser.documentNumber,
+        rethusNumber: signingUser.rethusNumber,
+        clinicalData,
+        odontogram,
+        capture,
+        user,
+      })
+    } catch {
+      return { ok: false, error: 'No se pudo firmar y registrar la historia clínica.' }
+    }
+    if (!result.ok) return result
+
+    await audit({
+      action: 'SIGN_CLINICAL_RECORD',
+      resourceType: 'clinical_record',
+      resourceId: result.recordId,
+      details: `Firma del odontólogo tratante — historia clínica principal — ${patient.documentType} ${patient.documentNumber}`,
+    })
+    setMessage('Historia clínica principal firmada y registrada.')
+    return { ok: true }
+  }
+
   const handleSignAndLock = async () => {
 
     const draftIssues = validateClinicalRecordDraft(clinicalData)
@@ -1367,8 +1359,6 @@ export function PatientDetailPage() {
 
       const signedForm = { ...normalizedClinicalData, evolutionNotes: sortedEvolutionNotes }
       setClinicalData(signedForm)
-      markHistorySigned(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
-      signatureBaselineRef.current = stableStringify(signedForm)
       setViewMode('edit')
       setViewingRecord(null)
       setIsLocked(false)
@@ -1490,18 +1480,11 @@ export function PatientDetailPage() {
           professionalLicense,
         )
         setClinicalData(form)
-        if (latest.isLocked) {
-          markHistorySigned(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
-        } else {
-          markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
-        }
       } else {
         setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
-        markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
       }
     } else {
       setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
-      markHistoryPending(setHistorySignature, followSignatureHydrationRef, signatureBaselineRef)
     }
 
     if (id) {
@@ -1538,6 +1521,7 @@ export function PatientDetailPage() {
         { id: 'anexos', label: 'Anexos', row: 1 },
         { id: 'tratamiento', label: 'Tratamiento', row: 1 },
         { id: 'plan-pagos', label: 'Plan y control de pagos', row: 1 },
+        { id: 'firma-tratante', label: 'Firma del odontólogo', row: 1 },
         { id: 'consentimiento', label: 'Consentimiento', row: 1 },
         { id: 'evolucion', label: 'Evolución', row: 1 },
         ...(can('invoices.read')
@@ -1666,17 +1650,8 @@ export function PatientDetailPage() {
             {patient.insurer && (
               <span className="text-base font-normal text-slate-500">· {patient.insurer}</span>
             )}
-            {showHistorySignatureBadge && (
-              <span
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${
-                  historyIsSigned
-                    ? 'bg-green-100 text-green-800'
-                    : 'bg-amber-100 text-amber-900'
-                }`}
-              >
-                <span className="h-2 w-2 rounded-full bg-current" aria-hidden />
-                {historyIsSigned ? 'Firmada' : 'Pendiente de firmar'}
-              </span>
+            {canViewClinical && !showRapidValuation && patientForeignKey && (
+              <ClinicalSignatureStatus patientId={patientForeignKey} />
             )}
           </p>
 
@@ -1929,6 +1904,10 @@ export function PatientDetailPage() {
           patientDocumentType={patient.documentType}
           patientDocumentNumber={patient.documentNumber}
           patientEmail={patient.email}
+          canSignMainHistory={can('clinical.sign')}
+          savedSignature={savedSignature}
+          onSaveProfileSignature={handleSaveProfileSignature}
+          onRegisterMainHistorySignature={registerMainHistorySignature}
 
         />
 

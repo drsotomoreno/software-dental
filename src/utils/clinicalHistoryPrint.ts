@@ -11,6 +11,7 @@ import {
   PAYMENT_METHOD_LABELS,
 } from '@/constants/dental'
 import type { ClinicalRecordFormData, PaymentPlanItem } from '@/types/clinicalRecord'
+import type { MainHistorySignatureStatus } from '@/utils/clinicalRecordSnapshot'
 import { formatClinicalDiagnosticChartSummary, normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import { NO_REPORTA_LABEL } from '@/types/anamnesis'
 import { formatVitalSignsSummary } from '@/types/stomatologicalExam'
@@ -83,6 +84,7 @@ export interface ClinicalHistoryPrintInput {
   clinicalData: ClinicalRecordFormData
   odontogram?: OdontogramData | null
   sections: ClinicalHistoryPrintSectionId[]
+  mainHistorySignature?: MainHistorySignatureStatus | null
 }
 
 function escapeHtml(value: string): string {
@@ -831,6 +833,32 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
     </section>`
 }
 
+function buildTreatingDentistSignatureSection(
+  status: MainHistorySignatureStatus | null | undefined,
+): string {
+  const signature = status?.signature
+  const signedAt = signature?.signedAt ?? status?.signedAt
+  const body = signature
+    ? `<table>
+        ${fieldRow('Nombre completo', signature.professionalName)}
+        ${fieldRow('Cédula', signature.professionalDocument)}
+        ${fieldRow('ReTHUS', signature.rethusNumber || '—')}
+        ${fieldRow('Fecha y hora de cierre', signedAt ? formatDate(signedAt) : '—')}
+      </table>
+      <div class="signatures">
+        <div class="signature-box"><p>Firma del odontólogo tratante</p><img src="${signature.signatureDataUrl}" alt="Firma del odontólogo tratante" /></div>
+      </div>`
+    : status?.signed
+      ? `<p>Historia clínica principal firmada${signedAt ? ` el ${escapeHtml(formatDate(signedAt))}` : ''}.</p>`
+      : '<p>Pendiente de firma del odontólogo tratante.</p>'
+
+  return `
+    <section class="print-section">
+      <h2>${printSectionHeading('firmaTratante')}</h2>
+      ${body}
+    </section>`
+}
+
 function buildConsentSection(data: ClinicalRecordFormData): string {
   const consent = data.informedConsent
   const selectedConsents = consent.selectedConsentIds
@@ -891,6 +919,8 @@ const SECTION_BUILDERS: Record<
   tratamiento: ({ clinicalData }) => buildTreatmentSection(clinicalData),
   presupuesto: ({ clinicalData }) => buildBudgetSection(clinicalData),
   planPagos: ({ clinicalData }) => buildPaymentsSection(clinicalData),
+  firmaTratante: ({ mainHistorySignature }) =>
+    buildTreatingDentistSignatureSection(mainHistorySignature),
   evolucion: ({ clinicalData }) => buildEvolutionSection(clinicalData),
   consentimiento: ({ clinicalData }) => buildConsentSection(clinicalData),
   exportacionHistoria: () => buildExportSection(),

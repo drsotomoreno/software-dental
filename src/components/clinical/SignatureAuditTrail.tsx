@@ -21,11 +21,13 @@ export function SignatureAuditTrail({ recordId }: SignatureAuditTrailProps) {
         {signatures.map((sig) => (
           <li key={String(sig.id)} className="rounded-lg border border-slate-200 bg-white p-3">
             <p className="font-medium text-slate-800">
-              {sig.recordType === 'clinical_record'
-                ? 'Firma profesional'
-                : sig.recordType === 'consent'
-                  ? 'Firma paciente (consentimiento)'
-                  : 'Firma adenda/aclaratoria'}
+              {sig.recordType === 'main_clinical_history'
+                ? 'Firma del odontólogo tratante (historia principal)'
+                : sig.recordType === 'clinical_record'
+                  ? 'Firma profesional'
+                  : sig.recordType === 'consent'
+                    ? 'Firma paciente (consentimiento)'
+                    : 'Firma adenda/aclaratoria'}
             </p>
             <dl className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
               <div>

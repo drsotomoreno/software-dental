@@ -36,12 +36,14 @@ import {
 import type { EvolutionNote } from '@/types/evolutionNote'
 import type { InformedConsent } from '@/types/consent'
 import type { UserProfile } from '@/types/user'
+import type { SignatureCaptureResult } from '@/types/signature'
 import { createEmptyConsent } from '@/types/consent'
 import { AnamnesisForm } from './AnamnesisForm'
 import { StomatologicalExamForm } from './StomatologicalExamForm'
 import { SpecializedAnnexesForm } from './SpecializedAnnexesForm'
 import { EvolutionNotesForm } from './EvolutionNotesForm'
 import { InformedConsentForm } from './InformedConsentForm'
+import { TreatingDentistSignatureSection } from './TreatingDentistSignatureSection'
 import { TreatmentPlanForm } from './TreatmentPlanForm'
 import { BudgetForm } from './BudgetForm'
 import { PaymentControlForm } from './PaymentControlForm'
@@ -72,6 +74,13 @@ interface ClinicalHistoryFormProps {
   patientDocumentType?: string
   patientDocumentNumber?: string
   patientEmail?: string
+  canSignMainHistory?: boolean
+  savedSignature?: SignatureCaptureResult | null
+  onSaveProfileSignature?: (capture: SignatureCaptureResult) => Promise<void>
+  onRegisterMainHistorySignature?: (
+    capture: SignatureCaptureResult,
+    password: string,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>
 }
 
 function showClinicalSection(activeSection: string, section: string): boolean {
@@ -125,6 +134,10 @@ export function ClinicalHistoryForm({
   clinicalUser = null,
   patientName = '',
   patientDocument = '',
+  canSignMainHistory = false,
+  savedSignature = null,
+  onSaveProfileSignature,
+  onRegisterMainHistorySignature,
 }: ClinicalHistoryFormProps) {
   const snapshotLocked = disabled
   const livingLocked = lockLivingChart
@@ -455,6 +468,23 @@ export function ClinicalHistoryForm({
             onOrthodonticsPaymentControlChange={(orthodonticsPaymentControl) =>
               update({ orthodonticsPaymentControl })
             }
+          />
+        </div>
+      )}
+
+      {showClinicalSection(activeSection, 'firma-tratante') && (
+        <div id="clinical-section-firma-tratante">
+          <TreatingDentistSignatureSection
+            patientId={patientId}
+            professionalName={professionalName}
+            professionalDocument={professionalLicense}
+            rethusNumber={clinicalUser?.rethusNumber}
+            userEmail={authorEmail}
+            canSign={canSignMainHistory && !snapshotLocked}
+            disabled={snapshotLocked}
+            savedSignature={savedSignature}
+            onSaveProfileSignature={onSaveProfileSignature}
+            onRegister={onRegisterMainHistorySignature}
           />
         </div>
       )}

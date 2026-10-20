@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Printer, X } from 'lucide-react'
 import {
   CLINICAL_HISTORY_PRINT_SECTIONS,
@@ -10,6 +11,7 @@ import type { OdontogramData } from '@/types/odontogram'
 import type { Patient } from '@/types/patient'
 import type { UserProfile } from '@/types/user'
 import { printClinicalHistorySections } from '@/utils/clinicalHistoryPrint'
+import { getMainHistorySignatureStatus } from '@/utils/clinicalRecordSnapshot'
 
 interface ClinicalHistoryPrintDialogProps {
   patient: Patient
@@ -24,6 +26,10 @@ export function ClinicalHistoryPrintDialog({
   clinicalData,
   odontogram,
 }: ClinicalHistoryPrintDialogProps) {
+  const mainHistorySignature = useLiveQuery(
+    () => getMainHistorySignatureStatus(String(patient.id ?? '')),
+    [patient.id],
+  )
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
   const [selectedSections, setSelectedSections] = useState<ClinicalHistoryPrintSectionId[]>(
@@ -67,6 +73,7 @@ export function ClinicalHistoryPrintDialog({
         professional,
         clinicalData,
         odontogram,
+        mainHistorySignature: mainHistorySignature ?? null,
         sections: CLINICAL_HISTORY_PRINT_SECTIONS.filter((section) =>
           selectedSections.includes(section.id),
         ).map((section) => section.id),

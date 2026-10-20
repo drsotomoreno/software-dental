@@ -2,6 +2,7 @@ import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
 import type { FiscalProfile } from '@/utils/fiscalProfile'
 import type { RepsHabilitationStatus } from '@/utils/repsCode'
 import type { RethusStatus } from '@/utils/rethusNumber'
+import type { SignatureCaptureMetadata } from '@/types/signature'
 
 export type UserRole = 'superadmin' | 'admin' | 'odontologo' | 'recepcion'
 
@@ -60,6 +61,9 @@ export interface UserProfile {
   avatarUrl?: string
   /** Teléfono de contacto — obligatorio en auxiliares administrativos. */
   phone?: string
+  /** Firma dibujada guardada para reutilizarla en la historia clínica principal. */
+  savedSignatureDataUrl?: string
+  savedSignatureMeta?: SignatureCaptureMetadata
 }
 
 export interface PriceItem {

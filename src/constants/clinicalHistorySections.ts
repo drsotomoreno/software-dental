@@ -23,6 +23,7 @@ export type ClinicalHistoryPrintSectionId =
   | 'tratamiento'
   | 'presupuesto'
   | 'planPagos'
+  | 'firmaTratante'
   | 'evolucion'
   | 'consentimiento'
   | 'examenesComplementarios'
@@ -80,6 +81,10 @@ export const CLINICAL_HISTORY_PRINT_SECTIONS: ClinicalHistoryPrintSection[] = [
     id: 'planPagos',
     label: 'Plan y Control de Pagos',
     number: CLINICAL_HISTORY_SECTION_NUMBERS.planPagos,
+  },
+  {
+    id: 'firmaTratante',
+    label: 'Firma del Odontólogo Tratante (Res. 1995/1999)',
   },
   {
     id: 'consentimiento',
