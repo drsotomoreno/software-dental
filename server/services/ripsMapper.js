@@ -1,19 +1,22 @@
 /**
  * Adapta una consulta odontológica al JSON de CargarRipsSinFactura (Res. 2275).
  *
- * vrServicio es el valor pagado por el paciente. 0, null o indefinido lanzan
- * RipsMapperError (RVC091) antes de llamar a MinsaludService.
- * Las fechas de atención quedan en hora de Bogotá: YYYY-MM-DD HH:mm.
+ * En un RIPS sin factura el Ministerio acepta vrServicio 0 y lo devuelve como
+ * notificación RVC091, no como rechazo. null e indefinido sí se detienen aquí.
+ * Las notas firmadas aportan el CUPS por código o por el nombre del procedimiento.
+ * Una nota sin firmar no se radica. Las fechas quedan en hora de Bogotá.
  * Con MINSALUD_ENV=stage el documento del paciente se sustituye por el del
  * prestador para no tropezar con RVG01. En cualquier otro valor se envía
  * el documento real.
  */
 
+import { cupsFromProcedureName } from '../../shared/dentalProcedureCups.js'
 import { documentoObligadoDigits } from '../../shared/nit.js'
 import { splitUsuarioDocumento } from './fevRipsService.js'
 
 const RIPS_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+const NAIVE_LOCAL_DATETIME = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/
 
 const REGIME_TO_TIPO_USUARIO = {
   contributivo: '01',
@@ -69,6 +72,9 @@ export function formatFechaAtencion(raw, field = 'fechaInicioAtencion') {
     return formatBogotaDateTime(new Date(`${text}T12:00:00-05:00`))
   }
 
+  const naive = text.match(NAIVE_LOCAL_DATETIME)
+  if (naive) return `${naive[1]} ${naive[2]}`
+
   const parsed = new Date(text)
   if (Number.isNaN(parsed.getTime())) {
     throw new RipsMapperError(`${field} no se pudo interpretar: ${text}`, field)
@@ -108,32 +114,37 @@ function firstNonBlank(values) {
   return ''
 }
 
-function positiveAmount(value) {
+function informedAmount(value) {
   if (value == null || value === '') return null
   const number = typeof value === 'number' ? value : Number(String(value).replace(/[^\d.-]/g, ''))
-  if (!Number.isFinite(number) || number <= 0) return null
+  if (!Number.isFinite(number) || number < 0) return null
   return Math.round(number)
 }
 
 function sumPaid(records) {
-  if (!Array.isArray(records)) return null
-  const total = records.reduce((sum, item) => {
-    const amount = Number(item?.amount ?? item?.valor ?? item?.valorPagado ?? item?.cost ?? 0)
-    return sum + (Number.isFinite(amount) && amount > 0 ? amount : 0)
-  }, 0)
-  return total > 0 ? Math.round(total) : null
+  if (!Array.isArray(records) || records.length === 0) return null
+  let seen = false
+  let total = 0
+  for (const item of records) {
+    const amount = informedAmount(item?.amount ?? item?.valor ?? item?.valorPagado ?? item?.cost)
+    if (amount == null) continue
+    seen = true
+    total += amount
+  }
+  return seen ? total : null
 }
 
 /**
- * Rechaza 0, null e indefinido antes de armar el JSON (regla RVC091).
+ * null e indefinido se detienen antes de radicar.
+ * 0 es válido: en RIPS sin factura el Ministerio lo acepta y avisa con RVC091.
  * @param {unknown} value
  * @returns {number}
  */
 export function assertVrServicio(value) {
   const number = typeof value === 'number' ? value : Number(value)
-  if (value == null || value === '' || !Number.isFinite(number) || number <= 0) {
+  if (value == null || value === '' || !Number.isFinite(number) || number < 0) {
     throw new RipsMapperError(
-      'RVC091: vrServicio no puede ser 0, null ni indefinido. El valor pagado por el paciente debe ser mayor que 0.',
+      'RVC091: vrServicio no puede ser null ni indefinido. En un RIPS sin factura el valor pagado se informa en cero.',
       'vrServicio',
     )
   }
@@ -148,16 +159,16 @@ export function assertVrServicio(value) {
 export function resolveVrServicio(atencion) {
   const notes = Array.isArray(atencion?.evolutionNotes) ? atencion.evolutionNotes : []
   const candidates = [
-    positiveAmount(atencion?.valorPagadoPaciente),
-    positiveAmount(atencion?.valorPagado),
-    positiveAmount(atencion?.montoPagado),
-    positiveAmount(atencion?.amountPaid),
-    positiveAmount(atencion?.vrServicio),
+    informedAmount(atencion?.valorPagadoPaciente),
+    informedAmount(atencion?.valorPagado),
+    informedAmount(atencion?.montoPagado),
+    informedAmount(atencion?.amountPaid),
+    informedAmount(atencion?.vrServicio),
     sumPaid(atencion?.paymentControl),
     sumPaid(atencion?.pagos),
     sumPaid(atencion?.orthodonticsPaymentControl),
-    positiveAmount(atencion?.budget?.total),
-    positiveAmount(atencion?.cost),
+    informedAmount(atencion?.budget?.total),
+    informedAmount(atencion?.cost),
     sumPaid(notes.filter((note) => note?.isBillable !== false)),
   ]
   return assertVrServicio(candidates.find((value) => value != null))
@@ -209,6 +220,105 @@ function principalDiagnosis(atencion) {
     code,
     certainty: principal?.certainty ?? principal?.certeza ?? 'confirmado',
   }
+}
+
+function diagnosisList(atencion) {
+  if (Array.isArray(atencion?.diagnoses)) return atencion.diagnoses
+  if (Array.isArray(atencion?.diagnosticos)) return atencion.diagnosticos
+  return []
+}
+
+function relatedDiagnosisCodes(atencion, principalCode) {
+  const codes = []
+  for (const item of diagnosisList(atencion)) {
+    const isPrincipal = item?.type === 'principal' || item?.tipo === 'principal'
+    if (isPrincipal) continue
+    const code = normalizeCie10(item?.code ?? item?.codigo)
+    if (!code || code === principalCode || codes.includes(code)) continue
+    codes.push(code)
+    if (codes.length === 3) break
+  }
+  return [codes[0] ?? null, codes[1] ?? null, codes[2] ?? null]
+}
+
+function isUnsignedEvolution(note) {
+  return note?.isLocked === false && !note?.signedAt
+}
+
+function cupsOfEvolutionService(service, note) {
+  const ownCups = service && service !== note ? service.cupsCode : note?.cupsCode
+  const direct = normalizeCups(ownCups)
+  if (direct) return direct
+  const named = cupsFromProcedureName(service?.procedure || service?.nombre || note?.procedure)
+  if (named) return named
+  return service !== note ? normalizeCups(note?.cupsCode) : ''
+}
+
+function amountOfEvolutionService(service, note) {
+  const candidates = [
+    service?.cost,
+    service?.vrServicio,
+    service?.valor,
+    note?.cost,
+    note?.vrServicio,
+    note?.valorPagadoPaciente,
+  ]
+  for (const value of candidates) {
+    const amount = informedAmount(value)
+    if (amount != null) return amount
+  }
+  return null
+}
+
+/**
+ * null cuando la atención no trae notas: se conserva la consulta única anterior.
+ * Las notas sin firmar se omiten. Si no queda ningún CUPS, no se inventa 890203.
+ * @param {object} atencion
+ */
+function serviciosDesdeEvoluciones(atencion) {
+  const notes = Array.isArray(atencion?.evolutionNotes) ? atencion.evolutionNotes : []
+  if (notes.length === 0) return null
+  const consultas = []
+  const procedimientos = []
+  let unsigned = 0
+  let withoutCups = 0
+  for (const note of notes) {
+    if (!note || typeof note !== 'object') continue
+    if (isUnsignedEvolution(note)) {
+      unsigned += 1
+      continue
+    }
+    const services =
+      Array.isArray(note.catalogServices) && note.catalogServices.length > 0
+        ? note.catalogServices
+        : [note]
+    let recognized = false
+    for (const service of services) {
+      const cups = cupsOfEvolutionService(service, note)
+      if (!cups) {
+        withoutCups += 1
+        continue
+      }
+      recognized = true
+      const bucket = cups.startsWith('890') ? consultas : procedimientos
+      bucket.push({
+        cups,
+        fecha: service?.fechaInicioAtencion || note.date || note.signedAt || note.fechaInicioAtencion,
+        vr: amountOfEvolutionService(service, note),
+      })
+    }
+    if (!recognized) withoutCups += 1
+  }
+  if (consultas.length === 0 && procedimientos.length === 0) {
+    if (unsigned > 0 && withoutCups === 0) {
+      throw new RipsMapperError(
+        'La evolución no está firmada. El RIPS se radica cuando la nota queda firmada.',
+        'evolutionNotes',
+      )
+    }
+    throw new RipsMapperError('La evolución firmada no tiene un CUPS reconocible.', 'cupsCode')
+  }
+  return { consultas, procedimientos }
 }
 
 function codConsultaOf(atencion) {
@@ -367,12 +477,53 @@ export class RipsMapper {
           patient?.numDocumentoIdentificacion ?? patient?.documentNumber ?? patient?.numDocumento,
         )
     const diagnostico = principalDiagnosis(atencion)
-    const vrServicio = assertVrServicio(resolveVrServicio(atencion))
-    const fechaInicioAtencion = formatFechaAtencion(fechaAtencionOf(atencion), 'fechaInicioAtencion')
+    const relacionados = relatedDiagnosisCodes(atencion, diagnostico.code)
+    const codPrestador = codPrestadorOf(atencion, this.prestador)
     // La consulta de la Res. 2275 solo transmite fechaInicioAtencion.
     // El fin se normaliza al mismo formato para rechazarlo aquí si es inválido.
     const finRaw = fechaFinOf(atencion)
     if (finRaw) formatFechaAtencion(finRaw, 'fechaFinAtencion')
+
+    const desdeNotas = serviciosDesdeEvoluciones(atencion)
+    const consultaLines = desdeNotas
+      ? desdeNotas.consultas
+      : [
+          {
+            cups: codConsultaOf(atencion),
+            fecha: fechaAtencionOf(atencion),
+            vr: resolveVrServicio(atencion),
+          },
+        ]
+    const procedimientoLines = desdeNotas ? desdeNotas.procedimientos : []
+    const servicios = {}
+    if (consultaLines.length > 0) {
+      servicios.consultas = consultaLines.map((line, index) =>
+        consultaRipsItem({
+          codPrestador,
+          profesionalDoc,
+          diagnostico,
+          relacionados,
+          cups: line.cups,
+          fecha: line.fecha || fechaAtencionOf(atencion),
+          vr: line.vr != null ? line.vr : resolveVrServicio(atencion),
+          consecutivo: index + 1,
+        }),
+      )
+    }
+    if (procedimientoLines.length > 0) {
+      servicios.procedimientos = procedimientoLines.map((line, index) =>
+        procedimientoRipsItem({
+          codPrestador,
+          profesionalDoc,
+          diagnostico,
+          relacionados,
+          cups: line.cups,
+          fecha: line.fecha || fechaAtencionOf(atencion),
+          vr: line.vr != null ? line.vr : resolveVrServicio(atencion),
+          consecutivo: index + 1,
+        }),
+      )
+    }
 
     return {
       numDocumentoIdObligado: nitOf(atencion, this.prestador),
@@ -387,40 +538,85 @@ export class RipsMapper {
           fechaNacimiento: birthDate(patient),
           codSexo: sexoOf(patient),
           codPaisResidencia: String(patient?.codPaisResidencia ?? '170'),
-          codMunicipioResidencia: digitsOnly(patient?.codMunicipioResidencia ?? patient?.municipalityCode ?? '11001').padStart(5, '0'),
+          codMunicipioResidencia: digitsOnly(
+            patient?.codMunicipioResidencia ?? patient?.municipalityCode ?? '11001',
+          ).padStart(5, '0'),
           codZonaTerritorialResidencia: String(patient?.codZonaTerritorialResidencia ?? '02'),
           incapacidad: String(atencion?.incapacidad ?? 'NO').toUpperCase() === 'SI' ? 'SI' : 'NO',
           consecutivo: 1,
           codPaisOrigen: String(patient?.codPaisOrigen ?? '170'),
-          servicios: {
-            consultas: [
-              {
-                codPrestador: codPrestadorOf(atencion, this.prestador),
-                fechaInicioAtencion,
-                numAutorizacion: null,
-                codConsulta: codConsultaOf(atencion),
-                modalidadGrupoServicioTecSal: '01',
-                grupoServicios: '01',
-                codServicio: DEFAULT_COD_SERVICIO,
-                finalidadTecnologiaSalud: '11',
-                causaMotivoAtencion: '38',
-                codDiagnosticoPrincipal: diagnostico.code,
-                codDiagnosticoRelacionado1: null,
-                codDiagnosticoRelacionado2: null,
-                codDiagnosticoRelacionado3: null,
-                tipoDiagnosticoPrincipal: tipoDiagnostico(diagnostico.certainty),
-                tipoDocumentoIdentificacion: profesionalDoc.tipo,
-                numDocumentoIdentificacion: profesionalDoc.numero,
-                vrServicio,
-                conceptoRecaudo: '05',
-                valorPagoModerador: 0,
-                numFEVPagoModerador: null,
-                consecutivo: 1,
-              },
-            ],
-          },
+          servicios,
         },
       ],
     }
+  }
+}
+
+function consultaRipsItem({
+  codPrestador,
+  profesionalDoc,
+  diagnostico,
+  relacionados,
+  cups,
+  fecha,
+  vr,
+  consecutivo,
+}) {
+  return {
+    codPrestador,
+    fechaInicioAtencion: formatFechaAtencion(fecha, 'fechaInicioAtencion'),
+    numAutorizacion: null,
+    codConsulta: cups,
+    modalidadGrupoServicioTecSal: '01',
+    grupoServicios: '01',
+    codServicio: DEFAULT_COD_SERVICIO,
+    finalidadTecnologiaSalud: '11',
+    causaMotivoAtencion: '38',
+    codDiagnosticoPrincipal: diagnostico.code,
+    codDiagnosticoRelacionado1: relacionados[0],
+    codDiagnosticoRelacionado2: relacionados[1],
+    codDiagnosticoRelacionado3: relacionados[2],
+    tipoDiagnosticoPrincipal: tipoDiagnostico(diagnostico.certainty),
+    tipoDocumentoIdentificacion: profesionalDoc.tipo,
+    numDocumentoIdentificacion: profesionalDoc.numero,
+    vrServicio: assertVrServicio(vr),
+    conceptoRecaudo: '05',
+    valorPagoModerador: 0,
+    numFEVPagoModerador: null,
+    consecutivo,
+  }
+}
+
+function procedimientoRipsItem({
+  codPrestador,
+  profesionalDoc,
+  diagnostico,
+  relacionados,
+  cups,
+  fecha,
+  vr,
+  consecutivo,
+}) {
+  return {
+    codPrestador,
+    fechaInicioAtencion: formatFechaAtencion(fecha, 'fechaInicioAtencion'),
+    idMIPRES: null,
+    numAutorizacion: null,
+    codProcedimiento: cups,
+    viaIngresoServicioSalud: '01',
+    modalidadGrupoServicioTecSal: '01',
+    grupoServicios: '01',
+    codServicio: DEFAULT_COD_SERVICIO,
+    finalidadTecnologiaSalud: '44',
+    tipoDocumentoIdentificacion: profesionalDoc.tipo,
+    numDocumentoIdentificacion: profesionalDoc.numero,
+    codDiagnosticoPrincipal: diagnostico.code,
+    codDiagnosticoRelacionado: relacionados[0],
+    codComplicacion: null,
+    vrServicio: assertVrServicio(vr),
+    conceptoRecaudo: '05',
+    valorPagoModerador: 0,
+    numFEVPagoModerador: null,
+    consecutivo,
   }
 }
