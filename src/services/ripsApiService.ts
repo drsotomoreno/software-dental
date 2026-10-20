@@ -94,6 +94,7 @@ export interface DictatedEvolutionBillingResult {
  * Obligado → generarFEV_y_RIPS(); No obligado → guardarRIPS_Pendiente(numFactura: null).
  */
 export async function routeDictatedEvolutionByFiscalProfile(input: {
+  modo?: 'sin_factura' | 'con_factura'
   rips?: RipsTransaction
   atencion?: object
   invoice?: DianInvoicePayload

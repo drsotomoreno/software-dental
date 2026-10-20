@@ -1929,6 +1929,7 @@ export function PatientDetailPage() {
           patientDocumentType={patient.documentType}
           patientDocumentNumber={patient.documentNumber}
           patientEmail={patient.email}
+          patient={patient}
 
         />
 

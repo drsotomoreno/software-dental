@@ -1,9 +1,16 @@
 import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import {
+  generarRipsDeNota,
+  type EvolutionRipsModo,
+  type GenerarRipsNotaInput,
+} from '@/services/generarRipsNota'
+import { stampEvolutionNoteRipsResult } from '@/services/evolutionNoteService'
 import type { EvolutionNote } from '@/types/evolutionNote'
 import {
   EVOLUTION_NOTE_IMMUTABILITY_MESSAGE,
   createEmptyEvolutionNote,
+  isEvolutionNoteAddendum,
   isEvolutionNoteImmutable,
 } from '@/types/evolutionNote'
 import { sortEvolutionNotesChronologically } from '@/utils/recordIntegrity'
@@ -39,6 +46,8 @@ interface EvolutionNotesFormProps {
   allowAddendums?: boolean
   /** Si es false, no se muestra el alta de notas (p. ej. solo lectura). Por defecto sí se permite. */
   allowNewNotes?: boolean
+  /** Paciente, profesional e historia necesarios para radicar el RIPS de una nota. */
+  ripsContext?: Omit<GenerarRipsNotaInput, 'modo' | 'note'> | null
 }
 
 export function EvolutionNotesForm({
@@ -53,10 +62,14 @@ export function EvolutionNotesForm({
   disabled = false,
   allowAddendums = true,
   allowNewNotes = true,
+  ripsContext = null,
 }: EvolutionNotesFormProps) {
   const { user } = useAuth()
   const [blockedMessage, setBlockedMessage] = useState('')
   const [shieldMismatches, setShieldMismatches] = useState<RipsShieldMismatch[]>([])
+  const [generatingRips, setGeneratingRips] = useState<{ noteId: string; modo: EvolutionRipsModo } | null>(
+    null,
+  )
 
   const logBlockedMutation = (noteId: string, action: 'UPDATE' | 'DELETE') => {
     if (!user) return
@@ -153,6 +166,33 @@ export function EvolutionNotesForm({
     }
   }
 
+  const generateRips = async (id: string, modo: EvolutionRipsModo) => {
+    const note = notes.find((item) => item.id === id)
+    if (!note || isEvolutionNoteAddendum(note)) return
+    if (!isEvolutionNoteImmutable(note)) {
+      const issues = validateEvolutionNote(note)
+      showBlocked(issues[0]?.message ?? 'Firme y grabe la nota antes de generar el RIPS.')
+      return
+    }
+    if (!ripsContext?.patient || !ripsContext.professional) {
+      showBlocked('No se pudo identificar al paciente o al profesional para generar el RIPS.')
+      return
+    }
+
+    setGeneratingRips({ noteId: id, modo })
+    try {
+      const result = await generarRipsDeNota({ ...ripsContext, modo, note })
+      if (result.stamp) {
+        onChange(stampEvolutionNoteRipsResult(notes, id, result.stamp))
+      }
+      if (!result.ok) showBlocked(result.message)
+    } catch {
+      showBlocked('No se pudo generar el RIPS de la nota.')
+    } finally {
+      setGeneratingRips(null)
+    }
+  }
+
   const addAddendum = (parentId: string) => {
     const parent = notes.find((item) => item.id === parentId)
     if (!parent || !isEvolutionNoteImmutable(parent)) {
@@ -234,6 +274,8 @@ export function EvolutionNotesForm({
               onRemove={() => removeNote(note.id)}
               onSign={() => signNote(note.id)}
               onAddAddendum={() => addAddendum(note.id)}
+              generatingRipsModo={generatingRips?.noteId === note.id ? generatingRips.modo : null}
+              onGenerateRips={(modo) => void generateRips(note.id, modo)}
             />
           ))}
         </div>

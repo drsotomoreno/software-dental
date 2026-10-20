@@ -1,3 +1,4 @@
+import type { EvolutionRipsModo } from '@/services/generarRipsNota'
 import type { EvolutionNote } from '@/types/evolutionNote'
 import {
   isEvolutionNoteAddendum,
@@ -7,6 +8,7 @@ import { formatDate } from '@/utils'
 import { VoiceDictationButton } from '@/components/voice'
 import { DigitalSignatureCanvas } from '@/components/signature'
 import { useAuth } from '@/contexts/AuthContext'
+import { EstadoRipsCuv } from './EstadoRipsCuv'
 import { CupsProcedurePicker } from './CupsProcedurePicker'
 import { EvolutionCatalogServicesField } from './EvolutionCatalogServicesField'
 import { EvolutionNoteAddendumPanel } from './EvolutionNoteAddendumPanel'
@@ -26,12 +28,13 @@ interface EvolutionNoteCardProps {
   onRemove: () => void
   onSign: () => void
   onAddAddendum: () => void
+  generatingRipsModo?: EvolutionRipsModo | null
+  onGenerateRips?: (modo: EvolutionRipsModo) => void
 }
 
 export function EvolutionNoteCard({
   note,
   index,
-  disabled = false,
   patientId = '',
   parentRecordId,
   allowAddendums = true,
@@ -39,6 +42,8 @@ export function EvolutionNoteCard({
   onRemove,
   onSign,
   onAddAddendum,
+  generatingRipsModo = null,
+  onGenerateRips,
 }: EvolutionNoteCardProps) {
   const { user } = useAuth()
   const immutable = isEvolutionNoteImmutable(note)
@@ -53,6 +58,7 @@ export function EvolutionNoteCard({
   const showClinicalNoteForm = nonRips || ripsMode === 'mixed'
   const evolutionFormReady =
     nonRips || showRipsForm || isAddendum || ripsMode === 'mixed'
+  const showRipsActions = !isAddendum && (ripsMode === 'rips' || ripsMode === 'mixed') && Boolean(onGenerateRips)
 
   return (
     <div
@@ -426,6 +432,39 @@ export function EvolutionNoteCard({
           </>
         )}
       </div>
+
+      {showRipsActions && (
+        <div className="mt-4 border-t border-slate-200 pt-4">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secondary text-xs"
+              disabled={generatingRipsModo != null}
+              onClick={() => onGenerateRips?.('sin_factura')}
+            >
+              {generatingRipsModo === 'sin_factura' ? 'Generando RIPS...' : 'Generar RIPS SIN factura'}
+            </button>
+            <button
+              type="button"
+              className="btn-primary text-xs"
+              disabled={generatingRipsModo != null}
+              onClick={() => onGenerateRips?.('con_factura')}
+            >
+              {generatingRipsModo === 'con_factura' ? 'Generando RIPS...' : 'Generar RIPS CON Factura'}
+            </button>
+          </div>
+          {(note.estadoMuv || note.ripsResultadoMensaje) && (
+            <div className="mt-3 space-y-2">
+              {note.estadoMuv && (
+                <EstadoRipsCuv estadoMuv={note.estadoMuv} cuv={note.cuv} />
+              )}
+              {note.ripsResultadoMensaje && (
+                <p className="text-xs text-slate-600">{note.ripsResultadoMensaje}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {immutable && allowAddendums && user && patientId && (
         <EvolutionNoteAddendumPanel

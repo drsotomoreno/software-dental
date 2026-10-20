@@ -7,7 +7,8 @@ import {
   enrutarPorPerfilFiscal,
   hasExtractedCie10AndCups,
 } from '../services/billingAndRipsService.js'
-import { isObligadoFev, normalizePerfilFiscal } from '../../shared/fiscalProfile.js'
+import { normalizePerfilFiscal } from '../../shared/fiscalProfile.js'
+import { resolverModoEvolucionDictada } from '../services/evolucionDictadaRuta.js'
 import {
   finalizarConsultaEnMuv,
   prestadorDesdeSesion,
@@ -32,10 +33,13 @@ function respuestaMuv(res, status, payload) {
   })
 }
 
+export { resolverModoEvolucionDictada } from '../services/evolucionDictadaRuta.js'
+
 /**
  * POST /api/rips/evolucion-dictada
- * Sin factura (no obligado): genera el RIPS, lo envía al MUV y guarda CUV y estado.
- * Con factura: conserva el enrutamiento FEV o RIPS pendiente.
+ * modo sin_factura: MUV sin FEV, aunque el prestador sea obligado.
+ * modo con_factura: enrutarPorPerfilFiscal (FEV+RIPS u RIPS pendiente).
+ * Sin modo: sin factura y no obligado radica en el MUV; el resto sigue el perfil fiscal.
  */
 export async function processDictatedEvolution(req, res, next) {
   try {
@@ -51,9 +55,20 @@ export async function processDictatedEvolution(req, res, next) {
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     const perfilFiscal = normalizePerfilFiscal(session.user.perfilFiscal)
     const atencion = atencionDelCuerpo(body)
-    const sinFactura = !body.invoice && !isObligadoFev(perfilFiscal)
+    const modo = body.modo === 'sin_factura' || body.modo === 'con_factura' ? body.modo : null
+    const ruta = resolverModoEvolucionDictada({ modo, invoice: body.invoice, perfilFiscal })
 
-    if (atencion && sinFactura) {
+    if (modo === 'sin_factura' && !atencion) {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        route: 'muv_sin_factura',
+        perfilFiscal,
+        error: 'El cuerpo debe incluir la atención para generar RIPS sin factura.',
+      })
+    }
+
+    if (atencion && ruta === 'muv_sin_factura') {
       const metadatos = {
         ...(body.metadatos && typeof body.metadatos === 'object' ? body.metadatos : {}),
         perfilFiscal,
