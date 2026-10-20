@@ -10,6 +10,8 @@ import {
 
   ClinicalHistoryForm,
 
+  ClinicalRecordList,
+
   PatientIdentificationSummary,
 
   RapidValuationForm,
@@ -63,7 +65,7 @@ import {
   calcOrthodonticsBudgetTotal,
 } from '@/utils'
 import { getFirstBlockingClinicalBudgetIssue } from '@/utils/clinicalRipsValidation'
-import { sortEvolutionNotesChronologically } from '@/utils/recordIntegrity'
+import { sortEvolutionNotesChronologically, verifyClinicalRecordIntegrity } from '@/utils/recordIntegrity'
 import {
   ensureEvolutionNoteOutboxCreate,
   finalizeEvolutionNote,
@@ -138,6 +140,23 @@ function patientToFormData(patient: NonNullable<Awaited<ReturnType<typeof getPat
   return formData
 }
 
+function stableStringify(value: unknown): string {
+  if (value === undefined) return 'null'
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`
+  }
+  const record = value as Record<string, unknown>
+  const keys = Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
+}
+
+function clinicalFormBaseline(data: ClinicalRecordFormData): string {
+  return stableStringify(data)
+}
+
 
 
 export function PatientDetailPage() {
@@ -163,6 +182,8 @@ export function PatientDetailPage() {
   const [odontogram, setOdontogram] = useState<OdontogramData | null>(null)
 
   const [clinicalData, setClinicalData] = useState<ClinicalRecordFormData | null>(null)
+
+  const [signedFormBaseline, setSignedFormBaseline] = useState<string | null>(null)
 
   const [isLocked, setIsLocked] = useState(false)
 
@@ -213,6 +234,7 @@ export function PatientDetailPage() {
 
   useEffect(() => {
     setClinicalData(null)
+    setSignedFormBaseline(null)
     setIsLocked(false)
     setViewMode('edit')
     setViewingRecord(null)
@@ -269,6 +291,12 @@ export function PatientDetailPage() {
   const isTreatmentCompleted = patient ? isCompletedPatient(patient) : false
 
   const isArchiveView = viewMode === 'view-record'
+  const historyIsSigned =
+    isArchiveView ||
+    (signedFormBaseline !== null &&
+      clinicalData !== null &&
+      clinicalFormBaseline(clinicalData) === signedFormBaseline)
+  const showHistorySignatureBadge = canViewClinical && clinicalData !== null
   const livingChartLocked = false
 
   const showRapidValuation =
@@ -419,13 +447,18 @@ export function PatientDetailPage() {
         setViewMode('edit')
       }
       let loadedWithWarning = false
+      let form: ClinicalRecordFormData
       try {
-        setClinicalData(clinicalRecordToFormData(safeRecord, professionalLicense))
+        form = clinicalRecordToFormData(safeRecord, professionalLicense)
       } catch {
         loadedWithWarning = true
-        setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
+        form = createEmptyClinicalForm(professionalLicense, professionalLicense)
         setMessage('La historia guardada tiene un formato antiguo. Se muestra la estructura base.')
       }
+      setClinicalData(form)
+      setSignedFormBaseline(
+        !loadedWithWarning && safeRecord.isLocked ? clinicalFormBaseline(form) : null,
+      )
       await loadOdontogramFromDb()
       setIsLocked(archive)
       setActiveSection('all')
@@ -541,6 +574,7 @@ export function PatientDetailPage() {
         }
 
         setClinicalData(base)
+        setSignedFormBaseline(null)
         clinicalInitForPatientRef.current = id
         loadCompleted = true
         if (patient?.treatmentCompleted) {
@@ -561,6 +595,7 @@ export function PatientDetailPage() {
       } catch {
         if (cancelled) return
         setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
+        setSignedFormBaseline(null)
         clinicalInitForPatientRef.current = id
         loadCompleted = true
         setMessage('No se pudo cargar la historia clínica. Intente abrir el paciente de nuevo.')
@@ -1275,7 +1310,9 @@ export function PatientDetailPage() {
         })
       }
 
-      setClinicalData({ ...normalizedClinicalData, evolutionNotes: sortedEvolutionNotes })
+      const signedForm = { ...normalizedClinicalData, evolutionNotes: sortedEvolutionNotes }
+      setClinicalData(signedForm)
+      setSignedFormBaseline(clinicalFormBaseline(signedForm))
       setViewMode('edit')
       setViewingRecord(null)
       setIsLocked(false)
@@ -1306,6 +1343,46 @@ export function PatientDetailPage() {
 
 
 
+  const handleViewRecord = async (recordId: string) => {
+    const key = toDexiePrimaryKey(recordId)
+    const record = await db.clinicalRecords.get(key)
+
+    if (!record) return
+
+    const integrity = await verifyClinicalRecordIntegrity(record)
+    setIntegrityStatus({ valid: integrity.valid, computedHash: integrity.computedHash })
+    await audit({
+      action: integrity.valid ? 'VIEW_CLINICAL_RECORD' : 'VERIFY_INTEGRITY',
+      resourceType: 'clinical_record',
+      resourceId: recordId,
+      details: integrity.valid
+        ? `Historia firmada ${record.signedAt?.slice(0, 10) ?? ''}`
+        : 'Integridad comprometida — hash no coincide',
+      success: integrity.valid,
+    })
+
+    const safeRecord = normalizeClinicalRecordForExport(record)
+
+    setViewingRecord(safeRecord)
+
+    setViewMode('view-record')
+
+    setClinicalData(clinicalRecordToFormData(safeRecord, professionalLicense))
+
+    const liveOdontogram = id ? await getOdontogramByPatientRouteId(id) : null
+    if (liveOdontogram) {
+      setOdontogram({
+        ...liveOdontogram,
+        dentitionType: liveOdontogram.dentitionType ?? 'permanente',
+        isInitialState: liveOdontogram.isInitialState ?? false,
+      })
+    } else if (safeRecord.odontogramSnapshot) {
+      setOdontogram(safeRecord.odontogramSnapshot)
+    }
+
+    setIsLocked(true)
+  }
+
   const handleExportPortabilityAudit = async (
     format: ClinicalHistoryExportFormat,
     recordCount: number,
@@ -1331,14 +1408,19 @@ export function PatientDetailPage() {
         (await getLatestSignedClinicalRecord(patientForeignKey)) ??
         (await getLatestClinicalRecord(patientForeignKey))
       if (latest) {
-        setClinicalData(
-          clinicalRecordToFormData(normalizeClinicalRecordForExport(latest), professionalLicense),
+        const form = clinicalRecordToFormData(
+          normalizeClinicalRecordForExport(latest),
+          professionalLicense,
         )
+        setClinicalData(form)
+        setSignedFormBaseline(latest.isLocked ? clinicalFormBaseline(form) : null)
       } else {
         setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
+        setSignedFormBaseline(null)
       }
     } else {
       setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
+      setSignedFormBaseline(null)
     }
 
     if (id) {
@@ -1497,14 +1579,25 @@ export function PatientDetailPage() {
 
           </h1>
 
-          <p className="text-sm text-slate-500">
-
-            {patient.firstName} {patient.lastName} — {patient.documentType}{' '}
-
-            {patient.documentNumber}
-
-            {patient.insurer && ` · ${patient.insurer}`}
-
+          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="text-lg font-semibold text-slate-900">
+              {patient.firstName} {patient.lastName} — {patient.documentType} {patient.documentNumber}
+            </span>
+            {patient.insurer && (
+              <span className="text-base font-normal text-slate-500">· {patient.insurer}</span>
+            )}
+            {showHistorySignatureBadge && (
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${
+                  historyIsSigned
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-amber-100 text-amber-900'
+                }`}
+              >
+                <span className="h-2 w-2 rounded-full bg-current" aria-hidden />
+                {historyIsSigned ? 'Firmada' : 'Pendiente de firmar'}
+              </span>
+            )}
           </p>
 
           <div className="mt-3">
@@ -1561,6 +1654,12 @@ export function PatientDetailPage() {
       </div>
 
 
+
+      {canViewClinical && !showRapidValuation && (
+        <div className="hidden">
+          <ClinicalRecordList patientId={patientForeignKey} onSelectRecord={handleViewRecord} />
+        </div>
+      )}
 
       {canViewClinical && sections.length > 1 && (
       <div className="clinical-section-nav space-y-2">
