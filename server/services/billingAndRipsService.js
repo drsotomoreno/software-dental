@@ -1,7 +1,6 @@
 /**
  * Orquestación FEV / RIPS según perfil fiscal del prestador.
- * Tras el dictado (CIE-10 + CUPS), Obligado_FEV genera FEV+RIPS;
- * No_Obligado guarda RIPS pendiente con numFactura = null.
+ * Con FEV: numFactura oficial y CUFE. Sin FEV: RC- del no obligado, o null si la atención vale 0.
  */
 import { submitRipsToMinsalud } from './minsaludRipsClient.js'
 import { buildDianHealthInvoiceXml } from './dianFeXmlBuilder.js'
@@ -9,12 +8,20 @@ import { saveCuvRecord } from './cuvRepository.js'
 import { saveTemporaryRipsRecord } from './ripsTemporalStore.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
 import {
-  isObligadoFev,
   normalizePerfilFiscal,
   normalizeRipsNumFactura,
   PERFIL_FISCAL_NO_OBLIGADO,
   PERFIL_FISCAL_OBLIGADO_FEV,
 } from '../../shared/fiscalProfile.js'
+import {
+  FLUJO_RIPS_CON_FEV,
+  FLUJO_RIPS_SIN_FEV_CERO,
+  FLUJO_RIPS_SIN_FEV_RECIBO,
+  isNumeroFevOficial,
+  isNumeroReciboCaja,
+  resolveRipsCobroFlujo,
+  sumVrServicioRips,
+} from '../../shared/ripsCobroFlow.js'
 
 function uniqueCodes(values) {
   return [...new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean))]
@@ -82,20 +89,48 @@ function stampNumFactura(rips, numFactura) {
  */
 export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user }) {
   const perfilFiscal = PERFIL_FISCAL_OBLIGADO_FEV
+  const numFactura = normalizeRipsNumFactura(rips?.numFactura ?? invoice?.invoiceNumber ?? invoice?.numFactura)
+  const cufe = String(invoice?.cufe ?? metadatos?.cufe ?? rips?.cufe ?? '').trim()
+  const referencia = normalizeRipsNumFactura(invoice?.invoiceNumber ?? invoice?.numFactura ?? metadatos?.fevReferencia)
+  if (!isNumeroFevOficial(numFactura) || !cufe || (referencia && referencia !== numFactura)) {
+    return {
+      ok: false,
+      success: false,
+      route: 'generarFEV_y_RIPS',
+      perfilFiscal,
+      error: 'La FEV exige numFactura oficial, CUFE y cruce 1:1 con el número reportado a la DIAN.',
+      localIssues: [
+        {
+          level: 'error',
+          field: 'numFactura',
+          message: 'La FEV exige numFactura oficial, CUFE y cruce 1:1 con el número reportado a la DIAN.',
+        },
+      ],
+    }
+  }
   const payload = {
     ...rips,
-    numFactura: normalizeRipsNumFactura(rips?.numFactura),
+    numFactura,
+    cufe,
   }
   const mergedMetadatos = {
     ...metadatos,
     perfilFiscal,
     esRipsTemporal: false,
+    emisionVoluntaria: metadatos.emisionVoluntaria === true,
+    cufe,
+    fevReferencia: numFactura,
     clinicId: metadatos.clinicId || user?.clinicId || user?.id || null,
   }
 
   const localIssues = validateRipsPackageLocally(payload, {
     perfilFiscal,
     esRipsTemporal: false,
+    flujoRips: FLUJO_RIPS_CON_FEV,
+    emisionVoluntaria: true,
+    cufe,
+    fevReferencia: numFactura,
+    valorAtencion: metadatos.valorAtencion ?? sumVrServicioRips(payload),
     crossValidateAgeSex: true,
   })
   if (hasBlockingValidationErrors(localIssues)) {
@@ -179,13 +214,58 @@ export async function generarFEV_y_RIPS({ rips, invoice, metadatos = {}, user })
  */
 export async function guardarRIPS_Pendiente({ rips, metadatos = {}, user }) {
   const perfilFiscal = PERFIL_FISCAL_NO_OBLIGADO
-  const payload = stampNumFactura(rips, null)
+  const valorAtencion = metadatos.valorAtencion ?? sumVrServicioRips(rips)
+  const flujo = resolveRipsCobroFlujo({
+    perfilFiscal,
+    valorAtencion,
+    atencionCero: metadatos.atencionCero === true || (valorAtencion != null && valorAtencion <= 0),
+    emisionVoluntaria: false,
+  })
+  if (flujo === FLUJO_RIPS_CON_FEV) {
+    return {
+      ok: false,
+      success: false,
+      route: 'guardarRIPS_Pendiente',
+      perfilFiscal,
+      error: 'Este cobro corresponde a FEV. No se guarda como RIPS sin factura.',
+    }
+  }
+  const numero = normalizeRipsNumFactura(rips?.numFactura)
+  if (flujo === FLUJO_RIPS_SIN_FEV_RECIBO && !isNumeroReciboCaja(numero)) {
+    return {
+      ok: false,
+      success: false,
+      route: 'guardarRIPS_Pendiente',
+      perfilFiscal,
+      error: 'El no obligado con cobro requiere numFactura igual al recibo RC-XXXXX.',
+      localIssues: [
+        {
+          level: 'error',
+          field: 'numFactura',
+          message: 'El no obligado con cobro requiere numFactura igual al recibo RC-XXXXX.',
+        },
+      ],
+    }
+  }
+  if (String(rips?.cufe ?? metadatos?.cufe ?? '').trim()) {
+    return {
+      ok: false,
+      success: false,
+      route: 'guardarRIPS_Pendiente',
+      perfilFiscal,
+      error: 'El RIPS sin FEV no lleva CUFE.',
+    }
+  }
+  const numFactura = flujo === FLUJO_RIPS_SIN_FEV_CERO ? null : numero
+  const payload = stampNumFactura(rips, numFactura)
   const clinicId = String(metadatos.clinicId || user?.clinicId || user?.id || '').trim()
 
   const localIssues = validateRipsPackageLocally(payload, {
     perfilFiscal,
-    esRipsTemporal: true,
-    allowNullNumFactura: true,
+    esRipsTemporal: flujo === FLUJO_RIPS_SIN_FEV_CERO,
+    atencionCero: flujo === FLUJO_RIPS_SIN_FEV_CERO,
+    valorAtencion: valorAtencion ?? (flujo === FLUJO_RIPS_SIN_FEV_CERO ? 0 : undefined),
+    flujoRips: flujo,
     crossValidateAgeSex: true,
   })
   if (hasBlockingValidationErrors(localIssues)) {
@@ -207,7 +287,7 @@ export async function guardarRIPS_Pendiente({ rips, metadatos = {}, user }) {
       ? metadatos.clinicalRecordIds[0]
       : metadatos.clinicalRecordId ?? null,
     numDocumentoIdObligado: payload.numDocumentoIdObligado,
-    numFactura: null,
+    numFactura,
     perfilFiscal,
     status: 'pendiente',
     ripsJson: payload,
@@ -218,25 +298,42 @@ export async function guardarRIPS_Pendiente({ rips, metadatos = {}, user }) {
     success: true,
     route: 'guardarRIPS_Pendiente',
     perfilFiscal,
-    numFactura: null,
+    numFactura,
     pendingRips: record,
-    message: 'Sus RIPS se enviarán mensualmente sin factura.',
+    message:
+      flujo === FLUJO_RIPS_SIN_FEV_CERO
+        ? 'Atención a $0. El RIPS se radica sin FEV y sin recibo.'
+        : 'RIPS del no obligado con el recibo de caja, sin CUFE.',
     rips: payload,
   }
 }
 
 /**
- * If/Else de perfil fiscal: Obligado → FEV+RIPS; si no → RIPS pendiente (numFactura null).
+ * FEV (obligado o emisión voluntaria, valor > 0) cruza CUFE.
+ * Sin FEV: recibo RC- del no obligado, o null si la atención vale 0.
  * @param {{ perfilFiscal?: unknown, rips: object, invoice?: object, metadatos?: object, user?: object }} params
  */
 export async function enrutarPorPerfilFiscal({ perfilFiscal, rips, invoice, metadatos, user }) {
   const resolved = normalizePerfilFiscal(perfilFiscal ?? user?.perfilFiscal)
-
-  if (isObligadoFev(resolved)) {
-    return generarFEV_y_RIPS({ rips, invoice, metadatos, user })
+  const valorAtencion = metadatos?.valorAtencion ?? sumVrServicioRips(rips)
+  const flujo = resolveRipsCobroFlujo({
+    perfilFiscal: resolved,
+    valorAtencion,
+    atencionCero: metadatos?.atencionCero === true,
+    emisionVoluntaria: metadatos?.emisionVoluntaria === true || Boolean(invoice),
+  })
+  const contexto = {
+    ...(metadatos ?? {}),
+    valorAtencion,
+    perfilFiscal: resolved,
+    emisionVoluntaria: flujo === FLUJO_RIPS_CON_FEV,
   }
 
-  return guardarRIPS_Pendiente({ rips, metadatos, user })
+  if (flujo === FLUJO_RIPS_CON_FEV) {
+    return generarFEV_y_RIPS({ rips, invoice, metadatos: contexto, user })
+  }
+
+  return guardarRIPS_Pendiente({ rips, metadatos: contexto, user })
 }
 
 /**

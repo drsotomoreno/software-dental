@@ -1,0 +1,25 @@
+---
+description: Consecutivos de cobro por titular y flujos RIPS con FEV o sin FEV
+globs: src/**/*{billing,Billing,invoice,Invoice,payment,Payment,rips,Rips,charge,Charge,fiscal,Fiscal}*,server/**/*{billing,invoice,rips,Rips,consulta,consecutivo}*,shared/{fiscalProfile,ripsStructureValidation,ripsCobroFlow}.js,**/*.sql
+alwaysApply: false
+---
+
+# Contabilidad y facturación por titular
+
+El titular es `clinicId || id` del usuario dueño (`usuario_titular_id`, texto). Cada titular tiene su propia secuencia. No hay contador global de recibos.
+
+## Emisión
+
+- **No obligado (predeterminado), con cobro:** reservar `RC-` + 5 dígitos en `consecutivos_prestador` / `recibos_caja`. El navegador no inventa ese número.
+- **Obligado o FEV voluntaria, valor > 0:** el número legal lo devuelve el proveedor (`FE-00012` o el texto DIAN). No se escribe la secuencia `RC-`.
+- **Atención a $0:** no se reserva recibo ni se exige FEV.
+
+## RIPS (Res. 2275)
+
+`numFactura` del JSON al MUV es el documento de ese flujo:
+
+- **Con FEV:** `numFactura` = número oficial. Exigir CUFE y cruce 1:1 con la FEV. Envío con validación DIAN/MUV.
+- **Sin FEV, no obligado con cobro:** `numFactura` = `RC-XXXXX`. Envío `enviarRipsSinFactura` (`xmlFevFile` vacío, sin CUFE).
+- **Sin FEV, atención a $0:** `vrServicio` = 0 y `numFactura` = null. Sin recibo y sin FEV.
+
+Un cobro mayor a cero sin `RC-` (no obligado) o sin número FEV y CUFE (obligado o voluntario) es error de validación.

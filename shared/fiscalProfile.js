@@ -1,6 +1,7 @@
 /**
  * Perfil fiscal del prestador (clínica / IPS / profesional independiente).
- * Res. 2275 / FEV-Salud: el no obligado radica RIPS con numFactura = null.
+ * Res. 2275: el no obligado con cobro radica RIPS con numFactura = RC-XXXXX.
+ * La atención a $0 radica numFactura null, sin FEV y sin recibo.
  */
 
 export const PERFIL_FISCAL_OBLIGADO_FEV = 'Obligado_FEV'
@@ -10,10 +11,10 @@ export const PERFIL_FISCAL_NO_OBLIGADO = 'No_Obligado'
 
 export const PERFIL_FISCAL_VALUES = [PERFIL_FISCAL_OBLIGADO_FEV, PERFIL_FISCAL_NO_OBLIGADO]
 
-export const DEFAULT_PERFIL_FISCAL = PERFIL_FISCAL_OBLIGADO_FEV
+export const DEFAULT_PERFIL_FISCAL = PERFIL_FISCAL_NO_OBLIGADO
 
 export const PERFIL_FISCAL_NO_OBLIGADO_NOTICE =
-  'Sus RIPS se enviarán mensualmente sin factura.'
+  'Los cobros llevan el recibo RC- en el RIPS. Las atenciones a $0 se reportan sin número de factura.'
 
 /** UVT 2026 y umbral de obligado a factura electrónica (3.500 UVT). */
 export const UVT_2026_VALUE_COP = 52_374
@@ -31,7 +32,7 @@ export const PERFIL_FISCAL_OPTIONS = [
   {
     id: PERFIL_FISCAL_NO_OBLIGADO,
     label: 'Profesional Independiente < 3.500 UVT',
-    hint: 'No obligado a facturar electrónicamente. Los RIPS se reportan al Ministerio sin número de factura.',
+    hint: 'No obligado a facturar electrónicamente. El RIPS del cobro lleva el recibo RC-. La atención a $0 va sin número de factura.',
     notice: PERFIL_FISCAL_NO_OBLIGADO_NOTICE,
   },
 ]
@@ -89,14 +90,17 @@ export function isObligadoFev(value) {
 }
 
 /**
- * Null en numFactura es válido para no obligados y para RIPS temporales (pre-FEV).
- * @param {unknown} perfilFiscal
- * @param {{ allowNullNumFactura?: boolean, esRipsTemporal?: boolean }} [options]
+ * Null en numFactura solo cuando la atención reportable vale cero.
+ * @param {unknown} _perfilFiscal
+ * @param {{ allowNullNumFactura?: boolean, esRipsTemporal?: boolean, atencionCero?: boolean, valorAtencion?: number }} [options]
  * @returns {boolean}
  */
-export function allowsNullNumFactura(perfilFiscal, options = {}) {
-  if (options.allowNullNumFactura === true || options.esRipsTemporal === true) return true
-  return isNoObligadoFev(perfilFiscal)
+export function allowsNullNumFactura(_perfilFiscal, options = {}) {
+  if (options.atencionCero === true) return true
+  if (typeof options.valorAtencion === 'number' && Number.isFinite(options.valorAtencion) && options.valorAtencion <= 0) {
+    return true
+  }
+  return false
 }
 
 /**

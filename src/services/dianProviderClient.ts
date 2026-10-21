@@ -3,8 +3,6 @@ import {
   getBillingModalitySettings,
   isWhiteLabelBillingActive,
 } from '@/services/billingModalityService'
-import { computeContentHash } from '@/utils/crypto'
-import { buildDianQrUrl } from '@/utils/thermalInvoicePrint'
 
 export interface ProviderConnectionResult {
   ok: boolean
@@ -13,6 +11,7 @@ export interface ProviderConnectionResult {
 
 export interface ProviderEmitResult {
   ok: boolean
+  invoiceNumber?: string
   cufe?: string
   cuv?: string
   qrUrl?: string
@@ -20,7 +19,8 @@ export interface ProviderEmitResult {
 }
 
 interface EmitPayload {
-  invoiceNumber: string
+  /** Vacío cuando el proveedor asigna el número legal. Un RC- no se reutiliza. */
+  invoiceNumber?: string
   issueDate: string
   amount: number
   buyerName?: string
@@ -85,6 +85,8 @@ export async function emitInvoiceWithDianProvider(
   try {
     const result = await postJson<{
       success: boolean
+      invoiceNumber?: string
+      numeroDocumento?: string
       cufe?: string
       cuv?: string
       qrUrl?: string
@@ -93,41 +95,32 @@ export async function emitInvoiceWithDianProvider(
       provider: 'marca-blanca',
       apiKey: settings.tenantApiKey,
       resolution: settings.resolution,
-      invoice: payload,
+      invoice: {
+        ...payload,
+        invoiceNumber: payload.invoiceNumber?.startsWith('FE-') ? payload.invoiceNumber : '',
+      },
     })
 
-    if (!result.success || !result.cufe) {
-      return buildLocalSignedEmission(payload, settings)
+    const invoiceNumber = (result.invoiceNumber || result.numeroDocumento || '').trim()
+    if (!result.success || !result.cufe || !invoiceNumber) {
+      return {
+        ok: false,
+        message: result.message || 'El proveedor no devolvió el número legal de la FEV.',
+      }
     }
 
     return {
       ok: true,
+      invoiceNumber,
       cufe: result.cufe,
       cuv: result.cuv,
       qrUrl: result.qrUrl,
       message: result.message || 'Factura firmada. CUFE y QR DIAN listos para el ticket.',
     }
   } catch {
-    return buildLocalSignedEmission(payload, settings)
-  }
-}
-
-async function buildLocalSignedEmission(
-  payload: EmitPayload,
-  settings: BillingModalitySettings,
-): Promise<ProviderEmitResult> {
-  const cufe = await computeContentHash(
-    `${settings.tenantApiKey}|${payload.invoiceNumber}|${payload.issueDate}|${payload.amount}`,
-  )
-  const cuv =
-    payload.cuv?.trim() ||
-    (await computeContentHash(`cuv|${payload.invoiceNumber}|${payload.issueDate}`)).toUpperCase().slice(0, 32)
-  const cufeToken = cufe.toUpperCase().slice(0, 96)
-  return {
-    ok: true,
-    cufe: cufeToken,
-    cuv: cuv.toUpperCase().slice(0, 32),
-    qrUrl: buildDianQrUrl(cufeToken),
-    message: 'Factura electrónica firmada. Ticket 80 mm con CUFE y QR DIAN.',
+    return {
+      ok: false,
+      message: 'El proveedor no devolvió el número legal de la FEV.',
+    }
   }
 }

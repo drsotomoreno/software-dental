@@ -29,6 +29,7 @@ function consultaOdontologica(extra = {}) {
     diagnoses: [{ code: 'K02.1', type: 'principal', certainty: 'confirmado' }],
     cupsCode: '890203',
     valorPagadoPaciente: 45000,
+    numeroDocumento: 'RC-00001',
     codPrestador: '680010389801',
     numDocumentoIdObligado: '79904620',
     ...extra,
@@ -41,7 +42,7 @@ test('en producción arma usuarios, servicios y consultas con el documento real'
   const usuario = rips.usuarios[0]
   const consulta = usuario.servicios.consultas[0]
 
-  assert.equal(rips.numFactura, null)
+  assert.equal(rips.numFactura, 'RC-00001')
   assert.equal(rips.tipoNota, 'RS')
   assert.equal(usuario.tipoDocumentoIdentificacion, 'CC')
   assert.equal(usuario.numDocumentoIdentificacion, '1020708099')
@@ -55,10 +56,11 @@ test('en producción arma usuarios, servicios y consultas con el documento real'
   assert.equal(Array.isArray(rips.usuarios), true)
   assert.equal(Array.isArray(usuario.servicios.consultas), true)
 
-  assert.throws(
-    () => mapper.toRipsSinFactura(consultaOdontologica({ valorPagadoPaciente: 0, id: 'consulta-0' })),
-    (error) => error instanceof RipsMapperError && error.field === 'vrServicio' && /RVC091/.test(error.message),
+  const gratuita = mapper.toRipsSinFactura(
+    consultaOdontologica({ valorPagadoPaciente: 0, id: 'consulta-0', numeroDocumento: undefined }),
   )
+  assert.equal(gratuita.numFactura, null)
+  assert.equal(gratuita.usuarios[0].servicios.consultas[0].vrServicio, 0)
   assert.throws(
     () =>
       mapper.toRipsSinFactura(

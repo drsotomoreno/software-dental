@@ -114,7 +114,7 @@ export async function enviarRipsMensuales(options = {}) {
         clinicId: pkg.clinicId,
         recordIds: pkg.recordIds,
         usuarios: pkg.rips.usuarios.length,
-        numFactura: null,
+        numFactura: pkg.rips.numFactura ?? null,
         filePath,
         submitted: false,
       }
@@ -151,7 +151,7 @@ export async function enviarRipsMensuales(options = {}) {
 
       await saveCuvRecord({
         cuv: ministry.cuv,
-        numFactura: null,
+        numFactura: pkg.rips.numFactura ?? null,
         numDocumentoIdObligado: pkg.rips.numDocumentoIdObligado,
         status: 'approved',
         procesoId: ministry.procesoId,

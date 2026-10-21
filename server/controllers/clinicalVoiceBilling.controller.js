@@ -51,7 +51,11 @@ export async function processDictatedEvolution(req, res, next) {
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     const perfilFiscal = normalizePerfilFiscal(session.user.perfilFiscal)
     const atencion = atencionDelCuerpo(body)
-    const sinFactura = !body.invoice && !isObligadoFev(perfilFiscal)
+    const valorExplicito = atencion?.valorPagadoPaciente ?? atencion?.valorPagado ?? atencion?.vrServicio
+    const atencionCero = valorExplicito === 0 || valorExplicito === '0'
+    const sinFactura =
+      Boolean(atencion) &&
+      (atencionCero || (!body.invoice && !isObligadoFev(perfilFiscal) && body.emisionVoluntaria !== true))
 
     if (atencion && sinFactura) {
       const metadatos = {
@@ -78,7 +82,7 @@ export async function processDictatedEvolution(req, res, next) {
           clinicoGuardado: true,
           route: 'muv_sin_factura',
           perfilFiscal,
-          numFactura: null,
+          numFactura: result.rips?.numFactura ?? null,
           cuv: result.cuv,
           estadoMuv: result.estadoMuv,
           resultadoValidacion: result.resultadoValidacion,

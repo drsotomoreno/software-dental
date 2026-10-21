@@ -38,6 +38,14 @@ import {
   normalizePerfilFiscal,
   normalizeRipsNumFactura,
 } from '@/utils/fiscalProfile'
+import {
+  FLUJO_RIPS_CON_FEV,
+  FLUJO_RIPS_SIN_FEV_CERO,
+  FLUJO_RIPS_SIN_FEV_RECIBO,
+  isNumeroFevOficial,
+  isNumeroReciboCaja,
+  resolveRipsCobroFlujo,
+} from '../../shared/ripsCobroFlow.js'
 
 function mapPatientBillingData(patient: Patient) {
   return {
@@ -123,9 +131,14 @@ export async function processClinicalSession(
   )
   const noObligado = isNoObligadoFev(perfilFiscal)
   const validationIssues: BillingValidationIssue[] = validateClinicalItems(clinicalItems)
-  const needsDian = !noObligado && requiresDianBilling(clinicalItems)
   const dianTotal = computeDianTotal(clinicalItems)
   const ripsReportableTotal = computeRipsReportableTotal(clinicalItems)
+  const flujo = resolveRipsCobroFlujo({
+    perfilFiscal,
+    valorAtencion: ripsReportableTotal,
+    emisionVoluntaria: input.emisionVoluntaria === true || isNumeroFevOficial(input.invoiceNumber),
+  })
+  const needsDian = flujo === FLUJO_RIPS_CON_FEV && requiresDianBilling(clinicalItems)
   const pipeline: ClinicalSessionPipeline = needsDian ? 'rips_and_dian' : 'rips_only'
 
   if (hasBlockingBillingIssues(validationIssues)) {
@@ -143,10 +156,34 @@ export async function processClinicalSession(
     }
   }
 
-  const invoiceNumber = needsDian
-    ? input.invoiceNumber?.trim() || `FV${Date.now().toString().slice(-8)}`
-    : null
-  const esRipsTemporal = normalizeRipsNumFactura(invoiceNumber) == null
+  const solicitado = input.invoiceNumber?.trim() || ''
+  let invoiceNumber: string | null = null
+  if (flujo === FLUJO_RIPS_CON_FEV) {
+    invoiceNumber = isNumeroFevOficial(solicitado) ? solicitado : null
+    if (!invoiceNumber) {
+      validationIssues.push({
+        level: 'error',
+        field: 'numFactura',
+        message: 'La FEV exige el número que devuelve el proveedor. No se genera un consecutivo RC-.',
+      })
+    } else if (!String(input.cufe ?? '').trim()) {
+      validationIssues.push({
+        level: 'error',
+        field: 'cufe',
+        message: 'La FEV exige CUFE para el cruce ante la DIAN y el MUV.',
+      })
+    }
+  } else if (flujo === FLUJO_RIPS_SIN_FEV_RECIBO) {
+    invoiceNumber = isNumeroReciboCaja(solicitado) ? solicitado : null
+    if (!invoiceNumber) {
+      validationIssues.push({
+        level: 'error',
+        field: 'numFactura',
+        message: 'El no obligado con cobro requiere el recibo RC-XXXXX de este titular.',
+      })
+    }
+  }
+  const esRipsTemporal = flujo === FLUJO_RIPS_SIN_FEV_CERO
 
   const invoice =
     needsDian && invoiceNumber
@@ -222,12 +259,13 @@ export async function processClinicalSession(
 
   const ripsPayload = {
     ...ripsWithRules,
-    numFactura: esRipsTemporal ? null : normalizeRipsNumFactura(ripsWithRules.numFactura),
+    numFactura: esRipsTemporal ? null : normalizeRipsNumFactura(invoiceNumber ?? ripsWithRules.numFactura),
+    cufe: flujo === FLUJO_RIPS_CON_FEV ? input.cufe ?? null : null,
   }
 
   let ministryResponse: ProcessClinicalSessionResult['ministryResponse']
   let cuv: string | null = null
-  const cufe: string | null = null
+  const cufe: string | null = flujo === FLUJO_RIPS_CON_FEV ? input.cufe?.trim() || null : null
   const extractedCie10 = clinicalItems.map((item) => item.cie10Code).filter(Boolean)
   const extractedCups = clinicalItems.map((item) => item.cupsCode).filter(Boolean)
   const metadatos = {
@@ -244,13 +282,16 @@ export async function processClinicalSession(
     try {
       const routed = await routeDictatedEvolutionByFiscalProfile({
         rips: ripsPayload,
-        atencion: noObligado
+        atencion: flujo !== FLUJO_RIPS_CON_FEV
           ? {
               ...record,
               id: String(record.id ?? sessionId),
               patient,
               professional,
               signedAt: record.signedAt,
+              perfilFiscal,
+              numeroDocumento: invoiceNumber,
+              valorPagadoPaciente: flujo === FLUJO_RIPS_SIN_FEV_CERO ? 0 : ripsReportableTotal,
             }
           : undefined,
         invoice: dianInvoice,
@@ -335,17 +376,20 @@ export async function processClinicalSession(
     })
   }
 
-  if ((esRipsTemporal || pendingWithoutInvoice) && !cuv) {
+  const documentoSinFevListo =
+    flujo === FLUJO_RIPS_SIN_FEV_CERO ||
+    (flujo === FLUJO_RIPS_SIN_FEV_RECIBO && isNumeroReciboCaja(ripsPayload.numFactura))
+  if (documentoSinFevListo && (esRipsTemporal || pendingWithoutInvoice) && !cuv) {
     await saveTemporaryRips({
       clinicId: professional.clinicId || professional.id,
       patientId: String(patient.id),
       professionalId: professional.id,
       clinicalRecordId: String(record.id ?? sessionId),
       numDocumentoIdObligado: ripsPayload.numDocumentoIdObligado,
-      numFactura: null,
+      numFactura: ripsPayload.numFactura,
       perfilFiscal,
       status: pendingWithoutInvoice ? 'pendiente' : 'draft',
-      ripsJson: { ...ripsPayload, numFactura: null },
+      ripsJson: ripsPayload,
       submittedAt: null,
     })
   }

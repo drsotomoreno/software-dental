@@ -40,6 +40,7 @@ function atencionValida(extra = {}) {
     diagnoses: [{ code: 'K021', type: 'principal', certainty: 'confirmado' }],
     codConsulta: '890203',
     valorPagadoPaciente: 50000,
+    numeroDocumento: 'RC-00001',
     codPrestador: '680010389801',
     numDocumentoIdObligado: '79904620',
     ...extra,
@@ -210,7 +211,7 @@ test('finalizar consulta genera el RIPS, llama al MUV y guarda el CUV', async ()
   assert.equal(result.estadoMuv, 'APROBADO')
   assert.equal(result.cuv, CUV)
   assert.deepEqual(repo.calls, ['insert', 'update'])
-  assert.equal(enviado.numFactura, null)
+  assert.equal(enviado.numFactura, 'RC-00001')
   assert.equal(enviado.usuarios[0].servicios.consultas[0].codDiagnosticoPrincipal, 'K021')
   assert.equal(enviado.usuarios[0].servicios.consultas[0].vrServicio, 50000)
   assert.equal(repo.rows.get('consulta-1').estadoMuv, 'APROBADO')
@@ -261,26 +262,26 @@ test('notificaciones sin CUV quedan RECHAZADO y el array se guarda', async () =>
   assert.equal(repo.rows.get('consulta-avisos').resultadoValidacion[0].Codigo, 'RVG08')
 })
 
-test('un vrServicio en 0 no llama al MUV, guarda RECHAZADO y no interrumpe el cierre', async () => {
+test('una atención a $0 radica RIPS sin factura, con numFactura null y vrServicio 0', async () => {
   const repo = memoria()
-  let llamadas = 0
+  let enviado = null
   const result = await finalizarConsultaEnMuv(
-    { atencion: atencionValida({ id: 'consulta-3', valorPagadoPaciente: 0 }) },
+    { atencion: atencionValida({ id: 'consulta-3', valorPagadoPaciente: 0, numeroDocumento: undefined }) },
     {
       ...repo,
       fevRipsService: {
-        async enviarRipsSinFactura() {
-          llamadas += 1
-          return { CUV: null, resultState: false, resultadosValidacion: [] }
+        async enviarRipsSinFactura(payload) {
+          enviado = payload
+          return { CUV, resultState: true, resultadosValidacion: [] }
         },
       },
     },
   )
-  assert.equal(llamadas, 0)
   assert.equal(result.clinicoGuardado, true)
-  assert.equal(result.estadoMuv, 'RECHAZADO')
-  assert.equal(repo.rows.get('consulta-3').estadoMuv, 'RECHAZADO')
-  assert.match(repo.rows.get('consulta-3').resultadoValidacion.error, /RVC091/)
+  assert.equal(result.estadoMuv, 'APROBADO')
+  assert.equal(enviado.numFactura, null)
+  assert.equal(enviado.usuarios[0].servicios.consultas[0].vrServicio, 0)
+  assert.equal(repo.rows.get('consulta-3').estadoMuv, 'APROBADO')
   assert.deepEqual(repo.calls, ['insert', 'update'])
 })
 

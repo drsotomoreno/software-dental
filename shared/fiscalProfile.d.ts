@@ -19,6 +19,11 @@ export function isNoObligadoFev(value?: unknown): boolean
 export function isObligadoFev(value?: unknown): boolean
 export function allowsNullNumFactura(
   perfilFiscal?: unknown,
-  options?: { allowNullNumFactura?: boolean; esRipsTemporal?: boolean },
+  options?: {
+    allowNullNumFactura?: boolean
+    esRipsTemporal?: boolean
+    atencionCero?: boolean
+    valorAtencion?: number
+  },
 ): boolean
 export function normalizeRipsNumFactura(value?: unknown): string | null
