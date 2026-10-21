@@ -85,7 +85,7 @@ export function MailSettingsPanel() {
       <div>
         <h2 className="text-base font-semibold text-slate-800">Correo de verificación</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Render bloquea SMTP. El envío usa Resend por HTTPS. Para que el código llegue a
+          El envío usa Resend por HTTPS desde la instancia EC2. Para que el código llegue a
           cualquier correo (Gmail, Yahoo, Outlook), el dominio mihistoriadental.com debe
           estar verificado en Resend. En Namecheap → Domain List → Advanced DNS agregue:
         </p>
@@ -105,8 +105,9 @@ export function MailSettingsPanel() {
           </li>
         </ul>
         <p className="mt-2 text-sm text-slate-600">
-          También agregue <code className="font-mono">RESEND_API_KEY</code> en Render →
-          Environment para que no se pierda al redesplegar.
+          También deje <code className="font-mono">RESEND_API_KEY</code> en el{' '}
+          <code className="font-mono">.env</code> de la instancia EC2 y aplíquelo con{' '}
+          <code className="font-mono">pm2 restart software-dental --update-env</code>.
         </p>
         <p className="mt-2 text-sm font-medium text-slate-700">{status}</p>
       </div>

@@ -22,7 +22,7 @@ function redactDatabaseUrl(url) {
   }
 }
 
-/** URL de PostgreSQL: la de Render (DATABASE_URL) o el Postgres local de desarrollo. */
+/** URL de PostgreSQL: DATABASE_URL (RDS en la EC2) o el Postgres local de desarrollo. */
 export const DATABASE_URL = resolveDatabaseUrl()
 
 export const config = {

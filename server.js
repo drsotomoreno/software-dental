@@ -91,7 +91,7 @@ function mountStaticFrontend() {
 if (isProduction) {
   if (!hasFrontendBuild) {
     console.error(
-      '[RIPS API] Falta dist/index.html. En Render el Build Command debe ser: npm run build',
+      '[RIPS API] Falta dist/index.html. En la EC2 ejecute npm run build y luego pm2 restart software-dental.',
     )
   }
   mountStaticFrontend()
@@ -169,8 +169,8 @@ async function bootAfterListen() {
   })
 }
 
-// Abrir el puerto antes de PostgreSQL. Si la base no responde, Render
-// igual tiene un proceso escuchando y deja de devolver 502.
+// Abrir el puerto antes de PostgreSQL. Si RDS no responde, PM2
+// igual tiene un proceso escuchando y el health check sigue respondiendo.
 const port = Number(process.env.PORT) || config.port || 3000
 const httpServer = app.listen(port, '0.0.0.0', () => {
   console.log(`[RIPS API] App y API en http://0.0.0.0:${port}`)

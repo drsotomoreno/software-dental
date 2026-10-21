@@ -59,4 +59,28 @@ src/
 npm run dev      # Servidor de desarrollo
 npm run build    # Build de producción
 npm run preview  # Preview del build
+npm run start    # API + frontend compilado (lo que arranca PM2)
 ```
+
+## Producción (AWS EC2 + RDS + PM2)
+
+La aplicación corre en una instancia de **AWS EC2**. PostgreSQL está en **AWS RDS** (`DATABASE_URL` en el `.env` de esa máquina). El proceso Node.js lo gestiona **PM2** con el nombre `software-dental`.
+
+No se despliega en Render, Heroku ni otra PaaS.
+
+1. Subir los cambios: `git push`.
+2. Entrar por SSH a la instancia EC2.
+3. En el directorio del repositorio:
+
+```bash
+bash scripts/deploy-ec2.sh
+```
+
+Ese script hace `git pull --ff-only`, `npm install`, `npm run build` y `pm2 restart software-dental --update-env`. La primera vez, si PM2 aún no tiene el proceso:
+
+```bash
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
+Reinicio manual equivalente: `pm2 restart software-dental` o `pm2 reload software-dental`.

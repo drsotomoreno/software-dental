@@ -26,9 +26,10 @@ function loadPgPool() {
 }
 
 /**
- * El host interno de Render (dpg-…-a, sin dominio) no habla TLS.
+ * localhost y los hosts sin dominio no hablan TLS.
+ * El endpoint de RDS (y cualquier host con dominio) usa SSL sin verificar la CA.
  * sslmode en la URL no se reenvía al pool: pg lo interpretaría y el handshake
- * dejaría el arranque colgado. Fuera de ese host se usa SSL sin verificar CA.
+ * dejaría el arranque colgado.
  */
 export function postgresSslOption(connectionString) {
   try {
@@ -37,8 +38,7 @@ export function postgresSslOption(connectionString) {
       !host ||
       host === 'localhost' ||
       host === '127.0.0.1' ||
-      !host.includes('.') ||
-      /^dpg-[a-z0-9-]+$/i.test(host)
+      !host.includes('.')
     if (internal) return false
     return { rejectUnauthorized: false }
   } catch {
@@ -58,7 +58,6 @@ function connectionErrorText(error) {
   const message = raw
     .replace(/postgres(?:ql)?:\/\/\S+/gi, 'postgresql://***')
     .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, '')
-    .replace(/\bdpg-[a-z0-9-]+\b/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim()
   if (code && message && !message.includes(code)) return `${code}: ${message}`
@@ -79,9 +78,9 @@ function decodeConnectionPart(value) {
 }
 
 export function poolConfig(url) {
-  // La URL externa de Render exige TLS sin verificar la CA. En pg 8, sslmode=require
+  // RDS exige TLS sin verificar la CA desde aquí. En pg 8, sslmode=require
   // dentro de connectionString pisa este objeto y activa la verificación: la
-  // conexión se rechaza. El host interno (sin dominio) no habla TLS y se deja en false.
+  // conexión se rechaza. localhost y un host sin dominio no hablan TLS y quedan en false.
   const ssl = postgresSslOption(url) === false ? false : { rejectUnauthorized: false }
   const common = {
     max: 2,
@@ -91,7 +90,7 @@ export function poolConfig(url) {
   try {
     const parsed = new URL(url)
     // No se pasa connectionString: un sslmode=require ahí pisa `ssl`
-    // y anula tanto este objeto como el bypass del host interno de Render.
+    // y anula tanto este objeto como el bypass de localhost.
     return {
       ...common,
       user: decodeConnectionPart(parsed.username),

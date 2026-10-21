@@ -6,7 +6,6 @@ const allowedHosts = [
   'www.mihistoriadental.com',
   'mihistoriadental.com',
   '.mihistoriadental.com',
-  '.onrender.com',
 ]
 
 export default defineConfig({
