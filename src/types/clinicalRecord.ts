@@ -191,6 +191,9 @@ export interface PaymentPlanItem {
 /** Factura asociada a un pago recibido */
 export type PaymentInvoiceStatus = 'active' | 'voided_by_credit_note'
 
+/** Comprobante generado al registrar un abono en Control de Pagos */
+export type PaymentDocumentKind = 'recibo_interno' | 'factura'
+
 export interface PaymentInvoice {
   id: string
   invoiceNumber: string
@@ -230,6 +233,10 @@ export interface PaymentRecord {
   treatingDentistUserId?: string
   /** Nombre del odontólogo al momento del registro (para factura e historial) */
   treatingDentistName?: string
+  /** Tipo de comprobante generado para este abono */
+  documentKind?: PaymentDocumentKind
+  /** Saldo del procedimiento después de aplicar este abono */
+  remainingBalance?: number
   invoices: PaymentInvoice[]
   notes?: string
 }

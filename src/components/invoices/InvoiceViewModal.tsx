@@ -208,7 +208,15 @@ export function InvoiceViewModal({ view, onClose }: InvoiceViewModalProps) {
 
           <div>
 
-            <h3 className="text-lg font-bold text-slate-900">Visualizar factura</h3>
+            <h3 className="text-lg font-bold text-slate-900">
+              {view.kind === 'electronic'
+                ? 'Visualizar factura'
+                : view.invoice.emissionMode === 'provider'
+                  ? 'Visualizar factura'
+                  : view.invoice.emissionMode === 'manual'
+                    ? 'Visualizar recibo'
+                    : 'Visualizar comprobante'}
+            </h3>
 
             <p className="text-sm text-slate-500">
 
@@ -216,7 +224,11 @@ export function InvoiceViewModal({ view, onClose }: InvoiceViewModalProps) {
 
                 ? `FEV-Salud ${view.invoice.invoiceNumber}`
 
-                : `Factura ${view.invoice.invoiceNumber || 'sin número'}`}
+                : view.invoice.emissionMode === 'provider'
+                  ? `Factura ${view.invoice.invoiceNumber || 'sin número'}`
+                  : view.invoice.emissionMode === 'manual'
+                    ? `Recibo interno ${view.invoice.invoiceNumber || 'sin número'}`
+                    : `Comprobante ${view.invoice.invoiceNumber || 'sin número'}`}
 
             </p>
 
@@ -672,6 +684,17 @@ function PaymentInvoicePreview({
 
           <Field label="IVA excluido" value={formatCurrency(0)} />
 
+          <Field
+            label="Tipo de comprobante"
+            value={
+              invoice.emissionMode === 'provider'
+                ? 'Factura electrónica / DIAN'
+                : invoice.emissionMode === 'manual'
+                  ? 'Recibo interno'
+                  : 'Comprobante'
+            }
+          />
+
           <Field label="Observaciones" value={invoice.notes || '—'} />
 
         </dl>
@@ -680,7 +703,9 @@ function PaymentInvoicePreview({
 
       <p className="text-xs text-slate-500">
 
-        Comprobante de control de pagos. Recibo de Caja interno: emita la FEV en el portal gratuito de la DIAN si la necesita.
+        {invoice.emissionMode === 'provider'
+          ? 'Factura electrónica (DIAN) de este abono. Puede imprimir el ticket o descargar el JSON.'
+          : 'Recibo interno de control de pagos. Puede imprimir el ticket o descargar el JSON asociado.'}
 
       </p>
 

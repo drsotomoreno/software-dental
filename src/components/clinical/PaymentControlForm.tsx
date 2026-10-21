@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Eye } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import type { UserProfile } from '@/types/user'
@@ -9,6 +8,7 @@ import type {
   OrthodonticsBudget,
   OrthodonticsPaymentRecord,
   PaymentControlLine,
+  PaymentDocumentKind,
   PaymentInvoice,
   PaymentPlanItem,
   PaymentRecord,
@@ -57,6 +57,7 @@ import {
   clinicalPaymentsNeedAutoInvoices,
   ensurePaymentsHaveAutoInvoices,
 } from '@/services/paymentInvoiceService'
+import { emitChargeReceipt } from '@/services/chargeEmissionService'
 import { InvoiceViewModal, type InvoiceViewMode } from '@/components/invoices/InvoiceViewModal'
 import { CreditNoteModal, paymentInvoiceStatusLabel } from '@/components/invoices/CreditNoteModal'
 import {
@@ -65,9 +66,24 @@ import {
 } from '@/services/creditNoteService'
 import { isPaymentInvoiceImmutable } from '@/services/invoiceImmutabilityService'
 import { PAYMENT_METHOD_LABELS } from '@/constants/dental'
+import { calcTotalPaid } from '@/utils/paymentControl'
+import {
+  abonoHistoryForLine,
+  documentKindFromEmission,
+  formatAbonoDate,
+  paymentReceiptActionLabel,
+  paymentReceiptTypeLabel,
+  procedurePaymentStatus,
+  remainingAfterAbono,
+  resolvePaymentDocumentKind,
+} from '@/utils/paymentAbonos'
 import { OrthodonticsPaymentControlForm } from './OrthodonticsPaymentControlForm'
 import { PaymentAgreementFields } from './PaymentAgreementFields'
 import { PaymentPlanProcedureField } from './PaymentPlanProcedureField'
+import {
+  PaymentRegistrationModal,
+  type PaymentRegistrationInput,
+} from './PaymentRegistrationModal'
 
 interface PaymentControlFormProps {
   paymentControlLines: PaymentControlLine[]
@@ -148,94 +164,12 @@ function PriceCell({
   )
 }
 
-function PayAmountField({
-  remaining,
-  paid,
-  disabled,
-  onPay,
-}: {
-  remaining: number
-  paid: number
-  disabled?: boolean
-  onPay: (amount: number) => void
-}) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
-
-  if (remaining <= 0 && paid > 0) {
-    return <span className="text-xs font-medium text-green-700">Pagado</span>
-  }
-
-  if (remaining <= 0) {
-    return <span className="text-xs text-slate-400">Sin saldo</span>
-  }
-
-  const amount = () => {
-    const source = editing ? draft : String(Math.round(remaining))
-    const parsed = Number(source.replace(/[^\d]/g, ''))
-    return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0
-  }
-
-  return (
-    <div className="flex items-center gap-1">
-      <input
-        inputMode="numeric"
-        disabled={disabled}
-        aria-label="Valor del pago"
-        className="input-field h-8 w-28 bg-white px-2 text-right text-sm tabular-nums"
-        value={editing ? draft : formatCurrency(remaining)}
-        onFocus={() => {
-          if (disabled) return
-          setEditing(true)
-          setDraft(String(Math.round(remaining)))
-        }}
-        onChange={(event) => setDraft(event.target.value.replace(/[^\d]/g, ''))}
-        onBlur={() => setEditing(false)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault()
-            const next = amount()
-            if (next > 0) {
-              onPay(next)
-              setEditing(false)
-            }
-          }
-        }}
-      />
-      <button
-        type="button"
-        disabled={disabled || amount() <= 0}
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => {
-          const next = amount()
-          if (next <= 0) return
-          onPay(next)
-          setEditing(false)
-        }}
-        className="btn-primary h-8 shrink-0 px-2 text-xs"
-      >
-        Registrar
-      </button>
-    </div>
-  )
-}
-
 const EMPTY_AGREEMENT: Pick<
   PaymentPlanItem,
   'paymentMethod' | 'dueDate' | 'installments' | 'initialPayment' | 'installmentAmount' | 'scheduleNotes'
 > = {
   paymentMethod: 'contado',
   scheduleNotes: '',
-}
-
-function procedurePaymentStatus(remaining: number, paid: number): { label: string; className: string } {
-  if (remaining <= 0 && paid > 0) {
-    return { label: 'Pagado', className: 'bg-green-100 text-green-800' }
-  }
-  if (remaining <= 0) {
-    return { label: 'Sin saldo', className: 'bg-slate-200 text-slate-600' }
-  }
-  return { label: `Saldo ${formatCurrency(remaining)}`, className: 'bg-amber-100 text-amber-900' }
 }
 
 function FieldCaption({ children }: { children: string }) {
@@ -279,6 +213,9 @@ export function PaymentControlForm({
   const cupsQuery = openMenu?.field === 'cups' ? openMenu.query : ''
   const cieCatalog = useCatalogSearch('cie10', cieQuery, 20)
   const [invoiceView, setInvoiceView] = useState<InvoiceViewMode | null>(null)
+  const [paymentDraftLineId, setPaymentDraftLineId] = useState<string | null>(null)
+  const [paymentBusy, setPaymentBusy] = useState(false)
+  const [paymentNotice, setPaymentNotice] = useState<string | null>(null)
   const [creditNoteTarget, setCreditNoteTarget] = useState<{
     paymentId: string
     invoice: PaymentInvoice
@@ -326,7 +263,12 @@ export function PaymentControlForm({
     resolveTariffUnitPrice(cupsCode)
 
   const total = sumPaymentControlPrices(paymentControlLines)
+  const totalPaid = calcTotalPaid(paymentControl)
   const balance = treatmentPaymentBalance(paymentControlLines, paymentControl)
+  const draftLine = paymentControlLines.find((line) => line.id === paymentDraftLineId) ?? null
+  const draftRemaining = draftLine
+    ? Math.max(0, lineBillablePrice(draftLine) - paidAmountForLine(draftLine.id, paymentControl))
+    : 0
   const canImportFromBudget =
     budgetItems.some((item) => item.procedure.trim()) ||
     Boolean(orthodonticsBudget?.active) ||
@@ -387,24 +329,79 @@ export function PaymentControlForm({
     }, 120)
   }
 
-  const registerPayment = (line: PaymentControlLine, amount: number) => {
-    if (disabled || amount <= 0) return
-    const agreement = planItemForLine(line, paymentPlan)
-    const draft: PaymentRecord = {
-      id: generateId(),
-      paymentControlLineId: line.id,
-      paymentPlanItemId: agreement?.id,
-      paymentDate: new Date().toISOString().slice(0, 10),
-      amount,
-      paymentMethod: agreement?.paymentMethod ?? 'contado',
-      paymentReason: line.procedure.trim() || agreement?.procedure || 'Procedimiento',
-      cupsCode: line.cupsCode,
-      treatingDentistUserId: user?.id,
-      treatingDentistName: dentistName(user),
-      invoices: [],
+  const registerPayment = async (line: PaymentControlLine, input: PaymentRegistrationInput) => {
+    if (disabled || paymentBusy) return
+    const billable = lineBillablePrice(line)
+    const paid = paidAmountForLine(line.id, paymentControl)
+    const remaining = Math.max(0, billable - paid)
+    const amount = Math.round(input.amount)
+    if (amount <= 0 || amount > remaining) return
+
+    setPaymentBusy(true)
+    setPaymentNotice(null)
+    try {
+      const agreement = planItemForLine(line, paymentPlan)
+      const remainingBalance = remainingAfterAbono(remaining, amount)
+      const requestedKind: PaymentDocumentKind = input.documentKind
+      const draft: PaymentRecord = {
+        id: generateId(),
+        paymentControlLineId: line.id,
+        paymentPlanItemId: agreement?.id,
+        paymentDate: input.paymentDate,
+        amount,
+        paymentMethod: agreement?.paymentMethod ?? 'contado',
+        paymentReason: line.procedure.trim() || agreement?.procedure || 'Procedimiento',
+        cupsCode: line.cupsCode,
+        treatingDentistUserId: user?.id,
+        treatingDentistName: dentistName(user),
+        documentKind: requestedKind,
+        remainingBalance,
+        invoices: [],
+      }
+      const withInvoice = attachAutoInvoiceToPayment(draft, user?.id)
+      const invoice = withInvoice.invoices[withInvoice.invoices.length - 1]
+      if (!invoice) {
+        setPaymentNotice('No se pudo preparar el comprobante.')
+        return
+      }
+      const result = await emitChargeReceipt({
+        invoice,
+        patientName,
+        patientDocument,
+        paymentReason: draft.paymentReason,
+        cupsCode: line.cupsCode,
+        amount,
+        forceCashReceipt: requestedKind === 'recibo_interno',
+      })
+      if (requestedKind === 'factura' && result.invoice.emissionMode !== 'provider') {
+        setPaymentNotice(
+          result.depleted
+            ? `${result.message} El abono no se registró.`
+            : 'No se pudo emitir la factura electrónica (DIAN). Elija Recibo Interno o revise la modalidad de facturación. El abono no se registró.',
+        )
+        return
+      }
+      const documentKind = documentKindFromEmission(requestedKind, result.invoice.emissionMode)
+      const payment: PaymentRecord = {
+        ...withInvoice,
+        documentKind,
+        remainingBalance,
+        invoices: withInvoice.invoices.map((item) =>
+          item.id === invoice.id ? { ...result.invoice, autoGenerated: true } : item,
+        ),
+      }
+      onChange([...paymentControl, payment])
+      setPaymentDraftLineId(null)
+      setPaymentNotice(
+        remainingBalance === 0
+          ? `Abono de ${formatCurrency(amount)} registrado. El procedimiento quedó en Pagado.`
+          : `Abono de ${formatCurrency(amount)} registrado. Saldo del procedimiento: ${formatCurrency(remainingBalance)}.`,
+      )
+    } catch (error) {
+      setPaymentNotice(error instanceof Error ? error.message : 'No se pudo registrar el pago.')
+    } finally {
+      setPaymentBusy(false)
     }
-    const payment = attachAutoInvoiceToPayment(draft, user?.id)
-    onChange([...paymentControl, payment])
   }
 
   const applyVoidedPaymentInvoice = (
@@ -491,8 +488,9 @@ export function PaymentControlForm({
         {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.planPagos, 'Plan y Control de Pagos')}
       </h3>
       <p className="mb-4 text-xs text-slate-500">
-        Para cada procedimiento defina la forma de pago, las cuotas y las fechas acordadas, y registre
-        los abonos con su factura y el saldo del tratamiento.
+        Para cada procedimiento defina la forma de pago y registre abonos parciales. Elija recibo
+        interno o factura electrónica; el saldo del procedimiento y el del tratamiento se actualizan
+        con cada abono.
       </p>
 
       {!disabled && (
@@ -527,6 +525,7 @@ export function PaymentControlForm({
             const remaining = Math.max(0, billable - paid)
             const status = procedurePaymentStatus(remaining, paid)
             const linePayments = paymentControl.filter((payment) => payment.paymentControlLineId === line.id)
+            const abonoHistory = abonoHistoryForLine(line.id, billable, paymentControl)
             const latestPayment = [...linePayments].reverse().find((payment) => payment.invoices.length > 0)
             const latestInvoice = latestPayment
               ? [...latestPayment.invoices].reverse()[0]
@@ -569,11 +568,10 @@ export function PaymentControlForm({
                     {latestPayment && latestInvoice && (
                       <button
                         type="button"
-                        aria-label="Ver factura"
                         onClick={() => openLatestInvoice(latestPayment)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        className="inline-flex h-8 items-center rounded-lg border border-dental-200 bg-white px-2.5 text-[11px] font-semibold text-dental-800 hover:bg-dental-50"
                       >
-                        <Eye className="h-3.5 w-3.5" />
+                        {paymentReceiptActionLabel(resolvePaymentDocumentKind(latestPayment))}
                       </button>
                     )}
                     {canCreditNote && latestPayment && latestInvoice && (
@@ -749,12 +747,26 @@ export function PaymentControlForm({
                   </div>
                   <div>
                     <FieldCaption>Registrar pago</FieldCaption>
-                    <PayAmountField
-                      remaining={remaining}
-                      paid={paid}
-                      disabled={disabled}
-                      onPay={(amount) => registerPayment(line, amount)}
-                    />
+                    {remaining <= 0 && paid > 0 ? (
+                      <span className="text-xs font-medium text-green-700">Pagado</span>
+                    ) : remaining <= 0 ? (
+                      <span className="text-xs text-slate-400">Sin saldo</span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={disabled || paymentBusy}
+                        onClick={() => {
+                          setPaymentNotice(null)
+                          setPaymentDraftLineId(line.id)
+                        }}
+                        className="btn-primary h-8 px-3 text-xs"
+                      >
+                        Registrar Pago
+                      </button>
+                    )}
+                    {paid > 0 && remaining > 0 && (
+                      <p className="mt-1 text-[11px] text-slate-500">Abonado {formatCurrency(paid)}</p>
+                    )}
                   </div>
                 </div>
 
@@ -788,6 +800,46 @@ export function PaymentControlForm({
                     onChange={(patch) => updateAgreement(line, patch)}
                   />
                 </div>
+
+                {abonoHistory.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      Historial de abonos
+                    </p>
+                    <ul className="space-y-2">
+                      {abonoHistory.map((entry) => (
+                        <li
+                          key={entry.payment.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium text-slate-800">
+                              {formatAbonoDate(entry.payment.paymentDate)}
+                            </p>
+                            <p className="text-slate-500">{paymentReceiptTypeLabel(entry.documentKind)}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold tabular-nums text-slate-900">
+                              {formatCurrency(entry.payment.amount)}
+                            </p>
+                            <p className="text-slate-500">
+                              Saldo restante {formatCurrency(entry.remainingBalance)}
+                            </p>
+                          </div>
+                          {entry.payment.invoices.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => openLatestInvoice(entry.payment)}
+                              className="inline-flex h-8 items-center rounded-lg border border-dental-200 bg-white px-2.5 text-[11px] font-semibold text-dental-800 hover:bg-dental-50"
+                            >
+                              {paymentReceiptActionLabel(entry.documentKind)}
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </article>
             )
           })
@@ -816,6 +868,10 @@ export function PaymentControlForm({
           <div className="text-right">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Valor total</p>
             <p className="text-sm font-semibold tabular-nums text-slate-900">{formatCurrency(total)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Total abonado</p>
+            <p className="text-sm font-semibold tabular-nums text-slate-900">{formatCurrency(totalPaid)}</p>
           </div>
           <div className="text-right">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -978,9 +1034,26 @@ export function PaymentControlForm({
         />
       )}
 
+      {paymentNotice && <p className="mt-3 text-sm text-dental-800">{paymentNotice}</p>}
       {creditNoteMessage && (
         <p className="mt-3 text-sm text-dental-800">{creditNoteMessage}</p>
       )}
+      <PaymentRegistrationModal
+        open={draftLine != null && draftRemaining > 0}
+        sessionKey={draftLine?.id ?? ''}
+        procedureTitle={draftLine?.procedure.trim() || 'Procedimiento'}
+        remaining={draftRemaining}
+        treatmentBalance={balance}
+        busy={paymentBusy}
+        notice={paymentNotice}
+        onClose={() => {
+          if (!paymentBusy) setPaymentDraftLineId(null)
+        }}
+        onSubmit={(input) => {
+          if (!draftLine) return
+          void registerPayment(draftLine, input)
+        }}
+      />
       <CreditNoteModal
         open={creditNoteTarget != null}
         invoiceNumber={creditNoteTarget?.invoice.invoiceNumber ?? ''}
