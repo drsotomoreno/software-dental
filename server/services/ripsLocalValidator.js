@@ -38,6 +38,11 @@ export function validateRipsPackageLocally(rips, context = {}) {
     perfilFiscal: context.perfilFiscal,
     allowNullNumFactura: context.allowNullNumFactura,
     esRipsTemporal: context.esRipsTemporal,
+    valorAtencion: context.valorAtencion,
+    atencionCero: context.atencionCero,
+    emisionVoluntaria: context.emisionVoluntaria,
+    flujoRips: context.flujoRips,
+    cufe: context.cufe ?? rips?.cufe,
   })
   errors.push(...structureIssues)
 

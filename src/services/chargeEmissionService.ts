@@ -11,6 +11,7 @@ import {
 } from '@/services/billingModalityService'
 import { emitInvoiceWithDianProvider } from '@/services/dianProviderClient'
 import { buildDianQrUrl } from '@/utils/thermalInvoicePrint'
+import { isNumeroReciboCaja } from '../../shared/ripsCobroFlow.js'
 
 export interface ChargeEmissionContext {
   invoice: PaymentInvoice
@@ -59,7 +60,7 @@ function buildRipsSnapshot(
 
   return {
     tipo: extras?.cufe ? 'fev_salud_marca_blanca' : 'recibo_caja_salud',
-    numFactura: context.invoice.invoiceNumber,
+    numFactura: context.amount <= 0 ? null : context.invoice.invoiceNumber,
     fecha: context.invoice.invoiceDate,
     cuv: extras?.cuv ?? null,
     cufe: extras?.cufe ?? null,
@@ -121,20 +122,33 @@ export async function emitChargeReceipt(
   const settings = getBillingModalitySettings()
   const depleted = getFoliosAvailable(settings) <= 0
 
+  if (context.amount <= 0) {
+    return cashReceiptResult(
+      {
+        ...context,
+        invoice: { ...context.invoice, invoiceNumber: '', emissionMode: 'manual', cufe: null },
+      },
+      false,
+    )
+  }
+
   if (context.forceCashReceipt || !usesProviderEmission(settings)) {
+    if (!isNumeroReciboCaja(context.invoice.invoiceNumber)) {
+      throw new Error('El recibo interno requiere el consecutivo RC- de este titular.')
+    }
     return cashReceiptResult(context, depleted && settings.modality === 'automatic')
   }
 
   const emitted = await emitInvoiceWithDianProvider({
-    invoiceNumber: context.invoice.invoiceNumber,
+    invoiceNumber: context.invoice.invoiceNumber?.startsWith('FE-') ? context.invoice.invoiceNumber : '',
     issueDate: context.invoice.invoiceDate,
     amount: context.amount,
     buyerName: context.patientName,
     buyerDocument: context.patientDocument,
   })
 
-  if (!emitted.ok || !emitted.cufe) {
-    return cashReceiptResult(context, depleted)
+  if (!emitted.ok || !emitted.cufe || !emitted.invoiceNumber) {
+    throw new Error(emitted.message || 'El proveedor no devolvió el número de la FEV.')
   }
 
   const consumed = consumeElectronicFolio()
@@ -152,6 +166,7 @@ export async function emitChargeReceipt(
       : emitted.message,
     invoice: {
       ...context.invoice,
+      invoiceNumber: emitted.invoiceNumber,
       emissionMode: 'provider',
       cufe: emitted.cufe,
       cuv: emitted.cuv ?? null,

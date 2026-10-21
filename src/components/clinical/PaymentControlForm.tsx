@@ -52,11 +52,7 @@ import {
   supplementalPlanItems,
   upsertAgreement,
 } from '@/utils/paymentSectionMerge'
-import {
-  attachAutoInvoiceToPayment,
-  clinicalPaymentsNeedAutoInvoices,
-  ensurePaymentsHaveAutoInvoices,
-} from '@/services/paymentInvoiceService'
+import { issueMissingReceipts, usuarioTitularIdDe } from '@/services/paymentInvoiceService'
 import { InvoiceViewModal, type InvoiceViewMode } from '@/components/invoices/InvoiceViewModal'
 import { CreditNoteModal, paymentInvoiceStatusLabel } from '@/components/invoices/CreditNoteModal'
 import {
@@ -288,9 +284,20 @@ export function PaymentControlForm({
   const [creditNoteMessage, setCreditNoteMessage] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!clinicalPaymentsNeedAutoInvoices({ paymentControl })) return
-    onChange(ensurePaymentsHaveAutoInvoices(paymentControl, user?.id))
-  }, [paymentControl, user?.id, onChange])
+    const titular = usuarioTitularIdDe(user)
+    if (!titular) return
+    let cancelled = false
+    void issueMissingReceipts(paymentControl, titular)
+      .then((result) => {
+        if (!cancelled && result.changed) onChange(result.payments)
+      })
+      .catch(() => {
+        /* Sin Postgres el cobro queda sin RC- hasta que el titular pueda reservarlo. */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [paymentControl, user, onChange])
 
   const cieOptions = useMemo(() => {
     const map = new Map<string, CieOption>()
@@ -403,8 +410,11 @@ export function PaymentControlForm({
       treatingDentistName: dentistName(user),
       invoices: [],
     }
-    const payment = attachAutoInvoiceToPayment(draft, user?.id)
-    onChange([...paymentControl, payment])
+    void issueMissingReceipts([draft], usuarioTitularIdDe(user)).then((result) => {
+      const payment = result.payments[0]
+      if (!payment?.invoices.some((invoice) => invoice.invoiceNumber.trim())) return
+      onChange([...paymentControl, payment])
+    })
   }
 
   const applyVoidedPaymentInvoice = (

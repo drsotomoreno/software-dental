@@ -1,4 +1,9 @@
-import { allowsNullNumFactura, normalizeRipsNumFactura } from './fiscalProfile.js'
+import { normalizeRipsNumFactura } from './fiscalProfile.js'
+import {
+  resolveRipsCobroFlujo,
+  sumVrServicioRips,
+  validateNumFacturaDelFlujo,
+} from './ripsCobroFlow.js'
 
 /** @typedef {'error' | 'warning'} RipsValidationLevel */
 
@@ -327,23 +332,23 @@ export function validateRipsStructureSyntax(rips, context = {}) {
   const fechaGeneracion = context.fechaGeneracion ?? new Date()
   const convenioFechaInicio = context.convenioFechaInicio
   const numFactura = normalizeRipsNumFactura(rips?.numFactura)
-  const allowNullNumFactura = allowsNullNumFactura(context.perfilFiscal, {
-    allowNullNumFactura: context.allowNullNumFactura,
-    esRipsTemporal: context.esRipsTemporal,
-  })
-  const fevReferencia = normalizeRipsNumFactura(context.fevReferencia) ?? numFactura
-
-  const facturaCheck = validateRipsFevNumero(numFactura, {
-    label: 'numFactura',
-    allowNull: allowNullNumFactura,
+  const valorAtencion = context.valorAtencion ?? sumVrServicioRips(rips)
+  const flujo =
+    context.flujoRips ??
+    resolveRipsCobroFlujo({
+      perfilFiscal: context.perfilFiscal,
+      valorAtencion,
+      atencionCero: context.atencionCero,
+      emisionVoluntaria: context.emisionVoluntaria === true,
+    })
+  const facturaCheck = validateNumFacturaDelFlujo({
+    flujo,
+    numFactura,
+    cufe: context.cufe ?? rips?.cufe,
+    fevReferencia: context.fevReferencia,
   })
   if (!facturaCheck.valid) {
     pushError('numFactura', facturaCheck.message)
-  } else if (numFactura && fevReferencia && numFactura !== fevReferencia) {
-    pushError(
-      'numFactura',
-      `numFactura («${numFactura}») debe coincidir 1:1 con la FEV reportada ante la DIAN («${fevReferencia}»).`,
-    )
   }
 
   if (rips?.tipoNota) {

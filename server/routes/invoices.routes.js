@@ -2,6 +2,8 @@ import { Router } from 'express'
 import { buildDianHealthInvoiceXml } from '../services/dianFeXmlBuilder.js'
 import { validateRipsPackageLocally, hasBlockingValidationErrors } from '../services/ripsLocalValidator.js'
 import { parseRepsCode } from '../../shared/repsCode.js'
+import { reservarReciboCaja } from '../services/consecutivosPrestadorRepository.js'
+import { numeroFevDelProveedor } from '../services/fevNumeroProveedor.js'
 
 const router = Router()
 
@@ -137,17 +139,56 @@ router.post('/provider/test', (req, res) => {
 })
 
 /**
+ * POST /api/invoices/recibos-caja
+ * Reserva el siguiente RC- del titular. No numera FEV.
+ */
+router.post('/recibos-caja', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const recibo = await reservarReciboCaja({
+      usuarioTitularId: body.usuarioTitularId,
+      monto: body.monto,
+      patientId: body.patientId,
+      paymentId: body.paymentId,
+      clinicalRecordId: body.clinicalRecordId,
+    })
+    return res.json({
+      success: true,
+      numeroDocumento: recibo.numeroDocumento,
+      consecutivo: recibo.consecutivo,
+      usuarioTitularId: recibo.usuarioTitularId,
+      tipoDocumento: recibo.tipoDocumento,
+    })
+  } catch (error) {
+    const unavailable = error?.code === 'PG_UNAVAILABLE' || error?.statusCode === 503
+    return res.status(unavailable ? 503 : error?.statusCode || 400).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'No se pudo reservar el consecutivo del titular.',
+    })
+  }
+})
+
+/**
  * POST /api/invoices/provider/emit
- * Envía la factura al proveedor y devuelve CUFE + URL de QR DIAN.
+ * El proveedor asigna el número legal de la FEV. No consume la secuencia RC-.
  */
 router.post('/provider/emit', (req, res) => {
   const apiKey = String(req.body?.apiKey ?? '').trim()
   const invoice = req.body?.invoice ?? {}
-  const invoiceNumber = String(invoice.invoiceNumber ?? '').trim()
-  if (apiKey.length < 8 || !invoiceNumber) {
+  if (apiKey.length < 8) {
     return res.status(400).json({
       success: false,
-      error: 'Se requieren clave de conexión y número de factura.',
+      error: 'Se requiere la clave de conexión del tenant.',
+    })
+  }
+
+  let invoiceNumber
+  try {
+    invoiceNumber = numeroFevDelProveedor(apiKey, invoice.invoiceNumber)
+  } catch (error) {
+    return res.status(error?.statusCode || 400).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'El proveedor no asignó número de FEV.',
     })
   }
 
@@ -160,6 +201,7 @@ router.post('/provider/emit', (req, res) => {
     cufe,
     qrUrl,
     invoiceNumber,
+    numeroDocumento: invoiceNumber,
     message: 'Factura enviada al proveedor. CUFE y QR listos para el ticket de 80 mm.',
   })
 })

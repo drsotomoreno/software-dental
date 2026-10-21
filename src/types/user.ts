@@ -32,8 +32,8 @@ export interface UserProfile {
   providerType?: 'institucion' | 'profesional_independiente'
   /**
    * Perfil fiscal del prestador (clínica). Vive en el titular (`clinicId === id`).
-   * Obligado_FEV: RIPS con numFactura = FEV DIAN.
-   * No_Obligado: RIPS temporales con numFactura null (Res. 2275).
+   * Obligado_FEV: RIPS con numFactura = FEV DIAN y CUFE.
+   * No_Obligado: cobro con numFactura = RC-XXXXX. Atención a $0 con numFactura null.
    */
   perfilFiscal?: FiscalProfile
   /** NIT prestador — RIPS */

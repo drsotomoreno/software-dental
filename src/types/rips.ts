@@ -5,8 +5,7 @@ import type { OdontologyThsSpecialtyId, RipsConsultationVisitType } from '@/cons
 export interface RipsTransaction {
   numDocumentoIdObligado: string
   /**
-   * Número FEV. Null en RIPS temporales y cuando el prestador es No_Obligado
-   * (Res. 2275 — el campo debe existir en el JSON con valor null).
+   * FEV oficial (FE-00012), recibo interno (RC-XXXXX) o null en atención a $0.
    */
   numFactura: string | null
   tipoNota: string | null
@@ -142,7 +141,7 @@ export interface RipsOtroServicio {
 export interface RipsExportMetadata {
   /** NIT del prestador (solo dígitos) */
   numDocumentoIdObligado: string
-  /** Número de factura electrónica de venta en salud. Null si No_Obligado o RIPS temporal. */
+  /** FEV oficial, recibo RC- o null cuando la atención vale cero. */
   numFactura: string | null
   /** Referencia FEV DIAN para validación 1:1 con numFactura (opcional si coincide con numFactura) */
   fevReferencia?: string | null

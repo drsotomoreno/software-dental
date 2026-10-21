@@ -1,5 +1,5 @@
 import type { RipsExportMetadata, RipsTransaction, RipsValidationIssue } from '@/types/rips'
-import { allowsNullNumFactura } from '@/utils/fiscalProfile'
+import { resolveRipsCobroFlujo, validateNumFacturaDelFlujo } from '../../shared/ripsCobroFlow.js'
 import {
   validateRipsCodPrestador,
   validateRipsFevNumero,
@@ -34,9 +34,15 @@ export interface RipsStructureValidationContext {
   codPrestador?: string
   /** Perfil fiscal del prestador (clínica). */
   perfilFiscal?: import('@/utils/fiscalProfile').FiscalProfile | string | boolean | null
-  /** Permite numFactura null (RIPS temporal o No_Obligado). */
+  /** Permite numFactura null solo si la atención vale cero. */
   allowNullNumFactura?: boolean
   esRipsTemporal?: boolean
+  /** Valor reportable de la atención. Cero habilita numFactura null. */
+  valorAtencion?: number
+  atencionCero?: boolean
+  emisionVoluntaria?: boolean
+  flujoRips?: 'con_fev' | 'sin_fev_recibo' | 'sin_fev_cero'
+  cufe?: string | null
 }
 
 /**
@@ -55,14 +61,19 @@ export function validateRipsMetadataStructure(
   context: Omit<RipsStructureValidationContext, 'codPrestador' | 'fevReferencia'> = {},
 ): RipsValidationIssue[] {
   const issues: RipsValidationIssue[] = []
-  const allowNull = allowsNullNumFactura(context.perfilFiscal ?? metadata.perfilFiscal, {
-    allowNullNumFactura: context.allowNullNumFactura,
-    esRipsTemporal: context.esRipsTemporal,
-  })
-
-  const facturaCheck = validateRipsFevNumero(metadata.numFactura, {
-    label: 'numFactura',
-    allowNull,
+  const valorAtencion = context.valorAtencion ?? metadata.vrConsulta
+  const flujo =
+    context.flujoRips ??
+    resolveRipsCobroFlujo({
+      perfilFiscal: context.perfilFiscal ?? metadata.perfilFiscal,
+      valorAtencion,
+      atencionCero: context.atencionCero,
+      emisionVoluntaria: context.emisionVoluntaria,
+    })
+  const facturaCheck = validateNumFacturaDelFlujo({
+    flujo,
+    numFactura: metadata.numFactura,
+    cufe: context.cufe,
   })
   if (!facturaCheck.valid) {
     issues.push({ level: 'error', field: 'numFactura', message: facturaCheck.message! })

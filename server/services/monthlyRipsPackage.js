@@ -1,5 +1,6 @@
 /**
- * Empaqueta RIPS pendientes (numFactura null) por odontólogo para el envío mensual.
+ * Empaqueta RIPS pendientes por odontólogo.
+ * Si todos los soportes comparten número (RC- o null en atenciones a $0), ese valor queda en numFactura.
  */
 const SERVICE_KEYS = [
   'consultas',
@@ -90,11 +91,21 @@ export function buildMonthlyRipsJson(records) {
     consecutivo: index + 1,
   }))
 
+  const numeros = [
+    ...new Set(
+      records.map((record) => {
+        const value = record?.numFactura ?? record?.ripsJson?.numFactura
+        const trimmed = value == null ? null : String(value).trim()
+        return trimmed ? trimmed : null
+      }),
+    ),
+  ]
+
   return {
     numDocumentoIdObligado: String(
       first.numDocumentoIdObligado || records[0]?.numDocumentoIdObligado || '',
     ).trim(),
-    numFactura: null,
+    numFactura: numeros.length === 1 ? numeros[0] : null,
     tipoNota: null,
     numNota: null,
     usuarios,

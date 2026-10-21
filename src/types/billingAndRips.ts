@@ -69,6 +69,10 @@ export interface ProcessClinicalSessionInput {
   professional: import('./user').UserProfile
   evolutionNoteIds?: string[]
   invoiceNumber?: string
+  /** CUFE devuelto por el proveedor cuando el flujo es FEV. */
+  cufe?: string | null
+  /** No obligado que elige emitir FEV. No reserva RC-. */
+  emisionVoluntaria?: boolean
   catalogLookup?: import('@/utils/ripsCompiler').EvolutionCatalogLookup
   submitToMinistry?: boolean
 }

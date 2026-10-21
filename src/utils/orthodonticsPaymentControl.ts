@@ -4,7 +4,6 @@ import type {
   OrthodonticsPaymentType,
 } from '@/types/clinicalRecord'
 import { calcOrthodonticsBudgetTotal, lineSubtotal } from './budget'
-import { attachAutoInvoiceToPayment } from '@/services/paymentInvoiceService'
 import { generateId } from './crypto'
 export const ORTHODONTICS_PAYMENT_TYPE_LABELS: Record<OrthodonticsPaymentType, string> = {
   cuota_inicial: 'Cuota inicial',
@@ -86,20 +85,18 @@ export function createEmptyOrthodonticsPayment(
   const paymentDate = new Date().toISOString().slice(0, 10)
   const amount = suggestOrthodonticsPaymentAmount(paymentType, budget)
 
-  return attachAutoInvoiceToPayment(
-    {
-      id: generateId(),
-      paymentDate,
-      amount,
-      paymentMethod: 'contado',
-      paymentType,
-      controlNumber,
-      additionalPaymentDescription: '',
-      paymentReason,
-      invoices: [],
-    },
-    userId,
-  )
+  void userId
+  return {
+    id: generateId(),
+    paymentDate,
+    amount,
+    paymentMethod: 'contado',
+    paymentType,
+    controlNumber,
+    additionalPaymentDescription: '',
+    paymentReason,
+    invoices: [],
+  }
 }
 export function normalizeOrthodonticsPayment(
   payment: Partial<OrthodonticsPaymentRecord>,
@@ -111,27 +108,24 @@ export function normalizeOrthodonticsPayment(
   const additionalPaymentDescription =
     paymentType === 'adicional' ? payment.additionalPaymentDescription ?? '' : undefined
 
-  return attachAutoInvoiceToPayment(
-    {
-      id: payment.id ?? generateId(),
-      paymentDate: payment.paymentDate ?? new Date().toISOString().slice(0, 10),
-      amount: payment.amount ?? suggestOrthodonticsPaymentAmount(paymentType, budget),
-      paymentMethod: payment.paymentMethod ?? 'contado',
-      paymentType,
-      controlNumber,
-      additionalPaymentDescription,
-      paymentReason:
-        payment.paymentReason ??
-        buildOrthodonticsPaymentReason(
-          paymentType,
-          controlNumber,
-          additionalPaymentDescription,
-        ),
-      invoices: payment.invoices ?? [],
-      notes: payment.notes,
-    },
-    undefined,
-  )
+  return {
+    id: payment.id ?? generateId(),
+    paymentDate: payment.paymentDate ?? new Date().toISOString().slice(0, 10),
+    amount: payment.amount ?? suggestOrthodonticsPaymentAmount(paymentType, budget),
+    paymentMethod: payment.paymentMethod ?? 'contado',
+    paymentType,
+    controlNumber,
+    additionalPaymentDescription,
+    paymentReason:
+      payment.paymentReason ??
+      buildOrthodonticsPaymentReason(
+        paymentType,
+        controlNumber,
+        additionalPaymentDescription,
+      ),
+    invoices: payment.invoices ?? [],
+    notes: payment.notes,
+  }
 }
 
 export function orthodonticsPaymentBalance(

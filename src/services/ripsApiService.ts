@@ -91,7 +91,7 @@ export interface DictatedEvolutionBillingResult {
 
 /**
  * Tras extraer CIE-10 y CUPS, el backend valida el perfil fiscal:
- * Obligado → generarFEV_y_RIPS(); No obligado → guardarRIPS_Pendiente(numFactura: null).
+ * Obligado o FEV voluntaria → generarFEV_y_RIPS(); no obligado con cobro → RC-; atención a $0 → numFactura null.
  */
 export async function routeDictatedEvolutionByFiscalProfile(input: {
   rips?: RipsTransaction

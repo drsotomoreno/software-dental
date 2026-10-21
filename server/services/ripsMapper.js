@@ -1,8 +1,8 @@
 /**
  * Adapta una consulta odontológica al JSON de CargarRipsSinFactura (Res. 2275).
  *
- * vrServicio es el valor pagado por el paciente. 0, null o indefinido lanzan
- * RipsMapperError (RVC091) antes de llamar a MinsaludService.
+ * vrServicio es el valor pagado por el paciente. 0 explícito es atención gratuita
+ * (numFactura null). Un cobro exige RC-XXXXX. Null sigue siendo error.
  * Las fechas de atención quedan en hora de Bogotá: YYYY-MM-DD HH:mm.
  * Con MINSALUD_ENV=stage el documento del paciente se sustituye por el del
  * prestador para no tropezar con RVG01. En cualquier otro valor se envía
@@ -10,6 +10,12 @@
  */
 
 import { documentoObligadoDigits } from '../../shared/nit.js'
+import {
+  FLUJO_RIPS_CON_FEV,
+  FLUJO_RIPS_SIN_FEV_CERO,
+  isNumeroReciboCaja,
+  resolveRipsCobroFlujo,
+} from '../../shared/ripsCobroFlow.js'
 import { splitUsuarioDocumento } from './fevRipsService.js'
 
 const RIPS_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
@@ -125,23 +131,27 @@ function sumPaid(records) {
 }
 
 /**
- * Rechaza 0, null e indefinido antes de armar el JSON (regla RVC091).
+ * Acepta 0 (atención gratuita). Rechaza null, indefinido y negativos.
  * @param {unknown} value
  * @returns {number}
  */
 export function assertVrServicio(value) {
   const number = typeof value === 'number' ? value : Number(value)
-  if (value == null || value === '' || !Number.isFinite(number) || number <= 0) {
+  if (value == null || value === '' || !Number.isFinite(number) || number < 0) {
     throw new RipsMapperError(
-      'RVC091: vrServicio no puede ser 0, null ni indefinido. El valor pagado por el paciente debe ser mayor que 0.',
+      'vrServicio no puede ser null ni indefinido. Indique 0 si la atención es gratuita.',
       'vrServicio',
     )
   }
   return Math.round(number)
 }
 
+function esCeroExplicito(value) {
+  return value === 0 || value === '0'
+}
+
 /**
- * Valor pagado por el paciente. Nunca devuelve 0 (regla RVC091).
+ * Valor pagado por el paciente. 0 explícito es una atención gratuita.
  * @param {object} atencion
  * @returns {number}
  */
@@ -160,7 +170,21 @@ export function resolveVrServicio(atencion) {
     positiveAmount(atencion?.cost),
     sumPaid(notes.filter((note) => note?.isBillable !== false)),
   ]
-  return assertVrServicio(candidates.find((value) => value != null))
+  const positive = candidates.find((value) => value != null)
+  if (positive != null) return positive
+  const ceros = [
+    atencion?.valorPagadoPaciente,
+    atencion?.valorPagado,
+    atencion?.montoPagado,
+    atencion?.amountPaid,
+    atencion?.vrServicio,
+    atencion?.cost,
+  ]
+  if (ceros.some(esCeroExplicito)) return 0
+  throw new RipsMapperError(
+    'vrServicio no puede ser null ni indefinido. Indique 0 si la atención es gratuita.',
+    'vrServicio',
+  )
 }
 
 function patientOf(atencion) {
@@ -367,7 +391,39 @@ export class RipsMapper {
           patient?.numDocumentoIdentificacion ?? patient?.documentNumber ?? patient?.numDocumento,
         )
     const diagnostico = principalDiagnosis(atencion)
-    const vrServicio = assertVrServicio(resolveVrServicio(atencion))
+    const vrServicio = resolveVrServicio(atencion)
+    const perfilFiscal = atencion?.perfilFiscal ?? professional?.perfilFiscal ?? this.prestador?.perfilFiscal
+    const flujo = resolveRipsCobroFlujo({
+      perfilFiscal,
+      valorAtencion: vrServicio,
+      emisionVoluntaria: atencion?.emisionVoluntaria === true,
+    })
+    if (flujo === FLUJO_RIPS_CON_FEV) {
+      throw new RipsMapperError(
+        'La FEV se numera en el proveedor y se cruza con CUFE. Este armado es solo el RIPS sin factura.',
+        'numFactura',
+      )
+    }
+    const cufe = String(atencion?.cufe ?? '').trim()
+    if (cufe) {
+      throw new RipsMapperError(
+        'El RIPS sin FEV no lleva CUFE ni interacción con la DIAN.',
+        'cufe',
+      )
+    }
+    let numFactura = null
+    if (flujo !== FLUJO_RIPS_SIN_FEV_CERO) {
+      const numero = String(
+        atencion?.numeroDocumento ?? atencion?.numeroRecibo ?? atencion?.numFactura ?? '',
+      ).trim()
+      if (!isNumeroReciboCaja(numero)) {
+        throw new RipsMapperError(
+          'El no obligado con cobro requiere numFactura igual al recibo de caja (RC-XXXXX).',
+          'numFactura',
+        )
+      }
+      numFactura = numero
+    }
     const fechaInicioAtencion = formatFechaAtencion(fechaAtencionOf(atencion), 'fechaInicioAtencion')
     // La consulta de la Res. 2275 solo transmite fechaInicioAtencion.
     // El fin se normaliza al mismo formato para rechazarlo aquí si es inválido.
@@ -376,7 +432,7 @@ export class RipsMapper {
 
     return {
       numDocumentoIdObligado: nitOf(atencion, this.prestador),
-      numFactura: null,
+      numFactura,
       tipoNota: 'RS',
       numNota: numNotaOf(atencion),
       usuarios: [

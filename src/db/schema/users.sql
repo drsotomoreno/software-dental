@@ -19,9 +19,8 @@ CREATE TABLE IF NOT EXISTS users (
   provider_nit TEXT,
   reps_code TEXT,
   reps_status TEXT,
-  -- Perfil fiscal del prestador (clínica). Enum o booleano equivalente:
-  -- Obligado_FEV (true) | No_Obligado (false). Res. 2275 / FEV-Salud.
-  perfil_fiscal TEXT NOT NULL DEFAULT 'Obligado_FEV'
+  -- Perfil fiscal del prestador (clínica). El predeterminado de instalaciones nuevas es No_Obligado.
+  perfil_fiscal TEXT NOT NULL DEFAULT 'No_Obligado'
     CHECK (perfil_fiscal IN ('Obligado_FEV', 'No_Obligado')),
   created_at TEXT,
   updated_at TEXT
@@ -32,4 +31,5 @@ CREATE INDEX IF NOT EXISTS idx_users_document ON users (document_number);
 CREATE INDEX IF NOT EXISTS idx_users_perfil_fiscal ON users (perfil_fiscal);
 
 -- Instalaciones existentes:
--- ALTER TABLE users ADD COLUMN perfil_fiscal TEXT NOT NULL DEFAULT 'Obligado_FEV';
+-- Las filas que ya tienen perfil_fiscal no se reescriben.
+-- ALTER TABLE users ADD COLUMN perfil_fiscal TEXT NOT NULL DEFAULT 'No_Obligado';
