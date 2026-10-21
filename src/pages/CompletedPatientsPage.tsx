@@ -1,20 +1,28 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
+import { PatientListSearch } from '@/components/patients/PatientListSearch'
 import { isCompletedPatient } from '@/types/patient'
+import { patientMatchesQuery } from '@/utils/patientListSearch'
 
 export function CompletedPatientsPage() {
   const { can } = useAuth()
   const { audit } = useAudit()
   const loggedRef = useRef(false)
+  const [query, setQuery] = useState('')
 
   const patients = useLiveQuery(async () => {
     const all = await db.patients.orderBy('lastName').reverse().toArray()
     return all.filter(isCompletedPatient)
   })
+
+  const filteredPatients = useMemo(
+    () => (patients ?? []).filter((patient) => patientMatchesQuery(patient, query)),
+    [patients, query],
+  )
 
   useEffect(() => {
     if (loggedRef.current) return
@@ -28,7 +36,7 @@ export function CompletedPatientsPage() {
 
   return (
     <div>
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Pacientes Terminados</h1>
           <p className="mt-1 text-sm text-slate-500">
@@ -53,7 +61,27 @@ export function CompletedPatientsPage() {
           </Link>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-teal-200 bg-white shadow-sm">
+        <>
+          <PatientListSearch
+            id="completed-patient-search"
+            label="Buscar pacientes terminados"
+            query={query}
+            onQueryChange={setQuery}
+            shown={filteredPatients.length}
+            total={patients.length}
+          />
+
+          {filteredPatients.length === 0 ? (
+            <div className="card text-center">
+              <p className="text-slate-500">
+                Ningún paciente coincide con «{query.trim()}».
+              </p>
+              <button type="button" onClick={() => setQuery('')} className="btn-secondary mt-4">
+                Limpiar búsqueda
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-teal-200 bg-white shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-teal-100 bg-teal-50">
               <tr>
@@ -66,7 +94,7 @@ export function CompletedPatientsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {patients.map((patient) => (
+              {filteredPatients.map((patient) => (
                 <tr key={patient.id} className="hover:bg-teal-50/40">
                   <td className="px-4 py-3 font-mono text-xs">
                     {patient.documentType} {patient.documentNumber}
@@ -94,7 +122,9 @@ export function CompletedPatientsPage() {
               ))}
             </tbody>
           </table>
-        </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

@@ -1,54 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Search, X } from 'lucide-react'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 
-import { isActivePatient, type Patient } from '@/types/patient'
+import { isActivePatient } from '@/types/patient'
 import { SeedTestDataPanel } from '@/components/dev/SeedTestDataPanel'
+import { PatientListSearch } from '@/components/patients/PatientListSearch'
 import { forzarSincronizacionLocal } from '@/services/clinicalSyncService'
-
-function foldSearchText(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-}
-
-function compactDocument(value: string): string {
-  return foldSearchText(value).replace(/[.\s]/g, '')
-}
-
-function digitsOnly(value: string): string {
-  return value.replace(/\D/g, '')
-}
-
-function patientMatchesQuery(
-  patient: Pick<Patient, 'firstName' | 'lastName' | 'documentNumber'>,
-  query: string,
-): boolean {
-  const normalized = foldSearchText(query).trim()
-  if (!normalized) return true
-
-  const name = foldSearchText(`${patient.firstName} ${patient.lastName}`)
-  const document = compactDocument(patient.documentNumber)
-  const documentDigits = digitsOnly(patient.documentNumber)
-
-  return normalized.split(/\s+/).every((token) => {
-    if (name.includes(token)) return true
-    const compactToken = token.replace(/[.\s]/g, '')
-    if (compactToken && document.includes(compactToken)) return true
-    const tokenDigits = digitsOnly(token)
-    return tokenDigits.length > 0 && documentDigits.includes(tokenDigits)
-  })
-}
-
-function formatShownCount(shown: number, total: number): string {
-  const noun = total === 1 ? 'paciente' : 'pacientes'
-  return `Mostrando ${shown} de ${total} ${noun}`
-}
+import { patientMatchesQuery } from '@/utils/patientListSearch'
 
 export function PatientListPage() {
   const { can } = useAuth()
@@ -130,39 +91,14 @@ export function PatientListPage() {
         </div>
       ) : (
         <>
-          <div className="mb-4">
-            <label htmlFor="active-patient-search" className="sr-only">
-              Buscar pacientes activos
-            </label>
-            <div className="relative max-w-xl">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-                aria-hidden
-              />
-              <input
-                id="active-patient-search"
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Buscar por nombre, apellido o documento"
-                autoComplete="off"
-                className="input-field w-full py-2.5 pl-10 pr-10 [&::-webkit-search-cancel-button]:appearance-none"
-              />
-              {query ? (
-                <button
-                  type="button"
-                  onClick={() => setQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-dental-500"
-                  aria-label="Limpiar búsqueda"
-                >
-                  <X className="h-4 w-4" aria-hidden />
-                </button>
-              ) : null}
-            </div>
-            <p className="mt-2 text-xs text-slate-500" aria-live="polite">
-              {formatShownCount(filteredPatients.length, patients.length)}
-            </p>
-          </div>
+          <PatientListSearch
+            id="active-patient-search"
+            label="Buscar pacientes activos"
+            query={query}
+            onQueryChange={setQuery}
+            shown={filteredPatients.length}
+            total={patients.length}
+          />
 
           {filteredPatients.length === 0 ? (
             <div className="card text-center">
