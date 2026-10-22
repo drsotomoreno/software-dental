@@ -13,6 +13,9 @@ interface OrthodonticsBudgetSectionProps {
   onChange?: (orthodonticsBudget: OrthodonticsBudget) => void
   onRegisterPayment?: (key: OrthodonticsBudgetRowKey) => void
   isRegisterPaymentDisabled?: (key: OrthodonticsBudgetRowKey) => boolean
+  onRegisterFullPayment?: () => void
+  isFullPaymentDisabled?: boolean
+  fullPaymentAmount?: number
 }
 
 interface RowConfig {
@@ -145,6 +148,9 @@ export function OrthodonticsBudgetSection({
   onChange,
   onRegisterPayment,
   isRegisterPaymentDisabled,
+  onRegisterFullPayment,
+  isFullPaymentDisabled = false,
+  fullPaymentAmount = 0,
 }: OrthodonticsBudgetSectionProps) {
   const readOnly = disabled || isPaymentMode
   const orthoTotal = ROWS.reduce(
@@ -220,7 +226,33 @@ export function OrthodonticsBudgetSection({
         </table>
       </div>
 
-      <div className="mt-4 flex items-center justify-end border-t border-emerald-100 pt-3 dark:border-emerald-900/60">
+      <div
+        className={`mt-4 flex flex-wrap items-center gap-3 border-t border-emerald-100 pt-3 dark:border-emerald-900/60 ${
+          isPaymentMode && onRegisterFullPayment ? 'justify-between' : 'justify-end'
+        }`}
+      >
+        {isPaymentMode && onRegisterFullPayment ? (
+          <div className="flex flex-col items-start gap-1">
+            <button
+              type="button"
+              disabled={isFullPaymentDisabled || fullPaymentAmount <= 0}
+              title={
+                fullPaymentAmount <= 0
+                  ? 'El tratamiento ya está pagado'
+                  : 'Registrar el saldo del tratamiento en un solo pago de contado'
+              }
+              onClick={() => onRegisterFullPayment()}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <CreditCard className="h-3.5 w-3.5" />
+              Pagar de contado
+              {fullPaymentAmount > 0 ? ` · ${formatCurrency(fullPaymentAmount)}` : ''}
+            </button>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              Un solo pago por el saldo del tratamiento
+            </span>
+          </div>
+        ) : null}
         <div className="text-right">
           <span className="text-sm text-slate-600 dark:text-slate-300">Subtotal ortodoncia: </span>
           <span className="ml-1 text-lg font-extrabold text-slate-900 dark:text-slate-50">

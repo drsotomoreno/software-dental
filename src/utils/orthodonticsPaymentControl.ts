@@ -28,6 +28,7 @@ export const ORTHODONTICS_PAYMENT_TYPE_LABELS: Record<OrthodonticsPaymentType, s
   control: 'Control',
   retenedores: 'Retenedores',
   adicional: 'Pago adicional',
+  pago_unico: 'Pago único de contado',
 }
 
 export function buildOrthodonticsPaymentReason(
@@ -42,6 +43,8 @@ export function buildOrthodonticsPaymentReason(
       return `Control ortodoncia #${controlNumber ?? '?'}`
     case 'retenedores':
       return 'Retenedores — ortodoncia'
+    case 'pago_unico':
+      return 'Pago único de contado — ortodoncia'
     case 'adicional':
       return additionalDescription?.trim()
         ? `Pago adicional — ${additionalDescription.trim()}`
@@ -60,6 +63,8 @@ export function suggestOrthodonticsPaymentAmount(
       return Math.max(0, budget.controls.unitPrice)
     case 'retenedores':
       return lineSubtotal(budget.retainers)
+    case 'pago_unico':
+      return calcOrthodonticsBudgetTotal(budget)
     case 'adicional':
       return 0
   }

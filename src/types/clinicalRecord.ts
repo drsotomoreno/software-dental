@@ -241,7 +241,12 @@ export interface PaymentRecord {
   notes?: string
 }
 
-export type OrthodonticsPaymentType = 'cuota_inicial' | 'control' | 'retenedores' | 'adicional'
+export type OrthodonticsPaymentType =
+  | 'cuota_inicial'
+  | 'control'
+  | 'retenedores'
+  | 'adicional'
+  | 'pago_unico'
 
 /** Pago registrado en control de ortodoncia */
 export interface OrthodonticsPaymentRecord {

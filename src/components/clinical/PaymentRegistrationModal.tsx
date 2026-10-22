@@ -30,6 +30,8 @@ interface PaymentRegistrationModalProps {
   conceptLabel?: string
   controlOptions?: PaymentControlOption[]
   defaultControlNumber?: number
+  /** Si viene definido, el abono es ese valor y no se puede cambiar. */
+  fixedAmount?: number
   onClose: () => void
   onSubmit: (input: PaymentRegistrationInput) => void
 }
@@ -49,6 +51,7 @@ export function PaymentRegistrationModal({
   conceptLabel,
   controlOptions,
   defaultControlNumber,
+  fixedAmount,
   onClose,
   onSubmit,
 }: PaymentRegistrationModalProps) {
@@ -63,12 +66,12 @@ export function PaymentRegistrationModal({
 
   useEffect(() => {
     if (!open) return
-    setDraft('')
+    setDraft(fixedAmount != null ? String(Math.max(0, Math.round(fixedAmount))) : '')
     setDocumentKind('recibo_interno')
     setPaymentDate(todayIso())
     setControlNumber(initialControlNumber)
     setError(null)
-  }, [open, sessionKey, initialControlNumber])
+  }, [open, sessionKey, initialControlNumber, fixedAmount])
 
   useEffect(() => {
     if (!open) return
@@ -81,7 +84,7 @@ export function PaymentRegistrationModal({
 
   if (!open) return null
 
-  const amount = parseAbonoAmount(draft)
+  const amount = fixedAmount != null ? Math.max(0, Math.round(fixedAmount)) : parseAbonoAmount(draft)
   const amountReady = abonoFitsBalance(amount, remaining)
   const procedureAfter = amountReady ? remainingAfterAbono(remaining, amount) : remaining
   const treatmentAfter = amountReady
@@ -166,21 +169,24 @@ export function PaymentRegistrationModal({
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-slate-700">Valor del abono</span>
             <input
-              autoFocus
+              autoFocus={fixedAmount == null}
               inputMode="numeric"
+              readOnly={fixedAmount != null}
               disabled={busy}
               aria-label="Valor del abono"
               placeholder="Escriba el valor abonado"
-              className="input-field text-right tabular-nums"
-              value={draft}
+              className={`input-field text-right tabular-nums ${fixedAmount != null ? 'bg-slate-50 font-semibold' : ''}`}
+              value={fixedAmount != null ? formatCurrency(fixedAmount) : draft}
               onChange={(event) => {
+                if (fixedAmount != null) return
                 setDraft(event.target.value.replace(/[^\d]/g, ''))
                 setError(null)
               }}
             />
             <span className="mt-1 block text-xs text-slate-500">
-              Escriba el valor que el paciente abona en esta atención.
-              {amount > 0 ? ` ${formatCurrency(amount)}.` : ''}
+              {fixedAmount != null
+                ? 'Pago único de contado por el saldo del tratamiento.'
+                : `Escriba el valor que el paciente abona en esta atención.${amount > 0 ? ` ${formatCurrency(amount)}.` : ''}`}
             </span>
           </label>
 
