@@ -72,17 +72,25 @@ export {
 } from './paymentControl'
 export {
   ORTHODONTICS_PAYMENT_TYPE_LABELS,
+  ORTHODONTICS_CONCEPT_LABELS,
   buildOrthodonticsPaymentReason,
   suggestOrthodonticsPaymentAmount,
   getOrthodonticsControlNumbers,
   getPaidControlNumbers,
+  suggestControlNumber,
   hasInitialInstallmentPaid,
   calcOrthodonticsPaymentsTotal,
   calcOrthodonticsInvoicedTotal,
   createEmptyOrthodonticsPayment,
   normalizeOrthodonticsPayment,
   orthodonticsPaymentBalance,
+  conceptForOrthodonticsProcedure,
+  paymentTypeForConcept,
+  paymentsForConcept,
+  paidAmountForConcept,
+  conceptRemaining,
 } from './orthodonticsPaymentControl'
+export type { OrthodonticsPaymentConcept } from './orthodonticsPaymentControl'
 export {
   normalizeCie10ForRips,
   normalizeNit,

@@ -24,7 +24,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useCatalogSearch } from '@/hooks/useCatalogSearch'
 import { useTariffSync } from '@/modules/tariff/useTariffSync'
 import { useTariffStore } from '@/store/useTariffStore'
-import { formatCurrency, generateId } from '@/utils'
+import { calcOrthodonticsBudgetTotal, formatCurrency, generateId } from '@/utils'
 import { formatCupsCodeDotted } from '@/services/catalogService'
 import { getDefaultQuantityForCups } from '@/utils/cupsBillingRules'
 import { searchGeneralDentistryCups } from '@/utils/cupsGeneralDentistry'
@@ -55,6 +55,7 @@ import {
 import {
   attachAutoInvoiceToPayment,
   clinicalPaymentsNeedAutoInvoices,
+  ensureOrthodonticsPaymentsHaveAutoInvoices,
   ensurePaymentsHaveAutoInvoices,
 } from '@/services/paymentInvoiceService'
 import { emitChargeReceipt } from '@/services/chargeEmissionService'
@@ -77,7 +78,21 @@ import {
   remainingAfterAbono,
   resolvePaymentDocumentKind,
 } from '@/utils/paymentAbonos'
-import { OrthodonticsPaymentControlForm } from './OrthodonticsPaymentControlForm'
+import {
+  ORTHODONTICS_CONCEPT_LABELS,
+  ORTHODONTICS_PAYMENT_TYPE_LABELS,
+  buildOrthodonticsPaymentReason,
+  calcOrthodonticsPaymentsTotal,
+  conceptForOrthodonticsProcedure,
+  conceptRemaining,
+  paidAmountForConcept,
+  paymentsForConcept,
+  getOrthodonticsControlNumbers,
+  getPaidControlNumbers,
+  orthodonticsPaymentBalance,
+  paymentTypeForConcept,
+  suggestControlNumber,
+} from '@/utils/orthodonticsPaymentControl'
 import { PaymentAgreementFields } from './PaymentAgreementFields'
 import { PaymentPlanProcedureField } from './PaymentPlanProcedureField'
 import {
@@ -180,6 +195,95 @@ function FieldCaption({ children }: { children: string }) {
   )
 }
 
+function OrthodonticsAbonoHistory({
+  payments,
+  disabled,
+  onOpenInvoice,
+  onCreditNote,
+  onDelete,
+}: {
+  payments: OrthodonticsPaymentRecord[]
+  disabled?: boolean
+  onOpenInvoice: (payment: OrthodonticsPaymentRecord) => void
+  onCreditNote: (payment: OrthodonticsPaymentRecord, invoice: PaymentInvoice) => void
+  onDelete: (paymentId: string) => void
+}) {
+  if (payments.length === 0) return null
+
+  return (
+    <details open className="mt-3 rounded-lg border border-slate-200 bg-white">
+      <summary className="cursor-pointer list-none px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 [&::-webkit-details-marker]:hidden">
+        Historial de abonos ({payments.length})
+      </summary>
+      <ul className="space-y-2 border-t border-slate-100 px-3 py-3">
+        {payments.map((payment) => {
+          const invoice = [...payment.invoices]
+            .reverse()
+            .find((item) => item.invoiceNumber || item.amount > 0)
+          const documentKind = resolvePaymentDocumentKind(payment)
+          const locked = payment.invoices.some((item) => isPaymentInvoiceImmutable(item))
+          const canCreditNote = Boolean(
+            invoice &&
+              isPaymentInvoiceImmutable(invoice) &&
+              invoice.status !== 'voided_by_credit_note',
+          )
+          const conceptLabel =
+            payment.paymentType === 'control' && payment.controlNumber
+              ? `Control #${payment.controlNumber}`
+              : ORTHODONTICS_PAYMENT_TYPE_LABELS[payment.paymentType]
+
+          return (
+            <li
+              key={payment.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs"
+            >
+              <div className="min-w-0">
+                <p className="font-medium text-slate-800">{formatAbonoDate(payment.paymentDate)}</p>
+                <p className="text-slate-500">
+                  {conceptLabel} · {PAYMENT_METHOD_LABELS[payment.paymentMethod]}
+                </p>
+                {invoice && paymentInvoiceStatusLabel(invoice) ? (
+                  <p className="text-rose-700">{paymentInvoiceStatusLabel(invoice)}</p>
+                ) : null}
+              </div>
+              <p className="font-semibold tabular-nums text-slate-900">{formatCurrency(payment.amount)}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                {invoice ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenInvoice(payment)}
+                    className="inline-flex h-8 items-center rounded-lg border border-dental-200 bg-white px-2.5 text-[11px] font-semibold text-dental-800 hover:bg-dental-50"
+                  >
+                    {paymentReceiptActionLabel(documentKind)}
+                  </button>
+                ) : null}
+                {canCreditNote && invoice ? (
+                  <button
+                    type="button"
+                    onClick={() => onCreditNote(payment, invoice)}
+                    className="h-8 rounded-lg border border-rose-200 bg-white px-2 text-[11px] font-medium text-rose-800 hover:bg-rose-50"
+                  >
+                    Anular
+                  </button>
+                ) : null}
+                {!disabled && !locked ? (
+                  <button
+                    type="button"
+                    onClick={() => onDelete(payment.id)}
+                    className="text-[11px] text-red-500 hover:text-red-700"
+                  >
+                    Eliminar
+                  </button>
+                ) : null}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </details>
+  )
+}
+
 export function PaymentControlForm({
   paymentControlLines,
   paymentPlan = [],
@@ -214,6 +318,7 @@ export function PaymentControlForm({
   const cieCatalog = useCatalogSearch('cie10', cieQuery, 20)
   const [invoiceView, setInvoiceView] = useState<InvoiceViewMode | null>(null)
   const [paymentDraftLineId, setPaymentDraftLineId] = useState<string | null>(null)
+  const [orthoDraftId, setOrthoDraftId] = useState<string | null>(null)
   const [paymentBusy, setPaymentBusy] = useState(false)
   const [paymentNotice, setPaymentNotice] = useState<string | null>(null)
   const [creditNoteTarget, setCreditNoteTarget] = useState<{
@@ -228,6 +333,13 @@ export function PaymentControlForm({
     if (!clinicalPaymentsNeedAutoInvoices({ paymentControl })) return
     onChange(ensurePaymentsHaveAutoInvoices(paymentControl, user?.id))
   }, [paymentControl, user?.id, onChange])
+
+  useEffect(() => {
+    if (!clinicalPaymentsNeedAutoInvoices({ orthodonticsPaymentControl })) return
+    onOrthodonticsPaymentControlChange(
+      ensureOrthodonticsPaymentsHaveAutoInvoices(orthodonticsPaymentControl, user?.id),
+    )
+  }, [orthodonticsPaymentControl, user?.id, onOrthodonticsPaymentControlChange])
 
   const cieOptions = useMemo(() => {
     const map = new Map<string, CieOption>()
@@ -276,6 +388,33 @@ export function PaymentControlForm({
   const unlinkedPayments = paymentControl.filter((payment) => !payment.paymentControlLineId)
   const pendingAgreements = supplementalPlanItems(paymentControlLines, paymentPlan)
   const orthoAgreements = orthodonticsPlanItems(paymentPlan)
+  const orthoDraft = orthoAgreements.find((item) => item.id === orthoDraftId) ?? null
+  const orthoConcept = orthoDraft ? conceptForOrthodonticsProcedure(orthoDraft.procedure) : null
+  const orthoDraftRemaining =
+    orthoDraft && orthoConcept
+      ? conceptRemaining(orthoDraft.totalAmount, orthodonticsPaymentControl, orthoConcept)
+      : 0
+  const orthoBudgetTotal = orthodonticsBudget?.active
+    ? calcOrthodonticsBudgetTotal(orthodonticsBudget)
+    : orthoAgreements.reduce((sum, item) => sum + (item.totalAmount || 0), 0)
+  const orthoPaidTotal = calcOrthodonticsPaymentsTotal(orthodonticsPaymentControl)
+  const orthoGlobalBalance = orthodonticsBudget?.active
+    ? orthodonticsPaymentBalance(orthodonticsBudget, orthodonticsPaymentControl)
+    : Math.max(0, orthoBudgetTotal - orthoPaidTotal)
+  const orthoControlNumbers = orthodonticsBudget
+    ? getOrthodonticsControlNumbers(orthodonticsBudget)
+    : []
+  const orthoPaidControls = getPaidControlNumbers(orthodonticsPaymentControl)
+  const orthoControlOptions = orthoControlNumbers.map((num) => ({
+    value: num,
+    label: `Control #${num}${orthoPaidControls.includes(num) ? ' (ya pagado)' : ''}`,
+  }))
+  const orthoDefaultControl = orthodonticsBudget
+    ? suggestControlNumber(orthodonticsBudget, orthodonticsPaymentControl)
+    : orthoControlOptions[0]?.value
+  const adicionalPayments = orthodonticsPaymentControl.filter(
+    (payment) => payment.paymentType === 'adicional',
+  )
 
   const updateLine = (id: string, patch: Partial<PaymentControlLine>) => {
     const nextLines = paymentControlLines.map((line) => (line.id === id ? { ...line, ...patch } : line))
@@ -402,6 +541,102 @@ export function PaymentControlForm({
     } finally {
       setPaymentBusy(false)
     }
+  }
+
+  const registerOrthodonticsPayment = async (
+    item: PaymentPlanItem,
+    input: PaymentRegistrationInput,
+  ) => {
+    const concept = conceptForOrthodonticsProcedure(item.procedure)
+    if (!concept || disabled || paymentBusy) return
+    const paymentType = paymentTypeForConcept(concept)
+    const remaining = conceptRemaining(item.totalAmount, orthodonticsPaymentControl, concept)
+    const amount = Math.round(input.amount)
+    if (amount <= 0 || amount > remaining) return
+
+    setPaymentBusy(true)
+    setPaymentNotice(null)
+    try {
+      const controlNumber =
+        paymentType === 'control'
+          ? input.controlNumber ??
+            (orthodonticsBudget
+              ? suggestControlNumber(orthodonticsBudget, orthodonticsPaymentControl)
+              : 1)
+          : undefined
+      const paymentReason = buildOrthodonticsPaymentReason(paymentType, controlNumber)
+      const conceptBalance = remainingAfterAbono(remaining, amount)
+      const requestedKind: PaymentDocumentKind = input.documentKind
+      const draft: OrthodonticsPaymentRecord = {
+        id: generateId(),
+        paymentDate: input.paymentDate,
+        amount,
+        paymentMethod: item.paymentMethod ?? 'contado',
+        paymentType,
+        controlNumber,
+        paymentReason,
+        invoices: [],
+      }
+      const withInvoice = attachAutoInvoiceToPayment(draft, user?.id)
+      const invoice = withInvoice.invoices[withInvoice.invoices.length - 1]
+      if (!invoice) {
+        setPaymentNotice('No se pudo preparar el comprobante.')
+        return
+      }
+      const result = await emitChargeReceipt({
+        invoice,
+        patientName,
+        patientDocument,
+        paymentReason,
+        amount,
+        forceCashReceipt: requestedKind === 'recibo_interno',
+      })
+      if (requestedKind === 'factura' && result.invoice.emissionMode !== 'provider') {
+        setPaymentNotice(
+          result.depleted
+            ? `${result.message} El abono no se registró.`
+            : 'No se pudo emitir la factura electrónica (DIAN). Elija Recibo Interno o revise la modalidad de facturación. El abono no se registró.',
+        )
+        return
+      }
+      const payment: OrthodonticsPaymentRecord = {
+        ...withInvoice,
+        invoices: withInvoice.invoices.map((entry) =>
+          entry.id === invoice.id ? { ...result.invoice, autoGenerated: true } : entry,
+        ),
+      }
+      onOrthodonticsPaymentControlChange([...orthodonticsPaymentControl, payment])
+      setOrthoDraftId(null)
+      const conceptLabel = ORTHODONTICS_CONCEPT_LABELS[concept]
+      setPaymentNotice(
+        conceptBalance === 0
+          ? `Abono de ${formatCurrency(amount)} registrado en ${conceptLabel}. El concepto quedó en Pagado.`
+          : `Abono de ${formatCurrency(amount)} registrado en ${conceptLabel}. Saldo: ${formatCurrency(conceptBalance)}.`,
+      )
+    } catch (error) {
+      setPaymentNotice(error instanceof Error ? error.message : 'No se pudo registrar el pago.')
+    } finally {
+      setPaymentBusy(false)
+    }
+  }
+
+  const removeOrthodonticsPayment = (paymentId: string) => {
+    onOrthodonticsPaymentControlChange(
+      orthodonticsPaymentControl.filter((payment) => payment.id !== paymentId),
+    )
+  }
+
+  const openOrthodonticsInvoice = (payment: OrthodonticsPaymentRecord) => {
+    const invoice = [...payment.invoices].reverse().find((item) => item.invoiceNumber || item.amount > 0)
+    if (!invoice) return
+    setInvoiceView({
+      kind: 'payment',
+      invoice,
+      patientName,
+      patientDocument,
+      paymentReason: payment.paymentReason,
+      paymentMethodLabel: PAYMENT_METHOD_LABELS[payment.paymentMethod],
+    })
   }
 
   const applyVoidedPaymentInvoice = (
@@ -757,6 +992,7 @@ export function PaymentControlForm({
                         disabled={disabled || paymentBusy}
                         onClick={() => {
                           setPaymentNotice(null)
+                          setOrthoDraftId(null)
                           setPaymentDraftLineId(line.id)
                         }}
                         className="btn-primary h-8 px-3 text-xs"
@@ -986,52 +1222,125 @@ export function PaymentControlForm({
         <div className="mt-6 space-y-3">
           <h4 className="text-sm font-semibold text-dental-800">Acuerdo de pago — ortodoncia</h4>
           <p className="text-xs text-slate-500">
-            Forma de pago acordada para la cuota inicial, los controles y los retenedores. Los abonos
-            y sus facturas se registran en el bloque de ortodoncia.
+            Forma de pago, abonos y saldo de la cuota inicial, los controles y los retenedores. Cada
+            abono queda en el concepto de la tarjeta desde la que se registra.
           </p>
-          {orthoAgreements.map((item) => (
-            <article key={item.id} className="rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm">
-              <header className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-3">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-dental-700">
-                    Procedimiento de ortodoncia
-                  </p>
-                  <h4 className="text-sm font-semibold text-slate-900">{item.procedure}</h4>
-                </div>
-                <span className="text-sm font-semibold text-dental-700">{formatCurrency(item.totalAmount)}</span>
-              </header>
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Acuerdo de pago
-                </p>
-                <PaymentAgreementFields
-                  item={item}
-                  disabled={disabled}
-                  onChange={(patch) =>
-                    onPaymentPlanChange(
-                      paymentPlan.map((row) => (row.id === item.id ? { ...row, ...patch } : row)),
-                    )
-                  }
-                />
+          {orthodonticsBudget?.active && (
+            <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-3">
+              <div>
+                <span className="text-xs text-slate-500">Presupuesto ortodoncia</span>
+                <p className="font-semibold text-slate-800">{formatCurrency(orthoBudgetTotal)}</p>
               </div>
-            </article>
-          ))}
-        </div>
-      )}
+              <div>
+                <span className="text-xs text-slate-500">Pagado ortodoncia</span>
+                <p className="font-semibold text-green-700">{formatCurrency(orthoPaidTotal)}</p>
+              </div>
+              <div>
+                <span className="text-xs text-slate-500">Saldo ortodoncia</span>
+                <p className="font-semibold text-amber-700">{formatCurrency(orthoGlobalBalance)}</p>
+              </div>
+            </div>
+          )}
+          {orthoAgreements.map((item) => {
+            const concept = conceptForOrthodonticsProcedure(item.procedure)
+            const conceptPayments = concept
+              ? paymentsForConcept(orthodonticsPaymentControl, concept)
+              : []
+            const conceptPaid = concept
+              ? paidAmountForConcept(orthodonticsPaymentControl, concept)
+              : 0
+            const conceptBalance = concept
+              ? conceptRemaining(item.totalAmount, orthodonticsPaymentControl, concept)
+              : 0
 
-      {orthodonticsBudget?.active && (
-        <OrthodonticsPaymentControlForm
-          orthodonticsPaymentControl={orthodonticsPaymentControl}
-          orthodonticsBudget={orthodonticsBudget}
-          disabled={disabled}
-          patientName={patientName}
-          patientDocument={patientDocument}
-          onViewInvoice={setInvoiceView}
-          onRequestCreditNote={(paymentId, invoice) =>
-            setCreditNoteTarget({ paymentId, invoice, source: 'orthodontics' })
-          }
-          onChange={onOrthodonticsPaymentControlChange}
-        />
+            return (
+              <article
+                key={item.id}
+                data-ortho-concept={concept ?? undefined}
+                className="rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm"
+              >
+                <header className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-3">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-dental-700">
+                      Procedimiento de ortodoncia
+                    </p>
+                    <h4 className="text-sm font-semibold text-slate-900">{item.procedure}</h4>
+                    {concept ? (
+                      <p className="mt-1 text-xs text-slate-600">
+                        Pagado:{' '}
+                        <span className="font-semibold text-green-700">{formatCurrency(conceptPaid)}</span>
+                        {' / '}
+                        Saldo:{' '}
+                        <span className="font-semibold text-amber-700">{formatCurrency(conceptBalance)}</span>
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className="text-sm font-semibold text-dental-700">
+                      {formatCurrency(item.totalAmount)}
+                    </span>
+                    {concept && !disabled ? (
+                      <button
+                        type="button"
+                        disabled={paymentBusy || conceptBalance <= 0}
+                        onClick={() => {
+                          setPaymentNotice(null)
+                          setPaymentDraftLineId(null)
+                          setOrthoDraftId(item.id)
+                        }}
+                        className="btn-primary h-8 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        + Registrar Pago
+                      </button>
+                    ) : null}
+                  </div>
+                </header>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Acuerdo de pago
+                  </p>
+                  <PaymentAgreementFields
+                    item={item}
+                    disabled={disabled}
+                    onChange={(patch) =>
+                      onPaymentPlanChange(
+                        paymentPlan.map((row) => (row.id === item.id ? { ...row, ...patch } : row)),
+                      )
+                    }
+                  />
+                </div>
+                {concept ? (
+                  <OrthodonticsAbonoHistory
+                    payments={conceptPayments}
+                    disabled={disabled}
+                    onOpenInvoice={openOrthodonticsInvoice}
+                    onCreditNote={(payment, invoice) =>
+                      setCreditNoteTarget({ paymentId: payment.id, invoice, source: 'orthodontics' })
+                    }
+                    onDelete={removeOrthodonticsPayment}
+                  />
+                ) : null}
+              </article>
+            )
+          })}
+          {adicionalPayments.length > 0 && (
+            <article className="rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm">
+              <h4 className="text-sm font-semibold text-slate-900">Pagos adicionales ya registrados</h4>
+              <p className="mt-1 text-xs text-slate-500">
+                Estos abonos siguen descontando el saldo global de ortodoncia.
+              </p>
+              <OrthodonticsAbonoHistory
+                payments={adicionalPayments}
+                disabled={disabled}
+                onOpenInvoice={openOrthodonticsInvoice}
+                onCreditNote={(payment, invoice) =>
+                  setCreditNoteTarget({ paymentId: payment.id, invoice, source: 'orthodontics' })
+                }
+                onDelete={removeOrthodonticsPayment}
+              />
+            </article>
+          )}
+        </div>
       )}
 
       {paymentNotice && <p className="mt-3 text-sm text-dental-800">{paymentNotice}</p>}
@@ -1052,6 +1361,25 @@ export function PaymentControlForm({
         onSubmit={(input) => {
           if (!draftLine) return
           void registerPayment(draftLine, input)
+        }}
+      />
+      <PaymentRegistrationModal
+        open={orthoDraft != null && orthoConcept != null && orthoDraftRemaining > 0}
+        sessionKey={orthoDraft ? `${orthoDraft.id}:${orthoConcept}` : ''}
+        procedureTitle={orthoDraft?.procedure ?? 'Ortodoncia'}
+        conceptLabel={orthoConcept ? ORTHODONTICS_CONCEPT_LABELS[orthoConcept] : undefined}
+        controlOptions={orthoConcept === 'controles' ? orthoControlOptions : undefined}
+        defaultControlNumber={orthoConcept === 'controles' ? orthoDefaultControl : undefined}
+        remaining={orthoDraftRemaining}
+        treatmentBalance={orthoGlobalBalance}
+        busy={paymentBusy}
+        notice={paymentNotice}
+        onClose={() => {
+          if (!paymentBusy) setOrthoDraftId(null)
+        }}
+        onSubmit={(input) => {
+          if (!orthoDraft) return
+          void registerOrthodonticsPayment(orthoDraft, input)
         }}
       />
       <CreditNoteModal

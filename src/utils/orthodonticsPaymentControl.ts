@@ -6,6 +6,23 @@ import type {
 import { calcOrthodonticsBudgetTotal, lineSubtotal } from './budget'
 import { attachAutoInvoiceToPayment } from '@/services/paymentInvoiceService'
 import { generateId } from './crypto'
+import { calcOrthodonticsPaymentsTotal } from './orthodonticsPaymentConcepts'
+
+export type { OrthodonticsPaymentConcept } from './orthodonticsPaymentConcepts'
+export {
+  ORTHODONTICS_CONCEPT_LABELS,
+  conceptForOrthodonticsProcedure,
+  paymentTypeForConcept,
+  paymentsForConcept,
+  paidAmountForConcept,
+  conceptRemaining,
+  getOrthodonticsControlNumbers,
+  getPaidControlNumbers,
+  suggestControlNumber,
+  hasInitialInstallmentPaid,
+  calcOrthodonticsPaymentsTotal,
+} from './orthodonticsPaymentConcepts'
+
 export const ORTHODONTICS_PAYMENT_TYPE_LABELS: Record<OrthodonticsPaymentType, string> = {
   cuota_inicial: 'Cuota inicial',
   control: 'Control',
@@ -46,27 +63,6 @@ export function suggestOrthodonticsPaymentAmount(
     case 'adicional':
       return 0
   }
-}
-
-export function getOrthodonticsControlNumbers(
-  budget: OrthodonticsBudget,
-): number[] {
-  const count = Math.max(0, Math.floor(budget.controls.quantity))
-  return Array.from({ length: count }, (_, i) => i + 1)
-}
-
-export function getPaidControlNumbers(payments: OrthodonticsPaymentRecord[]): number[] {
-  return payments
-    .filter((p) => p.paymentType === 'control' && p.controlNumber)
-    .map((p) => p.controlNumber!)
-}
-
-export function hasInitialInstallmentPaid(payments: OrthodonticsPaymentRecord[]): boolean {
-  return payments.some((p) => p.paymentType === 'cuota_inicial')
-}
-
-export function calcOrthodonticsPaymentsTotal(payments: OrthodonticsPaymentRecord[]): number {
-  return payments.reduce((sum, p) => sum + (p.amount || 0), 0)
 }
 
 export function calcOrthodonticsInvoicedTotal(payments: OrthodonticsPaymentRecord[]): number {
