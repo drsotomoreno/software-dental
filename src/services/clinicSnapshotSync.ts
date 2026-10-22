@@ -1,6 +1,7 @@
 import { db } from '@/db/database'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import {
+  flushPendingClinicalDraft,
   getCurrentClinicId,
   withRemotePullLock,
 } from '@/services/clinicalSyncState'
@@ -19,6 +20,7 @@ import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import type { SyncQueueAttachment } from '@/types/syncQueue'
 import { getDesktopBridge } from '@/types/desktopBridge'
 import { arrayBufferToBase64, base64ToArrayBuffer } from '@/utils/base64Binary'
+import { isRemoteDraftNewer } from '@/utils/clinicalDraftMerge'
 import { generateId } from '@/utils/crypto'
 import {
   hasLocalDiskPath,
@@ -223,10 +225,13 @@ async function mergeDrafts(records: ClinicalSyncRecord[]): Promise<boolean> {
     const payload = payloadOf(remote)
     const patientId = await resolveLocalPatientId(payload)
     if (!patientId) continue
+    const remoteUpdatedAt = remote.updatedAt || String(payload.updatedAt || '')
+    const local = await db.patientClinicalDrafts.get(patientId)
+    if (local && !isRemoteDraftNewer(local.updatedAt, remoteUpdatedAt)) continue
     const next: PatientClinicalDraft = {
       ...(payload as unknown as PatientClinicalDraft),
       patientId,
-      updatedAt: remote.updatedAt || String(payload.updatedAt || new Date().toISOString()),
+      updatedAt: remoteUpdatedAt || new Date().toISOString(),
     }
     await db.patientClinicalDrafts.put(next)
     changed = true
@@ -454,6 +459,7 @@ async function blobBase64ForAid(aidId: string): Promise<string> {
 }
 
 export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean> {
+  await flushPendingClinicalDraft()
   const [clinicalRecords, odontograms, diagnosticAids, drafts] = await Promise.all([
     db.clinicalRecords.toArray(),
     db.odontograms.toArray(),

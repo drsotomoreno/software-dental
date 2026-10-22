@@ -1,4 +1,8 @@
 import { db } from '@/db/database'
+import {
+  isApplyingRemotePull,
+  notifyClinicalRecordDirty,
+} from '@/services/clinicalSyncState'
 import type { EvolutionNote } from '@/types/evolutionNote'
 import { isEvolutionNoteImmutable } from '@/types/evolutionNote'
 import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
@@ -43,6 +47,11 @@ function mergeDraftEvolutionNotes(
   return preserveImmutableEvolutionNotes(merged, existing)
 }
 
+function notifyDraftChanged(): void {
+  if (isApplyingRemotePull()) return
+  notifyClinicalRecordDirty()
+}
+
 export async function getPatientClinicalDraft(
   patientRouteId: string,
 ): Promise<PatientClinicalDraft | undefined> {
@@ -66,6 +75,7 @@ export async function savePatientValuationDraft(
     odontogramDraft: existing?.odontogramDraft ?? null,
     updatedAt: now,
   })
+  notifyDraftChanged()
 }
 
 export async function savePatientClinicalDraft(
@@ -96,7 +106,9 @@ export async function savePatientClinicalDraft(
     odontogramDraft: odontogramDraft ?? existing?.odontogramDraft ?? null,
     updatedAt: now,
   })
+  notifyDraftChanged()
 }
+
 export async function appendPatientEvolutionNote(
   patientRouteId: string,
   note: EvolutionNote,
@@ -118,6 +130,7 @@ export async function appendPatientEvolutionNote(
     odontogramDraft: existing?.odontogramDraft ?? null,
     updatedAt: now,
   })
+  notifyDraftChanged()
 }
 
 export async function clearPatientClinicalDraft(patientRouteId: string): Promise<void> {

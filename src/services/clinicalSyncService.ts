@@ -1,6 +1,7 @@
 import { db } from '@/db/database'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import {
+  flushPendingClinicalDraft,
   getCurrentClinicId,
   setClinicalSyncDirtyListener,
   withRemotePullLock,
@@ -342,6 +343,7 @@ async function performClinicalSyncCycle(): Promise<boolean> {
   if (!auth?.token || !clinicId) return false
 
   try {
+    await flushPendingClinicalDraft().catch(() => undefined)
     await pushAllLocal(clinicId).catch(() => false)
     await pushClinicSnapshotLocal(clinicId).catch(() => false)
     const changed = await pullAndMerge(false).catch(() => false)

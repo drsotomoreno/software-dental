@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { db } from '@/db/database'
 import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
 import type { OdontogramData } from '@/types/odontogram'
+import { registerClinicalDraftFlush } from '@/services/clinicalSyncState'
 import { savePatientClinicalDraft } from '@/utils/patientClinicalDraft'
 import { toPatientForeignKey } from '@/utils/patientId'
 import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceService'
@@ -39,6 +40,7 @@ export function useClinicalAutoSave(options: {
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingRef = useRef(false)
   const skipNextSaveRef = useRef(true)
   const onOdontogramPersistedRef = useRef(onOdontogramPersisted)
   const clinicalDataRef = useRef(clinicalData)
@@ -53,17 +55,18 @@ export function useClinicalAutoSave(options: {
 
   const flushAutoSave = useRef(async () => {
     if (!enabledRef.current || !patientRouteIdRef.current || !clinicalDataRef.current) return
+    const patientRouteId = patientRouteIdRef.current
+    const clinicalData = normalizeClinicalRecordPayments(clinicalDataRef.current)
+    const odontogramToSave = odontogramRef.current
     try {
-      let odontogramToSave = odontogramRef.current
-      if (odontogramToSave) {
-        odontogramToSave = await persistOdontogram(patientRouteIdRef.current, odontogramToSave)
-        onOdontogramPersistedRef.current?.(odontogramToSave)
-      }
-      await savePatientClinicalDraft(
-        patientRouteIdRef.current,
-        normalizeClinicalRecordPayments(clinicalDataRef.current),
-        odontogramToSave,
-      )
+      await savePatientClinicalDraft(patientRouteId, clinicalData, odontogramToSave)
+    } catch {
+      // El borrador clínico se intenta primero: un fallo del odontograma no lo borra.
+    }
+    if (!odontogramToSave) return
+    try {
+      const persisted = await persistOdontogram(patientRouteId, odontogramToSave)
+      onOdontogramPersistedRef.current?.(persisted)
     } catch {
       // Autoguardado silencioso.
     }
@@ -71,6 +74,9 @@ export function useClinicalAutoSave(options: {
 
   useEffect(() => {
     skipNextSaveRef.current = true
+    pendingRef.current = false
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = null
     setLastSavedAt(null)
   }, [patientRouteId])
 
@@ -83,8 +89,11 @@ export function useClinicalAutoSave(options: {
     }
 
     if (timerRef.current) clearTimeout(timerRef.current)
+    pendingRef.current = true
 
     timerRef.current = setTimeout(() => {
+      timerRef.current = null
+      pendingRef.current = false
       setSaving(true)
       void flushAutoSave
         .current()
@@ -95,19 +104,43 @@ export function useClinicalAutoSave(options: {
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
+      timerRef.current = null
     }
   }, [patientRouteId, clinicalData, odontogram, enabled])
 
   useEffect(() => {
-    const flush = () => {
+    const takePending = () => {
+      if (!pendingRef.current && !timerRef.current) return false
       if (timerRef.current) clearTimeout(timerRef.current)
+      timerRef.current = null
+      pendingRef.current = false
+      return true
+    }
+
+    const flushPending = () => {
+      if (!takePending()) return
       void flushAutoSave.current()
     }
 
-    window.addEventListener('beforeunload', flush)
+    const flushPendingAndWait = async () => {
+      if (!takePending()) return
+      await flushAutoSave.current()
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flushPending()
+    }
+
+    registerClinicalDraftFlush(flushPendingAndWait)
+    window.addEventListener('beforeunload', flushPending)
+    window.addEventListener('pagehide', flushPending)
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
-      window.removeEventListener('beforeunload', flush)
-      flush()
+      registerClinicalDraftFlush(null)
+      window.removeEventListener('beforeunload', flushPending)
+      window.removeEventListener('pagehide', flushPending)
+      document.removeEventListener('visibilitychange', onVisibility)
+      flushPending()
     }
   }, [])
 

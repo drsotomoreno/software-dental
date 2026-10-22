@@ -47,3 +47,15 @@ export function setClinicalSyncDirtyListener(listener: (() => void) | null): voi
 export function notifyClinicalRecordDirty(): void {
   dirtyListener?.()
 }
+
+let flushPendingClinicalDraftImpl: (() => Promise<void>) | null = null
+
+/** El autoguardado registra aquí el volcado del borrador todavía no escrito. */
+export function registerClinicalDraftFlush(fn: (() => Promise<void>) | null): void {
+  flushPendingClinicalDraftImpl = fn
+}
+
+/** Escribe el borrador pendiente antes de leer IndexedDB para subirlo. */
+export async function flushPendingClinicalDraft(): Promise<void> {
+  await flushPendingClinicalDraftImpl?.()
+}
