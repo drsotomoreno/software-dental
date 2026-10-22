@@ -132,7 +132,7 @@ export default function OrthodonticCalculator({
           />
           <NumberField
             id="ortho-budget-retainer"
-            label="Precio del retenedor"
+            label="Precio de Los Retenedores"
             value={budget.values.retainerPrice}
             disabled={disabled}
             onChange={(retainerPrice) => updateStandardField('retainerPrice', retainerPrice)}
@@ -188,7 +188,7 @@ export default function OrthodonticCalculator({
           <div className="max-w-sm">
             <NumberField
               id="ortho-budget-global-retainer"
-              label="Precio del retenedor (global)"
+              label="Precio de Los Retenedores (global)"
               value={budget.values.retainerPrice}
               disabled={disabled}
               onChange={updateRetainerPrice}

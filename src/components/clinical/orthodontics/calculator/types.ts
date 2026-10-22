@@ -222,7 +222,7 @@ export function formatOrthodonticBudgetSummary(state: OrthodonticBudgetState | n
     return [
       `Inicial: ${formatCurrency(initialPayment)}`,
       `Cuotas (${monthlyControlsCount} × ${formatCurrency(pricePerControl)}): ${formatCurrency(monthlyControlsCount * pricePerControl)}`,
-      `Retenedor: ${formatCurrency(retainerPrice)}`,
+      `Retenedores: ${formatCurrency(retainerPrice)}`,
       `Total: ${formatCurrency(total)}`,
     ].join(' · ')
   }
@@ -235,7 +235,7 @@ export function formatOrthodonticBudgetSummary(state: OrthodonticBudgetState | n
 
   return [
     ...phaseLines,
-    `Retenedor: ${formatCurrency(state.values.retainerPrice)}`,
+    `Retenedores: ${formatCurrency(state.values.retainerPrice)}`,
     `Total: ${formatCurrency(total)}`,
   ].join(' · ')
 }
