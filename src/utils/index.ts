@@ -64,7 +64,9 @@ export {
   lineSubtotal,
   orthodonticsPaymentPlanItems,
   dentalImplantsPaymentPlanItems,
+  ORTHODONTICS_BUDGET_PROCEDURES,
 } from './budget'
+export type { OrthodonticsBudgetRowKey } from './budget'
 export {
   calcTotalPaid,
   calcTotalInvoiced,

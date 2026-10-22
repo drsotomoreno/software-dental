@@ -1,77 +1,73 @@
+import { CreditCard } from 'lucide-react'
 import type { OrthodonticsBudget, OrthodonticsBudgetLine } from '@/types/clinicalRecord'
-import { calcOrthodonticsBudgetTotal, formatCurrency, lineSubtotal } from '@/utils'
+import { formatCurrency, lineSubtotal } from '@/utils'
+import type { OrthodonticsBudgetRowKey } from '@/utils/budget'
 import { VoiceDictationButton } from '@/components/voice'
 import { parseDictatedInteger, parseDictatedNumber } from '@/utils/voiceDictation'
 
 interface OrthodonticsBudgetSectionProps {
   orthodonticsBudget: OrthodonticsBudget
   disabled?: boolean
-  onChange: (orthodonticsBudget: OrthodonticsBudget) => void
+  /** false: sección 8, edición del presupuesto. true: sección 9, registrar pago. */
+  isPaymentMode?: boolean
+  onChange?: (orthodonticsBudget: OrthodonticsBudget) => void
+  onRegisterPayment?: (key: OrthodonticsBudgetRowKey) => void
+  isRegisterPaymentDisabled?: (key: OrthodonticsBudgetRowKey) => boolean
 }
 
 interface RowConfig {
-  key: 'initialInstallment' | 'controls' | 'retainers'
+  key: OrthodonticsBudgetRowKey
   label: string
-  quantityLabel: string
-  unitLabel: string
   quantityMin: number
-  quantityStep?: number
-  fixedQuantity?: number
 }
 
 const ROWS: RowConfig[] = [
-  {
-    key: 'initialInstallment',
-    label: 'Cuota inicial',
-    quantityLabel: 'Cantidad',
-    unitLabel: 'Valor cuota inicial',
-    quantityMin: 1,
-    fixedQuantity: 1,
-  },
-  {
-    key: 'controls',
-    label: 'Controles',
-    quantityLabel: 'Nº de controles',
-    unitLabel: 'Valor por control',
-    quantityMin: 0,
-  },
-  {
-    key: 'retainers',
-    label: 'Retenedores',
-    quantityLabel: 'Nº de retenedores',
-    unitLabel: 'Valor por retenedor',
-    quantityMin: 0,
-  },
+  { key: 'initialInstallment', label: 'Cuota inicial', quantityMin: 0 },
+  { key: 'controls', label: 'Controles', quantityMin: 0 },
+  { key: 'retainers', label: 'Retenedores', quantityMin: 0 },
 ]
+
+function parseNonNegative(value: string): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 0
+  return Math.max(0, parsed)
+}
 
 function OrthoRow({
   config,
   line,
-  disabled,
+  readOnly,
+  showPaymentAction,
+  paymentDisabled,
   onChange,
+  onRegisterPayment,
 }: {
   config: RowConfig
   line: OrthodonticsBudgetLine
-  disabled?: boolean
+  readOnly: boolean
+  showPaymentAction: boolean
+  paymentDisabled: boolean
   onChange: (line: OrthodonticsBudgetLine) => void
+  onRegisterPayment?: () => void
 }) {
-  const quantity = config.fixedQuantity ?? line.quantity
+  const rowSubtotal = lineSubtotal(line)
 
   return (
-    <tr>
-      <td className="px-2 py-2 font-medium text-slate-700">{config.label}</td>
-      <td className="px-2 py-2">
-        {disabled || config.fixedQuantity !== undefined ? (
-          quantity
+    <tr className="group transition-colors hover:bg-emerald-50/40 dark:hover:bg-emerald-950/30">
+      <td className="py-3 pl-1 font-medium text-slate-800 dark:text-slate-100">{config.label}</td>
+      <td className="px-2 py-3">
+        {readOnly ? (
+          <span className="font-semibold text-slate-700 dark:text-slate-200">{line.quantity}</span>
         ) : (
           <div className="flex items-start gap-1">
             <input
               id={`ortho-qty-${config.key}`}
               type="number"
               min={config.quantityMin}
+              aria-label={`Cantidad de ${config.label.toLowerCase()}`}
               value={line.quantity}
-              onChange={(e) => onChange({ ...line, quantity: Number(e.target.value) })}
-              className="input-field min-w-0 w-20 flex-1"
+              onChange={(e) => onChange({ ...line, quantity: parseNonNegative(e.target.value) })}
+              className="w-20 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
             />
             <VoiceDictationButton
               targetInputId={`ortho-qty-${config.key}`}
@@ -87,18 +83,21 @@ function OrthoRow({
           </div>
         )}
       </td>
-      <td className="px-2 py-2">
-        {disabled ? (
-          formatCurrency(line.unitPrice)
+      <td className="px-2 py-3">
+        {readOnly ? (
+          <span className="font-medium text-slate-600 dark:text-slate-300">
+            {formatCurrency(line.unitPrice)}
+          </span>
         ) : (
           <div className="flex items-start gap-1">
             <input
               id={`ortho-price-${config.key}`}
               type="number"
               min={0}
+              aria-label={`Valor unitario de ${config.label.toLowerCase()}`}
               value={line.unitPrice}
-              onChange={(e) => onChange({ ...line, unitPrice: Number(e.target.value) })}
-              className="input-field min-w-0 w-32 flex-1"
+              onChange={(e) => onChange({ ...line, unitPrice: parseNonNegative(e.target.value) })}
+              className="w-full max-w-[200px] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
             />
             <VoiceDictationButton
               targetInputId={`ortho-price-${config.key}`}
@@ -114,9 +113,27 @@ function OrthoRow({
           </div>
         )}
       </td>
-      <td className="px-2 py-2 font-medium">
-        {formatCurrency(lineSubtotal({ quantity, unitPrice: line.unitPrice }))}
+      <td className="px-2 py-3 text-right font-bold text-slate-800 dark:text-slate-100">
+        {formatCurrency(rowSubtotal)}
       </td>
+      {showPaymentAction && (
+        <td className="py-3 pl-4 text-center">
+          <button
+            type="button"
+            disabled={paymentDisabled}
+            title={
+              paymentDisabled
+                ? 'Este concepto no tiene saldo por registrar'
+                : `Registrar pago de ${config.label.toLowerCase()}`
+            }
+            onClick={() => onRegisterPayment?.()}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <CreditCard className="h-3.5 w-3.5" />
+            Registrar Pago
+          </button>
+        </td>
+      )}
     </tr>
   )
 }
@@ -124,73 +141,93 @@ function OrthoRow({
 export function OrthodonticsBudgetSection({
   orthodonticsBudget,
   disabled = false,
+  isPaymentMode = false,
   onChange,
+  onRegisterPayment,
+  isRegisterPaymentDisabled,
 }: OrthodonticsBudgetSectionProps) {
-  const updateLine = (
-    key: RowConfig['key'],
-    line: OrthodonticsBudgetLine,
-  ) => {
-    const normalized =
-      key === 'initialInstallment' ? { ...line, quantity: 1 } : line
-    onChange({ ...orthodonticsBudget, [key]: normalized })
+  const readOnly = disabled || isPaymentMode
+  const orthoTotal = ROWS.reduce(
+    (sum, config) => sum + lineSubtotal(orthodonticsBudget[config.key]),
+    0,
+  )
+
+  const updateLine = (key: OrthodonticsBudgetRowKey, line: OrthodonticsBudgetLine) => {
+    onChange?.({ ...orthodonticsBudget, [key]: line })
   }
 
-  const orthoTotal = calcOrthodonticsBudgetTotal(orthodonticsBudget)
-
   return (
-    <div className="mb-6 rounded-lg border border-teal-200 bg-teal-50/40 p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+    <div
+      className={`w-full rounded-2xl border border-emerald-200 bg-emerald-50/20 p-5 shadow-sm transition-all dark:border-emerald-900/70 dark:bg-emerald-950/20 ${
+        isPaymentMode ? 'mt-6' : 'mb-6'
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-100 pb-3 dark:border-emerald-900/60">
         <div>
-          <h4 className="text-sm font-semibold text-teal-900">Presupuesto de ortodoncia</h4>
-          <p className="text-xs text-teal-700">
+          <h3 className="text-lg font-bold text-emerald-950 dark:text-emerald-100">
+            Presupuesto De Ortodoncia
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Cuota inicial, controles y retenedores con su valor unitario.
           </p>
         </div>
-        <label className="flex items-center gap-2 text-sm font-medium text-teal-900">
-          <input
-            type="checkbox"
-            disabled={disabled}
-            checked={orthodonticsBudget.active}
-            onChange={(e) => onChange({ ...orthodonticsBudget, active: e.target.checked })}
-            className="rounded border-teal-300 text-teal-600 focus:ring-teal-500"
-          />
-          Incluir en presupuesto
-        </label>
+        {!isPaymentMode && (
+          <label className="flex cursor-pointer select-none items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+            <input
+              type="checkbox"
+              disabled={disabled}
+              checked={orthodonticsBudget.active}
+              onChange={(e) => onChange?.({ ...orthodonticsBudget, active: e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            Incluir en presupuesto
+          </label>
+        )}
       </div>
 
-      {orthodonticsBudget.active && (
-        <>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] text-sm">
-              <thead>
-                <tr className="border-b border-teal-200 text-left text-xs text-teal-800">
-                  <th className="px-2 py-2 font-medium">Concepto</th>
-                  <th className="px-2 py-2 font-medium">Cantidad</th>
-                  <th className="px-2 py-2 font-medium">Valor unitario</th>
-                  <th className="px-2 py-2 font-medium">Subtotal</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-teal-100">
-                {ROWS.map((config) => (
-                  <OrthoRow
-                    key={config.key}
-                    config={config}
-                    line={orthodonticsBudget[config.key]}
-                    disabled={disabled}
-                    onChange={(line) => updateLine(config.key, line)}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-3 flex justify-end border-t border-teal-200 pt-3">
-            <span className="text-sm text-teal-800">
-              Subtotal ortodoncia:{' '}
-              <strong className="text-base text-teal-900">{formatCurrency(orthoTotal)}</strong>
-            </span>
-          </div>
-        </>
-      )}
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full text-left text-sm text-slate-700 dark:text-slate-200">
+          <thead>
+            <tr className="border-b border-emerald-100 text-xs font-semibold text-slate-500 dark:border-emerald-900/60 dark:text-slate-400">
+              <th className="w-1/4 py-2 pl-1">Concepto</th>
+              <th className="w-1/6 px-2 py-2">Cantidad</th>
+              <th className="w-1/3 px-2 py-2">Valor unitario</th>
+              <th className="px-2 py-2 text-right">Subtotal</th>
+              {isPaymentMode && <th className="py-2 pl-4 text-center">Acciones</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-emerald-50 dark:divide-emerald-950/40">
+            {ROWS.map((config) => (
+              <OrthoRow
+                key={config.key}
+                config={config}
+                line={orthodonticsBudget[config.key]}
+                readOnly={readOnly}
+                showPaymentAction={isPaymentMode}
+                paymentDisabled={
+                  disabled ||
+                  !onRegisterPayment ||
+                  (isRegisterPaymentDisabled?.(config.key) ??
+                    lineSubtotal(orthodonticsBudget[config.key]) <= 0)
+                }
+                onChange={(line) => updateLine(config.key, line)}
+                onRegisterPayment={
+                  onRegisterPayment ? () => onRegisterPayment(config.key) : undefined
+                }
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-4 flex items-center justify-end border-t border-emerald-100 pt-3 dark:border-emerald-900/60">
+        <div className="text-right">
+          <span className="text-sm text-slate-600 dark:text-slate-300">Subtotal ortodoncia: </span>
+          <span className="ml-1 text-lg font-extrabold text-slate-900 dark:text-slate-50">
+            {formatCurrency(orthoTotal)}
+          </span>
+        </div>
+      </div>
     </div>
   )
 }
