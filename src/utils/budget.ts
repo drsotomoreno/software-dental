@@ -256,12 +256,19 @@ export function buildBudgetFromTreatmentPlan(
   return next
 }
 
+/** Concepto de cada fila del presupuesto de ortodoncia y de su tarjeta de pago. */
+export const ORTHODONTICS_BUDGET_PROCEDURES = {
+  initialInstallment: 'Ortodoncia — Cuota inicial',
+  controls: 'Ortodoncia — Controles',
+  retainers: 'Ortodoncia — Retenedores',
+} as const
+
+export type OrthodonticsBudgetRowKey = keyof typeof ORTHODONTICS_BUDGET_PROCEDURES
+
 /** Conceptos de ortodoncia que el plan de pagos mantiene aparte del listado clínico. */
-export const ORTHODONTICS_PAYMENT_PLAN_PROCEDURES = new Set([
-  'Ortodoncia — Cuota inicial',
-  'Ortodoncia — Controles',
-  'Ortodoncia — Retenedores',
-])
+export const ORTHODONTICS_PAYMENT_PLAN_PROCEDURES = new Set<string>(
+  Object.values(ORTHODONTICS_BUDGET_PROCEDURES),
+)
 
 /** Conceptos de implantes que el plan de pagos sincroniza con el presupuesto. */
 export const DENTAL_IMPLANT_PAYMENT_PLAN_PROCEDURES = new Set([
@@ -277,15 +284,15 @@ export function orthodonticsPaymentPlanItems(
 
   const rows: { procedure: string; total: number }[] = [
     {
-      procedure: 'Ortodoncia — Cuota inicial',
+      procedure: ORTHODONTICS_BUDGET_PROCEDURES.initialInstallment,
       total: lineSubtotal(orthodontics.initialInstallment),
     },
     {
-      procedure: 'Ortodoncia — Controles',
+      procedure: ORTHODONTICS_BUDGET_PROCEDURES.controls,
       total: lineSubtotal(orthodontics.controls),
     },
     {
-      procedure: 'Ortodoncia — Retenedores',
+      procedure: ORTHODONTICS_BUDGET_PROCEDURES.retainers,
       total: lineSubtotal(orthodontics.retainers),
     },
   ]
