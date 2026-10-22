@@ -1672,10 +1672,6 @@ export function PatientDetailPage() {
 
         <div className="flex flex-wrap items-center gap-2">
 
-          {canViewClinical && !showRapidValuation && !isArchiveView && (
-            <ClinicalSignatureStatus patientId={patientForeignKey} />
-          )}
-
           {clinicalAutoSaveLabel && !isArchiveView && (
             <span
               className={`rounded-full px-3 py-1 text-sm font-medium ${
