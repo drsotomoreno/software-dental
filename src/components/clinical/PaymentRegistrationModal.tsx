@@ -9,6 +9,13 @@ export interface PaymentRegistrationInput {
   amount: number
   documentKind: PaymentDocumentKind
   paymentDate: string
+  /** Nº de control cuando el abono nace de la tarjeta de controles. */
+  controlNumber?: number
+}
+
+export interface PaymentControlOption {
+  value: number
+  label: string
 }
 
 interface PaymentRegistrationModalProps {
@@ -19,6 +26,10 @@ interface PaymentRegistrationModalProps {
   treatmentBalance: number
   busy?: boolean
   notice?: string | null
+  /** Concepto fijado por la tarjeta que abrió el formulario. */
+  conceptLabel?: string
+  controlOptions?: PaymentControlOption[]
+  defaultControlNumber?: number
   onClose: () => void
   onSubmit: (input: PaymentRegistrationInput) => void
 }
@@ -35,6 +46,9 @@ export function PaymentRegistrationModal({
   treatmentBalance,
   busy = false,
   notice = null,
+  conceptLabel,
+  controlOptions,
+  defaultControlNumber,
   onClose,
   onSubmit,
 }: PaymentRegistrationModalProps) {
@@ -42,15 +56,19 @@ export function PaymentRegistrationModal({
   const [draft, setDraft] = useState('')
   const [documentKind, setDocumentKind] = useState<PaymentDocumentKind>('recibo_interno')
   const [paymentDate, setPaymentDate] = useState(todayIso)
+  const [controlNumber, setControlNumber] = useState<number | ''>('')
   const [error, setError] = useState<string | null>(null)
+  const asksControlNumber = Boolean(controlOptions && controlOptions.length > 0)
+  const initialControlNumber = defaultControlNumber ?? controlOptions?.[0]?.value ?? ''
 
   useEffect(() => {
     if (!open) return
     setDraft('')
     setDocumentKind('recibo_interno')
     setPaymentDate(todayIso())
+    setControlNumber(initialControlNumber)
     setError(null)
-  }, [open, sessionKey])
+  }, [open, sessionKey, initialControlNumber])
 
   useEffect(() => {
     if (!open) return
@@ -84,8 +102,17 @@ export function PaymentRegistrationModal({
       setError('Indique la fecha del abono.')
       return
     }
+    if (asksControlNumber && typeof controlNumber !== 'number') {
+      setError('Seleccione el número de control que cubre este abono.')
+      return
+    }
     setError(null)
-    onSubmit({ amount, documentKind, paymentDate })
+    onSubmit({
+      amount,
+      documentKind,
+      paymentDate,
+      ...(asksControlNumber && typeof controlNumber === 'number' ? { controlNumber } : {}),
+    })
   }
 
   return createPortal(
@@ -107,6 +134,11 @@ export function PaymentRegistrationModal({
               Registrar Pago
             </h3>
             <p className="mt-1 text-sm text-slate-600">{procedureTitle}</p>
+            {conceptLabel ? (
+              <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-dental-700">
+                Concepto: {conceptLabel}
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -151,6 +183,37 @@ export function PaymentRegistrationModal({
               {amount > 0 ? ` ${formatCurrency(amount)}.` : ''}
             </span>
           </label>
+
+          {conceptLabel ? (
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-slate-700">Concepto</span>
+              <input
+                readOnly
+                aria-label="Concepto del abono"
+                className="input-field bg-dental-50 font-medium text-dental-900"
+                value={conceptLabel}
+              />
+            </label>
+          ) : null}
+
+          {asksControlNumber ? (
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-slate-700">Nº de control</span>
+              <select
+                disabled={busy}
+                aria-label="Número de control"
+                className="input-field text-sm"
+                value={controlNumber}
+                onChange={(event) => setControlNumber(Number(event.target.value))}
+              >
+                {controlOptions?.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-slate-700">Fecha</span>

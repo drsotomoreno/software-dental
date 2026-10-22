@@ -16,11 +16,16 @@ export function remainingAfterAbono(remaining: number, amount: number): number {
   return Math.max(0, Math.round(remaining) - Math.max(0, Math.round(amount)))
 }
 
-export function latestPaymentInvoice(payment: PaymentRecord): PaymentInvoice | undefined {
+type PaymentReceiptSource = {
+  invoices?: PaymentInvoice[]
+  documentKind?: PaymentDocumentKind
+}
+
+export function latestPaymentInvoice(payment: PaymentReceiptSource): PaymentInvoice | undefined {
   return [...(payment.invoices ?? [])].reverse().find((item) => Boolean(item.invoiceNumber) || item.amount > 0)
 }
 
-export function resolvePaymentDocumentKind(payment: PaymentRecord): PaymentDocumentKind | null {
+export function resolvePaymentDocumentKind(payment: PaymentReceiptSource): PaymentDocumentKind | null {
   const invoice = latestPaymentInvoice(payment)
   if (invoice?.emissionMode === 'provider') return 'factura'
   if (invoice?.emissionMode === 'manual') return 'recibo_interno'
