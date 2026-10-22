@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { ExamCie10Link } from '@/types/stomatologicalExam'
 import { VoiceDictationButton } from '@/components/voice'
 import { Cie10FindingSuggestions, SelectedCie10Badge } from './Cie10FindingSuggestions'
@@ -31,6 +32,8 @@ export function ExamFindingInputWithCie10({
   showSuggestions = true,
   voiceEnabled = true,
 }: ExamFindingInputWithCie10Props) {
+  const [focused, setFocused] = useState(false)
+
   const handleSelect = (option: { code: string; description: string }) => {
     onCie10Change(option)
     if (!value.trim()) {
@@ -64,6 +67,8 @@ export function ExamFindingInputWithCie10({
             disabled={disabled}
             value={value}
             onChange={(event) => onChange(event.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             placeholder={placeholder}
             className={`${className} resize-y`}
           />
@@ -74,11 +79,13 @@ export function ExamFindingInputWithCie10({
             disabled={disabled}
             value={value}
             onChange={(event) => onChange(event.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             placeholder={placeholder}
             className={className}
           />
         )}
-        {showSuggestions && !cie10 && (
+        {showSuggestions && focused && !cie10 && (
           <Cie10FindingSuggestions
             query={value}
             onSelect={handleSelect}

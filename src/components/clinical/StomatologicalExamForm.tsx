@@ -328,7 +328,7 @@ export function StomatologicalExamForm({
                 disabled={disabled}
                 placeholder="Describa hallazgos o anomalías..."
                 className={`input-field ${data.atm.isNormal ? 'border-green-300 bg-green-50/60' : ''}`}
-                showSuggestions={!data.atm.isNormal || Boolean(data.atm.notes.trim())}
+                showSuggestions={!data.atm.isNormal}
               />
             </div>
           </div>
@@ -514,7 +514,7 @@ export function StomatologicalExamForm({
                   disabled={disabled}
                   placeholder="Describa hallazgos o anomalías..."
                   className={`input-field ${data.occlusion.isNormal ? 'border-green-300 bg-green-50/60' : ''}`}
-                  showSuggestions={!data.occlusion.isNormal || Boolean(data.occlusion.notes.trim())}
+                  showSuggestions={!data.occlusion.isNormal}
                 />
               </div>
             </div>

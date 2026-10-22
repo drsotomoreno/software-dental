@@ -280,7 +280,7 @@ export function PeriodontiumExamSection({
           disabled={disabled}
           placeholder="Observaciones adicionales..."
           className={`input-field ${data.isNormal ? 'border-green-300 bg-green-50/60' : ''}`}
-          showSuggestions={!data.isNormal || Boolean(data.notes.trim())}
+          showSuggestions={!data.isNormal}
         />
       </div>
     </div>
