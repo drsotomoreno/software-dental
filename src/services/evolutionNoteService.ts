@@ -50,6 +50,8 @@ export function buildEvolutionNoteHashPayload(note: EvolutionNote) {
     professionalSignatureMeta: note.professionalSignatureMeta ?? null,
     cost: note.cost ?? null,
     isBillable: note.isBillable ?? null,
+    // pagoId, numeroSoportePago, conceptoPago, valorProcedimiento y estadoRips
+    // no entran al hash: el vínculo de cobro puede resolverse después de la firma.
   }
 }
 

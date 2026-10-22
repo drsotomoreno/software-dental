@@ -39,6 +39,7 @@ import type { ElectronicCreditNote } from '@/types/creditNote'
 import type { ClinicBillingSettingsRecord } from '@/types/billingModality'
 import type { RdaCryptographicConsent, RdaExternalHistory } from '@/types/rdaExternalHistory'
 import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
+import type { ConsecutivoPrestador, ReciboCaja } from '@/types/atencionPago'
 import { CREDIT_NOTE_IMMUTABILITY_MESSAGE } from '@/types/creditNote'
 import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
@@ -77,6 +78,8 @@ export class DentalDatabase extends Dexie {
   rdaConsents!: EntityTable<RdaCryptographicConsent, 'id'>
   rdaExternalHistories!: EntityTable<RdaExternalHistory, 'id'>
   ripsTemporales!: EntityTable<TemporaryRipsRecord, 'id'>
+  consecutivosPrestador!: EntityTable<ConsecutivoPrestador, 'id'>
+  recibosCaja!: EntityTable<ReciboCaja, 'id'>
 
   constructor() {
     super('DentalEMR')
@@ -713,6 +716,13 @@ export class DentalDatabase extends Dexie {
           })
         }
       }
+    })
+
+    this.version(29).stores({
+      consecutivosPrestador:
+        'id, &[usuarioTitularId+tipoDocumento], usuarioTitularId, tipoDocumento',
+      recibosCaja:
+        'id, &[usuarioTitularId+tipoDocumento+consecutivo], usuarioTitularId, tipoDocumento, consecutivo',
     })
   }
 }

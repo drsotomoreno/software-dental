@@ -1,4 +1,5 @@
 import type { SignatureCaptureMetadata } from '@/types/signature'
+import type { CamposPagoAtencion } from '@/types/atencionPago'
 
 export type EvolutionNoteKind = 'evolution' | 'addendum'
 
@@ -73,6 +74,15 @@ export interface EvolutionNote {
   signedAt?: string
   /** SHA-256 del contenido de la nota (Ley 527 de 1999). */
   contentHash?: string
+  /**
+   * Pago de esta atención (Sección 11). Vive fuera del hash clínico:
+   * asociar un recibo, o marcar sin costo / pendiente, no reescribe la nota firmada.
+   */
+  pagoId?: CamposPagoAtencion['pagoId']
+  numeroSoportePago?: CamposPagoAtencion['numeroSoportePago']
+  conceptoPago?: CamposPagoAtencion['conceptoPago']
+  valorProcedimiento?: CamposPagoAtencion['valorProcedimiento']
+  estadoRips?: CamposPagoAtencion['estadoRips']
 }
 
 /** Folio / sesión clínica — unidad de bloqueo de la HCE (Res. 1995/1999). */
@@ -124,6 +134,11 @@ export function createEmptyEvolutionNote(
     catalogServices: [],
     kind: 'evolution',
     isLocked: false,
+    pagoId: null,
+    numeroSoportePago: null,
+    conceptoPago: null,
+    valorProcedimiento: 0,
+    estadoRips: 'PENDIENTE_PAGO',
   }
 }
 
