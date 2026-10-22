@@ -24,7 +24,14 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useCatalogSearch } from '@/hooks/useCatalogSearch'
 import { useTariffSync } from '@/modules/tariff/useTariffSync'
 import { useTariffStore } from '@/store/useTariffStore'
-import { calcOrthodonticsBudgetTotal, formatCurrency, generateId } from '@/utils'
+import {
+  calcOrthodonticsBudgetTotal,
+  formatCurrency,
+  generateId,
+  lineSubtotal,
+  orthodonticsPaymentPlanItems,
+} from '@/utils'
+import { ORTHODONTICS_BUDGET_PROCEDURES, type OrthodonticsBudgetRowKey } from '@/utils/budget'
 import { formatCupsCodeDotted } from '@/services/catalogService'
 import { getDefaultQuantityForCups } from '@/utils/cupsBillingRules'
 import { searchGeneralDentistryCups } from '@/utils/cupsGeneralDentistry'
@@ -93,6 +100,7 @@ import {
   paymentTypeForConcept,
   suggestControlNumber,
 } from '@/utils/orthodonticsPaymentControl'
+import { OrthodonticsBudgetSection } from './OrthodonticsBudgetSection'
 import { PaymentAgreementFields } from './PaymentAgreementFields'
 import { PaymentPlanProcedureField } from './PaymentPlanProcedureField'
 import {
@@ -618,6 +626,43 @@ export function PaymentControlForm({
     } finally {
       setPaymentBusy(false)
     }
+  }
+
+  const openOrthodonticsPayment = (key: OrthodonticsBudgetRowKey) => {
+    if (disabled || paymentBusy || !orthodonticsBudget?.active) return
+    const procedure = ORTHODONTICS_BUDGET_PROCEDURES[key]
+    let agreement = orthoAgreements.find((item) => item.procedure === procedure) ?? null
+    if (!agreement) {
+      const generated = orthodonticsPaymentPlanItems(orthodonticsBudget).find(
+        (row) => row.procedure === procedure,
+      )
+      if (!generated) return
+      agreement = generated
+      onPaymentPlanChange([...paymentPlan, generated])
+    }
+    const concept = conceptForOrthodonticsProcedure(agreement.procedure)
+    if (!concept) return
+    const remaining = conceptRemaining(
+      agreement.totalAmount,
+      orthodonticsPaymentControl,
+      concept,
+    )
+    if (remaining <= 0) return
+    setPaymentNotice(null)
+    setPaymentDraftLineId(null)
+    setOrthoDraftId(agreement.id)
+  }
+
+  const isOrthoRegisterDisabled = (key: OrthodonticsBudgetRowKey) => {
+    if (disabled || paymentBusy || !orthodonticsBudget?.active) return true
+    const total = lineSubtotal(orthodonticsBudget[key])
+    if (total <= 0) return true
+    const procedure = ORTHODONTICS_BUDGET_PROCEDURES[key]
+    const agreement = orthoAgreements.find((item) => item.procedure === procedure)
+    if (!agreement) return false
+    const concept = conceptForOrthodonticsProcedure(procedure)
+    if (!concept) return true
+    return conceptRemaining(agreement.totalAmount, orthodonticsPaymentControl, concept) <= 0
   }
 
   const removeOrthodonticsPayment = (paymentId: string) => {
@@ -1217,6 +1262,16 @@ export function PaymentControlForm({
           <option key={zone} value={zone} />
         ))}
       </datalist>
+
+      {orthodonticsBudget?.active && (
+        <OrthodonticsBudgetSection
+          orthodonticsBudget={orthodonticsBudget}
+          isPaymentMode
+          disabled={disabled || paymentBusy}
+          onRegisterPayment={openOrthodonticsPayment}
+          isRegisterPaymentDisabled={isOrthoRegisterDisabled}
+        />
+      )}
 
       {(orthodonticsBudget?.active || orthoAgreements.length > 0) && orthoAgreements.length > 0 && (
         <div className="mt-6 space-y-3">
