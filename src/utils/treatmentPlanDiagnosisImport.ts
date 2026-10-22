@@ -1,6 +1,6 @@
 import type { ClinicalDiagnosticToothEntry } from '@/types/clinicalDiagnosticChart'
 import type { Cie10Diagnosis, TreatmentPlanItem } from '@/types/clinicalRecord'
-import { generateId } from './crypto'
+import { generateId } from './crypto.ts'
 
 const DEFAULT_TREATMENT_PHASE = 'fase_ii' as const
 
