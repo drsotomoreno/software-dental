@@ -92,8 +92,6 @@ import {
   calcOrthodonticsPaymentsTotal,
   conceptForOrthodonticsProcedure,
   conceptRemaining,
-  paidAmountForConcept,
-  paymentsForConcept,
   getOrthodonticsControlNumbers,
   getPaidControlNumbers,
   orthodonticsPaymentBalance,
@@ -1273,13 +1271,8 @@ export function PaymentControlForm({
         />
       )}
 
-      {(orthodonticsBudget?.active || orthoAgreements.length > 0) && orthoAgreements.length > 0 && (
+      {(orthodonticsBudget?.active || orthodonticsPaymentControl.length > 0) && (
         <div className="mt-6 space-y-3">
-          <h4 className="text-sm font-semibold text-dental-800">Acuerdo de pago — ortodoncia</h4>
-          <p className="text-xs text-slate-500">
-            Forma de pago, abonos y saldo de la cuota inicial, los controles y los retenedores. Cada
-            abono queda en el concepto de la tarjeta desde la que se registra.
-          </p>
           {orthodonticsBudget?.active && (
             <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-3">
               <div>
@@ -1296,88 +1289,15 @@ export function PaymentControlForm({
               </div>
             </div>
           )}
-          {orthoAgreements.map((item) => {
-            const concept = conceptForOrthodonticsProcedure(item.procedure)
-            const conceptPayments = concept
-              ? paymentsForConcept(orthodonticsPaymentControl, concept)
-              : []
-            const conceptPaid = concept
-              ? paidAmountForConcept(orthodonticsPaymentControl, concept)
-              : 0
-            const conceptBalance = concept
-              ? conceptRemaining(item.totalAmount, orthodonticsPaymentControl, concept)
-              : 0
-
-            return (
-              <article
-                key={item.id}
-                data-ortho-concept={concept ?? undefined}
-                className="rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm"
-              >
-                <header className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-3">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-dental-700">
-                      Procedimiento de ortodoncia
-                    </p>
-                    <h4 className="text-sm font-semibold text-slate-900">{item.procedure}</h4>
-                    {concept ? (
-                      <p className="mt-1 text-xs text-slate-600">
-                        Pagado:{' '}
-                        <span className="font-semibold text-green-700">{formatCurrency(conceptPaid)}</span>
-                        {' / '}
-                        Saldo:{' '}
-                        <span className="font-semibold text-amber-700">{formatCurrency(conceptBalance)}</span>
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <span className="text-sm font-semibold text-dental-700">
-                      {formatCurrency(item.totalAmount)}
-                    </span>
-                    {concept && !disabled ? (
-                      <button
-                        type="button"
-                        disabled={paymentBusy || conceptBalance <= 0}
-                        onClick={() => {
-                          setPaymentNotice(null)
-                          setPaymentDraftLineId(null)
-                          setOrthoDraftId(item.id)
-                        }}
-                        className="btn-primary h-8 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        + Registrar Pago
-                      </button>
-                    ) : null}
-                  </div>
-                </header>
-                <div className="rounded-lg border border-slate-200 bg-white p-3">
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Acuerdo de pago
-                  </p>
-                  <PaymentAgreementFields
-                    item={item}
-                    disabled={disabled}
-                    onChange={(patch) =>
-                      onPaymentPlanChange(
-                        paymentPlan.map((row) => (row.id === item.id ? { ...row, ...patch } : row)),
-                      )
-                    }
-                  />
-                </div>
-                {concept ? (
-                  <OrthodonticsAbonoHistory
-                    payments={conceptPayments}
-                    disabled={disabled}
-                    onOpenInvoice={openOrthodonticsInvoice}
-                    onCreditNote={(payment, invoice) =>
-                      setCreditNoteTarget({ paymentId: payment.id, invoice, source: 'orthodontics' })
-                    }
-                    onDelete={removeOrthodonticsPayment}
-                  />
-                ) : null}
-              </article>
-            )
-          })}
+          <OrthodonticsAbonoHistory
+            payments={orthodonticsPaymentControl.filter((payment) => payment.paymentType !== 'adicional')}
+            disabled={disabled}
+            onOpenInvoice={openOrthodonticsInvoice}
+            onCreditNote={(payment, invoice) =>
+              setCreditNoteTarget({ paymentId: payment.id, invoice, source: 'orthodontics' })
+            }
+            onDelete={removeOrthodonticsPayment}
+          />
           {adicionalPayments.length > 0 && (
             <article className="rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm">
               <h4 className="text-sm font-semibold text-slate-900">Pagos adicionales ya registrados</h4>
