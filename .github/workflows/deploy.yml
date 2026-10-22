@@ -53,6 +53,9 @@
 # - El repositorio ya está clonado en /var/www/mihistoriadental y `origin`
 #   apunta a este repo. Si es privado, esa copia necesita su propio deploy
 #   key de solo lectura (distinto de EC2_SSH_KEY) para que `git pull` funcione.
+# - Si nginx apunta a otro proceso PM2 (por ejemplo software-dental) cuyo
+#   directorio no es /var/www/mihistoriadental, el script también actualiza
+#   esa copia. Si no, el build nuevo no es el que ve el sitio.
 # - Node.js y npm están instalados. El proceso ya está registrado en PM2:
 #     pm2 start server.js --name mihistoriadental && pm2 save
 # - nginx está instalado y EC2_USER puede recargarlo sin contraseña.
@@ -94,9 +97,57 @@ jobs:
           command_timeout: 15m
           script: |
             set -euo pipefail
-            cd /var/www/mihistoriadental
-            git pull origin main
-            npm install
-            npm run build
+            CANONICAL="/var/www/mihistoriadental"
+
+            echo "Procesos PM2:"
+            pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};console.log([app.name,env.status,env.pm_cwd,env.pm_exec_path,env.PORT||""].join(" | "));}});'
+
+            deploy_repo() {
+              local dir="$1"
+              echo "---- Desplegando $dir ----"
+              cd "$dir"
+              git remote get-url origin
+              git status --short --branch
+              git fetch origin main
+              git reset --hard origin/main
+              npm install
+              npm run build
+              echo "Bundle:"
+              grep -o 'assets/index-[^"]*' dist/index.html || true
+            }
+
+            is_this_repo() {
+              local dir="$1"
+              local url
+              [ -d "$dir/.git" ] || return 1
+              url=$(git -C "$dir" remote get-url origin 2>/dev/null || true)
+              case "$url" in
+                *software-dental*) return 0 ;;
+                *) return 1 ;;
+              esac
+            }
+
+            deploy_repo "$CANONICAL"
+
+            pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);const seen=new Set();for(const app of apps){const cwd=app.pm2_env&&app.pm2_env.pm_cwd;if(cwd&&!seen.has(cwd)){seen.add(cwd);console.log(cwd);}}});' > /tmp/pm2-cwds.txt
+
+            while IFS= read -r dir; do
+              [ -n "$dir" ] || continue
+              if [ "$dir" = "$CANONICAL" ]; then
+                continue
+              fi
+              if is_this_repo "$dir"; then
+                deploy_repo "$dir"
+              elif [ -f "$dir/server.js" ] && [ -f "$dir/package.json" ]; then
+                echo "---- Copiando dist a $dir ----"
+                rm -rf "$dir/dist"
+                cp -a "$CANONICAL/dist" "$dir/dist"
+                echo "Bundle copiado:"
+                grep -o 'assets/index-[^"]*' "$dir/dist/index.html" || true
+              else
+                echo "Se omite $dir: no es este proyecto."
+              fi
+            done < /tmp/pm2-cwds.txt
+
             pm2 restart all
             sudo systemctl reload nginx
