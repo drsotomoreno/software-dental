@@ -1,0 +1,16 @@
+# REGLAS OBLIGATORIAS DE ARQUITECTURA E INFRAESTRUCTURA
+## 1. Prohibición Absoluta de Plataformas de Terceros
+- NUNCA sugieras, busques credenciales, verifiques ni intentes desplegar en Render, Heroku, Vercel, Netlify o GitHub Pages.
+- Si detectas archivos antiguos o referencias a Render, IGNÓRALOS por completo.
+## 2. Infraestructura Real de Producción
+- Servidor de Aplicación: AWS EC2 (Node.js + Express).
+- Base de Datos: AWS RDS PostgreSQL.
+- Base de Datos Local / Offline-First: Dexie.js (IndexedDB en el cliente).
+- Proceso de Despliegue: El único método válido para subir a producción es ejecutando el script PowerShell local `./actualizar.ps1`.
+## 3. Reglas de Negocio Odontológico y Normativa Colombiana
+- Historia Clínica Principal: Recae en el profesional tratante (Res. 1995 de 1999) y se firma una sola vez para activar la historia.
+- Evoluciones Clínicas: Se firman de manera independiente en cada atención del paciente.
+- RIPS: Formato JSON según Resolución 2275 de 2023 para envío a la plataforma MUV / SISPRO (códigos sin puntos, ej. Z012).
+## 4. Control de Versiones y Despliegues
+- NUNCA hagas `git merge` a `main` ni ejecutes `./actualizar.ps1` sin mi confirmación explícita previa.
+- Siempre verifica que la rama actual no tenga retrasos con `main` antes de proponer una mezcla.
