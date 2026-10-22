@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import type { InformedConsent } from '@/types/consent'
 import {
   CONSENT_MENU_OPTIONS,
@@ -12,22 +13,83 @@ import {
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
 import { DigitalSignatureCanvas } from '@/components/signature'
+import { listPatientClinicalRecords } from '@/utils/clinicalRecordSnapshot'
 
 interface InformedConsentFormProps {
   data: InformedConsent
   onChange: (data: InformedConsent) => void
   disabled?: boolean
+  /** Paciente de la historia clínica actual (Dexie). */
+  patientId?: string
+}
+
+function isSignedInformedConsent(
+  consent: InformedConsent | null | undefined,
+): consent is InformedConsent {
+  if (!consent?.selectedConsentIds?.length) return false
+  if (consent.signedAt?.trim()) return true
+  return Boolean(
+    consent.textAccepted &&
+      consent.patientSignatureDataUrl &&
+      consent.professionalSignatureDataUrl,
+  )
+}
+
+function signedConsentLabels(
+  consents: Array<InformedConsent | null | undefined>,
+): string[] {
+  const labels: string[] = []
+  const seen = new Set<string>()
+
+  for (const consent of consents) {
+    if (!isSignedInformedConsent(consent)) continue
+    for (const id of consent.selectedConsentIds) {
+      const label = getConsentLabel(id)
+      if (seen.has(label)) continue
+      seen.add(label)
+      labels.push(label)
+    }
+  }
+
+  return labels
 }
 
 export function InformedConsentForm({
   data,
   onChange,
   disabled = false,
+  patientId = '',
 }: InformedConsentFormProps) {
   const [activeConsentId, setActiveConsentId] = useState<ConsentTemplateId | null>(null)
   const [pickerValue, setPickerValue] = useState('')
 
   const selectedIds = data.selectedConsentIds ?? []
+
+  const persistedLabels = useLiveQuery(async () => {
+    if (!patientId) return []
+    const records = await listPatientClinicalRecords(patientId)
+    const ordered = [...records].sort((a, b) =>
+      (b.informedConsent?.signedAt ?? b.signedAt ?? b.updatedAt ?? '').localeCompare(
+        a.informedConsent?.signedAt ?? a.signedAt ?? a.updatedAt ?? '',
+      ),
+    )
+    return signedConsentLabels(ordered.map((record) => record.informedConsent))
+  }, [patientId])
+
+  const currentLabels = useMemo(() => signedConsentLabels([data]), [data])
+
+  const signedLabels = useMemo(() => {
+    const labels: string[] = []
+    const seen = new Set<string>()
+    for (const label of [...currentLabels, ...(persistedLabels ?? [])]) {
+      if (seen.has(label)) continue
+      seen.add(label)
+      labels.push(label)
+    }
+    return labels
+  }, [currentLabels, persistedLabels])
+
+  const signedStatusReady = persistedLabels !== undefined
 
   const activeId = useMemo(() => {
     if (activeConsentId && selectedIds.includes(activeConsentId)) return activeConsentId
@@ -65,6 +127,27 @@ export function InformedConsentForm({
           'Consentimiento Informado y Firmas',
         )}
       </h3>
+
+      {signedStatusReady && signedLabels.length === 0 ? (
+        <div
+          role="alert"
+          className="bg-red-50 border-l-4 border-red-500 text-red-700 p-3 rounded mb-4"
+        >
+          ⚠️ Atención: No hay consentimientos informados firmados para este paciente.
+        </div>
+      ) : signedLabels.length > 0 ? (
+        <ul
+          aria-label="Consentimientos informados firmados"
+          className="mb-4 list-disc space-y-1 pl-5 text-emerald-700 marker:text-emerald-700"
+        >
+          {signedLabels.map((label) => (
+            <li key={label} className="font-medium">
+              {label}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
       <p className="mb-4 text-xs text-slate-500">
         Seleccione uno o más consentimientos según el procedimiento a realizar. El paciente debe
         leer y aceptar el texto correspondiente antes de firmar.

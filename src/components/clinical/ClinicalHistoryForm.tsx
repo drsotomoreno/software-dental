@@ -495,6 +495,7 @@ export function ClinicalHistoryForm({
         data={form.informedConsent}
         onChange={(informedConsent: InformedConsent) => update({ informedConsent })}
         disabled={snapshotLocked}
+        patientId={patientId}
       />
         </div>
       )}
