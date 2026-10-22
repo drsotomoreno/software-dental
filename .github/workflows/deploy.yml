@@ -1,0 +1,102 @@
+# Despliegue automático a AWS EC2 (mihistoriadental.com).
+#
+# Se dispara en cada push a `main`. El runner de GitHub abre SSH contra la
+# instancia y, ya dentro, actualiza el código, instala dependencias, construye
+# el frontend y reinicia Node y nginx.
+#
+# ---------------------------------------------------------------------------
+# Cómo configurar los GitHub Secrets
+# ---------------------------------------------------------------------------
+# En el repositorio de GitHub:
+#   Settings → Secrets and variables → Actions → New repository secret
+#
+# Crea estos tres secretos. El nombre distingue mayúsculas y minúsculas y
+# tiene que coincidir exactamente con el que usa este workflow.
+#
+#   EC2_HOST
+#     IP pública o DNS público de la instancia EC2.
+#     Ejemplos: 18.xxx.xxx.xxx
+#               ec2-18-xxx-xxx-xxx.compute.amazonaws.com
+#     También puede ser un hostname que resuelva a esa instancia
+#     (por ejemplo mihistoriadental.com), siempre que el puerto 22 llegue
+#     hasta ella.
+#
+#   EC2_USER
+#     Usuario del sistema con el que se entra por SSH.
+#     En Amazon Linux suele ser ec2-user; en Ubuntu, ubuntu.
+#
+#   EC2_SSH_KEY
+#     Clave privada completa que corresponde a la clave pública autorizada
+#     en la instancia (~/.ssh/authorized_keys del usuario EC2_USER).
+#     Pega el archivo entero, con los saltos de línea y las líneas de inicio
+#     y fin, por ejemplo:
+#       -----BEGIN OPENSSH PRIVATE KEY-----
+#       ...
+#       -----END OPENSSH PRIVATE KEY-----
+#     Este valor solo vive en el secreto. No lo subas al repositorio ni lo
+#     dejes en el historial de git.
+#
+# Generar el par de claves (en tu máquina, fuera del repo) si aún no existe:
+#   ssh-keygen -t ed25519 -C "github-actions-deploy" -f ./ec2_deploy -N ""
+#   La pública (ec2_deploy.pub) se agrega a authorized_keys de la instancia.
+#   La privada (ec2_deploy) es el valor del secreto EC2_SSH_KEY.
+#   Borra ambos archivos locales cuando el secreto ya esté guardado.
+#
+# El security group de la instancia tiene que permitir SSH (puerto 22) desde
+# GitHub Actions. Para no dejar el puerto abierto a 0.0.0.0/0, limita el
+# origen a los rangos de la API meta de GitHub (clave "actions") o entra
+# por un bastion.
+#
+# ---------------------------------------------------------------------------
+# Preparación de la instancia (una vez, antes del primer despliegue)
+# ---------------------------------------------------------------------------
+# - El repositorio ya está clonado en /var/www/mihistoriadental y `origin`
+#   apunta a este repo. Si es privado, esa copia necesita su propio deploy
+#   key de solo lectura (distinto de EC2_SSH_KEY) para que `git pull` funcione.
+# - Node.js y npm están instalados. El proceso ya está registrado en PM2:
+#     pm2 start server.js --name mihistoriadental && pm2 save
+# - nginx está instalado y EC2_USER puede recargarlo sin contraseña.
+#   En /etc/sudoers.d/deploy, una línea como esta (cambia el usuario):
+#     ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl reload nginx
+# - Si el clone no vive en /var/www/mihistoriadental, cambia la ruta del `cd`.
+
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+# Un despliegue a la vez. El siguiente espera a que termine el que está en curso.
+concurrency:
+  group: deploy-ec2-main
+  cancel-in-progress: false
+
+# Este job no lee el código en el runner: el pull ocurre en la instancia.
+permissions:
+  contents: none
+
+jobs:
+  deploy:
+    name: Desplegar en EC2
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Conectar por SSH y desplegar
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # Corta el job si algún comando remoto termina con error.
+          script_stop: true
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            cd /var/www/mihistoriadental
+            git pull origin main
+            npm install
+            npm run build
+            pm2 restart all
+            sudo systemctl reload nginx
