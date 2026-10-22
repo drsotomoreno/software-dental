@@ -46,17 +46,18 @@ export function normalizeClinicalDiagnosticChart(
 
   const entries = Array.isArray(data.entries)
     ? data.entries
-        .filter(
-          (entry) =>
-            entry &&
-            typeof entry.dienteId === 'string' &&
-            VALID_TOOTH_IDS.has(entry.dienteId) &&
+        .filter((entry) => {
+          if (!entry || typeof entry !== 'object') return false
+          const dienteId = String(entry.dienteId ?? '')
+          return (
+            VALID_TOOTH_IDS.has(dienteId) &&
             typeof entry.diagnosisCode === 'string' &&
             entry.diagnosisCode.trim() &&
-            typeof entry.diagnosisDescription === 'string',
-        )
+            typeof entry.diagnosisDescription === 'string'
+          )
+        })
         .map((entry) => ({
-          dienteId: entry.dienteId,
+          dienteId: String(entry.dienteId),
           diagnosisCode: entry.diagnosisCode.trim(),
           diagnosisDescription: entry.diagnosisDescription.trim(),
           color:

@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { db } from '@/db/database'
 import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
 import type { OdontogramData } from '@/types/odontogram'
 import { registerClinicalDraftFlush } from '@/services/clinicalSyncState'
 import { savePatientClinicalDraft } from '@/utils/patientClinicalDraft'
-import { toPatientForeignKey } from '@/utils/patientId'
+import { upsertPatientOdontogram } from '@/utils/patientId'
 import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceService'
 
 const AUTO_SAVE_DELAY_MS = 1200
@@ -13,20 +12,10 @@ async function persistOdontogram(
   patientRouteId: string,
   odontogram: OdontogramData,
 ): Promise<OdontogramData> {
-  const patientId = toPatientForeignKey(patientRouteId)
-  const payload = {
+  return upsertPatientOdontogram(patientRouteId, {
     ...odontogram,
-    patientId,
     updatedAt: new Date().toISOString(),
-  }
-
-  if (odontogram.id) {
-    await db.odontograms.update(odontogram.id, payload)
-    return payload
-  }
-
-  const newId = await db.odontograms.add(payload)
-  return { ...payload, id: String(newId) }
+  })
 }
 
 export function useClinicalAutoSave(options: {

@@ -7,6 +7,7 @@ import {
   writeAttachmentBytes,
 } from './clinicAttachmentStore.js'
 import { readDurableJsonWithMerge, writeDurableJsonWithMerge } from './durableStore.js'
+import { draftRecordHasDiagnoses, odontogramRecordHasMarks } from './odontogramMerge.js'
 
 const STORE_FILE = join(config.dataDir, 'clinical-sync.json')
 const STORE_KEY = 'clinical-sync'
@@ -45,12 +46,27 @@ function stamp(record) {
   return Math.max(deleted, updated)
 }
 
-function mergeRecordMaps(left = {}, right = {}) {
+function shouldReplaceSyncedRecord(prev, next, entityKey) {
+  if (!prev) return true
+  if (
+    entityKey === 'odontograms' &&
+    odontogramRecordHasMarks(prev) &&
+    !odontogramRecordHasMarks(next)
+  ) {
+    return false
+  }
+  if (entityKey === 'drafts' && draftRecordHasDiagnoses(prev) && !draftRecordHasDiagnoses(next)) {
+    return false
+  }
+  return stamp(next) >= stamp(prev)
+}
+
+function mergeRecordMaps(left = {}, right = {}, entityKey = '') {
   const out = { ...left }
   for (const [syncId, record] of Object.entries(right)) {
     if (!record || typeof record !== 'object') continue
     const prev = out[syncId]
-    if (!prev || stamp(record) >= stamp(prev)) {
+    if (shouldReplaceSyncedRecord(prev, record, entityKey)) {
       out[syncId] = record
     }
   }
@@ -78,7 +94,7 @@ function mergeClinicBuckets(store, clinicIds) {
     if (!clinicId) continue
     const bucket = clinicBucket(store, clinicId)
     for (const key of ENTITY_MAPS) {
-      merged[key] = mergeRecordMaps(merged[key], bucket[key])
+      merged[key] = mergeRecordMaps(merged[key], bucket[key], key)
     }
   }
   return merged
@@ -111,7 +127,7 @@ export function mergeClinicalStores(primary, secondary) {
     const b = clinicBucket(right, clinicId)
     const merged = emptyClinic()
     for (const key of ENTITY_MAPS) {
-      merged[key] = mergeRecordMaps(a[key], b[key])
+      merged[key] = mergeRecordMaps(a[key], b[key], key)
     }
     clinics[clinicId] = merged
   }
@@ -263,7 +279,7 @@ function mergeIncomingMap(target, incoming, clinicId, acceptedKey, accepted) {
     const record = normalizeRecord(raw, clinicId)
     if (!record) continue
     const prev = target[record.syncId]
-    if (!prev || stamp(record) >= stamp(prev)) {
+    if (shouldReplaceSyncedRecord(prev, record, acceptedKey)) {
       target[record.syncId] = record
       count += 1
     }

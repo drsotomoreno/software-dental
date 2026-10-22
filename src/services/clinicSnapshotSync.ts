@@ -21,6 +21,12 @@ import type { SyncQueueAttachment } from '@/types/syncQueue'
 import { getDesktopBridge } from '@/types/desktopBridge'
 import { arrayBufferToBase64, base64ToArrayBuffer } from '@/utils/base64Binary'
 import { isRemoteDraftNewer } from '@/utils/clinicalDraftMerge'
+import {
+  clinicalDraftHasSection4,
+  odontogramHasMarks,
+  pickOdontogramFromCandidates,
+} from '@/utils/odontogramPersistence'
+import { listOdontogramsForPatient } from '@/utils/patientId'
 import { generateId } from '@/utils/crypto'
 import {
   hasLocalDiskPath,
@@ -170,15 +176,14 @@ async function mergeClinicalRecords(records: ClinicalSyncRecord[]): Promise<bool
 }
 
 async function mergeOdontograms(records: ClinicalSyncRecord[]): Promise<boolean> {
-  return mergeBySyncId(
-    () => db.odontograms.toArray(),
-    (row) => db.odontograms.add(row),
-    (id, row) => db.odontograms.update(id, row),
-    records,
-    async (payload, remote) => {
+  let changed = false
+  const byPatient = new Map<string, OdontogramData[]>()
+
+  for (const remote of records) {
+    const payload = payloadOf(remote)
     const patientId = await resolveLocalPatientId(payload)
-    if (!patientId) return null
-    return {
+    if (!patientId) continue
+    const remoteChart: OdontogramData = {
       ...(payload as unknown as OdontogramData),
       patientId,
       syncId: remote.syncId,
@@ -187,8 +192,55 @@ async function mergeOdontograms(records: ClinicalSyncRecord[]): Promise<boolean>
       lastSyncedAt: new Date().toISOString(),
       updatedAt: remote.updatedAt || String(payload.updatedAt || new Date().toISOString()),
     }
-    },
-  )
+    const group = byPatient.get(patientId) ?? []
+    group.push(remoteChart)
+    byPatient.set(patientId, group)
+  }
+
+  for (const [patientId, remotes] of byPatient) {
+    const locals = await listOdontogramsForPatient(patientId)
+    const canonical = pickOdontogramFromCandidates(locals)
+    const winner = pickOdontogramFromCandidates([canonical, ...remotes])
+    if (!winner) continue
+
+    const remoteWon = remotes.includes(winner)
+    const blankRemoteIsNewer = Boolean(
+      canonical &&
+        winner === canonical &&
+        odontogramHasMarks(canonical) &&
+        remotes.some(
+          (remote) =>
+            !odontogramHasMarks(remote) &&
+            isRemoteDraftNewer(canonical.updatedAt, remote.updatedAt),
+        ),
+    )
+
+    if (remoteWon) {
+      const patch: OdontogramData = { ...winner, patientId }
+      delete patch.id
+      if (canonical?.id != null) {
+        await db.odontograms.update(canonical.id, patch)
+      } else {
+        await db.odontograms.add(patch)
+      }
+      changed = true
+    } else if (blankRemoteIsNewer && canonical?.id != null) {
+      await db.odontograms.update(canonical.id, {
+        updatedAt: new Date().toISOString(),
+        pendingSync: true,
+      })
+      changed = true
+    }
+
+    const keepId = canonical?.id
+    for (const row of locals) {
+      if (row.id == null || String(row.id) === String(keepId)) continue
+      await db.odontograms.delete(row.id)
+      changed = true
+    }
+  }
+
+  return changed
 }
 
 async function mergeDiagnosticAids(records: ClinicalSyncRecord[]): Promise<boolean> {
@@ -232,6 +284,11 @@ async function mergeDrafts(records: ClinicalSyncRecord[]): Promise<boolean> {
       ...(payload as unknown as PatientClinicalDraft),
       patientId,
       updatedAt: remoteUpdatedAt || new Date().toISOString(),
+    }
+    if (local && clinicalDraftHasSection4(local) && !clinicalDraftHasSection4(next)) {
+      await db.patientClinicalDrafts.update(patientId, { updatedAt: new Date().toISOString() })
+      changed = true
+      continue
     }
     await db.patientClinicalDrafts.put(next)
     changed = true

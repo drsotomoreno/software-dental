@@ -85,6 +85,14 @@ import {
   getPatientClinicalDraft,
   savePatientValuationDraft,
 } from '@/utils/patientClinicalDraft'
+import { isRemoteDraftNewer } from '@/utils/clinicalDraftMerge'
+import {
+  mergeLivingChart,
+  odontogramAfterPersist,
+  pickOdontogram,
+  pickOdontogramFromCandidates,
+} from '@/utils/odontogramPersistence'
+import { upsertPatientOdontogram } from '@/utils/patientId'
 import { validateAcceptTreatment } from '@/utils/patientPhase'
 import {
   buildValuationConsentMetadata,
@@ -332,10 +340,7 @@ export function PatientDetailPage() {
     odontogram,
     enabled: Boolean(id) && Boolean(clinicalData) && !isArchiveView,
     onOdontogramPersisted: (persisted) => {
-      setOdontogram((prev) => {
-        if (!prev || prev.id === persisted.id) return prev
-        return persisted
-      })
+      setOdontogram((prev) => odontogramAfterPersist(prev, persisted))
     },
   })
 
@@ -352,45 +357,41 @@ export function PatientDetailPage() {
 
   useEffect(() => {
     if (!id || patient === undefined || patient === null) return
-    if (patient.treatmentCompleted) return
-
     let cancelled = false
 
     async function loadOdontogram() {
       const draft = await getPatientClinicalDraft(patientForeignKey)
+      const stored = await getOdontogramByPatientRouteId(id)
+      const signed = await getLatestSignedClinicalRecord(patientForeignKey)
+      const latest =
+        !signed && patient?.treatmentCompleted
+          ? await getLatestClinicalRecord(patientForeignKey)
+          : null
       if (cancelled) return
 
-      if (draft?.odontogramDraft) {
-        setOdontogram(
-          ensureOdontogramTeeth({
-            ...draft.odontogramDraft,
-            dentitionType: draft.odontogramDraft.dentitionType ?? 'permanente',
-            isInitialState: draft.odontogramDraft.isInitialState ?? true,
-          }),
-        )
-        return
-      }
+      const picked = pickOdontogramFromCandidates([
+        stored,
+        draft?.odontogramDraft,
+        signed?.odontogramSnapshot,
+        latest?.odontogramSnapshot,
+      ])
+      const ready = picked
+        ? ensureOdontogramTeeth({
+            ...picked,
+            dentitionType: picked.dentitionType ?? 'permanente',
+            isInitialState: picked.isInitialState ?? true,
+          })
+        : null
 
-      const existing = await getOdontogramByPatientRouteId(id)
-      if (cancelled) return
-
-      if (existing) {
-        setOdontogram(
-          ensureOdontogramTeeth({
-            ...existing,
-            dentitionType: existing.dentitionType ?? 'permanente',
-            isInitialState: existing.isInitialState ?? true,
-          }),
+      setOdontogram((prev) => {
+        if (ready) return pickOdontogram(prev, ready) ?? ready
+        if (prev && (prev.teeth?.length ?? 0) > 0) return prev
+        return createDefaultOdontogram(
+          patientForeignKey,
+          [...ALL_TEETH_NUMBERS, ...ALL_DECIDUOUS_TEETH],
+          'mixta',
         )
-      } else {
-        setOdontogram(
-          createDefaultOdontogram(
-            patientForeignKey,
-            [...ALL_TEETH_NUMBERS, ...ALL_DECIDUOUS_TEETH],
-            'mixta',
-          ),
-        )
-      }
+      })
     }
 
     void loadOdontogram()
@@ -419,94 +420,35 @@ export function PatientDetailPage() {
     let cancelled = false
     let loadCompleted = false
 
-    async function loadOdontogramFromDb() {
-      if (!id) return
-      const existing = await getOdontogramByPatientRouteId(id)
-      if (cancelled || !existing) return
-      setOdontogram(
-        ensureOdontogramTeeth({
-          ...existing,
-          dentitionType: existing.dentitionType ?? 'permanente',
-          isInitialState: existing.isInitialState ?? true,
-        }),
-      )
-    }
-
-    async function applyClinicalRecord(record: ClinicalRecord, archive: boolean) {
-      const safeRecord = normalizeClinicalRecordForExport(record)
-      if (archive) {
-        setViewingRecord(safeRecord)
-        setViewMode('view-record')
-      } else {
-        setViewingRecord(null)
-        setViewMode('edit')
-      }
-      let loadedWithWarning = false
-      let form: ClinicalRecordFormData
-      try {
-        form = clinicalRecordToFormData(safeRecord, professionalLicense)
-      } catch {
-        loadedWithWarning = true
-        form = createEmptyClinicalForm(professionalLicense, professionalLicense)
-        setMessage('La historia guardada tiene un formato antiguo. Se muestra la estructura base.')
-      }
-      setClinicalData(form)
-      await loadOdontogramFromDb()
-      setIsLocked(archive)
-      setActiveSection('all')
-      if (!loadedWithWarning) {
-        setMessage(
-          archive
-            ? 'Atención firmada (snapshot). El odontograma, plan y exámenes del expediente siguen editables. Las evoluciones firmadas no se modifican.'
-            : 'Historia clínica activa. Las evoluciones firmadas son inmutables (Res. 1995/1999); odontograma, demografía, plan y exámenes siguen editables.',
-        )
-      }
-      clinicalInitForPatientRef.current = id
-      loadCompleted = true
-    }
-
     async function initClinicalData() {
       try {
-        if (patientForeignKey && !draftClinicalData) {
-          let hasInProgressDraft = false
-          try {
-            const draft = await getPatientClinicalDraft(patientForeignKey)
-            hasInProgressDraft = Boolean(draft?.clinicalDraft || draft?.valuationDraft)
-          } catch {
-            hasInProgressDraft = false
-          }
-
-          if (!hasInProgressDraft) {
-            const signedRecord = await getLatestSignedClinicalRecord(patientForeignKey)
-            if (signedRecord) {
-              if (cancelled) return
-              await applyClinicalRecord(signedRecord, false)
-              return
-            }
-          }
-        }
-
-        if (patient?.treatmentCompleted && patientForeignKey) {
-          const signedRecord = await getLatestSignedClinicalRecord(patientForeignKey)
-          if (signedRecord) {
-            if (cancelled) return
-            await applyClinicalRecord(signedRecord, false)
-            return
-          }
-
-          const latestRecord = await getLatestClinicalRecord(patientForeignKey)
-          if (latestRecord) {
-            if (cancelled) return
-            await applyClinicalRecord(latestRecord, false)
-            return
-          }
-        }
-
         const emptyForm = createEmptyClinicalForm(professionalLicense, professionalLicense)
-        const base: ClinicalRecordFormData = {
+        let base: ClinicalRecordFormData = {
           ...emptyForm,
           ...(draftClinicalData ?? {}),
           diagnosticChart: normalizeClinicalDiagnosticChart(draftClinicalData?.diagnosticChart),
+        }
+        let loadedWithWarning = false
+        let signedRecord: ClinicalRecord | null = null
+
+        if (patientForeignKey && !draftClinicalData) {
+          signedRecord = await getLatestSignedClinicalRecord(patientForeignKey)
+          if (!signedRecord && patient?.treatmentCompleted) {
+            signedRecord = await getLatestClinicalRecord(patientForeignKey)
+          }
+          if (signedRecord) {
+            try {
+              base = clinicalRecordToFormData(
+                normalizeClinicalRecordForExport(signedRecord),
+                professionalLicense,
+              )
+            } catch {
+              loadedWithWarning = true
+              setMessage(
+                'La historia guardada tiene un formato antiguo. Se muestra la estructura base.',
+              )
+            }
+          }
         }
 
         if (patient?.valuationConsent && !base.valuationConsent) {
@@ -519,29 +461,23 @@ export function PatientDetailPage() {
         if (patientForeignKey) {
           try {
             const draft = await getPatientClinicalDraft(patientForeignKey)
-            if (draft?.clinicalDraft && !draftClinicalData) {
-              const clinicalDraft = draft.clinicalDraft
-              Object.assign(base, {
-                ...clinicalDraft,
-                budget: clinicalDraft.budget ?? base.budget,
-                budgetItems: clinicalDraft.budgetItems ?? base.budgetItems,
-                treatmentPlan: clinicalDraft.treatmentPlan ?? base.treatmentPlan,
-                diagnoses: clinicalDraft.diagnoses ?? base.diagnoses,
-                diagnosticChart: normalizeClinicalDiagnosticChart(clinicalDraft.diagnosticChart),
-              })
-              loadedDraft = true
-            } else if (draft?.valuationDraft && !draftClinicalData) {
-              Object.assign(base, {
-                ...draft.valuationDraft,
-                budget: draft.valuationDraft.budget ?? base.budget,
-                budgetItems: draft.valuationDraft.budgetItems ?? base.budgetItems,
-                treatmentPlan: draft.valuationDraft.treatmentPlan ?? base.treatmentPlan,
-                diagnoses: draft.valuationDraft.diagnoses ?? base.diagnoses,
-                diagnosticChart: normalizeClinicalDiagnosticChart(
-                  draft.valuationDraft.diagnosticChart,
-                ),
-              })
-              loadedDraft = true
+            const living = draft?.clinicalDraft ?? draft?.valuationDraft
+            if (draft && living && !draftClinicalData) {
+              const newer = signedRecord
+                ? isRemoteDraftNewer(
+                    signedRecord.updatedAt || signedRecord.signedAt || signedRecord.createdAt,
+                    draft.updatedAt,
+                  )
+                : true
+              base = mergeLivingChart(
+                base,
+                {
+                  ...living,
+                  diagnosticChart: normalizeClinicalDiagnosticChart(living.diagnosticChart),
+                },
+                newer,
+              )
+              loadedDraft = newer || !signedRecord
             }
             if (draft?.evolutionNotes?.length) {
               const existingIds = new Set((base.evolutionNotes ?? []).map((note) => note.id))
@@ -561,13 +497,14 @@ export function PatientDetailPage() {
 
         if (cancelled) return
 
-        if (patient?.treatmentCompleted) {
-          await loadOdontogramFromDb()
-        }
-
         setClinicalData(base)
         clinicalInitForPatientRef.current = id
         loadCompleted = true
+        if (!loadedWithWarning && signedRecord && !loadedDraft) {
+          setMessage(
+            'Historia clínica activa. Las evoluciones firmadas son inmutables (Res. 1995/1999); odontograma, demografía, plan y exámenes siguen editables.',
+          )
+        }
         if (patient?.treatmentCompleted) {
           setActiveSection('all')
           if (loadedDraft) {
@@ -616,27 +553,12 @@ export function PatientDetailPage() {
 
     if (!odontogram || !patientForeignKey) return
 
-    const payload = {
-
+    const saved = await upsertPatientOdontogram(patientForeignKey, {
       ...odontogram,
-
       patientId: patientForeignKey,
-
       updatedAt: new Date().toISOString(),
-
-    }
-
-    if (odontogram.id) {
-
-      await db.odontograms.update(odontogram.id, payload)
-
-    } else {
-
-      const newId = await db.odontograms.add(payload)
-
-      setOdontogram({ ...payload, id: String(newId) })
-
-    }
+    })
+    setOdontogram((prev) => odontogramAfterPersist(prev ?? odontogram, saved))
 
     setMessage('Odontograma guardado correctamente.')
 
@@ -775,18 +697,12 @@ export function PatientDetailPage() {
 
     await savePatientValuationDraft(id, valuationDraft)
 
-    const odontogramPayload = {
+    const saved = await upsertPatientOdontogram(id, {
       ...odontogram,
       patientId: patientForeignKey,
       updatedAt: new Date().toISOString(),
-    }
-
-    if (odontogram.id) {
-      await db.odontograms.update(odontogram.id, odontogramPayload)
-    } else {
-      const newId = await db.odontograms.add(odontogramPayload)
-      setOdontogram({ ...odontogramPayload, id: String(newId) })
-    }
+    })
+    setOdontogram((prev) => odontogramAfterPersist(prev ?? odontogram, saved))
   }, [
     id,
     clinicalData,
@@ -1437,14 +1353,15 @@ export function PatientDetailPage() {
     setClinicalData(clinicalRecordToFormData(safeRecord, professionalLicense))
 
     const liveOdontogram = id ? await getOdontogramByPatientRouteId(id) : null
-    if (liveOdontogram) {
-      setOdontogram({
-        ...liveOdontogram,
-        dentitionType: liveOdontogram.dentitionType ?? 'permanente',
-        isInitialState: liveOdontogram.isInitialState ?? false,
-      })
-    } else if (safeRecord.odontogramSnapshot) {
-      setOdontogram(safeRecord.odontogramSnapshot)
+    const visibleOdontogram = pickOdontogram(liveOdontogram, safeRecord.odontogramSnapshot)
+    if (visibleOdontogram) {
+      setOdontogram(
+        ensureOdontogramTeeth({
+          ...visibleOdontogram,
+          dentitionType: visibleOdontogram.dentitionType ?? 'permanente',
+          isInitialState: visibleOdontogram.isInitialState ?? false,
+        }),
+      )
     }
 
     setIsLocked(true)
@@ -1475,10 +1392,25 @@ export function PatientDetailPage() {
         (await getLatestSignedClinicalRecord(patientForeignKey)) ??
         (await getLatestClinicalRecord(patientForeignKey))
       if (latest) {
-        const form = clinicalRecordToFormData(
+        let form = clinicalRecordToFormData(
           normalizeClinicalRecordForExport(latest),
           professionalLicense,
         )
+        const draft = await getPatientClinicalDraft(patientForeignKey)
+        const living = draft?.clinicalDraft ?? draft?.valuationDraft
+        if (draft && living) {
+          form = mergeLivingChart(
+            form,
+            {
+              ...living,
+              diagnosticChart: normalizeClinicalDiagnosticChart(living.diagnosticChart),
+            },
+            isRemoteDraftNewer(
+              latest.updatedAt || latest.signedAt || latest.createdAt,
+              draft.updatedAt,
+            ),
+          )
+        }
         setClinicalData(form)
       } else {
         setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
@@ -1489,12 +1421,23 @@ export function PatientDetailPage() {
 
     if (id) {
       const existing = await getOdontogramByPatientRouteId(id)
-      if (existing) {
-        setOdontogram({
-          ...existing,
-          dentitionType: existing.dentitionType ?? 'permanente',
-          isInitialState: existing.isInitialState ?? false,
-        })
+      const draft = patientForeignKey ? await getPatientClinicalDraft(patientForeignKey) : null
+      const signed = patientForeignKey
+        ? await getLatestSignedClinicalRecord(patientForeignKey)
+        : null
+      const visible = pickOdontogramFromCandidates([
+        existing,
+        draft?.odontogramDraft,
+        signed?.odontogramSnapshot,
+      ])
+      if (visible) {
+        setOdontogram(
+          ensureOdontogramTeeth({
+            ...visible,
+            dentitionType: visible.dentitionType ?? 'permanente',
+            isInitialState: visible.isInitialState ?? false,
+          }),
+        )
       } else {
         setOdontogram(createDefaultOdontogram(patientForeignKey, ALL_TEETH_NUMBERS))
       }
