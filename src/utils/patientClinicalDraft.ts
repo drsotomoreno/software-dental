@@ -4,7 +4,7 @@ import {
   notifyClinicalRecordDirty,
 } from '@/services/clinicalSyncState'
 import type { EvolutionNote } from '@/types/evolutionNote'
-import { isEvolutionNoteImmutable } from '@/types/evolutionNote'
+import { isEvolutionNoteImmutable, retainSignedEvolutionBody } from '@/types/evolutionNote'
 import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
 import type { OdontogramData } from '@/types/odontogram'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
@@ -20,7 +20,10 @@ function preserveImmutableEvolutionNotes(
   const signedSnapshots = new Map(
     (existing ?? []).filter(isEvolutionNoteImmutable).map((note) => [note.id, note]),
   )
-  return incoming.map((note) => signedSnapshots.get(note.id) ?? note)
+  return incoming.map((note) => {
+    const signed = signedSnapshots.get(note.id)
+    return signed ? retainSignedEvolutionBody(signed, note) : note
+  })
 }
 
 function normalizeClinicalDraft(draft: ClinicalRecordFormData): ClinicalRecordFormData {

@@ -21,6 +21,7 @@ import {
   removeEvolutionNoteFromList,
   updateEvolutionNoteInList,
 } from '@/services/evolutionNoteService'
+import { EvolutionNoteRipsMetadataError } from '@/types/evolutionNoteRips'
 import { RipsShieldModal } from '@/components/rips/RipsShieldModal'
 import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
 import type { RipsShieldMismatch } from '@/types/consultationCheckout'
@@ -90,6 +91,10 @@ export function EvolutionNotesForm({
     } catch (error) {
       if (error instanceof EvolutionNoteImmutableError) {
         logBlockedMutation(id, 'UPDATE')
+        showBlocked(error.message)
+        return
+      }
+      if (error instanceof EvolutionNoteRipsMetadataError) {
         showBlocked(error.message)
         return
       }

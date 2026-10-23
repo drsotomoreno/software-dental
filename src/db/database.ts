@@ -40,6 +40,10 @@ import type { ClinicBillingSettingsRecord } from '@/types/billingModality'
 import type { RdaCryptographicConsent, RdaExternalHistory } from '@/types/rdaExternalHistory'
 import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
 import type { ConsecutivoPrestador, ReciboCaja } from '@/types/atencionPago'
+import {
+  backfillDraftEvolutionNotes,
+  backfillEvolutionNotesRipsMetadata,
+} from '@/types/evolutionNoteRips'
 import { CREDIT_NOTE_IMMUTABILITY_MESSAGE } from '@/types/creditNote'
 import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
@@ -723,6 +727,39 @@ export class DentalDatabase extends Dexie {
         'id, &[usuarioTitularId+tipoDocumento], usuarioTitularId, tipoDocumento',
       recibosCaja:
         'id, &[usuarioTitularId+tipoDocumento+consecutivo], usuarioTitularId, tipoDocumento, consecutivo',
+    })
+
+    // v30 — metadata RIPS (Res. 2275) dentro de cada nota de evolución.
+    // Solo completa ripsMetadata ausente. No reescribe procedure, clinicalNote,
+    // la firma ni contentHash.
+    this.version(30).upgrade(async (tx) => {
+      const records = await tx.table('clinicalRecords').toArray()
+      for (const record of records) {
+        if (!record?.id) continue
+        const evolutionNotes = backfillEvolutionNotesRipsMetadata(record.evolutionNotes)
+        if (evolutionNotes === record.evolutionNotes) continue
+        await tx.table('clinicalRecords').update(record.id, { evolutionNotes })
+      }
+
+      const drafts = await tx.table('patientClinicalDrafts').toArray()
+      for (const draft of drafts) {
+        if (!draft?.patientId) continue
+        const evolutionNotes = backfillEvolutionNotesRipsMetadata(draft.evolutionNotes)
+        const valuationDraft = backfillDraftEvolutionNotes(draft.valuationDraft)
+        const clinicalDraft = backfillDraftEvolutionNotes(draft.clinicalDraft)
+        if (
+          evolutionNotes === draft.evolutionNotes &&
+          valuationDraft === draft.valuationDraft &&
+          clinicalDraft === draft.clinicalDraft
+        ) {
+          continue
+        }
+        await tx.table('patientClinicalDrafts').update(draft.patientId, {
+          evolutionNotes,
+          valuationDraft,
+          clinicalDraft,
+        })
+      }
     })
   }
 }

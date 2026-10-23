@@ -4,7 +4,7 @@ import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceServic
 import type { AuthUser } from '@/types/auth'
 import type { ClinicalRecord, ClinicalRecordFormData, TreatingDentistSignature } from '@/types/clinicalRecord'
 import type { EvolutionNote } from '@/types/evolutionNote'
-import { isEvolutionNoteImmutable } from '@/types/evolutionNote'
+import { isEvolutionNoteImmutable, retainSignedEvolutionBody } from '@/types/evolutionNote'
 import type { OdontogramData } from '@/types/odontogram'
 import type { SignatureCaptureResult } from '@/types/signature'
 import { computeContentHash, serializeForHash } from '@/utils/crypto'
@@ -35,7 +35,10 @@ function snapshotEvolutionNotes(
   const signed = new Map(
     (existing ?? []).filter(isEvolutionNoteImmutable).map((note) => [note.id, note]),
   )
-  const merged = incoming.map((note) => signed.get(note.id) ?? note)
+  const merged = incoming.map((note) => {
+    const preserved = signed.get(note.id)
+    return preserved ? retainSignedEvolutionBody(preserved, note) : note
+  })
   for (const note of signed.values()) {
     if (!merged.some((item) => item.id === note.id)) merged.push(note)
   }

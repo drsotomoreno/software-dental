@@ -1,5 +1,9 @@
 import type { SignatureCaptureMetadata } from '@/types/signature'
 import type { CamposPagoAtencion } from '@/types/atencionPago'
+import {
+  createDefaultEvolutionNoteRipsMetadata,
+  type EvolutionNoteRipsMetadata,
+} from '@/types/evolutionNoteRips'
 
 export type EvolutionNoteKind = 'evolution' | 'addendum'
 
@@ -83,6 +87,12 @@ export interface EvolutionNote {
   conceptoPago?: CamposPagoAtencion['conceptoPago']
   valorProcedimiento?: CamposPagoAtencion['valorProcedimiento']
   estadoRips?: CamposPagoAtencion['estadoRips']
+  /**
+   * Radicación RIPS (Res. 2275). Fuera del hash clínico: el CIE-10 de envío,
+   * el recibo, la FEV, el CUV y los reintentos se actualizan sin romper la
+   * firma de la nota (Res. 1995/1999).
+   */
+  ripsMetadata?: EvolutionNoteRipsMetadata
 }
 
 /** Folio / sesión clínica — unidad de bloqueo de la HCE (Res. 1995/1999). */
@@ -114,6 +124,20 @@ export function isEvolutionNoteMutable(
   return !isEvolutionNoteImmutable(note)
 }
 
+/**
+ * Conserva el cuerpo firmado y deja pasar la metadata RIPS más reciente.
+ * Un borrador o una sincronización no pueden devolver el CUV, el recibo o el
+ * estado de transmisión a la copia anterior.
+ */
+export function retainSignedEvolutionBody(
+  signed: EvolutionNote,
+  incoming: EvolutionNote,
+): EvolutionNote {
+  if (!isEvolutionNoteImmutable(signed)) return incoming
+  if (incoming.ripsMetadata === undefined) return signed
+  return { ...signed, ripsMetadata: incoming.ripsMetadata }
+}
+
 export function createEmptyEvolutionNote(
   professionalName = '',
   professionalLicense = '',
@@ -139,6 +163,7 @@ export function createEmptyEvolutionNote(
     conceptoPago: null,
     valorProcedimiento: 0,
     estadoRips: 'PENDIENTE_PAGO',
+    ripsMetadata: createDefaultEvolutionNoteRipsMetadata(),
   }
 }
 

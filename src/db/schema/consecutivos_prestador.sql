@@ -43,6 +43,18 @@ CREATE TABLE IF NOT EXISTS atenciones (
     concepto_pago TEXT,
     valor_procedimiento NUMERIC NOT NULL DEFAULT 0,
     estado_rips TEXT NOT NULL DEFAULT 'PENDIENTE_PAGO',
+    -- Metadata RIPS (Res. 2275), mutable e independiente del cuerpo firmado.
+    cod_diagnostico_principal TEXT,
+    tipo_vinculacion_financiera TEXT NOT NULL DEFAULT 'valor_cero',
+    id_recibo_asociado TEXT,
+    id_factura_electronica TEXT,
+    causa_motivo_atencion TEXT NOT NULL DEFAULT '38',
+    finalidad_tecnologia TEXT NOT NULL DEFAULT '11',
+    concepto_recaudo TEXT NOT NULL DEFAULT '05',
+    rips_estado TEXT NOT NULL DEFAULT 'sin_preparar',
+    cuv TEXT,
+    rips_fecha_transmision TEXT,
+    rips_error_log TEXT,
     created_at TEXT,
     updated_at TEXT,
     FOREIGN KEY (pago_id) REFERENCES recibos_caja(id) ON DELETE SET NULL,
@@ -52,6 +64,10 @@ CREATE TABLE IF NOT EXISTS atenciones (
 CREATE INDEX IF NOT EXISTS idx_atenciones_pago_id ON atenciones (pago_id);
 CREATE INDEX IF NOT EXISTS idx_atenciones_estado_rips ON atenciones (estado_rips);
 CREATE INDEX IF NOT EXISTS idx_atenciones_clinical_record ON atenciones (clinical_record_id);
+CREATE INDEX IF NOT EXISTS idx_atenciones_rips_estado ON atenciones (rips_estado);
+CREATE INDEX IF NOT EXISTS idx_atenciones_cuv ON atenciones (cuv);
+CREATE INDEX IF NOT EXISTS idx_atenciones_id_recibo_asociado ON atenciones (id_recibo_asociado);
+CREATE INDEX IF NOT EXISTS idx_atenciones_id_factura_electronica ON atenciones (id_factura_electronica);
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_atenciones_evolution_note
     ON atenciones (evolution_note_id)

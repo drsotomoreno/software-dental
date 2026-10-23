@@ -4,9 +4,16 @@ import {
   EVOLUTION_NOTE_IMMUTABILITY_MESSAGE,
   isEvolutionNoteImmutable,
 } from '@/types/evolutionNote'
+import {
+  applyEvolutionNotePatch,
+  createDefaultEvolutionNoteRipsMetadata,
+} from '@/types/evolutionNoteRips'
+import { buildEvolutionNoteHashPayload } from '@/utils/evolutionNoteHash'
 import type { EvolutionNoteAddendum } from '@/types/evolutionNoteAddendum'
 import type { SyncOutboxEntityType, SyncOutboxEntry } from '@/types/syncOutbox'
 import { computeContentHash, generateId, serializeForHash } from '@/utils'
+
+export { buildEvolutionNoteHashPayload }
 
 export class EvolutionNoteImmutableError extends Error {
   constructor(message = EVOLUTION_NOTE_IMMUTABILITY_MESSAGE) {
@@ -20,38 +27,6 @@ export function assertEvolutionNoteMutable(
 ): void {
   if (isEvolutionNoteImmutable(note)) {
     throw new EvolutionNoteImmutableError()
-  }
-}
-
-/** Payload canónico para hash SHA-256 de una nota de evolución. */
-export function buildEvolutionNoteHashPayload(note: EvolutionNote) {
-  return {
-    id: note.id,
-    kind: note.kind ?? 'evolution',
-    parentEvolutionNoteId: note.parentEvolutionNoteId ?? null,
-    parentEvolutionNoteHash: note.parentEvolutionNoteHash ?? null,
-    addendumReason: note.addendumReason ?? null,
-    date: note.date,
-    procedure: note.procedure,
-    anesthesia: note.anesthesia,
-    prescriptions: note.prescriptions,
-    professionalName: note.professionalName,
-    professionalLicense: note.professionalLicense,
-    authorUserId: note.authorUserId ?? null,
-    authorEmail: note.authorEmail ?? null,
-    createdAt: note.createdAt,
-    catalogServices: note.catalogServices ?? null,
-    dentalServiceId: note.dentalServiceId ?? null,
-    serviceName: note.serviceName ?? null,
-    requiereCupsRips: note.requiereCupsRips ?? null,
-    clinicalNote: note.clinicalNote ?? null,
-    cupsCode: note.cupsCode ?? null,
-    professionalSignatureDataUrl: note.professionalSignatureDataUrl ?? null,
-    professionalSignatureMeta: note.professionalSignatureMeta ?? null,
-    cost: note.cost ?? null,
-    isBillable: note.isBillable ?? null,
-    // pagoId, numeroSoportePago, conceptoPago, valorProcedimiento y estadoRips
-    // no entran al hash: el vínculo de cobro puede resolverse después de la firma.
   }
 }
 
@@ -123,8 +98,14 @@ export function updateEvolutionNoteInList(
 ): EvolutionNote[] {
   const target = notes.find((note) => note.id === noteId)
   if (!target) return notes
-  assertEvolutionNoteMutable(target)
-  return notes.map((note) => (note.id === noteId ? { ...note, ...patch } : note))
+  return notes.map((note) =>
+    note.id === noteId
+      ? applyEvolutionNotePatch(note, patch, {
+          immutable: isEvolutionNoteImmutable(note),
+          rejectClinicalEdit: () => assertEvolutionNoteMutable(note),
+        })
+      : note,
+  )
 }
 
 export function removeEvolutionNoteFromList(
@@ -162,6 +143,7 @@ export function createAddendumDraftNote(
     clinicalNote: '',
     requiereCupsRips: false,
     isLocked: false,
+    ripsMetadata: createDefaultEvolutionNoteRipsMetadata(),
   }
 }
 

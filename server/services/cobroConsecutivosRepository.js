@@ -8,10 +8,11 @@ import { fileURLToPath } from 'node:url'
 import { withPgClient } from './durableStore.js'
 import { splitSqlStatements } from './consultasRepository.js'
 
-const MIGRATION_FILE = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '../db/migrations/20261022133400_consecutivos_prestador_atenciones.sql',
-)
+const MIGRATION_DIR = join(dirname(fileURLToPath(import.meta.url)), '../db/migrations')
+const MIGRATION_FILES = [
+  join(MIGRATION_DIR, '20261022133400_consecutivos_prestador_atenciones.sql'),
+  join(MIGRATION_DIR, '20261023140000_atenciones_rips_metadata.sql'),
+]
 
 const TIPOS = new Set(['RECIBO_CAJA', 'CUENTA_COBRO'])
 const UUID_RE =
@@ -45,16 +46,18 @@ export function assertReservaConsecutivo(input = {}) {
 export async function ensureCobroSchema() {
   if (!schemaReady) {
     schemaReady = withPgClient(async (client) => {
-      const sql = await readFile(MIGRATION_FILE, 'utf8')
-      for (const statement of splitSqlStatements(sql)) {
-        try {
-          await client.query(statement)
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error)
-          const wrapped = new Error(`${detail} — sentencia: ${statement}`)
-          wrapped.code = error?.code
-          wrapped.cause = error
-          throw wrapped
+      for (const file of MIGRATION_FILES) {
+        const sql = await readFile(file, 'utf8')
+        for (const statement of splitSqlStatements(sql)) {
+          try {
+            await client.query(statement)
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error)
+            const wrapped = new Error(`${detail} — sentencia: ${statement}`)
+            wrapped.code = error?.code
+            wrapped.cause = error
+            throw wrapped
+          }
         }
       }
     }).catch((error) => {

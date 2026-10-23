@@ -1,5 +1,6 @@
 import type { ClinicalRecord } from '@/types/clinicalRecord'
 import type { EvolutionNote } from '@/types/evolutionNote'
+import { omitEvolutionNoteRipsMetadata } from '@/types/evolutionNoteRips'
 import { normalizeSpecializedAnnexes } from '@/types/specializedAnnexes'
 import { computeContentHash, serializeForHash } from './crypto'
 
@@ -35,7 +36,9 @@ export function buildRecordHashPayload(record: ClinicalRecord) {
       ? { paymentControlLines: record.paymentControlLines }
       : {}),
     orthodonticsPaymentControl: record.orthodonticsPaymentControl ?? [],
-    evolutionNotes: sortEvolutionNotesChronologically(record.evolutionNotes ?? []),
+    evolutionNotes: sortEvolutionNotesChronologically(record.evolutionNotes ?? []).map((note) =>
+      omitEvolutionNoteRipsMetadata(note),
+    ),
     informedConsent: record.informedConsent,
   }
 }
