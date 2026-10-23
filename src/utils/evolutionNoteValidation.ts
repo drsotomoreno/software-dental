@@ -73,22 +73,20 @@ export function validateEvolutionNote(note: EvolutionNote): EvolutionNoteValidat
     })
   }
 
-  if (ripsMode === 'non_rips' || ripsMode === 'mixed') {
-    if (!note.professionalSignatureDataUrl) {
-      issues.push({
-        noteId: note.id,
-        field: 'professionalSignatureDataUrl',
-        message: 'La firma digital del profesional es obligatoria.',
-      })
-    } else if (
-      (note.professionalSignatureMeta?.strokeCount ?? 0) < MIN_SIGNATURE_STROKES
-    ) {
-      issues.push({
-        noteId: note.id,
-        field: 'professionalSignatureDataUrl',
-        message: 'La firma digital del profesional no es válida.',
-      })
-    }
+  if (!note.professionalSignatureDataUrl) {
+    issues.push({
+      noteId: note.id,
+      field: 'professionalSignatureDataUrl',
+      message: 'La firma digital del profesional es obligatoria.',
+    })
+  } else if (
+    (note.professionalSignatureMeta?.strokeCount ?? 0) < MIN_SIGNATURE_STROKES
+  ) {
+    issues.push({
+      noteId: note.id,
+      field: 'professionalSignatureDataUrl',
+      message: 'La firma digital del profesional no es válida.',
+    })
   }
 
   if (ripsMode === 'non_rips') {

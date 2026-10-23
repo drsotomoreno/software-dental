@@ -34,6 +34,53 @@ function parcheProcedimientoCups(procedure: string): EvolutionNotePatch {
   return { procedure, cupsCode: resolved.cupsCode }
 }
 
+function EvolutionNoteSignature({
+  note,
+  readOnly,
+  disabled,
+  onChange,
+}: {
+  note: EvolutionNote
+  readOnly: boolean
+  disabled: boolean
+  onChange: (patch: EvolutionNotePatch) => void
+}) {
+  if (readOnly) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white p-3">
+        <p className="mb-2 text-xs font-medium text-slate-600">Firma del profesional</p>
+        {note.professionalSignatureDataUrl ? (
+          <img
+            src={note.professionalSignatureDataUrl}
+            alt="Firma del profesional"
+            className="max-h-28 max-w-full"
+          />
+        ) : (
+          <div className="flex h-28 items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-400">
+            Sin firma registrada
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="w-full [&_canvas]:!h-40 [&_canvas]:max-w-full [&_canvas]:!w-full">
+      <DigitalSignatureCanvas
+        onSignatureChange={(result) =>
+          onChange({
+            professionalSignatureDataUrl: result?.dataUrl,
+            professionalSignatureMeta: result?.metadata,
+          })
+        }
+        disabled={disabled}
+        width={640}
+        height={160}
+      />
+    </div>
+  )
+}
+
 interface EvolutionNoteCardProps {
   note: EvolutionNote
   index: number
@@ -264,36 +311,11 @@ export function EvolutionNoteCard({
             ) : (
               <>
                 {showClinicalNoteForm && (
-                  <>
-                    <div className="rounded-lg border border-violet-100 bg-white/80 p-3 text-xs text-violet-900">
-                      {ripsMode === 'mixed'
-                        ? 'Algunos procedimientos no requieren CUPS para RIPS. Firme digitalmente antes de grabar la nota.'
-                        : 'Este servicio no requiere código CUPS para RIPS. Firme digitalmente; no se generarán advertencias de radicación.'}
-                    </div>
-
-                    <DigitalSignatureCanvas
-                      onSignatureChange={(result) =>
-                        onChange({
-                          professionalSignatureDataUrl: result?.dataUrl,
-                          professionalSignatureMeta: result?.metadata,
-                        })
-                      }
-                      disabled={clinicalLocked}
-                      width={480}
-                      height={160}
-                    />
-
-                    {note.professionalSignatureDataUrl && readOnly && (
-                      <div className="rounded-lg border border-slate-200 bg-white p-3">
-                        <p className="mb-2 text-xs font-medium text-slate-600">Firma del profesional</p>
-                        <img
-                          src={note.professionalSignatureDataUrl}
-                          alt="Firma profesional"
-                          className="max-h-24"
-                        />
-                      </div>
-                    )}
-                  </>
+                  <div className="rounded-lg border border-violet-100 bg-white/80 p-3 text-xs text-violet-900">
+                    {ripsMode === 'mixed'
+                      ? 'Algunos procedimientos no requieren CUPS para RIPS. Firme digitalmente antes de grabar la nota.'
+                      : 'Este servicio no requiere código CUPS para RIPS. Firme digitalmente; no se generarán advertencias de radicación.'}
+                  </div>
                 )}
 
                 {showRipsForm && (
@@ -425,6 +447,12 @@ export function EvolutionNoteCard({
                 )}
               </>
             )}
+            <EvolutionNoteSignature
+              note={note}
+              readOnly={readOnly}
+              disabled={clinicalLocked}
+              onChange={onChange}
+            />
           </>
         )}
       </div>

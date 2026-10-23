@@ -810,11 +810,16 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
             ? `${escapeHtml(note.serviceName)}${isNonRips ? ' (sin RIPS)' : ''}`
             : procedureFallback
 
+      const firma = note.professionalSignatureDataUrl
+        ? `<img src="${note.professionalSignatureDataUrl}" alt="Firma del profesional" style="max-height:64px;max-width:160px" />`
+        : '<div style="height:48px;border-bottom:1px solid #94a3b8"></div>'
+
       return `<tr>
           <td>${formatDate(note.date || note.createdAt)}</td>
           <td>${serviceLabel}</td>
           <td>${noteOrRx}</td>
           <td>${escapeHtml(note.professionalName)}</td>
+          <td>${firma}</td>
         </tr>`
     })
     .join('')
@@ -825,7 +830,7 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
       ${
         rows
           ? `<table>
-        <thead><tr><th>Fecha</th><th>Procedimiento</th><th>Nota de evolución / Prescripciones</th><th>Profesional</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Procedimiento</th><th>Nota de evolución / Prescripciones</th><th>Profesional</th><th>Firma</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`
           : '<p>Sin notas de evolución.</p>'
