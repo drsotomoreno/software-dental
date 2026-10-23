@@ -13,6 +13,7 @@ import { Cie10PrincipalCombobox } from './Cie10PrincipalCombobox'
 import { EvolutionCatalogServicesField } from './EvolutionCatalogServicesField'
 import { EvolutionNoteAddendumPanel } from './EvolutionNoteAddendumPanel'
 import { EvolutionRipsEstadoBadge, EvolutionRipsPanel } from './EvolutionRipsPanel'
+import type { PacienteRipsIdentidad } from '@/utils/evolutionRipsPayload'
 import {
   noteHasCatalogServices,
   resolveEvolutionNoteRipsMode,
@@ -23,6 +24,7 @@ interface EvolutionNoteCardProps {
   index: number
   disabled?: boolean
   patientId?: string
+  paciente?: PacienteRipsIdentidad
   parentRecordId?: string
   pagosPaciente?: Array<PaymentRecord | OrthodonticsPaymentRecord>
   allowAddendums?: boolean
@@ -37,6 +39,7 @@ export function EvolutionNoteCard({
   index,
   disabled = false,
   patientId = '',
+  paciente,
   parentRecordId,
   pagosPaciente = [],
   allowAddendums = true,
@@ -415,6 +418,7 @@ export function EvolutionNoteCard({
           <EvolutionRipsPanel
             note={note}
             patientId={patientId}
+            paciente={paciente}
             pagosActuales={pagosPaciente}
             disabled={disabled}
             clinicalLocked={clinicalLocked}

@@ -1842,6 +1842,10 @@ export function PatientDetailPage() {
           patientDocument={`${patient.documentType} ${patient.documentNumber}`.trim()}
           patientDocumentType={patient.documentType}
           patientDocumentNumber={patient.documentNumber}
+          patientBirthDate={patient.birthDate}
+          patientGender={patient.gender}
+          patientRegime={patient.regime}
+          patientMunicipalityCode={patient.municipalityCode}
           patientEmail={patient.email}
           canSignMainHistory={can('clinical.sign')}
           savedSignature={savedSignature}

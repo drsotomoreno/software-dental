@@ -193,7 +193,21 @@ export function createDefaultEvolutionNoteRipsMetadata(
   })
 }
 
-type NotaConRipsMetadata = { ripsMetadata?: EvolutionNoteRipsMetadata | null }
+type NotaConRipsMetadata = {
+  ripsMetadata?: EvolutionNoteRipsMetadata | null
+  cost?: number
+  isBillable?: boolean
+  estadoRips?: string | null
+}
+
+/** Una nota con tarifa no nace como control de $0 al guardar el primer CIE-10. */
+function vinculoInicial(note: NotaConRipsMetadata): Partial<EvolutionNoteRipsMetadata> {
+  if (note.ripsMetadata) return {}
+  const sinCosto =
+    (note.cost ?? 0) === 0 || note.isBillable === false || note.estadoRips === 'SIN_COSTO'
+  if (sinCosto) return {}
+  return { tipoVinculacionFinanciera: 'recibo_interno' }
+}
 
 /**
  * Fusiona un parche de metadata sobre la nota.
@@ -207,6 +221,7 @@ export function applyEvolutionNoteRipsMetadata<T extends NotaConRipsMetadata>(
     ...note,
     ripsMetadata: parseEvolutionNoteRipsMetadata({
       ...createDefaultEvolutionNoteRipsMetadata(),
+      ...vinculoInicial(note),
       ...(note.ripsMetadata ?? {}),
       ...patch,
     }),

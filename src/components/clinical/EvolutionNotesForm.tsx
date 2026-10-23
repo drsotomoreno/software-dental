@@ -27,11 +27,13 @@ import { RipsShieldModal } from '@/components/rips/RipsShieldModal'
 import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
 import type { RipsShieldMismatch } from '@/types/consultationCheckout'
 import { EvolutionNoteCard } from './EvolutionNoteCard'
+import type { PacienteRipsIdentidad } from '@/utils/evolutionRipsPayload'
 
 interface EvolutionNotesFormProps {
   notes: EvolutionNote[]
   onChange: (notes: EvolutionNote[]) => void
   patientId?: string
+  paciente?: PacienteRipsIdentidad
   parentRecordId?: string
   pagosPaciente?: Array<PaymentRecord | OrthodonticsPaymentRecord>
   professionalName?: string
@@ -48,6 +50,7 @@ export function EvolutionNotesForm({
   notes,
   onChange,
   patientId = '',
+  paciente,
   parentRecordId,
   pagosPaciente = [],
   professionalName = '',
@@ -237,6 +240,7 @@ export function EvolutionNotesForm({
               disabled={disabled}
               parentRecordId={parentRecordId}
               patientId={patientId}
+              paciente={paciente}
               pagosPaciente={pagosPaciente}
               allowAddendums={allowAddendums}
               onChange={(patch) => updateNote(note.id, patch)}

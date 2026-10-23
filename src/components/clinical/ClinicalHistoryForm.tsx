@@ -73,6 +73,10 @@ interface ClinicalHistoryFormProps {
   patientDocument?: string
   patientDocumentType?: string
   patientDocumentNumber?: string
+  patientBirthDate?: string
+  patientGender?: string
+  patientRegime?: string
+  patientMunicipalityCode?: string
   patientEmail?: string
   canSignMainHistory?: boolean
   savedSignature?: SignatureCaptureResult | null
@@ -134,6 +138,12 @@ export function ClinicalHistoryForm({
   clinicalUser = null,
   patientName = '',
   patientDocument = '',
+  patientDocumentType = '',
+  patientDocumentNumber = '',
+  patientBirthDate = '',
+  patientGender = '',
+  patientRegime = '',
+  patientMunicipalityCode = '',
   canSignMainHistory = false,
   savedSignature = null,
   onSaveProfileSignature,
@@ -506,6 +516,14 @@ export function ClinicalHistoryForm({
         notes={form.evolutionNotes}
         onChange={(evolutionNotes: EvolutionNote[]) => update({ evolutionNotes })}
         patientId={patientId}
+        paciente={{
+          documentType: patientDocumentType,
+          documentNumber: patientDocumentNumber,
+          birthDate: patientBirthDate,
+          gender: patientGender,
+          regime: patientRegime,
+          municipalityCode: patientMunicipalityCode,
+        }}
         pagosPaciente={[
           ...(form.paymentControl ?? []),
           ...(form.orthodonticsPaymentControl ?? []),

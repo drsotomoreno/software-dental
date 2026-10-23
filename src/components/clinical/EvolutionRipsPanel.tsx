@@ -2,8 +2,11 @@ import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CheckCircle2, Download, Rocket } from 'lucide-react'
 import { db } from '@/db/database'
+import { useAuth } from '@/contexts/AuthContext'
+import { useToast } from '@/hooks/useToast'
 import { listPatientElectronicInvoices } from '@/services/invoiceService'
 import { routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
+import { Toast } from '@/components/ui/Toast'
 import type { EvolutionNote, EvolutionNotePatch } from '@/types/evolutionNote'
 import type { OrthodonticsPaymentRecord, PaymentRecord } from '@/types/clinicalRecord'
 import {
@@ -23,6 +26,12 @@ import {
 } from '@/utils/evolutionPaymentOptions'
 import { toDexiePrimaryKey, toPatientForeignKey } from '@/utils/patientId'
 import { Cie10PrincipalCombobox } from './Cie10PrincipalCombobox'
+import {
+  EvolutionRipsPayloadError,
+  armarRipsNotaEvolucion,
+  mensajeCampoRips,
+  type PacienteRipsIdentidad,
+} from '@/utils/evolutionRipsPayload'
 
 const OPCIONES_VINCULO: Array<{ value: TipoVinculacionFinanciera; label: string }> = [
   { value: 'recibo_interno', label: 'Recibo de caja interno' },
@@ -114,6 +123,7 @@ export function EvolutionRipsEstadoBadge({ note }: { note: EvolutionNote }) {
 interface EvolutionRipsPanelProps {
   note: EvolutionNote
   patientId?: string
+  paciente?: PacienteRipsIdentidad
   pagosActuales?: Array<PaymentRecord | OrthodonticsPaymentRecord>
   disabled?: boolean
   /** La nota firmada congela la tarifa clínica, no la metadata RIPS. */
@@ -125,18 +135,21 @@ interface EvolutionRipsPanelProps {
 export function EvolutionRipsPanel({
   note,
   patientId = '',
+  paciente,
   pagosActuales = [],
   disabled = false,
   clinicalLocked = false,
   showDiagnosis = false,
   onChange,
 }: EvolutionRipsPanelProps) {
+  const { user } = useAuth()
   const metadata = metadataDe(note)
   const tipo = tipoEfectivo(note)
   const valorCero = tipo === 'valor_cero'
-  const [enviando, setEnviando] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const [verCuv, setVerCuv] = useState(false)
   const [mensajeLocal, setMensajeLocal] = useState('')
+  const { toastMessage, showToast, clearToast } = useToast(8000)
   const pagosKey = pagosActuales
     .map((pago) => `${pago.id}:${pago.amount}:${pago.paymentDate}`)
     .join('|')
@@ -238,8 +251,26 @@ export function EvolutionRipsPanel({
     })
   }
 
+  const entradaRips = () => ({
+    note,
+    paciente: paciente ?? { documentType: '', documentNumber: '', birthDate: '' },
+    prestador: {
+      documentType: user?.documentType || 'CC',
+      documentNumber: user?.documentNumber || note.professionalLicense,
+      providerNit: user?.providerNit,
+      repsCode: user?.repsCode,
+    },
+    numeroSoporte: note.numeroSoportePago,
+    tipoVinculacion: tipo,
+  })
+
   const descargarJson = () => {
-    const doc = documentoRipsDeNota(note)
+    let doc: object = documentoRipsDeNota(note)
+    try {
+      doc = armarRipsNotaEvolucion(entradaRips())
+    } catch {
+      doc = documentoRipsDeNota(note)
+    }
     descargarTexto(
       `RIPS_nota_${note.id.slice(0, 8)}.json`,
       JSON.stringify(doc, null, 2),
@@ -252,10 +283,41 @@ export function EvolutionRipsPanel({
     descargarTexto(`CUV_${metadata.cuv}.txt`, metadata.cuv, 'text/plain;charset=utf-8')
   }
 
+  const rechazoMuv = (resultado: {
+    field?: string | null
+    error?: string
+    message?: string
+    estadoMuv?: string
+    localIssues?: Array<{ level: string; field?: string; message: string }>
+    ministryErrors?: Array<{ message: string }>
+  }) => {
+    const issue = resultado.localIssues?.find((item) => item.level !== 'warning' && item.message)
+    const field = resultado.field || issue?.field || null
+    const message =
+      issue?.message ||
+      resultado.ministryErrors?.find((item) => item.message)?.message ||
+      resultado.error ||
+      resultado.message ||
+      (resultado.estadoMuv === 'RECHAZADO' ? 'El MUV rechazó el RIPS.' : 'El MUV no devolvió un CUV.')
+    return field ? `${field}: ${message}` : message
+  }
+
   const enviar = async () => {
+    if (isLoading) return
     setMensajeLocal('')
-    setEnviando(true)
+    setIsLoading(true)
     try {
+      const entrada = entradaRips()
+      try {
+        armarRipsNotaEvolucion(entrada)
+      } catch (error) {
+        if (error instanceof EvolutionRipsPayloadError) {
+          setMensajeLocal(mensajeCampoRips(error))
+          return
+        }
+        throw error
+      }
+
       const preparado = applyEvolutionNoteRipsMetadata(note, {
         ...metadata,
         tipoVinculacionFinanciera: tipo,
@@ -263,10 +325,18 @@ export function EvolutionRipsPanel({
       })
       const lista = preparado.ripsMetadata
       if (!lista) return
+      const rips = armarRipsNotaEvolucion({ ...entrada, note: { ...note, ripsMetadata: lista } })
       const resultado = await routeDictatedEvolutionByFiscalProfile({
-        atencion: documentoRipsDeNota({ ...note, ripsMetadata: lista }),
+        rips,
         cie10: [lista.codDiagnosticoPrincipal],
-        cups: [note.cupsCode],
+        cups: rips.usuarios.flatMap((usuario) => [
+          ...usuario.servicios.consultas.map((consulta) => consulta.codConsulta),
+          ...usuario.servicios.procedimientos.map((procedimiento) => procedimiento.codProcedimiento),
+        ]),
+        metadatos: {
+          patientUuid: patientId || undefined,
+          patientDocument: paciente?.documentNumber,
+        },
       })
       const cuv = resultado.cuv?.trim()
       if (cuv) {
@@ -280,14 +350,23 @@ export function EvolutionRipsPanel({
           },
         })
         setVerCuv(true)
+        showToast(`RIPS transmitido. CUV: ${cuv}`)
         return
       }
-      const detalle =
-        resultado.error ||
-        resultado.message ||
-        (resultado.estadoMuv === 'RECHAZADO'
-          ? 'El MUV rechazó el RIPS.'
-          : 'El MUV no devolvió un CUV.')
+      if (resultado.ok && resultado.route === 'guardarRIPS_Pendiente') {
+        publicar({
+          ripsMetadata: {
+            ...lista,
+            ripsEstado: 'preparado',
+            cuv: null,
+            ripsFechaTransmision: null,
+            ripsErrorLog: null,
+          },
+        })
+        showToast(resultado.message || 'El RIPS quedó preparado. El MUV aún no devolvió un CUV.')
+        return
+      }
+      const detalle = rechazoMuv(resultado)
       publicar({
         ripsMetadata: {
           ...lista,
@@ -299,12 +378,14 @@ export function EvolutionRipsPanel({
       })
     } catch (error) {
       const detalle =
-        error instanceof EvolutionNoteRipsMetadataError
-          ? error.message
-          : error instanceof Error
+        error instanceof EvolutionRipsPayloadError
+          ? mensajeCampoRips(error)
+          : error instanceof EvolutionNoteRipsMetadataError
             ? error.message
-            : 'No se pudo enviar el RIPS.'
-      if (error instanceof EvolutionNoteRipsMetadataError) {
+            : error instanceof Error
+              ? error.message
+              : 'No se pudo enviar el RIPS.'
+      if (error instanceof EvolutionRipsPayloadError || error instanceof EvolutionNoteRipsMetadataError) {
         setMensajeLocal(detalle)
         return
       }
@@ -315,7 +396,7 @@ export function EvolutionRipsPanel({
         },
       })
     } finally {
-      setEnviando(false)
+      setIsLoading(false)
     }
   }
 
@@ -452,10 +533,11 @@ export function EvolutionRipsPanel({
             type="button"
             className="btn-primary"
             onClick={() => void enviar()}
-            disabled={disabled || enviando}
+            disabled={disabled || isLoading}
+            aria-busy={isLoading}
           >
             <Rocket className="mr-2 h-4 w-4" aria-hidden />
-            {enviando ? 'Enviando RIPS…' : 'Preparar y enviar RIPS'}
+            {isLoading ? 'Enviando RIPS…' : 'Preparar y enviar RIPS'}
           </button>
         )}
         <button type="button" className="btn-secondary text-xs" onClick={descargarJson} disabled={disabled}>
@@ -477,15 +559,16 @@ export function EvolutionRipsPanel({
         </p>
       )}
       {mensajeLocal && (
-        <p role="alert" className="mt-3 text-sm text-amber-800">
+        <p role="alert" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           {mensajeLocal}
         </p>
       )}
       {metadata.ripsEstado === 'error' && metadata.ripsErrorLog && (
-        <p role="alert" className="mt-3 text-sm text-amber-800">
+        <p role="alert" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           {metadata.ripsErrorLog}
         </p>
       )}
+      <Toast message={toastMessage} onDismiss={clearToast} />
     </section>
   )
 }

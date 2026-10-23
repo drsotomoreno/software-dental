@@ -115,6 +115,15 @@ test('vincular recibo o CUV en una nota firmada no toca el cuerpo ni el hash', (
   assert.equal(isRipsMetadataOnlyPatch({ ripsMetadata: accepted.ripsMetadata, clinicalNote: 'x' }), false)
 })
 
+test('guardar el CIE-10 de una nota con tarifa no la convierte en atención de $0', () => {
+  const note = applyEvolutionNoteRipsMetadata(
+    { cost: 180000, isBillable: true, estadoRips: 'PENDIENTE_PAGO' },
+    { codDiagnosticoPrincipal: 'K021' },
+  )
+  assert.equal(note.ripsMetadata.tipoVinculacionFinanciera, 'recibo_interno')
+  assert.equal(note.ripsMetadata.codDiagnosticoPrincipal, 'K021')
+})
+
 test('el hash clínico ignora la metadata aunque cambie el CUV o el recibo', () => {
   const base = notaFirmada({ ripsMetadata: createDefaultEvolutionNoteRipsMetadata() })
   const updated = applyEvolutionNoteRipsMetadata(base, {
