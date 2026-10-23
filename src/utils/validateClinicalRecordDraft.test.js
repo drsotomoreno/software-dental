@@ -122,6 +122,144 @@ test('sin filas ni presupuesto de anexo sigue pidiendo un ítem', () => {
   assert.deepEqual(issues, [MISSING_BUDGET_ITEM])
 })
 
+test('un procedimiento del anexo de cirugía oral cuenta como presupuesto', () => {
+  const issues = validateClinicalRecordDraft(
+    readyDraft({
+      specializedAnnexes: {
+        oralSurgery: {
+          treatmentPlan: [
+            {
+              id: 'cx-1',
+              cupsCode: '230102',
+              procedure: 'Exodoncia de diente permanente multirradicular',
+              toothNumber: 38,
+            },
+          ],
+        },
+      },
+    }),
+  )
+
+  assert.equal(issues.includes(MISSING_BUDGET_ITEM), false)
+})
+
+test('el plan vacío de periodoncia no cuenta como presupuesto', () => {
+  const issues = validateClinicalRecordDraft(
+    readyDraft({
+      specializedAnnexes: {
+        periodontics: {
+          treatmentPlan: [
+            {
+              phase: 'fase_i',
+              procedure: 'Instrucción de higiene oral, control de placa, RAR',
+              plannedDate: '',
+              status: 'pendiente',
+              notes: '',
+            },
+            {
+              phase: 'fase_ii',
+              procedure: 'Cirugía periodontal / regenerativa',
+              plannedDate: '',
+              status: 'pendiente',
+              notes: '',
+            },
+            {
+              phase: 'fase_iii',
+              procedure: 'Soporte periodontal (mantenimiento)',
+              plannedDate: '',
+              status: 'pendiente',
+              notes: '',
+            },
+          ],
+        },
+      },
+    }),
+  )
+
+  assert.deepEqual(issues, [MISSING_BUDGET_ITEM])
+})
+
+test('un tratamiento periodontal elegido cuenta como presupuesto', () => {
+  const issues = validateClinicalRecordDraft(
+    readyDraft({
+      specializedAnnexes: {
+        periodontics: {
+          treatmentPlan: [
+            {
+              phase: 'fase_ii',
+              procedure: 'Cirugía periodontal / regenerativa',
+              plannedDate: '2026-11-02',
+              status: 'pendiente',
+              notes: '',
+            },
+          ],
+        },
+      },
+    }),
+  )
+
+  assert.equal(issues.includes(MISSING_BUDGET_ITEM), false)
+})
+
+test('una restauración del anexo de rehabilitación cuenta como presupuesto', () => {
+  const issues = validateClinicalRecordDraft(
+    readyDraft({
+      specializedAnnexes: {
+        rehabilitationAesthetics: {
+          visualTreatmentPlan: [{ dienteId: '11', tratamiento: 'corona_individual', color: 'A2' }],
+        },
+      },
+    }),
+  )
+
+  assert.equal(issues.includes(MISSING_BUDGET_ITEM), false)
+})
+
+test('el blanqueamiento del anexo cuenta como presupuesto', () => {
+  const issues = validateClinicalRecordDraft(
+    readyDraft({
+      specializedAnnexes: {
+        rehabilitationAesthetics: {
+          dentalWhitening: { casero: false, consultorio: true, diente_oscurecido: false },
+        },
+      },
+    }),
+  )
+
+  assert.equal(issues.includes(MISSING_BUDGET_ITEM), false)
+})
+
+test('un implante planificado en el anexo cuenta como presupuesto', () => {
+  const issues = validateClinicalRecordDraft(
+    readyDraft({
+      specializedAnnexes: {
+        dentalImplants: {
+          implantPlacementPlan: {
+            implants: [{ id: 'imp-1' }],
+          },
+        },
+      },
+    }),
+  )
+
+  assert.equal(issues.includes(MISSING_BUDGET_ITEM), false)
+})
+
+test('un tratamiento ya importado desde un anexo cuenta como presupuesto', () => {
+  const issues = validateClinicalRecordDraft(
+    readyDraft({
+      treatmentPlan: [
+        {
+          procedure: 'Exodoncia de diente permanente unirradicular',
+          source: 'oral_surgery_annex',
+        },
+      ],
+    }),
+  )
+
+  assert.equal(issues.includes(MISSING_BUDGET_ITEM), false)
+})
+
 test('aceptar el tratamiento reconoce el presupuesto del anexo de ortodoncia', () => {
   const error = validateAcceptTreatment(
     readyDraft({
