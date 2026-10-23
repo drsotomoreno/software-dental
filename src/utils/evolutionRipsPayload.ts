@@ -18,6 +18,7 @@ import {
   type TipoVinculacionFinanciera,
 } from '../types/evolutionNoteRips.ts'
 import type { RipsConsulta, RipsProcedimiento, RipsTransaction, RipsUsuario } from '../types/rips.ts'
+import { cupsDesdeTexto } from './cupsCodeResolve.ts'
 
 const CUPS_PATTERN = /^\d{6}$/
 const COD_SERVICIO_ODONTOLOGIA = 344
@@ -69,29 +70,26 @@ function compactCie10(code: string): string {
   return code.replace(/[.\s]/g, '').toUpperCase()
 }
 
-function cupsDeTexto(value: string | null | undefined): string | null {
-  const text = String(value ?? '').trim()
-  if (!text) return null
-  const dotted = text.match(/\b(\d{2})\.(\d{2})\.(\d{2})\b/)
-  if (dotted) return `${dotted[1]}${dotted[2]}${dotted[3]}`
-  const digits = text.replace(/\D/g, '')
-  if (digits.length >= 6) return digits.slice(-6)
-  return null
+function cupsDeFuente(value: string | null | undefined): string[] {
+  return cupsDesdeTexto(value).filter((cups) => CUPS_PATTERN.test(cups))
 }
 
 export function cupsValidosDeNota(note: EvolutionNote): string[] {
   const vistos = new Set<string>()
   const fuentes = [
     note.cupsCode,
+    note.serviceName,
     ...(note.catalogServices ?? []).flatMap((service) =>
-      service.requiereCupsRips === false ? [] : [service.cupsCode, service.procedure],
+      service.requiereCupsRips === false
+        ? []
+        : [service.cupsCode, service.procedure, service.serviceName],
     ),
     note.procedure,
   ]
   for (const fuente of fuentes) {
-    const cups = cupsDeTexto(fuente)
-    if (!cups || !CUPS_PATTERN.test(cups) || vistos.has(cups)) continue
-    vistos.add(cups)
+    for (const cups of cupsDeFuente(fuente)) {
+      if (!vistos.has(cups)) vistos.add(cups)
+    }
   }
   return [...vistos]
 }
@@ -172,8 +170,12 @@ function costosPorCups(note: EvolutionNote, cups: string[], valorCero: boolean):
   if (valorCero) return cups.map(() => 0)
   const porCodigo = new Map<string, number>()
   for (const service of note.catalogServices ?? []) {
-    const code = cupsDeTexto(service.cupsCode)
-    if (!code || service.cost == null) continue
+    if (service.requiereCupsRips === false || service.cost == null) continue
+    const code =
+      cupsDeFuente(service.cupsCode)[0] ??
+      cupsDeFuente(service.procedure)[0] ??
+      cupsDeFuente(service.serviceName)[0]
+    if (!code) continue
     porCodigo.set(code, Math.round(service.cost))
   }
   const total = Math.round(note.valorProcedimiento ?? note.cost ?? 0)

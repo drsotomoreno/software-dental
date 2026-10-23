@@ -11,9 +11,9 @@ import { useTariffStore } from '@/store/useTariffStore'
 import type { DentalService } from '@/types/dentalServiceCatalog'
 import type { EvolutionCatalogService } from '@/types/evolutionNote'
 import type { TariffItem } from '@/types/pricing'
+import { resolverProcedimientoCups } from '@/utils/cupsCodeResolve'
 import {
   abbreviateProcedureLabel,
-  filterCupsProcedureOptions,
   formatCupsProcedureLabel,
   type CupsProcedureOption,
 } from '@/utils/cupsProcedureLabel'
@@ -57,11 +57,16 @@ function formatDentalServiceLabel(service: DentalService): string {
 }
 
 function serviceToDisplayLabel(service: EvolutionCatalogService): string {
-  if (service.serviceName?.trim()) return service.serviceName
-  if (service.procedure?.trim() && service.cupsCode) {
-    return formatCupsProcedureLabel(service.cupsCode, service.procedure)
+  const procedure = service.procedure?.trim() || service.serviceName?.trim() || ''
+  if (service.requiereCupsRips === false) {
+    return service.serviceName?.trim() || procedure
   }
-  return service.procedure?.trim() ?? ''
+  const cupsCode =
+    resolverProcedimientoCups(service.cupsCode)?.cupsCode ??
+    resolverProcedimientoCups(procedure)?.cupsCode ??
+    resolverProcedimientoCups(service.serviceName)?.cupsCode
+  if (cupsCode && procedure) return formatCupsProcedureLabel(cupsCode, procedure)
+  return service.serviceName?.trim() || procedure
 }
 
 export function EvolutionDentalServiceSelect({
@@ -325,25 +330,10 @@ export function EvolutionDentalServiceSelect({
       }
     }
 
-    const cupsDigits = trimmed.replace(/\D/g, '')
-    if (/^\d{6}$/.test(cupsDigits)) {
-      const cupsCode = normalizeCupsCode(cupsDigits)
-      const fromCatalog = filterCupsProcedureOptions(
-        [
-          ...EVOLUTION_CUPS_SHORTLIST,
-          ...(prices ?? []).map((price) => ({
-            procedure: price.procedure,
-            cupsCode: price.cupsCode,
-          })),
-        ],
-        cupsDigits,
-        1,
-      )[0]
-      const procedure =
-        fromCatalog?.procedure ??
-        cupsCatalog?.find((item) => normalizeCupsCode(item.code) === cupsCode)?.description ??
-        trimmed
-      applyCupsOption({ cupsCode, procedure })
+    const resolved = resolverProcedimientoCups(trimmed)
+    if (resolved) {
+      if (normalizeCupsCode(service.cupsCode ?? '') === resolved.cupsCode) return
+      applyCupsOption({ cupsCode: resolved.cupsCode, procedure: resolved.procedure })
       return
     }
 

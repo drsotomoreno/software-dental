@@ -142,6 +142,54 @@ test('la atención en $0 deja la tarifa en cero y no exige soporte', () => {
   assert.equal(rips.usuarios[0].servicios.consultas[0].conceptoRecaudo, '05')
 })
 
+test('el nombre del catálogo legacy cap. 39 cuenta como CUPS 391402 aunque la nota no guardó el código', () => {
+  const procedure = 'Ortodoncia correctiva con aparatos fijos (legacy cap. 39)'
+  const rips = armarRipsNotaEvolucion({
+    ...base,
+    numeroSoporte: 'FV00000008',
+    note: notaFirmada({
+      cupsCode: null,
+      procedure,
+      serviceName: procedure,
+      cost: 80000,
+      catalogServices: [
+        {
+          id: 's-orto',
+          procedure,
+          serviceName: procedure,
+          cupsCode: null,
+          requiereCupsRips: true,
+          cost: 80000,
+        },
+      ],
+      ripsMetadata: {
+        ...notaFirmada().ripsMetadata,
+        tipoVinculacionFinanciera: 'recibo_interno',
+        idFacturaElectronica: null,
+        idReciboAsociado: 'pago-8',
+      },
+    }),
+  })
+  const procedimientos = rips.usuarios[0].servicios.procedimientos
+  assert.equal(procedimientos.length, 1)
+  assert.equal(procedimientos[0].codProcedimiento, '391402')
+  assert.equal(procedimientos[0].vrServicio, 80000)
+  assert.equal(rips.usuarios[0].servicios.consultas.length, 0)
+})
+
+test('un código punteado junto a «cap. 39» no se convierte en los últimos seis dígitos', () => {
+  const procedure = '39.1.4.02 — Ortodoncia correctiva con aparatos fijos (legacy cap. 39)'
+  const rips = armarRipsNotaEvolucion({
+    ...base,
+    note: notaFirmada({
+      cupsCode: null,
+      procedure,
+      catalogServices: [],
+    }),
+  })
+  assert.equal(rips.usuarios[0].servicios.procedimientos[0].codProcedimiento, '391402')
+})
+
 test('el recibo interno queda en el soporte de la línea y numFactura sigue vacío', () => {
   const rips = armarRipsNotaEvolucion({
     ...base,

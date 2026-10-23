@@ -8,6 +8,8 @@ import { VoiceDictationButton } from '@/components/voice'
 import { DigitalSignatureCanvas } from '@/components/signature'
 import { useAuth } from '@/contexts/AuthContext'
 import type { OrthodonticsPaymentRecord, PaymentRecord } from '@/types/clinicalRecord'
+import { cupsExplicitosDeTexto, resolverProcedimientoCups } from '@/utils/cupsCodeResolve'
+import { formatCupsProcedureLabel } from '@/utils/cupsProcedureLabel'
 import { CupsProcedurePicker } from './CupsProcedurePicker'
 import { Cie10PrincipalCombobox } from './Cie10PrincipalCombobox'
 import { EvolutionCatalogServicesField } from './EvolutionCatalogServicesField'
@@ -18,6 +20,19 @@ import {
   noteHasCatalogServices,
   resolveEvolutionNoteRipsMode,
 } from '@/utils/evolutionCatalogServices'
+
+function etiquetaProcedimientoCups(procedure: string, cupsCode?: string | null): string {
+  if (cupsExplicitosDeTexto(procedure).length > 0) return procedure
+  const resolved = resolverProcedimientoCups(cupsCode) ?? resolverProcedimientoCups(procedure)
+  if (!resolved) return procedure
+  return formatCupsProcedureLabel(resolved.cupsCode, procedure.trim() || resolved.procedure)
+}
+
+function parcheProcedimientoCups(procedure: string): EvolutionNotePatch {
+  const resolved = resolverProcedimientoCups(procedure)
+  if (!resolved) return { procedure }
+  return { procedure, cupsCode: resolved.cupsCode }
+}
 
 interface EvolutionNoteCardProps {
   note: EvolutionNote
@@ -63,6 +78,7 @@ export function EvolutionNoteCard({
     nonRips || showRipsForm || isAddendum || ripsMode === 'mixed'
   const showRipsCollection = !isAddendum && ripsMode !== 'non_rips'
   const clinicalLocked = disabled || readOnly
+  const procedimientoVisible = etiquetaProcedimientoCups(note.procedure, note.cupsCode)
 
   return (
     <div
@@ -289,15 +305,15 @@ export function EvolutionNoteCard({
                       <VoiceDictationButton
                         targetInputId={`evo-procedure-${note.id}`}
                         getValue={() => note.procedure}
-                        onValueChange={(procedure) => onChange({ procedure })}
+                        onValueChange={(procedure) => onChange(parcheProcedimientoCups(procedure))}
                       />
                     )}
                   </div>
                   <CupsProcedurePicker
                     inputId={`evo-procedure-${note.id}`}
                     disabled={clinicalLocked}
-                    value={note.procedure}
-                    onChange={(procedure) => onChange({ procedure })}
+                    value={procedimientoVisible}
+                    onChange={(procedure) => onChange(parcheProcedimientoCups(procedure))}
                   />
                 </div>
 
