@@ -506,6 +506,10 @@ export function ClinicalHistoryForm({
         notes={form.evolutionNotes}
         onChange={(evolutionNotes: EvolutionNote[]) => update({ evolutionNotes })}
         patientId={patientId}
+        pagosPaciente={[
+          ...(form.paymentControl ?? []),
+          ...(form.orthodonticsPaymentControl ?? []),
+        ]}
         parentRecordId={clinicalRecordId != null ? String(clinicalRecordId) : undefined}
         professionalName={professionalName}
         professionalLicense={professionalLicense}

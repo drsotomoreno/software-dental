@@ -5,6 +5,11 @@ import {
   type EvolutionNoteRipsMetadata,
 } from '@/types/evolutionNoteRips'
 
+/** Parche de la nota. La metadata RIPS puede ir incompleta: se fusiona con la actual. */
+export type EvolutionNotePatch = Omit<Partial<EvolutionNote>, 'ripsMetadata'> & {
+  ripsMetadata?: Partial<EvolutionNoteRipsMetadata>
+}
+
 export type EvolutionNoteKind = 'evolution' | 'addendum'
 
 export const EVOLUTION_NOTE_IMMUTABILITY_MESSAGE =
@@ -160,9 +165,11 @@ export function createEmptyEvolutionNote(
     isLocked: false,
     pagoId: null,
     numeroSoportePago: null,
-    conceptoPago: null,
+    conceptoPago: 'No aplica',
     valorProcedimiento: 0,
-    estadoRips: 'PENDIENTE_PAGO',
+    estadoRips: 'SIN_COSTO',
+    cost: 0,
+    isBillable: false,
     ripsMetadata: createDefaultEvolutionNoteRipsMetadata(),
   }
 }

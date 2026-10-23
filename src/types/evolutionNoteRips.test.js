@@ -170,6 +170,22 @@ test('una nota bloqueada acepta solo el parche de metadata RIPS', () => {
       ),
     /inmutables/,
   )
+
+  const vinculado = applyEvolutionNotePatch(
+    notes[0],
+    {
+      pagoId: 'recibo-9',
+      numeroSoportePago: 'RC-9',
+      valorProcedimiento: 80000,
+      estadoRips: 'PAGADO',
+      ripsMetadata: { idReciboAsociado: 'recibo-9', tipoVinculacionFinanciera: 'recibo_interno' },
+    },
+    { immutable: true, rejectClinicalEdit: blocked },
+  )
+  assert.equal(vinculado.clinicalNote, 'Se obtura 16 oclusal.')
+  assert.equal(vinculado.contentHash, 'hash-clinico')
+  assert.equal(vinculado.pagoId, 'recibo-9')
+  assert.equal(vinculado.ripsMetadata.idReciboAsociado, 'recibo-9')
 })
 
 test('la migración de notas existentes solo completa la metadata ausente', () => {

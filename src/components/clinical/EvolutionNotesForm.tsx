@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import type { EvolutionNote } from '@/types/evolutionNote'
+import type { OrthodonticsPaymentRecord, PaymentRecord } from '@/types/clinicalRecord'
+import type { EvolutionNote, EvolutionNotePatch } from '@/types/evolutionNote'
 import {
   EVOLUTION_NOTE_IMMUTABILITY_MESSAGE,
   createEmptyEvolutionNote,
@@ -32,6 +33,7 @@ interface EvolutionNotesFormProps {
   onChange: (notes: EvolutionNote[]) => void
   patientId?: string
   parentRecordId?: string
+  pagosPaciente?: Array<PaymentRecord | OrthodonticsPaymentRecord>
   professionalName?: string
   professionalLicense?: string
   authorUserId?: string
@@ -47,6 +49,7 @@ export function EvolutionNotesForm({
   onChange,
   patientId = '',
   parentRecordId,
+  pagosPaciente = [],
   professionalName = '',
   professionalLicense = '',
   authorUserId = '',
@@ -85,7 +88,7 @@ export function EvolutionNotesForm({
     ])
   }
 
-  const updateNote = (id: string, patch: Partial<EvolutionNote>) => {
+  const updateNote = (id: string, patch: EvolutionNotePatch) => {
     try {
       onChange(updateEvolutionNoteInList(notes, id, patch))
     } catch (error) {
@@ -234,6 +237,7 @@ export function EvolutionNotesForm({
               disabled={disabled}
               parentRecordId={parentRecordId}
               patientId={patientId}
+              pagosPaciente={pagosPaciente}
               allowAddendums={allowAddendums}
               onChange={(patch) => updateNote(note.id, patch)}
               onRemove={() => removeNote(note.id)}

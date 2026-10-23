@@ -1,5 +1,5 @@
 import { db } from '@/db/database'
-import type { EvolutionNote } from '@/types/evolutionNote'
+import type { EvolutionNote, EvolutionNotePatch } from '@/types/evolutionNote'
 import {
   EVOLUTION_NOTE_IMMUTABILITY_MESSAGE,
   isEvolutionNoteImmutable,
@@ -94,7 +94,7 @@ export async function finalizeEvolutionNotes(
 export function updateEvolutionNoteInList(
   notes: EvolutionNote[],
   noteId: string,
-  patch: Partial<EvolutionNote>,
+  patch: EvolutionNotePatch,
 ): EvolutionNote[] {
   const target = notes.find((note) => note.id === noteId)
   if (!target) return notes

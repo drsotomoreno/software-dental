@@ -1,4 +1,4 @@
-import type { EvolutionNote } from '@/types/evolutionNote'
+import type { EvolutionNote, EvolutionNotePatch } from '@/types/evolutionNote'
 import {
   isEvolutionNoteAddendum,
   isEvolutionNoteImmutable,
@@ -7,9 +7,12 @@ import { formatDate } from '@/utils'
 import { VoiceDictationButton } from '@/components/voice'
 import { DigitalSignatureCanvas } from '@/components/signature'
 import { useAuth } from '@/contexts/AuthContext'
+import type { OrthodonticsPaymentRecord, PaymentRecord } from '@/types/clinicalRecord'
 import { CupsProcedurePicker } from './CupsProcedurePicker'
+import { Cie10PrincipalCombobox } from './Cie10PrincipalCombobox'
 import { EvolutionCatalogServicesField } from './EvolutionCatalogServicesField'
 import { EvolutionNoteAddendumPanel } from './EvolutionNoteAddendumPanel'
+import { EvolutionRipsEstadoBadge, EvolutionRipsPanel } from './EvolutionRipsPanel'
 import {
   noteHasCatalogServices,
   resolveEvolutionNoteRipsMode,
@@ -21,8 +24,9 @@ interface EvolutionNoteCardProps {
   disabled?: boolean
   patientId?: string
   parentRecordId?: string
+  pagosPaciente?: Array<PaymentRecord | OrthodonticsPaymentRecord>
   allowAddendums?: boolean
-  onChange: (patch: Partial<EvolutionNote>) => void
+  onChange: (patch: EvolutionNotePatch) => void
   onRemove: () => void
   onSign: () => void
   onAddAddendum: () => void
@@ -34,6 +38,7 @@ export function EvolutionNoteCard({
   disabled = false,
   patientId = '',
   parentRecordId,
+  pagosPaciente = [],
   allowAddendums = true,
   onChange,
   onRemove,
@@ -53,6 +58,8 @@ export function EvolutionNoteCard({
   const showClinicalNoteForm = nonRips || ripsMode === 'mixed'
   const evolutionFormReady =
     nonRips || showRipsForm || isAddendum || ripsMode === 'mixed'
+  const showRipsCollection = !isAddendum && ripsMode !== 'non_rips'
+  const clinicalLocked = disabled || readOnly
 
   return (
     <div
@@ -64,7 +71,7 @@ export function EvolutionNoteCard({
             : 'border-slate-200 bg-slate-50'
       }`}
     >
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-slate-700">
             {isAddendum ? 'Aclaratoria' : `Nota #${index + 1}`}
@@ -72,11 +79,6 @@ export function EvolutionNoteCard({
               <span className="ml-2 font-normal text-slate-500">— {formatDate(note.date)}</span>
             )}
           </span>
-          {immutable && (
-            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-              Firmada — inmutable
-            </span>
-          )}
           {isAddendum && (
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
               Addendum
@@ -98,8 +100,14 @@ export function EvolutionNoteCard({
             </span>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {!readOnly && !isAddendum && (
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {immutable && (
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+              Firmada — inmutable
+            </span>
+          )}
+          {showRipsCollection && <EvolutionRipsEstadoBadge note={note} />}
+          {!clinicalLocked && !isAddendum && (
             <button
               type="button"
               onClick={onSign}
@@ -108,7 +116,7 @@ export function EvolutionNoteCard({
               Firmar y grabar
             </button>
           )}
-          {!readOnly && !immutable && (
+          {!clinicalLocked && !immutable && (
             <button
               type="button"
               onClick={onRemove}
@@ -146,7 +154,7 @@ export function EvolutionNoteCard({
                 Motivo de la aclaratoria <span className="text-red-500">*</span>
               </label>
               <input
-                disabled={readOnly}
+                disabled={clinicalLocked}
                 value={note.addendumReason ?? ''}
                 onChange={(event) => onChange({ addendumReason: event.target.value })}
                 className="input-field"
@@ -159,7 +167,7 @@ export function EvolutionNoteCard({
               </label>
               <textarea
                 rows={5}
-                disabled={readOnly}
+                disabled={clinicalLocked}
                 value={note.clinicalNote ?? ''}
                 onChange={(event) => onChange({ clinicalNote: event.target.value })}
                 className="input-field min-h-[8rem] resize-y"
@@ -186,7 +194,7 @@ export function EvolutionNoteCard({
           <>
             <EvolutionCatalogServicesField
               note={note}
-              disabled={readOnly}
+              disabled={clinicalLocked}
               onChange={(patch) => onChange(patch)}
             />
 
@@ -194,44 +202,11 @@ export function EvolutionNoteCard({
               <label className="label-field">Fecha y hora de la sesión</label>
               <input
                 type="datetime-local"
-                disabled={readOnly}
+                disabled={clinicalLocked}
                 value={note.date}
                 onChange={(event) => onChange({ date: event.target.value })}
                 className="input-field"
               />
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="label-field">Costo de la atención (COP)</label>
-                <input
-                  type="number"
-                  min={0}
-                  disabled={readOnly}
-                  value={note.cost ?? ''}
-                  onChange={(event) =>
-                    onChange({
-                      cost: event.target.value === '' ? undefined : Number(event.target.value),
-                    })
-                  }
-                  placeholder="0 = control / garantía"
-                  className="input-field"
-                />
-              </div>
-              <label className="flex items-end gap-2 pb-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  disabled={readOnly}
-                  checked={note.isBillable !== false && (note.cost ?? 0) > 0}
-                  onChange={(event) =>
-                    onChange({
-                      isBillable: event.target.checked,
-                      cost: event.target.checked ? note.cost || 0 : 0,
-                    })
-                  }
-                />
-                Genera factura DIAN (FEV)
-              </label>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
@@ -239,7 +214,7 @@ export function EvolutionNoteCard({
                 <label className="label-field mb-0">
                   Nota de Evolución <span className="text-red-500">*</span>
                 </label>
-                {!readOnly && (
+                {!clinicalLocked && (
                   <VoiceDictationButton
                     targetInputId={`evo-evolution-note-${note.id}`}
                     getValue={() => note.clinicalNote ?? ''}
@@ -254,7 +229,7 @@ export function EvolutionNoteCard({
               <textarea
                 id={`evo-evolution-note-${note.id}`}
                 rows={8}
-                disabled={readOnly}
+                disabled={clinicalLocked}
                 value={note.clinicalNote ?? ''}
                 onChange={(event) => onChange({ clinicalNote: event.target.value })}
                 placeholder="Escriba o dicte la nota de evolución del profesional tratante…"
@@ -284,7 +259,7 @@ export function EvolutionNoteCard({
                           professionalSignatureMeta: result?.metadata,
                         })
                       }
-                      disabled={readOnly}
+                      disabled={clinicalLocked}
                       width={480}
                       height={160}
                     />
@@ -307,7 +282,7 @@ export function EvolutionNoteCard({
                 <div>
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <label className="label-field mb-0">Procedimiento / CUPS</label>
-                    {!readOnly && (
+                    {!clinicalLocked && (
                       <VoiceDictationButton
                         targetInputId={`evo-procedure-${note.id}`}
                         getValue={() => note.procedure}
@@ -317,11 +292,19 @@ export function EvolutionNoteCard({
                   </div>
                   <CupsProcedurePicker
                     inputId={`evo-procedure-${note.id}`}
-                    disabled={readOnly}
+                    disabled={clinicalLocked}
                     value={note.procedure}
                     onChange={(procedure) => onChange({ procedure })}
                   />
                 </div>
+
+                <Cie10PrincipalCombobox
+                  value={note.ripsMetadata?.codDiagnosticoPrincipal ?? ''}
+                  disabled={disabled}
+                  onChange={(codDiagnosticoPrincipal) =>
+                    onChange({ ripsMetadata: { codDiagnosticoPrincipal } })
+                  }
+                />
 
                 <div>
                   <h5 className="mb-2 text-xs font-semibold uppercase text-slate-500">Anestesia</h5>
@@ -329,7 +312,7 @@ export function EvolutionNoteCard({
                     <div>
                       <label className="label-field">Tipo</label>
                       <input
-                        disabled={readOnly}
+                        disabled={clinicalLocked}
                         value={note.anesthesia.type}
                         onChange={(event) =>
                           onChange({
@@ -345,7 +328,7 @@ export function EvolutionNoteCard({
                       <input
                         type="number"
                         min={0}
-                        disabled={readOnly}
+                        disabled={clinicalLocked}
                         value={note.anesthesia.carpules}
                         onChange={(event) =>
                           onChange({
@@ -361,7 +344,7 @@ export function EvolutionNoteCard({
                     <div>
                       <label className="label-field">Vasoconstrictor</label>
                       <input
-                        disabled={readOnly}
+                        disabled={clinicalLocked}
                         value={note.anesthesia.vasoconstrictor}
                         onChange={(event) =>
                           onChange({
@@ -381,7 +364,7 @@ export function EvolutionNoteCard({
                 <div>
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <label className="label-field mb-0">Medicamentos recetados</label>
-                    {!readOnly && (
+                    {!clinicalLocked && (
                       <VoiceDictationButton
                         targetInputId={`evo-rx-${note.id}`}
                         getValue={() => note.prescriptions}
@@ -392,7 +375,7 @@ export function EvolutionNoteCard({
                   <textarea
                     id={`evo-rx-${note.id}`}
                     rows={2}
-                    disabled={readOnly}
+                    disabled={clinicalLocked}
                     value={note.prescriptions}
                     onChange={(event) => onChange({ prescriptions: event.target.value })}
                     className="input-field resize-y"
@@ -403,7 +386,7 @@ export function EvolutionNoteCard({
                   <div>
                     <label className="label-field">Profesional tratante</label>
                     <input
-                      disabled={readOnly}
+                      disabled={clinicalLocked}
                       value={note.professionalName}
                       onChange={(event) => onChange({ professionalName: event.target.value })}
                       className="input-field"
@@ -412,7 +395,7 @@ export function EvolutionNoteCard({
                   <div>
                     <label className="label-field">Número de Documento (Cédula / ReTHUS)</label>
                     <input
-                      disabled={readOnly}
+                      disabled={clinicalLocked}
                       value={note.professionalLicense}
                       onChange={(event) => onChange({ professionalLicense: event.target.value })}
                       className="input-field"
@@ -426,6 +409,20 @@ export function EvolutionNoteCard({
           </>
         )}
       </div>
+
+      {showRipsCollection && (
+        <div className="mt-4">
+          <EvolutionRipsPanel
+            note={note}
+            patientId={patientId}
+            pagosActuales={pagosPaciente}
+            disabled={disabled}
+            clinicalLocked={clinicalLocked}
+            showDiagnosis={!showRipsForm && !evolutionFormReady}
+            onChange={onChange}
+          />
+        </div>
+      )}
 
       {immutable && allowAddendums && user && patientId && (
         <EvolutionNoteAddendumPanel

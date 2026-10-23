@@ -220,21 +220,49 @@ export function isRipsMetadataOnlyPatch(patch: object): boolean {
   return keys.length === 1 && keys[0] === 'ripsMetadata'
 }
 
+/** Cobro y radicación: se pueden actualizar con la nota ya firmada. */
+export const EVOLUTION_SIDECAR_KEYS = [
+  'ripsMetadata',
+  'pagoId',
+  'numeroSoportePago',
+  'conceptoPago',
+  'valorProcedimiento',
+  'estadoRips',
+] as const
+
+export function isEvolutionSidecarPatch(patch: object): boolean {
+  const record = patch as Record<string, unknown>
+  const keys = Object.keys(record).filter((key) => record[key] !== undefined)
+  return keys.length > 0 && keys.every((key) => (EVOLUTION_SIDECAR_KEYS as readonly string[]).includes(key))
+}
+
 /**
- * Aplica un parche a la nota. Si ya está firmada, solo acepta `ripsMetadata`.
- * `rejectClinicalEdit` se invoca para conservar el mensaje de la Res. 1995/1999.
+ * Aplica un parche a la nota. Si ya está firmada, solo acepta el sidecar
+ * (metadata RIPS y vínculo de pago). `rejectClinicalEdit` conserva el mensaje
+ * de la Res. 1995/1999.
  */
 export function applyEvolutionNotePatch<T extends NotaConRipsMetadata>(
   note: T,
-  patch: Partial<T> & { ripsMetadata?: Partial<EvolutionNoteRipsMetadata> },
+  patch: Omit<Partial<T>, 'ripsMetadata'> & {
+    ripsMetadata?: Partial<EvolutionNoteRipsMetadata>
+  },
   options: { immutable: boolean; rejectClinicalEdit: () => void },
 ): T {
   if (options.immutable) {
-    if (!isRipsMetadataOnlyPatch(patch) || !patch.ripsMetadata) {
+    if (!isEvolutionSidecarPatch(patch)) {
       options.rejectClinicalEdit()
       return note
     }
-    return applyEvolutionNoteRipsMetadata(note, patch.ripsMetadata)
+    const withMetadata = patch.ripsMetadata
+      ? applyEvolutionNoteRipsMetadata(note, patch.ripsMetadata)
+      : note
+    const sidecar = { ...patch }
+    delete sidecar.ripsMetadata
+    return {
+      ...withMetadata,
+      ...sidecar,
+      ...(patch.ripsMetadata ? { ripsMetadata: withMetadata.ripsMetadata } : {}),
+    }
   }
   if (patch.ripsMetadata) {
     const withMetadata = applyEvolutionNoteRipsMetadata(note, patch.ripsMetadata)
