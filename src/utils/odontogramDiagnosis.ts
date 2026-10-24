@@ -1,11 +1,15 @@
 import type { Cie10Diagnosis } from '@/types/clinicalRecord'
+import {
+  collectOverriddenOdontogramCodes,
+  teethAvailableForOdontogramImport,
+} from './importedCieEdit.ts'
 import type { OdontogramData, ToothFace, ToothRecord } from '@/types/odontogram'
 import {
   ODONTOGRAM_SUPPLEMENTARY_KEYS,
   ODONTOGRAM_SUPPLEMENTARY_LABELS,
   ODONTOGRAM_SUPPLEMENTARY_CIE10,
   EDENTULISM_SCOPE_LABELS,
-} from '@/types/odontogram'
+} from '../types/odontogram.ts'
 
 const FACES: ToothFace[] = ['vestibular', 'mesial', 'oclusal', 'distal', 'lingual']
 
@@ -244,20 +248,36 @@ export function importOdontogramCieDiagnoses(
   const next = current.map((diagnosis) => ({
     ...diagnosis,
     affectedTeeth: diagnosis.affectedTeeth ? [...diagnosis.affectedTeeth] : undefined,
+    overridesOdontogramCodes: diagnosis.overridesOdontogramCodes
+      ? [...diagnosis.overridesOdontogramCodes]
+      : undefined,
   }))
   let added = 0
   let updated = 0
   let hasPrincipal = next.some((diagnosis) => diagnosis.type === 'principal')
+  const overridden = collectOverriddenOdontogramCodes(next)
 
   for (const diagnosis of incoming) {
+    if (overridden.has(diagnosis.code)) continue
+
+    const incomingHadTeeth = (diagnosis.affectedTeeth?.length ?? 0) > 0
+    const availableTeeth = teethAvailableForOdontogramImport(
+      next,
+      diagnosis.code,
+      diagnosis.affectedTeeth,
+    )
     const index = next.findIndex((item) => item.code === diagnosis.code)
     if (index < 0) {
+      if (incomingHadTeeth && availableTeeth.length === 0) continue
       const type: Cie10Diagnosis['type'] = hasPrincipal ? 'relacionado' : 'principal'
       hasPrincipal = true
       next.push({
         ...diagnosis,
         type,
-        affectedTeeth: diagnosis.affectedTeeth ? [...diagnosis.affectedTeeth] : undefined,
+        affectedTeeth: incomingHadTeeth ? availableTeeth : undefined,
+        overridesOdontogramCodes: diagnosis.overridesOdontogramCodes
+          ? [...diagnosis.overridesOdontogramCodes]
+          : undefined,
       })
       added += 1
       continue
@@ -265,7 +285,7 @@ export function importOdontogramCieDiagnoses(
 
     const existing = next[index]
     const mergedTeeth = [
-      ...new Set([...(existing.affectedTeeth ?? []), ...(diagnosis.affectedTeeth ?? [])]),
+      ...new Set([...(existing.affectedTeeth ?? []), ...availableTeeth]),
     ].sort((a, b) => a - b)
     const nextTeeth = mergedTeeth.length > 0 ? mergedTeeth : undefined
     if (!sameAffectedTeeth(existing.affectedTeeth, nextTeeth)) {

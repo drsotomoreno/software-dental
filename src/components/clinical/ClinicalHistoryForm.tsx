@@ -9,6 +9,8 @@ import {
   syncClinicalDataFromEndodonticsAnnex,
   collectOdontogramCieDiagnoses,
   importOdontogramCieDiagnoses,
+  reassignDiagnosticChartCie,
+  reassignImportedDiagnosisCie,
   createEmptyOrthodonticsBudget,
   createEmptyDentalImplantsBudget,
 } from '@/utils'
@@ -414,6 +416,23 @@ export function ClinicalHistoryForm({
                 entries: diagnosticChart.entries.filter((entry) => entry.diagnosisCode !== code),
               },
             })
+          }}
+          onReassignImportedCie={({ fromCode, toCode, toDescription, toothNumber }) => {
+            const chart = normalizeClinicalDiagnosticChart(form.diagnosticChart)
+            const diagnoses = reassignImportedDiagnosisCie(form.diagnoses, {
+              fromCode,
+              toCode,
+              toDescription,
+              toothNumber,
+            })
+            const diagnosticChart = reassignDiagnosticChartCie(chart, {
+              fromCode,
+              toCode,
+              toDescription,
+              toothId: toothNumber != null ? String(toothNumber) : undefined,
+            })
+            if (diagnoses === form.diagnoses && diagnosticChart === chart) return
+            update({ diagnoses, diagnosticChart })
           }}
           disabled={livingLocked}
         />
