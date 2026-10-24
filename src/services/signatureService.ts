@@ -1,7 +1,13 @@
 import { db } from '@/db/database'
 import type { AuthUser } from '@/types/auth'
-import type { SignatureCaptureResult } from '@/types/signature'
-import type { DigitalSignature } from '@/types/signature'
+import type { ClinicalRecord } from '@/types/clinicalRecord'
+import type { StoredConsentSignatures } from '@/types/consent'
+import {
+  MIN_SIGNATURE_STROKES,
+  type DigitalSignature,
+  type SignatureCaptureMetadata,
+  type SignatureCaptureResult,
+} from '@/types/signature'
 import { collectSignatureContext } from '@/utils/clientContext'
 
 export interface CreateSignatureInput {
@@ -39,6 +45,52 @@ export async function createDigitalSignature(input: CreateSignatureInput): Promi
 
   const id = await db.signatures.add(signature)
   return String(id)
+}
+
+export function signatureMetadataFromRow(
+  row:
+    | Pick<DigitalSignature, 'signatureDataUrl' | 'signatureMethod' | 'strokeCount' | 'signedAt'>
+    | undefined,
+): SignatureCaptureMetadata | undefined {
+  if (!row?.signatureDataUrl) return undefined
+  if (row.signatureMethod && row.signatureMethod !== 'canvas_biometric') return undefined
+  const strokeCount = row.strokeCount ?? 0
+  if (strokeCount < MIN_SIGNATURE_STROKES) return undefined
+  return {
+    signatureMethod: 'canvas_biometric',
+    strokeCount,
+    captureStartedAt: row.signedAt,
+    captureEndedAt: row.signedAt,
+    canvasWidth: 400,
+    canvasHeight: 150,
+  }
+}
+
+/** Recupera las imágenes si el consentimiento quedó firmado pero sin el data URL. */
+export async function findLedgerConsentSignatures(
+  records: Array<Pick<ClinicalRecord, 'id' | 'informedConsent' | 'signedAt'>>,
+): Promise<StoredConsentSignatures | null> {
+  for (const record of records) {
+    if (record.id == null) continue
+    const rows = await db.signatures.where('recordId').equals(String(record.id)).toArray()
+    const newestFirst = [...rows].sort((a, b) => (b.signedAt ?? '').localeCompare(a.signedAt ?? ''))
+    const patient = newestFirst.find((row) => row.recordType === 'consent' && row.signatureDataUrl)
+    const professional = newestFirst.find(
+      (row) => row.recordType === 'clinical_record' && row.signatureDataUrl,
+    )
+    if (!patient?.signatureDataUrl && !professional?.signatureDataUrl) continue
+    return {
+      selectedConsentIds: record.informedConsent?.selectedConsentIds,
+      patientSignatureDataUrl: patient?.signatureDataUrl,
+      patientSignatureMeta:
+        record.informedConsent?.patientSignatureMeta ?? signatureMetadataFromRow(patient),
+      professionalSignatureDataUrl: professional?.signatureDataUrl,
+      professionalSignatureMeta:
+        record.informedConsent?.professionalSignatureMeta ?? signatureMetadataFromRow(professional),
+      signedAt: record.informedConsent?.signedAt ?? record.signedAt,
+    }
+  }
+  return null
 }
 
 export function validateSignatureCapture(

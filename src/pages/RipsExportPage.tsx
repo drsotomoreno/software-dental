@@ -6,18 +6,22 @@ import { RequirePermission } from '@/components/auth/RequirePermission'
 import { RipsExportForm } from '@/components/rips'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
-import type { ClinicalRecord } from '@/types/clinicalRecord'
 import type { Patient } from '@/types/patient'
 import type { RipsSourceRecord } from '@/utils/rips'
+import {
+  atencionEnPeriodo,
+  etiquetaAtencionRips,
+  listRipsExportAttentions,
+  type RipsExportAttention,
+} from '@/utils/ripsExportAttentions'
 import { formatDate } from '@/utils'
 
 export function RipsExportPage() {
   const { user } = useAuth()
   const { audit } = useAudit()
   const patients = useLiveQuery(() => db.patients.toArray())
-  const records = useLiveQuery(() =>
-    db.clinicalRecords.filter((r) => r.isLocked).toArray(),
-  )
+  const records = useLiveQuery(() => db.clinicalRecords.toArray())
+  const drafts = useLiveQuery(() => db.patientClinicalDrafts.toArray())
 
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -33,32 +37,27 @@ export function RipsExportPage() {
     return map
   }, [patients])
 
-  const filteredRecords = useMemo(() => {
-    if (!records) return []
-    return records
-      .filter((record) => {
-        const signedAt = record.signedAt ?? record.createdAt
-        if (dateFrom && signedAt < dateFrom) return false
-        if (dateTo && signedAt > dateTo + 'T23:59:59') return false
-        return true
-      })
-      .sort(
-        (a, b) =>
-          new Date(b.signedAt ?? 0).getTime() - new Date(a.signedAt ?? 0).getTime(),
-      )
-  }, [records, dateFrom, dateTo])
+  const attentions = useMemo(
+    () => listRipsExportAttentions({ records: records ?? [], drafts: drafts ?? [] }),
+    [records, drafts],
+  )
+
+  const filteredAttentions = useMemo(
+    () =>
+      attentions.filter((attention) => atencionEnPeriodo(attention.occurredAt, dateFrom, dateTo)),
+    [attentions, dateFrom, dateTo],
+  )
 
   const sources: RipsSourceRecord[] = useMemo(() => {
     const result: RipsSourceRecord[] = []
-    for (const record of filteredRecords) {
-      const id = String(record.id ?? '')
-      if (!selectedIds.has(id)) continue
-      const patient = patientMap.get(String(record.patientId))
+    for (const attention of filteredAttentions) {
+      if (!selectedIds.has(attention.id)) continue
+      const patient = patientMap.get(attention.patientId)
       if (!patient) continue
-      result.push({ record, patient })
+      result.push({ record: attention.record, patient })
     }
     return result
-  }, [filteredRecords, selectedIds, patientMap])
+  }, [filteredAttentions, selectedIds, patientMap])
 
   const toggleRecord = (id: string) => {
     setSelectedIds((prev) => {
@@ -70,7 +69,7 @@ export function RipsExportPage() {
   }
 
   const selectAll = () => {
-    setSelectedIds(new Set(filteredRecords.map((r) => String(r.id ?? ''))))
+    setSelectedIds(new Set(filteredAttentions.map((attention) => attention.id)))
   }
 
   const clearSelection = () => setSelectedIds(new Set())
@@ -86,7 +85,8 @@ export function RipsExportPage() {
         <h1 className="text-2xl font-bold text-slate-900">Exportación RIPS</h1>
         <p className="mt-1 text-sm text-slate-600">
           Genere el JSON RIPS, valídelo ante MinSalud y obtenga el CUV para la FEV-DIAN.
-          Seleccione historias clínicas firmadas para incluir consultas y procedimientos odontológicos.
+          Aquí aparecen las historias clínicas firmadas y todas las notas de evolución
+          de la cuenta marcadas como RIPS listo para exportar.
         </p>
         <p className="mt-2 text-xs text-slate-500">
           También puede exportar{' '}
@@ -129,11 +129,12 @@ export function RipsExportPage() {
           </button>
         </div>
 
-        {!records ? (
-          <p className="text-sm text-slate-500">Cargando historias clínicas...</p>
-        ) : filteredRecords.length === 0 ? (
+        {!records || !drafts ? (
+          <p className="text-sm text-slate-500">Cargando atenciones...</p>
+        ) : filteredAttentions.length === 0 ? (
           <p className="text-sm text-slate-500">
-            No hay historias clínicas firmadas en el período seleccionado.{' '}
+            No hay historias clínicas firmadas ni notas de evolución con RIPS listo para exportar
+            en el período seleccionado.{' '}
             <Link to="/pacientes" className="text-dental-600 hover:underline">
               Ir a pacientes
             </Link>
@@ -148,21 +149,19 @@ export function RipsExportPage() {
                   <th className="px-3 py-2 font-medium text-slate-600">Paciente</th>
                   <th className="px-3 py-2 font-medium text-slate-600">Diagnóstico</th>
                   <th className="px-3 py-2 font-medium text-slate-600">Procedimientos</th>
+                  <th className="px-3 py-2 font-medium text-slate-600">Estado</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredRecords.map((record) => {
-                  const id = String(record.id ?? '')
-                  const patient = patientMap.get(String(record.patientId))
-                  const procCount = record.budgetItems.filter((i) => i.procedure.trim()).length
+                {filteredAttentions.map((attention) => {
+                  const patient = patientMap.get(attention.patientId)
                   return (
                     <RecordRow
-                      key={id}
-                      record={record}
+                      key={attention.id}
+                      attention={attention}
                       patient={patient}
-                      procCount={procCount}
-                      checked={selectedIds.has(id)}
-                      onToggle={() => toggleRecord(id)}
+                      checked={selectedIds.has(attention.id)}
+                      onToggle={() => toggleRecord(attention.id)}
                     />
                   )
                 })}
@@ -172,7 +171,7 @@ export function RipsExportPage() {
         )}
 
         <p className="text-xs text-slate-500">
-          {selectedIds.size} atención(es) seleccionada(s) de {filteredRecords.length}
+          {selectedIds.size} atención(es) seleccionada(s) de {filteredAttentions.length}
         </p>
       </div>
 
@@ -198,19 +197,25 @@ export function RipsExportPage() {
 }
 
 function RecordRow({
-  record,
+  attention,
   patient,
-  procCount,
   checked,
   onToggle,
 }: {
-  record: ClinicalRecord
+  attention: RipsExportAttention
   patient?: Patient
-  procCount: number
   checked: boolean
   onToggle: () => void
 }) {
-  const principal = record.diagnoses.find((d) => d.type === 'principal') ?? record.diagnoses[0]
+  const estado = etiquetaAtencionRips(attention)
+  const estadoClass =
+    attention.ripsEstado === 'enviado_ok'
+      ? 'text-emerald-800'
+      : attention.ripsEstado === 'error'
+        ? 'text-red-700'
+        : attention.ripsEstado === 'preparado'
+          ? 'text-amber-800'
+          : 'text-slate-600'
 
   return (
     <tr className={checked ? 'bg-dental-50/40' : undefined}>
@@ -218,7 +223,7 @@ function RecordRow({
         <input type="checkbox" checked={checked} onChange={onToggle} />
       </td>
       <td className="px-3 py-2 whitespace-nowrap">
-        {record.signedAt ? formatDate(record.signedAt) : '—'}
+        {attention.occurredAt ? formatDate(attention.occurredAt) : '—'}
       </td>
       <td className="px-3 py-2">
         {patient ? (
@@ -232,10 +237,11 @@ function RecordRow({
           <span className="text-amber-700">Paciente no encontrado</span>
         )}
       </td>
-      <td className="px-3 py-2 text-slate-600">
-        {principal ? `${principal.code} — ${principal.description}` : 'Sin diagnóstico'}
+      <td className="px-3 py-2 text-slate-600">{attention.diagnosisLabel}</td>
+      <td className="px-3 py-2 text-slate-600">{attention.procedureLabel}</td>
+      <td className={`px-3 py-2 ${estadoClass}`} title={attention.ripsErrorLog ?? undefined}>
+        {estado}
       </td>
-      <td className="px-3 py-2 text-slate-600">{procCount}</td>
     </tr>
   )
 }

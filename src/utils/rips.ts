@@ -35,6 +35,7 @@ import {
 } from './ripsCompiler'
 import { compileOtrosServiciosForRecord } from './ripsOtrosServicios'
 import { validateRipsExport } from './ripsValidation'
+import { armarRipsNotaEvolucion } from './evolutionRipsPayload'
 
 export interface RipsSourceRecord {
   record: ClinicalRecord
@@ -205,6 +206,7 @@ function buildConsulta(
   metadata: RipsExportMetadata,
   consecutivo: number,
 ): RipsConsulta | null {
+  if (record.ripsAtencionNotaId) return null
   const principal = getPrincipalDiagnosis(record)
   if (!principal) return null
 
@@ -299,6 +301,52 @@ export function buildRipsFromRecords(
     let procedimientoConsecutivo = 1
 
     for (const record of records) {
+      if (record.ripsAtencionNotaId) {
+        const note =
+          (record.evolutionNotes ?? []).find((item) => item.id === record.ripsAtencionNotaId) ??
+          record.evolutionNotes?.[0]
+        if (!note) continue
+        try {
+          const paquete = armarRipsNotaEvolucion({
+            note,
+            paciente: {
+              documentType: patient.documentType,
+              documentNumber: patient.documentNumber,
+              birthDate: patient.birthDate,
+              gender: patient.gender,
+              regime: patient.regime,
+              municipalityCode: patient.municipalityCode,
+            },
+            prestador: {
+              documentType: professional.documentType,
+              documentNumber: professional.documentNumber,
+              providerNit: professional.providerNit,
+              repsCode: resolvedMetadata.codPrestador || professional.repsCode,
+            },
+            numeroSoporte: note.numeroSoportePago,
+            tipoVinculacion: note.ripsMetadata?.tipoVinculacionFinanciera,
+          })
+          const servicios = paquete.usuarios[0]?.servicios
+          for (const consulta of servicios?.consultas ?? []) {
+            consultas.push({ ...consulta, consecutivo: consultaConsecutivo })
+            consultaConsecutivo += 1
+          }
+          for (const procedimiento of servicios?.procedimientos ?? []) {
+            procedimientos.push({ ...procedimiento, consecutivo: procedimientoConsecutivo })
+            procedimientoConsecutivo += 1
+          }
+          otrosServicios.push(...(servicios?.otrosServicios ?? []))
+        } catch (error) {
+          issues.push({
+            level: 'error',
+            recordId: String(record.id ?? ''),
+            patientDocument: `${patient.documentType} ${patient.documentNumber}`,
+            message: error instanceof Error ? error.message : 'No se pudo armar el RIPS de la nota.',
+          })
+        }
+        continue
+      }
+
       const consulta = buildConsulta(record, professional, resolvedMetadata, consultaConsecutivo)
       if (consulta) {
         consultas.push(consulta)

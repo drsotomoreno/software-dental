@@ -150,6 +150,59 @@ test('un formulario vacío más nuevo no borra anamnesis, evoluciones ni firma',
   assert.equal(merged.findings, 'Caries en 16')
 })
 
+test('un borrador más nuevo no borra las firmas del consentimiento de ortodoncia', () => {
+  const signed = {
+    informedConsent: {
+      selectedConsentIds: ['ortodoncia_brackets'],
+      textAccepted: true,
+      signedAt: '2026-10-23T18:40:00.000Z',
+      patientSignatureDataUrl: 'data:image/png;base64,paciente',
+      professionalSignatureDataUrl: 'data:image/png;base64,profesional',
+      professionalLicense: '79984620',
+    },
+  }
+  const draft = {
+    informedConsent: {
+      selectedConsentIds: ['ortodoncia_brackets'],
+      textAccepted: true,
+      professionalLicense: '79984620',
+    },
+  }
+
+  const merged = mergeLivingChart(signed, draft, true)
+  assert.equal(merged.informedConsent.patientSignatureDataUrl, 'data:image/png;base64,paciente')
+  assert.equal(
+    merged.informedConsent.professionalSignatureDataUrl,
+    'data:image/png;base64,profesional',
+  )
+  assert.equal(merged.informedConsent.signedAt, '2026-10-23T18:40:00.000Z')
+  assert.equal(merged.informedConsent.textAccepted, true)
+})
+
+test('una firma nueva del consentimiento reemplaza solo ese trazo', () => {
+  const signed = {
+    informedConsent: {
+      selectedConsentIds: ['ortodoncia_brackets'],
+      textAccepted: true,
+      patientSignatureDataUrl: 'data:image/png;base64,paciente',
+      professionalSignatureDataUrl: 'data:image/png;base64,anterior',
+      professionalLicense: '79984620',
+    },
+  }
+  const draft = {
+    informedConsent: {
+      selectedConsentIds: ['ortodoncia_brackets'],
+      textAccepted: true,
+      professionalSignatureDataUrl: 'data:image/png;base64,nueva',
+      professionalLicense: '79984620',
+    },
+  }
+
+  const merged = mergeLivingChart(signed, draft, true)
+  assert.equal(merged.informedConsent.patientSignatureDataUrl, 'data:image/png;base64,paciente')
+  assert.equal(merged.informedConsent.professionalSignatureDataUrl, 'data:image/png;base64,nueva')
+})
+
 test('un cierre más nuevo no se pisa con un borrador viejo que aún tiene datos', () => {
   const signed = {
     diagnoses: [{ code: 'K04.0', description: 'Pulpitis', type: 'principal' }],

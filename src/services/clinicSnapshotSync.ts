@@ -13,6 +13,7 @@ import {
   resolvePatientSyncId,
 } from '@/services/syncQueueService'
 import type { ClinicalRecord } from '@/types/clinicalRecord'
+import { keepStoredConsentSignatures } from '@/types/consent'
 import type { ClinicalSyncPullResponse, ClinicalSyncRecord } from '@/types/clinicalSync'
 import type { DiagnosticAid } from '@/types/diagnosticAid'
 import type { OdontogramData } from '@/types/odontogram'
@@ -150,7 +151,12 @@ async function mergeClinicalRecords(records: ClinicalSyncRecord[]): Promise<bool
 
     if (local?.id != null) {
       if (!shouldReplaceClinicalDocument(local, { ...remote, payload: next })) continue
-      const patch = { ...next }
+      const patch = {
+        ...next,
+        informedConsent: next.informedConsent
+          ? keepStoredConsentSignatures(local.informedConsent, next.informedConsent)
+          : (local.informedConsent ?? next.informedConsent),
+      }
       delete patch.id
       await db.clinicalRecords.update(local.id, patch)
       changed = true
@@ -302,7 +308,30 @@ async function mergeDrafts(records: ClinicalSyncRecord[]): Promise<boolean> {
       }
       continue
     }
-    await db.patientClinicalDrafts.put(next)
+    const kept: PatientClinicalDraft = local
+      ? {
+          ...next,
+          clinicalDraft: next.clinicalDraft
+            ? {
+                ...next.clinicalDraft,
+                informedConsent: keepStoredConsentSignatures(
+                  local.clinicalDraft?.informedConsent,
+                  next.clinicalDraft.informedConsent,
+                ),
+              }
+            : next.clinicalDraft,
+          valuationDraft: next.valuationDraft
+            ? {
+                ...next.valuationDraft,
+                informedConsent: keepStoredConsentSignatures(
+                  local.valuationDraft?.informedConsent,
+                  next.valuationDraft.informedConsent,
+                ),
+              }
+            : next.valuationDraft,
+        }
+      : next
+    await db.patientClinicalDrafts.put(kept)
     changed = true
   }
   return changed

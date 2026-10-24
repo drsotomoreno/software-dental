@@ -10,6 +10,7 @@ import type { OdontogramData } from '@/types/odontogram'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import { normalizeAnamnesis } from '@/types/anamnesis'
 import { normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
+import { keepStoredConsentSignatures } from '@/types/consent'
 import {
   preserveEvolutionWorkflowStatus,
   shouldPersistClinicalDraft,
@@ -80,7 +81,13 @@ export async function savePatientValuationDraft(
   await db.patientClinicalDrafts.put({
     patientId,
     evolutionNotes: existing?.evolutionNotes ?? [],
-    valuationDraft: normalizedValuation,
+    valuationDraft: {
+      ...normalizedValuation,
+      informedConsent: keepStoredConsentSignatures(
+        existing?.valuationDraft?.informedConsent,
+        normalizedValuation.informedConsent,
+      ),
+    },
     clinicalDraft: existing?.clinicalDraft ?? null,
     odontogramDraft: existing?.odontogramDraft ?? null,
     updatedAt: now,
@@ -109,6 +116,10 @@ export async function savePatientClinicalDraft(
     valuationDraft: existing?.valuationDraft ?? null,
     clinicalDraft: {
       ...normalized,
+      informedConsent: keepStoredConsentSignatures(
+        existing?.clinicalDraft?.informedConsent,
+        normalized.informedConsent,
+      ),
       evolutionNotes: preserveImmutableEvolutionNotes(
         normalized.evolutionNotes ?? [],
         existing?.clinicalDraft?.evolutionNotes,
