@@ -22,6 +22,11 @@ export interface Cie10Diagnosis {
   source?: 'odontograma' | 'manual' | 'odontograma_suplementario'
   /** Piezas dentales FDI asociadas (si proviene del odontograma) */
   affectedTeeth?: number[]
+  /**
+   * CIE que el odontograma sugirió y el clínico reemplazó por este diagnóstico.
+   * La reimportación no vuelve a crear esos códigos.
+   */
+  overridesOdontogramCodes?: string[]
 }
 
 /** Fases del plan de tratamiento odontológico */

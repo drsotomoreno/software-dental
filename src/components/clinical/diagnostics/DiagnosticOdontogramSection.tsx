@@ -17,6 +17,7 @@ import {
 } from '@/constants/clinicalHistorySections'
 import { useCatalogMeta, useCatalogSearch } from '@/hooks/useCatalogSearch'
 import { VoiceDictationButton } from '@/components/voice'
+import { ImportedOdontogramDiagnoses } from './ImportedOdontogramDiagnoses'
 
 function isAdditionalDiagnosis(diagnosis: Cie10Diagnosis): boolean {
   return diagnosis.source === 'manual' && !(diagnosis.affectedTeeth?.length)
@@ -69,6 +70,12 @@ interface DiagnosticOdontogramSectionProps {
   onAddAdditionalDiagnosis?: (code: string, description: string) => void
   onUpdateDiagnosis?: (code: string, patch: Partial<Cie10Diagnosis>) => void
   onRemoveAdditionalDiagnosis?: (code: string) => void
+  onReassignImportedCie?: (payload: {
+    fromCode: string
+    toCode: string
+    toDescription: string
+    toothNumber?: number
+  }) => void
   disabled?: boolean
 }
 
@@ -89,6 +96,7 @@ export function DiagnosticOdontogramSection({
   onAddAdditionalDiagnosis,
   onUpdateDiagnosis,
   onRemoveAdditionalDiagnosis,
+  onReassignImportedCie,
   disabled = false,
 }: DiagnosticOdontogramSectionProps) {
   const chart = normalizeClinicalDiagnosticChart(value)
@@ -461,75 +469,13 @@ export function DiagnosticOdontogramSection({
       </div>
 
       {importedOdontogramDiagnoses.length > 0 && (
-        <div>
-          <h4 className="label-field mb-1">Diagnósticos CIE importados del odontograma</h4>
-          <ul className="space-y-2">
-            {importedOdontogramDiagnoses.map((diagnosis) => (
-              <li
-                key={diagnosis.code}
-                className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm"
-              >
-                <span className="font-mono font-medium text-dental-700">{diagnosis.code}</span>
-                <span>— {diagnosis.description}</span>
-                {(diagnosis.affectedTeeth?.length ?? 0) > 0 && (
-                  <span className="text-xs text-slate-500">
-                    Piezas {diagnosis.affectedTeeth?.join(', ')}
-                  </span>
-                )}
-                {!disabled ? (
-                  <>
-                    <select
-                      value={diagnosis.type}
-                      onChange={(e) =>
-                        onUpdateDiagnosis?.(diagnosis.code, {
-                          type: e.target.value as Cie10Diagnosis['type'],
-                        })
-                      }
-                      className="rounded border border-slate-300 px-1.5 py-0.5 text-xs"
-                      aria-label={`Tipo de ${diagnosis.code}`}
-                    >
-                      <option value="principal">Principal</option>
-                      <option value="relacionado">Relacionado</option>
-                    </select>
-                    <select
-                      value={diagnosis.certainty}
-                      onChange={(e) =>
-                        onUpdateDiagnosis?.(diagnosis.code, {
-                          certainty: e.target.value as DiagnosisCertainty,
-                        })
-                      }
-                      className="rounded border border-slate-300 px-1.5 py-0.5 text-xs"
-                      aria-label={`Certeza de ${diagnosis.code}`}
-                    >
-                      {Object.entries(DIAGNOSIS_CERTAINTY_LABELS).map(([key, label]) => (
-                        <option key={key} value={key}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => onRemoveAdditionalDiagnosis?.(diagnosis.code)}
-                      className="ml-auto text-red-500 hover:text-red-700"
-                      aria-label={`Quitar ${diagnosis.code}`}
-                    >
-                      ✕
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span className="rounded bg-dental-100 px-1.5 py-0.5 text-xs text-dental-700">
-                      {diagnosis.type}
-                    </span>
-                    <span className="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">
-                      {DIAGNOSIS_CERTAINTY_LABELS[diagnosis.certainty]}
-                    </span>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
+        <ImportedOdontogramDiagnoses
+          diagnoses={importedOdontogramDiagnoses}
+          disabled={disabled}
+          onUpdateDiagnosis={onUpdateDiagnosis}
+          onRemoveDiagnosis={onRemoveAdditionalDiagnosis}
+          onReassignCie={onReassignImportedCie}
+        />
       )}
 
       <div>
