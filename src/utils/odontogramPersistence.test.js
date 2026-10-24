@@ -104,6 +104,52 @@ test('guardar el id no pisa los dientes que siguen en edición', () => {
   assert.equal(next.teeth[0].faces.oclusal, 'caries')
 })
 
+test('un formulario vacío más nuevo no borra anamnesis, evoluciones ni firma', () => {
+  const signedAt = '2026-10-23T18:40:00.000Z'
+  const signed = {
+    anamnesis: { chiefComplaint: 'Dolor en molar 16' },
+    stomatologicalExam: { vitalSigns: { systolicPressure: 120, diastolicPressure: 80, heartRate: 72, notes: '' } },
+    diagnoses: [{ code: 'K02.1', description: 'Caries', type: 'principal' }],
+    diagnosticChart: { entries: [], notes: '' },
+    findings: 'Caries en 16',
+    treatmentPlan: [{ id: 'plan-1', procedure: 'Resina', cupsCode: '990201' }],
+    evolutionNotes: [
+      {
+        id: 'evo-1',
+        procedure: 'Resina',
+        clinicalNote: 'Se realizó obturación.',
+        isLocked: true,
+        signedAt,
+        contentHash: 'hash-evo',
+      },
+    ],
+    informedConsent: {
+      textAccepted: true,
+      signedAt,
+      professionalSignatureDataUrl: 'data:image/png;base64,firma',
+      professionalLicense: '123',
+    },
+  }
+  const blank = {
+    anamnesis: { chiefComplaint: '' },
+    stomatologicalExam: { vitalSigns: { systolicPressure: null, diastolicPressure: null, heartRate: null, notes: '' } },
+    diagnoses: [],
+    diagnosticChart: { entries: [], notes: '' },
+    findings: '',
+    treatmentPlan: [],
+    evolutionNotes: [],
+    informedConsent: { textAccepted: false, professionalLicense: '123' },
+  }
+
+  const merged = mergeLivingChart(signed, blank, true)
+  assert.equal(merged.anamnesis.chiefComplaint, 'Dolor en molar 16')
+  assert.equal(merged.evolutionNotes[0].clinicalNote, 'Se realizó obturación.')
+  assert.equal(merged.informedConsent.professionalSignatureDataUrl, 'data:image/png;base64,firma')
+  assert.equal(merged.treatmentPlan[0].procedure, 'Resina')
+  assert.equal(merged.diagnoses[0].code, 'K02.1')
+  assert.equal(merged.findings, 'Caries en 16')
+})
+
 test('un cierre más nuevo no se pisa con un borrador viejo que aún tiene datos', () => {
   const signed = {
     diagnoses: [{ code: 'K04.0', description: 'Pulpitis', type: 'principal' }],

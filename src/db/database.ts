@@ -33,6 +33,7 @@ import {
   withClinicalSyncSuppressed,
 } from '@/services/clinicalSyncState'
 import { dentalServiceSpecialtyId, normalizeOrganizationId } from '@/utils/organizationId'
+import { shouldReplaceClinicalDocument } from '../../shared/clinicalRecordGuard.js'
 import type { RehusSpecialtyId } from '@/constants/rehusSpecialties'
 import type { ElectronicInvoice } from '@/types/invoice'
 import type { ElectronicCreditNote } from '@/types/creditNote'
@@ -895,7 +896,14 @@ db.clinicalRecords.hook('creating', (_primKey, obj) => {
 })
 
 db.clinicalRecords.hook('updating', (mods, _primKey, obj) => {
-  stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as ClinicalRecord)
+  const previous = obj as ClinicalRecord
+  const next = { ...previous, ...(mods as Partial<ClinicalRecord>) }
+  if (!backupRestoreUnlock && !shouldReplaceClinicalDocument(previous, next)) {
+    throw new Error(
+      'La historia clínica firmada es un documento legal y no puede reemplazarse por una versión vacía o sin firma.',
+    )
+  }
+  stampClinicalSyncOnUpdate(mods as Record<string, unknown>, previous)
 })
 
 db.odontograms.hook('creating', (_primKey, obj) => {

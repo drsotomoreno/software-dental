@@ -22,6 +22,11 @@ import { getDesktopBridge } from '@/types/desktopBridge'
 import { arrayBufferToBase64, base64ToArrayBuffer } from '@/utils/base64Binary'
 import { isRemoteDraftNewer } from '@/utils/clinicalDraftMerge'
 import {
+  clinicalBodyHasContent,
+  isSignedClinicalDocument,
+  shouldReplaceClinicalDocument,
+} from '../../shared/clinicalRecordGuard.js'
+import {
   clinicalDraftHasSection4,
   odontogramHasMarks,
   pickOdontogramFromCandidates,
@@ -119,50 +124,21 @@ function toEntityRecord(
   }
 }
 
-async function mergeBySyncId<T extends { id?: number | string; syncId?: string; updatedAt?: string }>(
-  loadAll: () => Promise<T[]>,
-  addRow: (row: T) => Promise<unknown>,
-  updateRow: (id: string | number, row: Partial<T>) => Promise<unknown>,
-  remotes: ClinicalSyncRecord[],
-  mapRow: (payload: Record<string, unknown>, remote: ClinicalSyncRecord) => Promise<T | null>,
-): Promise<boolean> {
+async function mergeClinicalRecords(records: ClinicalSyncRecord[]): Promise<boolean> {
   let changed = false
-  const locals = await loadAll()
+  const locals = await db.clinicalRecords.toArray()
   const bySync = new Map(
     locals.filter((row) => row.syncId).map((row) => [String(row.syncId), row]),
   )
-  for (const remote of remotes) {
-    const next = await mapRow(payloadOf(remote), remote)
-    if (!next) continue
-    const local = bySync.get(remote.syncId)
-    if (local?.id != null) {
-      const localStamp = Date.parse(String(local.updatedAt || '')) || 0
-      const remoteStamp = Date.parse(String(remote.updatedAt || '')) || 0
-      if (remoteStamp < localStamp) continue
-      const patch = { ...next }
-      delete patch.id
-      await updateRow(local.id, patch)
-      changed = true
-      continue
-    }
-    const withId = { ...next }
-    delete withId.id
-    await addRow(withId)
-    changed = true
-  }
-  return changed
-}
 
-async function mergeClinicalRecords(records: ClinicalSyncRecord[]): Promise<boolean> {
-  return mergeBySyncId(
-    () => db.clinicalRecords.toArray(),
-    (row) => db.clinicalRecords.add(row),
-    (id, row) => db.clinicalRecords.update(id, row),
-    records,
-    async (payload, remote) => {
-    const patientId = await resolveLocalPatientId(payload)
-    if (!patientId) return null
-    return {
+  for (const remote of records) {
+    const payload = payloadOf(remote)
+    const local = bySync.get(remote.syncId)
+    const resolvedPatientId = await resolveLocalPatientId(payload)
+    const patientId = local?.patientId != null ? String(local.patientId) : resolvedPatientId
+    if (!patientId) continue
+
+    const next: ClinicalRecord = {
       ...(payload as unknown as ClinicalRecord),
       patientId,
       syncId: remote.syncId,
@@ -171,8 +147,36 @@ async function mergeClinicalRecords(records: ClinicalSyncRecord[]): Promise<bool
       lastSyncedAt: new Date().toISOString(),
       updatedAt: remote.updatedAt || String(payload.updatedAt || new Date().toISOString()),
     }
-    },
-  )
+
+    if (local?.id != null) {
+      if (!shouldReplaceClinicalDocument(local, { ...remote, payload: next })) continue
+      const patch = { ...next }
+      delete patch.id
+      await db.clinicalRecords.update(local.id, patch)
+      changed = true
+      continue
+    }
+
+    const patientAlreadyHasHistory = locals.some(
+      (row) =>
+        String(row.patientId) === patientId &&
+        (clinicalBodyHasContent(row) || isSignedClinicalDocument(row)),
+    )
+    if (
+      patientAlreadyHasHistory &&
+      !clinicalBodyHasContent(next) &&
+      !isSignedClinicalDocument(next)
+    ) {
+      continue
+    }
+
+    const withId = { ...next }
+    delete withId.id
+    await db.clinicalRecords.add(withId)
+    changed = true
+  }
+
+  return changed
 }
 
 async function mergeOdontograms(records: ClinicalSyncRecord[]): Promise<boolean> {
@@ -279,15 +283,23 @@ async function mergeDrafts(records: ClinicalSyncRecord[]): Promise<boolean> {
     if (!patientId) continue
     const remoteUpdatedAt = remote.updatedAt || String(payload.updatedAt || '')
     const local = await db.patientClinicalDrafts.get(patientId)
-    if (local && !isRemoteDraftNewer(local.updatedAt, remoteUpdatedAt)) continue
     const next: PatientClinicalDraft = {
       ...(payload as unknown as PatientClinicalDraft),
       patientId,
       updatedAt: remoteUpdatedAt || new Date().toISOString(),
     }
-    if (local && clinicalDraftHasSection4(local) && !clinicalDraftHasSection4(next)) {
-      await db.patientClinicalDrafts.update(patientId, { updatedAt: new Date().toISOString() })
-      changed = true
+    const remoteRecord = { ...remote, payload: next, updatedAt: next.updatedAt }
+    if (local && !shouldReplaceClinicalDocument(local, remoteRecord)) {
+      const remoteIsEmptyShell =
+        !clinicalBodyHasContent(next) && !isSignedClinicalDocument(next)
+      const localHasHistory =
+        clinicalBodyHasContent(local) ||
+        isSignedClinicalDocument(local) ||
+        clinicalDraftHasSection4(local)
+      if (localHasHistory && remoteIsEmptyShell) {
+        await db.patientClinicalDrafts.update(patientId, { updatedAt: new Date().toISOString() })
+        changed = true
+      }
       continue
     }
     await db.patientClinicalDrafts.put(next)

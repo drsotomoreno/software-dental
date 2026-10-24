@@ -10,6 +10,7 @@ import type { OdontogramData } from '@/types/odontogram'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import { normalizeAnamnesis } from '@/types/anamnesis'
 import { normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
+import { shouldPersistClinicalDraft } from '../../shared/clinicalRecordGuard.js'
 import { sortEvolutionNotesChronologically } from './recordIntegrity'
 import { toPatientForeignKey } from './patientId'
 
@@ -69,11 +70,13 @@ export async function savePatientValuationDraft(
   const patientId = toPatientForeignKey(patientRouteId)
   const existing = await db.patientClinicalDrafts.get(patientId)
   const now = new Date().toISOString()
+  const normalizedValuation = normalizeClinicalDraft(valuationDraft)
+  if (!shouldPersistClinicalDraft(existing?.valuationDraft, normalizedValuation)) return
 
   await db.patientClinicalDrafts.put({
     patientId,
     evolutionNotes: existing?.evolutionNotes ?? [],
-    valuationDraft: normalizeClinicalDraft(valuationDraft),
+    valuationDraft: normalizedValuation,
     clinicalDraft: existing?.clinicalDraft ?? null,
     odontogramDraft: existing?.odontogramDraft ?? null,
     updatedAt: now,
@@ -90,6 +93,7 @@ export async function savePatientClinicalDraft(
   const existing = await db.patientClinicalDrafts.get(patientId)
   const now = new Date().toISOString()
   const normalized = normalizeClinicalDraft(clinicalDraft)
+  if (!shouldPersistClinicalDraft(existing?.clinicalDraft ?? existing, normalized)) return
 
   await db.patientClinicalDrafts.put({
     patientId,

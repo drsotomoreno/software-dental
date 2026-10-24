@@ -7,7 +7,8 @@ import {
   writeAttachmentBytes,
 } from './clinicAttachmentStore.js'
 import { readDurableJsonWithMerge, writeDurableJsonWithMerge } from './durableStore.js'
-import { draftRecordHasDiagnoses, odontogramRecordHasMarks } from './odontogramMerge.js'
+import { shouldReplaceClinicalDocument } from '../../shared/clinicalRecordGuard.js'
+import { odontogramRecordHasMarks } from './odontogramMerge.js'
 
 const STORE_FILE = join(config.dataDir, 'clinical-sync.json')
 const STORE_KEY = 'clinical-sync'
@@ -48,14 +49,14 @@ function stamp(record) {
 
 function shouldReplaceSyncedRecord(prev, next, entityKey) {
   if (!prev) return true
+  if (entityKey === 'clinicalRecords' || entityKey === 'drafts') {
+    return shouldReplaceClinicalDocument(prev, next)
+  }
   if (
     entityKey === 'odontograms' &&
     odontogramRecordHasMarks(prev) &&
     !odontogramRecordHasMarks(next)
   ) {
-    return false
-  }
-  if (entityKey === 'drafts' && draftRecordHasDiagnoses(prev) && !draftRecordHasDiagnoses(next)) {
     return false
   }
   return stamp(next) >= stamp(prev)

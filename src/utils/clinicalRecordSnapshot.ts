@@ -18,6 +18,10 @@ import { migrateLegacyBudget, generateId } from '@/utils'
 import { sortEvolutionNotesChronologically } from '@/utils/recordIntegrity'
 import { toDexiePrimaryKey, toPatientForeignKey } from '@/utils/patientId'
 import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceService'
+import {
+  clinicalDocumentRichness,
+  isSignedClinicalDocument,
+} from '../../shared/clinicalRecordGuard.js'
 
 function normalizeTreatmentPlanItems(
   items: TreatmentPlanItem[] | undefined,
@@ -165,7 +169,15 @@ export async function getLatestSignedClinicalRecord(
   patientRouteId: string,
 ): Promise<ClinicalRecord | null> {
   const records = await listPatientClinicalRecords(patientRouteId)
-  return latestClinicalRecord(records.filter((record) => record.isLocked))
+  const signed = records.filter((record) => isSignedClinicalDocument(record))
+  if (signed.length === 0) return null
+  return [...signed].sort((a, b) => {
+    const byContent = clinicalDocumentRichness(b) - clinicalDocumentRichness(a)
+    if (byContent !== 0) return byContent
+    return (b.signedAt ?? b.updatedAt ?? b.createdAt ?? '').localeCompare(
+      a.signedAt ?? a.updatedAt ?? a.createdAt ?? '',
+    )
+  })[0]
 }
 
 export interface MainHistorySignatureStatus {

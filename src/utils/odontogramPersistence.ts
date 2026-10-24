@@ -1,6 +1,14 @@
 import type { ClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import type { Cie10Diagnosis } from '@/types/clinicalRecord'
 import type { OdontogramData } from '@/types/odontogram'
+import {
+  anamnesisHasContent,
+  informedConsentHasContent,
+  mergeSignedEvolutionNotes,
+  specializedAnnexesHaveContent,
+  stomatologicalExamHasContent,
+  treatmentPlanHasContent,
+} from '../../shared/clinicalRecordGuard.js'
 import { isRemoteDraftNewer } from './clinicalDraftMerge.ts'
 
 export function odontogramHasMarks(data: OdontogramData | null | undefined): boolean {
@@ -74,6 +82,12 @@ function hasChartEntries(data: LivingChart | null | undefined): boolean {
   return (data?.diagnosticChart?.entries?.length ?? 0) > 0
 }
 
+function notesOf(value: unknown): unknown[] | undefined {
+  if (!value || typeof value !== 'object' || !('evolutionNotes' in value)) return undefined
+  const notes = (value as { evolutionNotes?: unknown[] }).evolutionNotes
+  return Array.isArray(notes) ? notes : undefined
+}
+
 /** La sección 4 del borrador más nuevo no se pierde detrás de un cierre anterior. */
 export function mergeLivingChart<T extends LivingChart>(
   base: T,
@@ -83,13 +97,43 @@ export function mergeLivingChart<T extends LivingChart>(
   if (!draft) return base
 
   if (draftIsNewer) {
+    const draftRecord = draft as T & {
+      anamnesis?: unknown
+      stomatologicalExam?: unknown
+      specializedAnnexes?: unknown
+      treatmentPlan?: unknown
+      informedConsent?: unknown
+    }
+    const baseRecord = base as T & {
+      anamnesis?: unknown
+      stomatologicalExam?: unknown
+      specializedAnnexes?: unknown
+      treatmentPlan?: unknown
+      informedConsent?: unknown
+    }
     return {
       ...base,
       ...draft,
+      anamnesis: anamnesisHasContent(draftRecord.anamnesis)
+        ? draftRecord.anamnesis
+        : (baseRecord.anamnesis ?? draftRecord.anamnesis),
+      stomatologicalExam: stomatologicalExamHasContent(draftRecord.stomatologicalExam)
+        ? draftRecord.stomatologicalExam
+        : (baseRecord.stomatologicalExam ?? draftRecord.stomatologicalExam),
+      specializedAnnexes: specializedAnnexesHaveContent(draftRecord.specializedAnnexes)
+        ? draftRecord.specializedAnnexes
+        : (baseRecord.specializedAnnexes ?? draftRecord.specializedAnnexes),
       diagnoses: hasDiagnoses(draft) ? draft.diagnoses : base.diagnoses,
       diagnosticChart: hasChartEntries(draft) ? draft.diagnosticChart : base.diagnosticChart,
       findings: draft.findings?.trim() ? draft.findings : base.findings || draft.findings,
-    }
+      treatmentPlan: treatmentPlanHasContent(draftRecord.treatmentPlan)
+        ? draftRecord.treatmentPlan
+        : (baseRecord.treatmentPlan ?? draftRecord.treatmentPlan),
+      evolutionNotes: mergeSignedEvolutionNotes(notesOf(base), notesOf(draft)),
+      informedConsent: informedConsentHasContent(draftRecord.informedConsent)
+        ? draftRecord.informedConsent
+        : (baseRecord.informedConsent ?? draftRecord.informedConsent),
+    } as T
   }
 
   return {

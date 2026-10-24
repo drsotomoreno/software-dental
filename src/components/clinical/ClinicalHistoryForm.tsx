@@ -38,6 +38,7 @@ import type { InformedConsent } from '@/types/consent'
 import type { UserProfile } from '@/types/user'
 import type { SignatureCaptureResult } from '@/types/signature'
 import { createEmptyConsent } from '@/types/consent'
+import { clinicalFormHasContent } from '../../../shared/clinicalRecordGuard.js'
 import { AnamnesisForm } from './AnamnesisForm'
 import { StomatologicalExamForm } from './StomatologicalExamForm'
 import { SpecializedAnnexesForm } from './SpecializedAnnexesForm'
@@ -172,11 +173,19 @@ export function ClinicalHistoryForm({
   const onChangeRef = useRef(onChange)
   const disabledRef = useRef(disabled)
   const loadedPatientIdRef = useRef(patientId)
+  const formRef = useRef(form)
+  formRef.current = form
   onChangeRef.current = onChange
   disabledRef.current = disabled
 
   useEffect(() => {
-    if (!initialData || !patientId || loadedPatientIdRef.current === patientId) return
+    if (!initialData || !patientId) return
+    const samePatient = loadedPatientIdRef.current === patientId
+    const recoverBlankForm =
+      samePatient &&
+      !clinicalFormHasContent(formRef.current) &&
+      clinicalFormHasContent(initialData)
+    if (samePatient && !recoverBlankForm) return
     loadedPatientIdRef.current = patientId
 
     const emptyForm = createEmptyClinicalForm(professionalLicense)
