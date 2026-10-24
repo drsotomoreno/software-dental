@@ -188,26 +188,39 @@ export function formatExamFindingCie10Suffix(link: ExamCie10Link | null | undefi
   return ` (CIE-10 ${link.code}: ${link.description})`
 }
 
-export type AtmLaterality = '' | 'derecha' | 'izquierda' | 'bilateral'
+export type AtmLaterality = '' | 'no' | 'derecha' | 'izquierda' | 'bilateral'
 
 export const ATM_LATERALITY_OPTIONS: {
   value: Exclude<AtmLaterality, ''>
   label: string
 }[] = [
+  { value: 'no', label: 'No' },
   { value: 'derecha', label: 'Derecha' },
   { value: 'izquierda', label: 'Izquierda' },
   { value: 'bilateral', label: 'Bilateral' },
 ]
 
-export type AtmDeviationMovement = '' | 'apertura' | 'cierre'
+export type AtmDeviationMovement = '' | 'no' | 'apertura' | 'cierre'
 
 export const ATM_DEVIATION_MOVEMENT_OPTIONS: {
   value: Exclude<AtmDeviationMovement, ''>
   label: string
 }[] = [
+  { value: 'no', label: 'No' },
   { value: 'apertura', label: 'Movimiento de apertura' },
   { value: 'cierre', label: 'Movimiento de cierre' },
 ]
+
+/** Hallazgo positivo de ATM. «No» es la ausencia explícita, no una alteración. */
+export function isAtmPositiveFinding(value: string): boolean {
+  return value !== '' && value !== 'no'
+}
+
+export function atmDeniesAllFindings(
+  atm: Pick<AtmExam, 'clicks' | 'pain' | 'deviation'>,
+): boolean {
+  return atm.clicks === 'no' && atm.pain === 'no' && atm.deviation === 'no'
+}
 
 export interface AtmExam {
   isNormal: boolean
@@ -410,20 +423,25 @@ export function normalizeExamField(value: unknown): ExamField {
   return { isNormal, description: text }
 }
 
+function normalizeAtmToken(value: string): string {
+  return value.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '')
+}
+
+function isAtmAbsenceToken(value: string): boolean {
+  return value === 'no' || value === 'ausente' || value === 'ninguno' || value === 'ninguna'
+}
+
 function normalizeAtmLaterality(value: unknown): AtmLaterality {
-  if (value === 'derecha' || value === 'izquierda' || value === 'bilateral') {
+  if (value === 'no' || value === 'derecha' || value === 'izquierda' || value === 'bilateral') {
     return value
   }
 
   if (value === true) return 'bilateral'
 
   if (typeof value === 'string') {
-    const normalized = value
-      .trim()
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/\p{Diacritic}/gu, '')
+    const normalized = normalizeAtmToken(value)
 
+    if (isAtmAbsenceToken(normalized)) return 'no'
     if (normalized.includes('bilateral')) return 'bilateral'
     if (normalized.includes('derecha')) return 'derecha'
     if (normalized.includes('izquierda')) return 'izquierda'
@@ -433,15 +451,12 @@ function normalizeAtmLaterality(value: unknown): AtmLaterality {
 }
 
 function normalizeAtmDeviationMovement(value: unknown): AtmDeviationMovement {
-  if (value === 'apertura' || value === 'cierre') return value
+  if (value === 'no' || value === 'apertura' || value === 'cierre') return value
 
   if (typeof value === 'string') {
-    const normalized = value
-      .trim()
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/\p{Diacritic}/gu, '')
+    const normalized = normalizeAtmToken(value)
 
+    if (isAtmAbsenceToken(normalized) || normalized === 'sin desviacion') return 'no'
     if (normalized.includes('apertura')) return 'apertura'
     if (normalized.includes('cierre')) return 'cierre'
   }
@@ -664,21 +679,35 @@ function normalizePeriodontiumExam(data: LegacyPeriodontiumExam | undefined): Pe
   }
 }
 
+function normalizeAtmExam(data: Partial<AtmExam> | undefined): AtmExam {
+  const empty = createEmptyStomatologicalExam().atm
+  const clicks = normalizeAtmLaterality(data?.clicks)
+  const pain = normalizeAtmLaterality(data?.pain)
+  const deviation = normalizeAtmDeviationMovement(data?.deviation)
+  const hasPositive =
+    isAtmPositiveFinding(clicks) ||
+    isAtmPositiveFinding(pain) ||
+    isAtmPositiveFinding(deviation)
+  const fillAbsence = Boolean(data?.isNormal) && !hasPositive
+  const next: AtmExam = {
+    ...empty,
+    ...data,
+    clicks: fillAbsence && clicks === '' ? 'no' : clicks,
+    pain: fillAbsence && pain === '' ? 'no' : pain,
+    deviation: fillAbsence && deviation === '' ? 'no' : deviation,
+    notes: normalizeAtmNotes(data?.notes),
+    isNormal: false,
+  }
+  next.isNormal = atmDeniesAllFindings(next)
+  return next
+}
+
 export function normalizeStomatologicalExam(data: Partial<StomatologicalExam>): StomatologicalExam {
-  const empty = createEmptyStomatologicalExam()
   const st = data.softTissues as Record<string, unknown> | undefined
 
   return {
     vitalSigns: normalizeVitalSignsExam(data.vitalSigns),
-    atm: {
-      ...empty.atm,
-      ...data.atm,
-      isNormal: data.atm?.isNormal ?? false,
-      clicks: normalizeAtmLaterality(data.atm?.clicks),
-      pain: normalizeAtmLaterality(data.atm?.pain),
-      deviation: normalizeAtmDeviationMovement(data.atm?.deviation),
-      notes: normalizeAtmNotes(data.atm?.notes),
-    },
+    atm: normalizeAtmExam(data.atm),
     softTissues: {
       lips: normalizeExamField(st?.lips),
       cheeks: normalizeExamField(st?.cheeks),
