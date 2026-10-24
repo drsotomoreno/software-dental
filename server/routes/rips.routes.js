@@ -10,6 +10,7 @@ import {
 } from '../services/ripsTemporalStore.js'
 import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.controller.js'
 import { getMonthlyRipsStatus, runMonthlyRipsJob } from '../controllers/monthlyRips.controller.js'
+import { sendBatchRips, sendSingleRips } from '../controllers/ripsTransmission.controller.js'
 
 const router = Router()
 
@@ -18,6 +19,18 @@ const router = Router()
  * Cierra la consulta: RIPS sin factura hacia el MUV, o FEV si hay factura.
  */
 router.post('/evolucion-dictada', processDictatedEvolution)
+
+/**
+ * POST /api/rips/send-single
+ * Radica un RIPS. Con CUFE usa CargarFevRips; sin CUFE, CargarRipsSinFactura.
+ */
+router.post('/send-single', (req, res) => sendSingleRips(req, res))
+
+/**
+ * POST /api/rips/send-batch
+ * Acepta un lote diario y lo radica en serie después de responder.
+ */
+router.post('/send-batch', (req, res) => sendBatchRips(req, res))
 
 /**
  * GET /api/rips/mensual/estado
