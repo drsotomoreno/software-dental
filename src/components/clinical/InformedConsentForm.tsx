@@ -1,6 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import type { InformedConsent } from '@/types/consent'
+import {
+  keepStoredConsentSignatures,
+  restoreMissingConsentSignatures,
+  type StoredConsentSignatures,
+} from '@/types/consent'
 import {
   CONSENT_MENU_OPTIONS,
   getConsentLabel,
@@ -13,7 +18,11 @@ import {
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
 import { DigitalSignatureCanvas } from '@/components/signature'
+import { findLedgerConsentSignatures } from '@/services/signatureService'
+import type { SignatureCaptureResult } from '@/types/signature'
 import { listPatientClinicalRecords } from '@/utils/clinicalRecordSnapshot'
+
+const NO_CONSENT_IDS: ConsentTemplateId[] = []
 
 interface InformedConsentFormProps {
   data: InformedConsent
@@ -62,19 +71,83 @@ export function InformedConsentForm({
 }: InformedConsentFormProps) {
   const [activeConsentId, setActiveConsentId] = useState<ConsentTemplateId | null>(null)
   const [pickerValue, setPickerValue] = useState('')
+  const dataRef = useRef(data)
+  const onChangeRef = useRef(onChange)
+  dataRef.current = data
+  onChangeRef.current = onChange
 
-  const selectedIds = data.selectedConsentIds ?? []
+  const selectedIds = data.selectedConsentIds ?? NO_CONSENT_IDS
+  const selectedKey = selectedIds.join('|')
 
-  const persistedLabels = useLiveQuery(async () => {
-    if (!patientId) return []
+  const persisted = useLiveQuery(async () => {
+    if (!patientId) return { labels: [] as string[], stored: null as StoredConsentSignatures | null }
     const records = await listPatientClinicalRecords(patientId)
     const ordered = [...records].sort((a, b) =>
       (b.informedConsent?.signedAt ?? b.signedAt ?? b.updatedAt ?? '').localeCompare(
         a.informedConsent?.signedAt ?? a.signedAt ?? a.updatedAt ?? '',
       ),
     )
-    return signedConsentLabels(ordered.map((record) => record.informedConsent))
-  }, [patientId])
+    let stored: StoredConsentSignatures | null = null
+    for (const record of ordered) {
+      let ledger: StoredConsentSignatures | null = null
+      try {
+        ledger = await findLedgerConsentSignatures([record])
+      } catch {
+        ledger = null
+      }
+      const merged = keepStoredConsentSignatures(ledger, record.informedConsent ?? ledger ?? null)
+      if (!merged || typeof merged !== 'object') continue
+      const candidate = merged as StoredConsentSignatures
+      if (!candidate.patientSignatureDataUrl && !candidate.professionalSignatureDataUrl) continue
+      const ids = candidate.selectedConsentIds ?? []
+      const overlapsSelection =
+        selectedIds.length === 0 ||
+        ids.length === 0 ||
+        ids.some((id) => selectedIds.includes(id as ConsentTemplateId))
+      if (!overlapsSelection) continue
+      stored = {
+        selectedConsentIds: ids,
+        patientSignatureDataUrl: candidate.patientSignatureDataUrl,
+        patientSignatureMeta: candidate.patientSignatureMeta,
+        professionalSignatureDataUrl: candidate.professionalSignatureDataUrl,
+        professionalSignatureMeta: candidate.professionalSignatureMeta,
+        signedAt: candidate.signedAt ?? record.signedAt,
+      }
+      break
+    }
+    return {
+      labels: signedConsentLabels(ordered.map((record) => record.informedConsent)),
+      stored,
+    }
+  }, [patientId, selectedKey])
+
+  const persistedLabels = persisted?.labels
+  const storedSignatures = persisted?.stored ?? null
+  const storedRef = useRef(storedSignatures)
+  storedRef.current = storedSignatures
+  const storedKey = [
+    storedSignatures?.patientSignatureDataUrl ?? '',
+    storedSignatures?.professionalSignatureDataUrl ?? '',
+    storedSignatures?.signedAt ?? '',
+    (storedSignatures?.selectedConsentIds ?? []).join(','),
+  ].join('|')
+
+  useEffect(() => {
+    const stored = storedRef.current
+    if (!stored) return
+    const current = dataRef.current
+    const restored = restoreMissingConsentSignatures(current, stored)
+    if (
+      restored.patientSignatureDataUrl === current.patientSignatureDataUrl &&
+      restored.professionalSignatureDataUrl === current.professionalSignatureDataUrl &&
+      restored.patientSignatureMeta === current.patientSignatureMeta &&
+      restored.professionalSignatureMeta === current.professionalSignatureMeta &&
+      restored.signedAt === current.signedAt
+    ) {
+      return
+    }
+    onChangeRef.current(restored)
+  }, [storedKey, selectedKey])
 
   const currentLabels = useMemo(() => signedConsentLabels([data]), [data])
 
@@ -89,7 +162,7 @@ export function InformedConsentForm({
     return labels
   }, [currentLabels, persistedLabels])
 
-  const signedStatusReady = persistedLabels !== undefined
+  const signedStatusReady = persisted !== undefined
 
   const activeId = useMemo(() => {
     if (activeConsentId && selectedIds.includes(activeConsentId)) return activeConsentId
@@ -101,6 +174,24 @@ export function InformedConsentForm({
   const availableOptions = CONSENT_MENU_OPTIONS.filter((t) => !selectedIds.includes(t.id))
 
   const update = (patch: Partial<InformedConsent>) => onChange({ ...data, ...patch })
+
+  const applySignature = (
+    field: 'patient' | 'professional',
+    result: SignatureCaptureResult | null,
+  ) => {
+    if (!result?.dataUrl) return
+    if (field === 'patient') {
+      update({
+        patientSignatureDataUrl: result.dataUrl,
+        patientSignatureMeta: result.metadata,
+      })
+      return
+    }
+    update({
+      professionalSignatureDataUrl: result.dataUrl,
+      professionalSignatureMeta: result.metadata,
+    })
+  }
 
   const addConsent = (id: ConsentTemplateId) => {
     if (selectedIds.includes(id)) return
@@ -239,15 +330,12 @@ export function InformedConsentForm({
         <div>
           <h4 className="mb-2 text-sm font-semibold text-slate-700">Firma del paciente</h4>
           <DigitalSignatureCanvas
-            onSignatureChange={(result) =>
-              update({
-                patientSignatureDataUrl: result?.dataUrl,
-                patientSignatureMeta: result?.metadata,
-              })
-            }
+            value={data.patientSignatureDataUrl}
+            onSignatureChange={(result) => applySignature('patient', result)}
             disabled={disabled}
             width={400}
             height={150}
+            ariaLabel="Firma del paciente"
           />
         </div>
 
@@ -269,15 +357,12 @@ export function InformedConsentForm({
             />
           </div>
           <DigitalSignatureCanvas
-            onSignatureChange={(result) =>
-              update({
-                professionalSignatureDataUrl: result?.dataUrl,
-                professionalSignatureMeta: result?.metadata,
-              })
-            }
+            value={data.professionalSignatureDataUrl}
+            onSignatureChange={(result) => applySignature('professional', result)}
             disabled={disabled}
             width={400}
             height={150}
+            ariaLabel="Firma del profesional"
           />
         </div>
       </div>

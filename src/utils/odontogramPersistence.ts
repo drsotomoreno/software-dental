@@ -1,5 +1,6 @@
 import type { ClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import type { Cie10Diagnosis } from '@/types/clinicalRecord'
+import { keepStoredConsentSignatures } from '../types/consent.ts'
 import type { OdontogramData } from '@/types/odontogram'
 import {
   anamnesisHasContent,
@@ -130,9 +131,12 @@ export function mergeLivingChart<T extends LivingChart>(
         ? draftRecord.treatmentPlan
         : (baseRecord.treatmentPlan ?? draftRecord.treatmentPlan),
       evolutionNotes: mergeSignedEvolutionNotes(notesOf(base), notesOf(draft)),
-      informedConsent: informedConsentHasContent(draftRecord.informedConsent)
-        ? draftRecord.informedConsent
-        : (baseRecord.informedConsent ?? draftRecord.informedConsent),
+      informedConsent: keepStoredConsentSignatures(
+        baseRecord.informedConsent,
+        informedConsentHasContent(draftRecord.informedConsent)
+          ? draftRecord.informedConsent
+          : (baseRecord.informedConsent ?? draftRecord.informedConsent),
+      ),
     } as T
   }
 
