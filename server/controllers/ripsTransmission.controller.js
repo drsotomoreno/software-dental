@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { resolveSubscriptionSession, sessionHintFromRequest } from '../services/subscriptionAuthStore.js'
 import { MuvInfrastructureError } from '../services/sisproMuvService.js'
 import { encolarTransmision, transmitirLote, transmitirRips } from '../services/ripsTransmissionService.js'
+import { ripsBatchTracker } from '../services/ripsBatchTracker.js'
 
 const MAX_BATCH = 200
 
@@ -66,6 +67,56 @@ export function normalizarLote(body) {
     sobres.push(sobre)
   }
   return { sobres }
+}
+
+export function titularDelPrestador(user) {
+  return String(user?.id || user?.email || '')
+}
+
+function itemDesdeResultado(sobre, result) {
+  const errors = Array.isArray(result?.errors) ? result.errors : []
+  const cuv = String(result?.cuv ?? '').trim()
+  const success = result?.success === true && Boolean(cuv)
+  return {
+    evolutionId: sobre.evolutionId ?? null,
+    patientId: sobre.patientId ?? null,
+    success,
+    cuv: success ? cuv : null,
+    retryable: result?.retryable === true,
+    errors: success ? [] : errors,
+  }
+}
+
+function itemDesdeFallo(sobre, error) {
+  return {
+    evolutionId: sobre.evolutionId ?? null,
+    patientId: sobre.patientId ?? null,
+    success: false,
+    cuv: null,
+    retryable: true,
+    errors: [
+      {
+        code: error?.code || 'MUV_INFRASTRUCTURE',
+        message: error instanceof Error ? error.message : 'No se pudo contactar el MUV.',
+        path: '',
+      },
+    ],
+  }
+}
+
+function vigilarLote(tracker, batchId, enviar) {
+  return async (sobre, context, deps) => {
+    try {
+      const result = await enviar(sobre, context, deps)
+      const item = itemDesdeResultado(sobre, result)
+      tracker.anotar(batchId, item)
+      return result
+    } catch (error) {
+      const item = itemDesdeFallo(sobre, error)
+      tracker.anotar(batchId, item)
+      return { success: false, cuv: null, errors: item.errors, retryable: true }
+    }
+  }
 }
 
 function esInfraestructura(error) {
@@ -155,6 +206,9 @@ export async function sendBatchRips(req, res, deps = {}) {
 
     const batchId = randomUUID()
     const context = { user: session.user, modo: 'batch', batchId }
+    const tracker = deps.tracker ?? ripsBatchTracker
+    const enviar = deps.transmitir ?? transmitirRips
+    tracker.abrir(batchId, parsed.sobres, titularDelPrestador(session.user))
     console.info('[rips/send-batch] lote aceptado', {
       batchId,
       count: parsed.sobres.length,
@@ -177,11 +231,39 @@ export async function sendBatchRips(req, res, deps = {}) {
           })
         })
       })
-    encolar(() => lote(parsed.sobres, context, deps))
+    encolar(() =>
+      lote(parsed.sobres, context, { ...deps, transmitir: vigilarLote(tracker, batchId, enviar) })
+        .catch((error) => {
+          tracker.cerrar(batchId, error instanceof Error ? error.message : 'No se pudo procesar el lote.')
+          throw error
+        })
+        .finally(() => tracker.cerrar(batchId)),
+    )
     return undefined
   } catch (error) {
     console.error('[rips/send-batch]', error instanceof Error ? error.message : error)
     if (res.headersSent) return undefined
     return res.status(500).json({ success: false, error: 'No se pudo aceptar el lote RIPS.' })
+  }
+}
+
+/**
+ * GET /api/rips/send-batch/:batchId
+ * Resultado por atención cuando el lote diario termina.
+ */
+export async function getBatchRips(req, res, deps = {}) {
+  const resolveSession = deps.resolveSession ?? resolveSubscriptionSession
+  try {
+    const session = await resolveSession(bearerToken(req), sessionHintFromRequest(req))
+    if (!session?.user) {
+      return res.status(401).json({ success: false, error: 'Sesión inválida o expirada.' })
+    }
+    const tracker = deps.tracker ?? ripsBatchTracker
+    const batch = tracker.obtener(req.params.batchId, titularDelPrestador(session.user))
+    if (!batch) return res.status(404).json({ success: false, error: 'Lote RIPS no encontrado.' })
+    return res.status(200).json({ success: true, ...batch })
+  } catch (error) {
+    console.error('[rips/send-batch] consulta', error instanceof Error ? error.message : error)
+    return res.status(500).json({ success: false, error: 'No se pudo consultar el lote RIPS.' })
   }
 }

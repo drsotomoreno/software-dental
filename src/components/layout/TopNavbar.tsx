@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '@/contexts/AuthContext'
+import { RipsStatusWidget } from '@/components/RipsStatusWidget'
 
 import { APP_INITIALS, APP_SHORT_NAME } from '@/constants/branding'
 
@@ -224,7 +225,9 @@ export function TopNavbar() {
             </nav>
           </div>
 
-          <div className="relative shrink-0 self-start pl-1" ref={menuRef}>
+          <div className="flex shrink-0 items-start gap-1.5 sm:gap-2">
+            <RipsStatusWidget />
+          <div className="relative shrink-0 self-start" ref={menuRef}>
             <button
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
@@ -318,6 +321,7 @@ export function TopNavbar() {
                 </button>
               </div>
             )}
+          </div>
           </div>
         </div>
       </div>

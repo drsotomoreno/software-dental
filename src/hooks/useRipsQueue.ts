@@ -7,6 +7,8 @@ import {
   type CloseEvolutionResult,
   type RipsEvolutionCloseData,
 } from '@/db/ripsQueueStore'
+import { processDailyRipsBatch } from '@/services/ripsSyncEngine'
+import { resumenRips } from '@/services/ripsSyncPlan'
 import type { RipsQueueEntry } from '@/types/ripsQueue'
 
 export type { CloseEvolutionResult, RipsEvolutionCloseData } from '@/db/ripsQueueStore'
@@ -52,9 +54,14 @@ export function useRipsQueue(patientId?: string) {
     setLastResult(null)
   }, [])
 
+  const summary = useMemo(() => resumenRips(entries ?? []), [entries])
+  const sendDailyBatch = useCallback(() => processDailyRipsBatch({ reason: 'manual' }), [])
+
   return {
     entries: entries ?? [],
     loading: entries === undefined,
+    summary,
+    sendDailyBatch,
     closeEvolution,
     lastResult,
     highlightFields,

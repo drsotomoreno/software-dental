@@ -309,6 +309,23 @@ export async function listRipsBatchQueue(): Promise<RipsQueueEntry[]> {
   return rows.filter(isRipsBatchCandidate)
 }
 
+/**
+ * Devuelve un RIPS reclamado para el lote si el envío no llegó a confirmarse.
+ * Un CUV ya guardado no se toca.
+ */
+export async function restoreRipsAfterFailedSync(
+  evolutionId: string,
+  status: 'QUEUED' | 'ERROR_RETRY',
+  errors?: RipsQueueError[],
+): Promise<RipsQueueEntry> {
+  if (status === 'QUEUED') {
+    return transition(evolutionId, RIPS_QUEUE_STATUS.QUEUED, { errors: undefined })
+  }
+  return transition(evolutionId, RIPS_QUEUE_STATUS.ERROR_RETRY, {
+    errors: (errors ?? []).map((item) => ({ code: item.code, message: item.message })),
+  })
+}
+
 async function transition(
   evolutionId: string,
   status: RipsQueueStatus,

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { MuvInfrastructureError } from '../services/sisproMuvService.js'
-import { sendBatchRips, sendSingleRips } from './ripsTransmission.controller.js'
+import { createRipsBatchTracker } from '../services/ripsBatchTracker.js'
+import { getBatchRips, sendBatchRips, sendSingleRips } from './ripsTransmission.controller.js'
 import router from '../routes/rips.routes.js'
 
 function respuesta() {
@@ -149,8 +150,56 @@ test('send-batch rechaza un lote vacío, un ítem inválido y más de 200', asyn
   }
 })
 
+test('el lote aceptado se puede consultar con el CUV y el rechazo de cada atención', async () => {
+  const res = respuesta()
+  const tracker = createRipsBatchTracker()
+  let trabajo = null
+  await sendBatchRips(
+    {
+      headers: { authorization: 'Bearer sesion-app' },
+      body: [
+        { usuarios: [], numFactura: null, evolutionId: 'evo-ok', patientId: 'pac-1' },
+        { usuarios: [], numFactura: null, evolutionId: 'evo-mal', patientId: 'pac-2' },
+      ],
+    },
+    res,
+    {
+      resolveSession: sesion,
+      tracker,
+      encolar: (tarea) => {
+        trabajo = tarea()
+      },
+      transmitir: async (sobre) => {
+        if (sobre.evolutionId === 'evo-mal') {
+          return { success: false, cuv: null, errors: [{ code: 'RVC012', message: 'CIE-10 inválido', path: 'usuarios[0]' }] }
+        }
+        return { success: true, cuv: 'CUV-OK', errors: [] }
+      },
+    },
+  )
+  await trabajo
+  const consulta = respuesta()
+  await getBatchRips({ headers: { authorization: 'Bearer sesion-app' }, params: { batchId: res.body.batchId } }, consulta, {
+    resolveSession: sesion,
+    tracker,
+  })
+  assert.equal(consulta.statusCode, 200)
+  assert.equal(consulta.body.status, 'done')
+  assert.equal(consulta.body.items.find((item) => item.evolutionId === 'evo-ok').cuv, 'CUV-OK')
+  assert.equal(consulta.body.items.find((item) => item.evolutionId === 'evo-mal').errors[0].code, 'RVC012')
+
+  const ajeno = respuesta()
+  await getBatchRips(
+    { headers: { authorization: 'Bearer otra' }, params: { batchId: res.body.batchId } },
+    ajeno,
+    { resolveSession: async () => ({ user: { id: 'user-2' } }), tracker },
+  )
+  assert.equal(ajeno.statusCode, 404)
+})
+
 test('las rutas de radicación quedan montadas en /api/rips', () => {
   const rutas = router.stack.filter((layer) => layer.route).map((layer) => `${Object.keys(layer.route.methods)[0]} ${layer.route.path}`)
   assert.ok(rutas.includes('post /send-single'))
   assert.ok(rutas.includes('post /send-batch'))
+  assert.ok(rutas.includes('get /send-batch/:batchId'))
 })

@@ -249,11 +249,31 @@ export function PatientDetailPage() {
     (location.state as { resetHistoryView?: boolean } | null)?.resetHistoryView,
   )
 
+  const ripsFocus = location.state as { ripsSection?: string; evolutionId?: string } | null
+  const scrolledRipsNote = useRef<string | null>(null)
+
   useEffect(() => {
     if (!resetHistoryView || !canViewClinical) return
     setActiveSection('all')
     window.scrollTo({ top: 0, behavior: 'auto' })
   }, [resetHistoryView, canViewClinical, location.key])
+
+  useEffect(() => {
+    if (ripsFocus?.ripsSection !== 'evolucion' || !canViewClinical) return
+    setActiveSection('evolucion')
+  }, [ripsFocus?.ripsSection, ripsFocus?.evolutionId, canViewClinical, location.key])
+
+  useEffect(() => {
+    const noteId = ripsFocus?.evolutionId
+    if (activeSection !== 'evolucion' || !noteId || scrolledRipsNote.current === noteId) return
+    const timer = window.setTimeout(() => {
+      const node = document.getElementById(`evo-evolution-note-${noteId}`)
+      if (!node) return
+      scrolledRipsNote.current = noteId
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [activeSection, ripsFocus?.evolutionId, clinicalData])
 
   useEffect(() => {
     if (activeSection === 'all') {

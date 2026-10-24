@@ -10,7 +10,7 @@ import {
 } from '../services/ripsTemporalStore.js'
 import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.controller.js'
 import { getMonthlyRipsStatus, runMonthlyRipsJob } from '../controllers/monthlyRips.controller.js'
-import { sendBatchRips, sendSingleRips } from '../controllers/ripsTransmission.controller.js'
+import { getBatchRips, sendBatchRips, sendSingleRips } from '../controllers/ripsTransmission.controller.js'
 
 const router = Router()
 
@@ -31,6 +31,12 @@ router.post('/send-single', (req, res) => sendSingleRips(req, res))
  * Acepta un lote diario y lo radica en serie después de responder.
  */
 router.post('/send-batch', (req, res) => sendBatchRips(req, res))
+
+/**
+ * GET /api/rips/send-batch/:batchId
+ * CUV o errores de cada atención del lote aceptado.
+ */
+router.get('/send-batch/:batchId', (req, res) => getBatchRips(req, res))
 
 /**
  * GET /api/rips/mensual/estado
