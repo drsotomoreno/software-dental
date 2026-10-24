@@ -172,6 +172,7 @@ export function treatmentPlanHasContent(plan) {
 
 const ANNEX_EMPTY = new Set([
   '',
+  '0',
   'no_evaluado',
   'sano',
   'presente',
@@ -181,18 +182,31 @@ const ANNEX_EMPTY = new Set([
   'valor_cero',
 ])
 
+/** Textos que trae la plantilla periodontal nueva. No son hallazgos del paciente. */
+const ANNEX_TEMPLATE_TEXT = new Set([
+  'instruccion de higiene oral, control de placa, rar',
+  'instrucción de higiene oral, control de placa, rar',
+  'cirugia periodontal / regenerativa',
+  'cirugía periodontal / regenerativa',
+  'soporte periodontal (mantenimiento)',
+])
+
 function annexNodeHasContent(value, depth) {
   if (value == null || depth > 7) return false
   if (typeof value === 'boolean') return value === true
   if (typeof value === 'number') return value !== 0
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase()
-    return normalized.length > 0 && !ANNEX_EMPTY.has(normalized)
+    return (
+      normalized.length > 0 &&
+      !ANNEX_EMPTY.has(normalized) &&
+      !ANNEX_TEMPLATE_TEXT.has(normalized)
+    )
   }
   if (Array.isArray(value)) return value.some((item) => annexNodeHasContent(item, depth + 1))
   if (typeof value === 'object') {
     return Object.entries(value).some(([key, child]) => {
-      if (key === 'id' || key === 'color') return false
+      if (key === 'id' || key === 'color' || key === 'number') return false
       return annexNodeHasContent(child, depth + 1)
     })
   }
@@ -290,6 +304,40 @@ export function shouldPersistClinicalDraft(existing, incoming) {
  * Una historia firmada o con contenido gana siempre sobre una copia en blanco,
  * aunque la copia en blanco tenga `updatedAt` posterior.
  */
+function clinicalFormsOf(record) {
+  const data = unwrapClinicalPayload(record)
+  return [data, data.clinicalDraft, data.valuationDraft].filter(
+    (form) => form && typeof form === 'object',
+  )
+}
+
+function anyClinicalForm(record, predicate) {
+  return clinicalFormsOf(record).some((form) => predicate(form))
+}
+
+const CLINICAL_SECTION_CHECKS = [
+  (form) => anamnesisHasContent(form.anamnesis),
+  (form) => stomatologicalExamHasContent(form.stomatologicalExam),
+  (form) => Array.isArray(form.diagnoses) && form.diagnoses.length > 0,
+  (form) => treatmentPlanHasContent(form.treatmentPlan),
+  (form) => evolutionNotesHaveContent(form.evolutionNotes),
+  (form) => text(form.findings) || text(form.diagnosisNotes) || text(form.treatmentPlanNotes),
+]
+
+/** Una copia más nueva no puede dejar atrás secciones que la guardada sí tiene. */
+function dropsClinicalSections(prev, next) {
+  return CLINICAL_SECTION_CHECKS.some(
+    (hasSection) => anyClinicalForm(prev, hasSection) && !anyClinicalForm(next, hasSection),
+  )
+}
+
+/** La copia entrante trae anamnesis, examen, diagnóstico, plan o evolución que faltaba. */
+function gainsClinicalSections(prev, next) {
+  return CLINICAL_SECTION_CHECKS.some(
+    (hasSection) => !anyClinicalForm(prev, hasSection) && anyClinicalForm(next, hasSection),
+  )
+}
+
 export function shouldReplaceClinicalDocument(prev, next) {
   if (!prev) return true
   if (!next) return false
@@ -303,6 +351,8 @@ export function shouldReplaceClinicalDocument(prev, next) {
 
   if (prevBody && !nextBody) return false
   if (!prevBody && nextBody) return true
+  if (dropsClinicalSections(prev, next)) return false
+  if (gainsClinicalSections(prev, next)) return true
 
   if (prevSigned && !nextSigned) return false
   if (!prevSigned && nextSigned) return true

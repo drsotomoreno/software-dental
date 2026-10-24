@@ -4,6 +4,7 @@ import {
   isEvolutionNoteImmutable,
 } from '@/types/evolutionNote'
 import { formatDate } from '@/utils'
+import { PenLine } from 'lucide-react'
 import { VoiceDictationButton } from '@/components/voice'
 import { DigitalSignatureCanvas } from '@/components/signature'
 import { useAuth } from '@/contexts/AuthContext'
@@ -205,15 +206,6 @@ export function EvolutionNoteCard({
             </span>
           )}
           {showRipsCollection && <EvolutionRipsEstadoBadge note={note} />}
-          {!clinicalLocked && !isAddendum && (
-            <button
-              type="button"
-              onClick={onSign}
-              className="text-xs font-medium text-dental-700 hover:text-dental-900"
-            >
-              Firmar y grabar
-            </button>
-          )}
           {!clinicalLocked && !immutable && (
             <button
               type="button"
@@ -485,6 +477,16 @@ export function EvolutionNoteCard({
               disabled={clinicalLocked}
               onChange={onChange}
             />
+            {!clinicalLocked && (
+              <button
+                type="button"
+                onClick={onSign}
+                className="btn-primary w-full px-6 py-4 text-base font-semibold shadow-sm"
+              >
+                <PenLine className="mr-2 h-5 w-5" aria-hidden />
+                Firmar y grabar
+              </button>
+            )}
           </>
         )}
       </div>
