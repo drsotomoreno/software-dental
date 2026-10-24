@@ -202,6 +202,27 @@ test('una nota bloqueada acepta solo el parche de metadata RIPS', () => {
   assert.equal(vinculado.ripsMetadata.idReciboAsociado, 'recibo-9')
 })
 
+test('cerrar la evolución es un sidecar y no entra al hash clínico', () => {
+  const note = notaFirmada()
+  const blocked = () => {
+    throw new Error('inmutables')
+  }
+  const closed = applyEvolutionNotePatch(
+    note,
+    { workflowStatus: 'CLOSED' },
+    { immutable: true, rejectClinicalEdit: blocked },
+  )
+  assert.equal(closed.workflowStatus, 'CLOSED')
+  assert.equal(closed.clinicalNote, note.clinicalNote)
+  assert.equal(closed.contentHash, note.contentHash)
+  const hashed = omitEvolutionNoteRipsMetadata({ ...closed, ripsMetadata: closed.ripsMetadata })
+  assert.equal(hashed.workflowStatus, undefined)
+  assert.equal(
+    serializeForHash(buildEvolutionNoteHashPayload(note)),
+    serializeForHash(buildEvolutionNoteHashPayload(closed)),
+  )
+})
+
 test('la migración de notas existentes solo completa la metadata ausente', () => {
   const custom = createDefaultEvolutionNoteRipsMetadata({
     codDiagnosticoPrincipal: 'K021',

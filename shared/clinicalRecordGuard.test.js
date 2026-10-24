@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   isBlankClinicalShell,
+  mergeSignedEvolutionNotes,
+  preserveEvolutionWorkflowStatus,
   shouldPersistClinicalDraft,
   shouldReplaceClinicalDocument,
 } from './clinicalRecordGuard.js'
@@ -208,4 +210,36 @@ test('un formulario más nuevo no borra la evolución que ya estaba guardada', (
   }
   assert.equal(shouldReplaceClinicalDocument(withVisit, newerShell), false)
   assert.equal(shouldReplaceClinicalDocument(newerShell, withVisit), true)
+})
+
+test('un autoguardado no reabre una evolución ya cerrada para RIPS', () => {
+  const saved = [
+    {
+      id: 'evo-1',
+      procedure: 'Resina',
+      clinicalNote: 'Se realizó obturación.',
+      workflowStatus: 'CLOSED',
+      isLocked: true,
+      signedAt,
+      contentHash: 'hash-evo',
+    },
+  ]
+  const autosave = [
+    {
+      id: 'evo-1',
+      procedure: 'Resina',
+      clinicalNote: 'Se realizó obturación.',
+      isLocked: true,
+      signedAt,
+      contentHash: 'hash-evo',
+    },
+  ]
+  const merged = mergeSignedEvolutionNotes(saved, autosave)
+  assert.equal(merged[0].workflowStatus, 'CLOSED')
+  assert.equal(merged[0].clinicalNote, 'Se realizó obturación.')
+  const preserved = preserveEvolutionWorkflowStatus(saved, [
+    { id: 'evo-1', procedure: 'Resina', clinicalNote: 'Nota en borrador' },
+  ])
+  assert.equal(preserved[0].workflowStatus, 'CLOSED')
+  assert.equal(preserved[0].clinicalNote, 'Nota en borrador')
 })

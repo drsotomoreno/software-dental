@@ -33,13 +33,17 @@ import {
   withClinicalSyncSuppressed,
 } from '@/services/clinicalSyncState'
 import { dentalServiceSpecialtyId, normalizeOrganizationId } from '@/utils/organizationId'
-import { shouldReplaceClinicalDocument } from '../../shared/clinicalRecordGuard.js'
+import {
+  preserveEvolutionWorkflowStatus,
+  shouldReplaceClinicalDocument,
+} from '../../shared/clinicalRecordGuard.js'
 import type { RehusSpecialtyId } from '@/constants/rehusSpecialties'
 import type { ElectronicInvoice } from '@/types/invoice'
 import type { ElectronicCreditNote } from '@/types/creditNote'
 import type { ClinicBillingSettingsRecord } from '@/types/billingModality'
 import type { RdaCryptographicConsent, RdaExternalHistory } from '@/types/rdaExternalHistory'
 import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
+import type { RipsQueueEntry } from '@/types/ripsQueue'
 import type { ConsecutivoPrestador, ReciboCaja } from '@/types/atencionPago'
 import {
   backfillDraftEvolutionNotes,
@@ -83,6 +87,8 @@ export class DentalDatabase extends Dexie {
   rdaConsents!: EntityTable<RdaCryptographicConsent, 'id'>
   rdaExternalHistories!: EntityTable<RdaExternalHistory, 'id'>
   ripsTemporales!: EntityTable<TemporaryRipsRecord, 'id'>
+  /** Outbox RIPS (Res. 2275): un sobre por evolución, con CUV o error MUV. */
+  rips_queue!: EntityTable<RipsQueueEntry, 'id'>
   consecutivosPrestador!: EntityTable<ConsecutivoPrestador, 'id'>
   recibosCaja!: EntityTable<ReciboCaja, 'id'>
 
@@ -762,6 +768,11 @@ export class DentalDatabase extends Dexie {
         })
       }
     })
+
+    // v31 — cola local RIPS (outbox). No migra filas: la tabla nace vacía.
+    this.version(31).stores({
+      rips_queue: '++id, &evolutionId, patientId, type, status, [status+type], updatedAt',
+    })
   }
 }
 
@@ -897,7 +908,14 @@ db.clinicalRecords.hook('creating', (_primKey, obj) => {
 
 db.clinicalRecords.hook('updating', (mods, _primKey, obj) => {
   const previous = obj as ClinicalRecord
-  const next = { ...previous, ...(mods as Partial<ClinicalRecord>) }
+  const patch = mods as Partial<ClinicalRecord>
+  if (Array.isArray(patch.evolutionNotes)) {
+    patch.evolutionNotes = preserveEvolutionWorkflowStatus(
+      previous.evolutionNotes,
+      patch.evolutionNotes,
+    ) as ClinicalRecord['evolutionNotes']
+  }
+  const next = { ...previous, ...patch }
   if (!backupRestoreUnlock && !shouldReplaceClinicalDocument(previous, next)) {
     throw new Error(
       'La historia clínica firmada es un documento legal y no puede reemplazarse por una versión vacía o sin firma.',

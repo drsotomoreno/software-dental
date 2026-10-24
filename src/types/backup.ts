@@ -49,6 +49,8 @@ export interface BackupDataTables {
   rdaConsents?: unknown[]
   rdaExternalHistories?: unknown[]
   ripsTemporales?: unknown[]
+  /** Cola local RIPS (CUV, errores MUV y sobres pendientes). */
+  rips_queue?: unknown[]
 }
 
 export interface BackupPayload {

@@ -101,6 +101,19 @@ export interface EvolutionNote {
    * firma de la nota (Res. 1995/1999).
    */
   ripsMetadata?: EvolutionNoteRipsMetadata
+  /**
+   * Cierre operativo del folio para encolar RIPS. Fuera del hash clínico:
+   * no reescribe el cuerpo firmado (Res. 1995/1999).
+   */
+  workflowStatus?: EvolutionWorkflowStatus
+}
+
+export type EvolutionWorkflowStatus = 'DRAFT' | 'CLOSED'
+
+export function evolutionWorkflowStatus(
+  note: Pick<EvolutionNote, 'workflowStatus'> | null | undefined,
+): EvolutionWorkflowStatus {
+  return note?.workflowStatus === 'CLOSED' ? 'CLOSED' : 'DRAFT'
 }
 
 /** Folio / sesión clínica — unidad de bloqueo de la HCE (Res. 1995/1999). */
@@ -142,8 +155,12 @@ export function retainSignedEvolutionBody(
   incoming: EvolutionNote,
 ): EvolutionNote {
   if (!isEvolutionNoteImmutable(signed)) return incoming
-  if (incoming.ripsMetadata === undefined) return signed
-  return { ...signed, ripsMetadata: incoming.ripsMetadata }
+  const ripsMetadata = incoming.ripsMetadata !== undefined ? incoming.ripsMetadata : signed.ripsMetadata
+  const workflowStatus = incoming.workflowStatus ?? signed.workflowStatus
+  if (ripsMetadata === signed.ripsMetadata && workflowStatus === signed.workflowStatus) {
+    return signed
+  }
+  return { ...signed, ripsMetadata, workflowStatus }
 }
 
 export function createEmptyEvolutionNote(
@@ -173,6 +190,7 @@ export function createEmptyEvolutionNote(
     estadoRips: 'SIN_COSTO',
     cost: 0,
     isBillable: false,
+    workflowStatus: 'DRAFT',
     ripsMetadata: createDefaultEvolutionNoteRipsMetadata(),
   }
 }

@@ -50,12 +50,32 @@ export function mergeSignedEvolutionNotes(baseNotes, incomingNotes) {
       merged.set(note.id, note)
       continue
     }
-    merged.set(
-      note.id,
-      note.ripsMetadata !== undefined ? { ...previous, ripsMetadata: note.ripsMetadata } : previous,
-    )
+    const kept = { ...previous }
+    if (note.ripsMetadata !== undefined) kept.ripsMetadata = note.ripsMetadata
+    if (note.workflowStatus !== undefined) kept.workflowStatus = note.workflowStatus
+    merged.set(note.id, kept)
   }
-  return [...merged.values()]
+  return preserveEvolutionWorkflowStatus(baseNotes, [...merged.values()])
+}
+
+/**
+ * Una evolución ya cerrada para RIPS no vuelve a borrador porque un
+ * autoguardado traiga la nota sin `workflowStatus`.
+ * @param {unknown} existing
+ * @param {unknown} incoming
+ */
+export function preserveEvolutionWorkflowStatus(existing, incoming) {
+  if (!Array.isArray(incoming)) return incoming
+  const closed = new Set(
+    (Array.isArray(existing) ? existing : [])
+      .filter((note) => note && note.workflowStatus === 'CLOSED' && note.id)
+      .map((note) => note.id),
+  )
+  if (closed.size === 0) return incoming
+  return incoming.map((note) => {
+    if (!note || !closed.has(note.id) || note.workflowStatus === 'CLOSED') return note
+    return { ...note, workflowStatus: 'CLOSED' }
+  })
 }
 
 export function evolutionNotesHaveContent(notes) {

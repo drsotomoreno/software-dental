@@ -10,7 +10,10 @@ import type { OdontogramData } from '@/types/odontogram'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import { normalizeAnamnesis } from '@/types/anamnesis'
 import { normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
-import { shouldPersistClinicalDraft } from '../../shared/clinicalRecordGuard.js'
+import {
+  preserveEvolutionWorkflowStatus,
+  shouldPersistClinicalDraft,
+} from '../../shared/clinicalRecordGuard.js'
 import { sortEvolutionNotesChronologically } from './recordIntegrity'
 import { toPatientForeignKey } from './patientId'
 
@@ -21,10 +24,11 @@ function preserveImmutableEvolutionNotes(
   const signedSnapshots = new Map(
     (existing ?? []).filter(isEvolutionNoteImmutable).map((note) => [note.id, note]),
   )
-  return incoming.map((note) => {
+  const merged = incoming.map((note) => {
     const signed = signedSnapshots.get(note.id)
     return signed ? retainSignedEvolutionBody(signed, note) : note
   })
+  return preserveEvolutionWorkflowStatus(existing, merged) as EvolutionNote[]
 }
 
 function normalizeClinicalDraft(draft: ClinicalRecordFormData): ClinicalRecordFormData {

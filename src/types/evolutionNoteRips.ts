@@ -238,6 +238,7 @@ export function isRipsMetadataOnlyPatch(patch: object): boolean {
 /** Cobro y radicación: se pueden actualizar con la nota ya firmada. */
 export const EVOLUTION_SIDECAR_KEYS = [
   'ripsMetadata',
+  'workflowStatus',
   'pagoId',
   'numeroSoportePago',
   'conceptoPago',
@@ -288,13 +289,18 @@ export function applyEvolutionNotePatch<T extends NotaConRipsMetadata>(
   return { ...note, ...patch }
 }
 
-/** Quita la metadata RIPS antes de hashear el cuerpo clínico. */
+/**
+ * Quita la metadata RIPS y el cierre operativo antes de hashear el cuerpo clínico.
+ * Un CUV o un estado CLOSED posteriores no invalidan la firma.
+ */
 export function omitEvolutionNoteRipsMetadata<T extends NotaConRipsMetadata>(
   note: T,
 ): Omit<T, 'ripsMetadata'> {
-  if (!note || typeof note !== 'object' || !('ripsMetadata' in note)) return note
+  if (!note || typeof note !== 'object') return note
+  if (!('ripsMetadata' in note) && !('workflowStatus' in note)) return note
   const clinical = { ...note }
   delete clinical.ripsMetadata
+  delete (clinical as { workflowStatus?: unknown }).workflowStatus
   return clinical
 }
 

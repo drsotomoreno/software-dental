@@ -1,6 +1,7 @@
 export function unwrapClinicalPayload(record: unknown): Record<string, unknown>
 export function evolutionNotesHaveContent(notes: unknown): boolean
 export function mergeSignedEvolutionNotes(baseNotes: unknown, incomingNotes: unknown): unknown
+export function preserveEvolutionWorkflowStatus(existing: unknown, incoming: unknown): unknown
 export function anamnesisHasContent(anamnesis: unknown): boolean
 export function stomatologicalExamHasContent(exam: unknown): boolean
 export function informedConsentHasContent(consent: unknown): boolean
