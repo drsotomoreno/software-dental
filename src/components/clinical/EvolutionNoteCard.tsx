@@ -34,6 +34,21 @@ function parcheProcedimientoCups(procedure: string): EvolutionNotePatch {
   return { procedure, cupsCode: resolved.cupsCode }
 }
 
+function FirmaRegistrada({ titulo, src }: { titulo: string; src?: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <p className="mb-2 text-xs font-medium text-slate-600">{titulo}</p>
+      {src ? (
+        <img src={src} alt={titulo} className="max-h-28 max-w-full" />
+      ) : (
+        <div className="flex h-28 items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-400">
+          Sin firma registrada
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EvolutionNoteSignature({
   note,
   readOnly,
@@ -47,36 +62,53 @@ function EvolutionNoteSignature({
 }) {
   if (readOnly) {
     return (
-      <div className="rounded-lg border border-slate-200 bg-white p-3">
-        <p className="mb-2 text-xs font-medium text-slate-600">Firma del profesional</p>
-        {note.professionalSignatureDataUrl ? (
-          <img
-            src={note.professionalSignatureDataUrl}
-            alt="Firma del profesional"
-            className="max-h-28 max-w-full"
-          />
-        ) : (
-          <div className="flex h-28 items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-400">
-            Sin firma registrada
-          </div>
-        )}
+      <div className="grid gap-4 md:grid-cols-2">
+        <FirmaRegistrada titulo="Firma del paciente" src={note.patientSignatureDataUrl} />
+        <FirmaRegistrada titulo="Firma del odontólogo" src={note.professionalSignatureDataUrl} />
       </div>
     )
   }
 
   return (
-    <div className="w-full [&_canvas]:!h-40 [&_canvas]:max-w-full [&_canvas]:!w-full">
-      <DigitalSignatureCanvas
-        onSignatureChange={(result) =>
-          onChange({
-            professionalSignatureDataUrl: result?.dataUrl,
-            professionalSignatureMeta: result?.metadata,
-          })
-        }
-        disabled={disabled}
-        width={640}
-        height={160}
-      />
+    <div className="space-y-2">
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="min-w-0 [&_canvas]:!h-36 [&_canvas]:max-w-full [&_canvas]:!w-full">
+          <DigitalSignatureCanvas
+            title="Firma del paciente"
+            ariaLabel="Área de firma del paciente"
+            showDetails={false}
+            onSignatureChange={(result) =>
+              onChange({
+                patientSignatureDataUrl: result?.dataUrl,
+                patientSignatureMeta: result?.metadata,
+              })
+            }
+            disabled={disabled}
+            width={480}
+            height={144}
+          />
+        </div>
+        <div className="min-w-0 [&_canvas]:!h-36 [&_canvas]:max-w-full [&_canvas]:!w-full">
+          <DigitalSignatureCanvas
+            title="Firma del odontólogo"
+            ariaLabel="Área de firma del odontólogo"
+            showDetails={false}
+            onSignatureChange={(result) =>
+              onChange({
+                professionalSignatureDataUrl: result?.dataUrl,
+                professionalSignatureMeta: result?.metadata,
+              })
+            }
+            disabled={disabled}
+            width={480}
+            height={144}
+          />
+        </div>
+      </div>
+      <p className="text-xs text-slate-500">
+        El paciente y el odontólogo firman en la nota. Después de grabarla, las dos firmas quedan
+        fijas con el contenido clínico.
+      </p>
     </div>
   )
 }
@@ -313,8 +345,8 @@ export function EvolutionNoteCard({
                 {showClinicalNoteForm && (
                   <div className="rounded-lg border border-violet-100 bg-white/80 p-3 text-xs text-violet-900">
                     {ripsMode === 'mixed'
-                      ? 'Algunos procedimientos no requieren CUPS para RIPS. Firme digitalmente antes de grabar la nota.'
-                      : 'Este servicio no requiere código CUPS para RIPS. Firme digitalmente; no se generarán advertencias de radicación.'}
+                      ? 'Algunos procedimientos no requieren CUPS para RIPS. Deben firmar el paciente y el odontólogo antes de grabar la nota.'
+                      : 'Este servicio no requiere código CUPS para RIPS. Deben firmar el paciente y el odontólogo; no se generarán advertencias de radicación.'}
                   </div>
                 )}
 

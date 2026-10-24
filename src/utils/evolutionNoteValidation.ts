@@ -8,6 +8,30 @@ export interface EvolutionNoteValidationIssue {
   message: string
 }
 
+function validarFirma(
+  noteId: string,
+  dataUrl: string | undefined,
+  strokeCount: number | undefined,
+  field: string,
+  quien: string,
+): EvolutionNoteValidationIssue | null {
+  if (!dataUrl) {
+    return {
+      noteId,
+      field,
+      message: `La firma del ${quien} es obligatoria.`,
+    }
+  }
+  if ((strokeCount ?? 0) < MIN_SIGNATURE_STROKES) {
+    return {
+      noteId,
+      field,
+      message: `La firma del ${quien} no es válida.`,
+    }
+  }
+  return null
+}
+
 /** Servicios sin CUPS RIPS no generan advertencias ni bloqueos de radicación. */
 export function isEvolutionNoteExemptFromRips(
   note: Pick<EvolutionNote, 'requiereCupsRips'>,
@@ -73,21 +97,22 @@ export function validateEvolutionNote(note: EvolutionNote): EvolutionNoteValidat
     })
   }
 
-  if (!note.professionalSignatureDataUrl) {
-    issues.push({
-      noteId: note.id,
-      field: 'professionalSignatureDataUrl',
-      message: 'La firma digital del profesional es obligatoria.',
-    })
-  } else if (
-    (note.professionalSignatureMeta?.strokeCount ?? 0) < MIN_SIGNATURE_STROKES
-  ) {
-    issues.push({
-      noteId: note.id,
-      field: 'professionalSignatureDataUrl',
-      message: 'La firma digital del profesional no es válida.',
-    })
-  }
+  const firmaPaciente = validarFirma(
+    note.id,
+    note.patientSignatureDataUrl,
+    note.patientSignatureMeta?.strokeCount,
+    'patientSignatureDataUrl',
+    'paciente',
+  )
+  const firmaOdontologo = validarFirma(
+    note.id,
+    note.professionalSignatureDataUrl,
+    note.professionalSignatureMeta?.strokeCount,
+    'professionalSignatureDataUrl',
+    'odontólogo',
+  )
+  if (firmaPaciente) issues.push(firmaPaciente)
+  if (firmaOdontologo) issues.push(firmaOdontologo)
 
   if (ripsMode === 'non_rips') {
     return issues

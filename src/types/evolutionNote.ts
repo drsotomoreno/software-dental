@@ -68,6 +68,9 @@ export interface EvolutionNote {
   cupsCode?: string | null
   professionalSignatureDataUrl?: string
   professionalSignatureMeta?: SignatureCaptureMetadata
+  /** Firma del paciente en la misma nota de evolución. Entra al hash clínico. */
+  patientSignatureDataUrl?: string
+  patientSignatureMeta?: SignatureCaptureMetadata
   /**
    * Costo de la atención. Si es 0 y `isBillable` es false, genera RIPS (con CUPS) pero no FEV DIAN.
    */

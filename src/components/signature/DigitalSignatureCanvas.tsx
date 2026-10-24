@@ -7,6 +7,10 @@ interface DigitalSignatureCanvasProps {
   disabled?: boolean
   width?: number
   height?: number
+  title?: string
+  ariaLabel?: string
+  /** Ley 527 y el texto de auditoría. En un par de firmas se muestra una sola vez afuera. */
+  showDetails?: boolean
 }
 
 interface Point {
@@ -19,6 +23,9 @@ export function DigitalSignatureCanvas({
   disabled = false,
   width = 500,
   height = 180,
+  title = 'Firma digital biométrica',
+  ariaLabel = 'Área de firma digital biométrica',
+  showDetails = true,
 }: DigitalSignatureCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const isDrawing = useRef(false)
@@ -165,8 +172,10 @@ export function DigitalSignatureCanvas({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <label className="label-field mb-0">
-          Firma digital biométrica <span className="text-red-500">*</span>
-          <span className="ml-2 text-xs font-normal text-slate-500">(Ley 527 — no imágenes escaneadas)</span>
+          {title} <span className="text-red-500">*</span>
+          {showDetails && (
+            <span className="ml-2 text-xs font-normal text-slate-500">(Ley 527 — no imágenes escaneadas)</span>
+          )}
         </label>
         <button
           type="button"
@@ -198,7 +207,7 @@ export function DigitalSignatureCanvas({
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
           onContextMenu={(e) => e.preventDefault()}
-          aria-label="Área de firma digital biométrica"
+          aria-label={ariaLabel}
         />
         {isEmpty && !disabled && (
           <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-400">
@@ -209,10 +218,12 @@ export function DigitalSignatureCanvas({
 
       {strokeWarning && <p className="text-xs text-red-600">{strokeWarning}</p>}
 
-      <p className="text-xs text-slate-500">
-        La firma queda vinculada a su usuario autenticado, hash del documento, IP/dispositivo y
-        timestamp para auditoría.
-      </p>
+      {showDetails && (
+        <p className="text-xs text-slate-500">
+          La firma queda vinculada a su usuario autenticado, hash del documento, IP/dispositivo y
+          timestamp para auditoría.
+        </p>
+      )}
     </div>
   )
 }

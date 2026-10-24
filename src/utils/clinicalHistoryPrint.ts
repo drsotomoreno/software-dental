@@ -810,16 +810,18 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
             ? `${escapeHtml(note.serviceName)}${isNonRips ? ' (sin RIPS)' : ''}`
             : procedureFallback
 
-      const firma = note.professionalSignatureDataUrl
-        ? `<img src="${note.professionalSignatureDataUrl}" alt="Firma del profesional" style="max-height:64px;max-width:160px" />`
-        : '<div style="height:48px;border-bottom:1px solid #94a3b8"></div>'
+      const firmaDe = (src: string | undefined, alt: string) =>
+        src
+          ? `<img src="${src}" alt="${alt}" style="max-height:64px;max-width:140px" />`
+          : '<div style="height:48px;border-bottom:1px solid #94a3b8"></div>'
 
       return `<tr>
           <td>${formatDate(note.date || note.createdAt)}</td>
           <td>${serviceLabel}</td>
           <td>${noteOrRx}</td>
           <td>${escapeHtml(note.professionalName)}</td>
-          <td>${firma}</td>
+          <td>${firmaDe(note.patientSignatureDataUrl, 'Firma del paciente')}</td>
+          <td>${firmaDe(note.professionalSignatureDataUrl, 'Firma del odontólogo')}</td>
         </tr>`
     })
     .join('')
@@ -830,7 +832,7 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
       ${
         rows
           ? `<table>
-        <thead><tr><th>Fecha</th><th>Procedimiento</th><th>Nota de evolución / Prescripciones</th><th>Profesional</th><th>Firma</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Procedimiento</th><th>Nota de evolución / Prescripciones</th><th>Profesional</th><th>Firma del paciente</th><th>Firma del odontólogo</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`
           : '<p>Sin notas de evolución.</p>'
