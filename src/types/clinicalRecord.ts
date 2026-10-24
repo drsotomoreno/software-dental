@@ -350,6 +350,11 @@ export interface ClinicalRecord {
    * El bloqueo legal (Res. 1995/1999) aplica a cada `EvolutionNote` firmada.
    */
   isLocked: boolean
+  /**
+   * La fila de exportación es una nota de evolución ya preparada.
+   * El JSON sale de esa nota; no se agrega la consulta por defecto de la historia.
+   */
+  ripsAtencionNotaId?: string
   /** CUV entregado por el MUV al cerrar la atención sin factura. */
   cuv?: string | null
   /** PENDIENTE, APROBADO o RECHAZADO. */
