@@ -18,6 +18,7 @@ import {
   ANGLE_OCCLUSION_FIELD_LABELS,
   ATM_DEVIATION_MOVEMENT_OPTIONS,
   ATM_LATERALITY_OPTIONS,
+  atmDeniesAllFindings,
   CROSSBITE_TYPE_OPTIONS,
   SOFT_TISSUE_FIELD_LABELS,
   clearExamFindingCie10ByPrefix,
@@ -111,8 +112,13 @@ function ExaminableFieldRow({
   )
 }
 
-function atmOptionClass(active: boolean, disabled?: boolean): string {
+function atmOptionClass(
+  active: boolean,
+  disabled?: boolean,
+  absent = false,
+): string {
   if (disabled) return 'bg-slate-100 text-slate-400 cursor-not-allowed'
+  if (active && absent) return 'bg-green-600 text-white shadow-sm'
   if (active) return 'bg-dental-600 text-white shadow-sm'
   return 'bg-slate-100 text-slate-700 hover:bg-slate-200'
 }
@@ -138,9 +144,11 @@ function AtmLateralityField({
             type="button"
             disabled={disabled}
             onClick={() => onChange(value === option.value ? '' : option.value)}
+            aria-pressed={value === option.value}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${atmOptionClass(
               value === option.value,
               disabled,
+              option.value === 'no',
             )}`}
           >
             {option.label}
@@ -170,9 +178,11 @@ function AtmDeviationField({
             type="button"
             disabled={disabled}
             onClick={() => onChange(value === option.value ? '' : option.value)}
+            aria-pressed={value === option.value}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${atmOptionClass(
               value === option.value,
               disabled,
+              option.value === 'no',
             )}`}
           >
             {option.label}
@@ -203,14 +213,12 @@ export function StomatologicalExamForm({
 
   const updateAtm = (patch: Partial<StomatologicalExam['atm']>) => {
     const next = { ...data.atm, ...patch }
-    const hasAlteration =
-      Boolean(next.clicks) || Boolean(next.pain) || Boolean(next.deviation)
 
     onChange({
       ...data,
       atm: {
         ...next,
-        isNormal: hasAlteration ? false : next.isNormal,
+        isNormal: atmDeniesAllFindings(next),
       },
     })
   }
@@ -220,9 +228,9 @@ export function StomatologicalExamForm({
       atm: {
         ...data.atm,
         isNormal: true,
-        clicks: '',
-        pain: '',
-        deviation: '',
+        clicks: 'no',
+        pain: 'no',
+        deviation: 'no',
       },
       findingCie10: clearExamFindingCie10ByPrefix(data.findingCie10, 'atm.'),
     })
