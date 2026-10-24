@@ -159,3 +159,53 @@ test('otro hash firmado no reescribe el documento legal ya guardado', () => {
   }
   assert.equal(shouldReplaceClinicalDocument(original, rewritten), false)
 })
+
+test('la plantilla periodontal vacía no cuenta como historia clínica', () => {
+  const shell = {
+    specializedAnnexes: {
+      periodontics: {
+        teeth: [
+          {
+            number: 16,
+            clinicalStatus: 'presente',
+            mobility: 0,
+            furcation: '0',
+            sites: { mb: { pbs: null, mg: null, bop: false, plaque: false } },
+          },
+        ],
+        treatmentPlan: [
+          { procedure: 'Instrucción de higiene oral, control de placa, RAR', status: 'pendiente' },
+          { procedure: 'Cirugía periodontal / regenerativa', status: 'pendiente' },
+          { procedure: 'Soporte periodontal (mantenimiento)', status: 'pendiente' },
+        ],
+      },
+    },
+    informedConsent: { professionalLicense: '1097106893' },
+  }
+  assert.equal(isBlankClinicalShell(shell), true)
+})
+
+test('un formulario más nuevo no borra la evolución que ya estaba guardada', () => {
+  const withVisit = {
+    updatedAt: '2026-10-23T22:40:27.226Z',
+    valuationConsent: { consentimientoValoracionAceptado: true },
+    evolutionNotes: [
+      {
+        id: 'rips-visit',
+        procedure: 'Ortodoncia correctiva con aparatos fijos',
+        clinicalNote: 'Atención del 23 de octubre',
+        cupsCode: '391402',
+      },
+    ],
+    diagnoses: [{ code: 'K07.4', description: 'Maloclusión, no especificada', type: 'principal' }],
+  }
+  const newerShell = {
+    updatedAt: '2026-10-24T15:17:02.651Z',
+    valuationConsent: { consentimientoValoracionAceptado: true },
+    evolutionNotes: [],
+    diagnoses: [],
+    anamnesis: { chiefComplaint: '' },
+  }
+  assert.equal(shouldReplaceClinicalDocument(withVisit, newerShell), false)
+  assert.equal(shouldReplaceClinicalDocument(newerShell, withVisit), true)
+})
