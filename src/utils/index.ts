@@ -25,6 +25,10 @@ export {
   mergeFindingsWithOdontogram,
 } from './odontogramDiagnosis'
 export {
+  reassignDiagnosticChartCie,
+  reassignImportedDiagnosisCie,
+} from './importedCieEdit'
+export {
   suggestTreatmentFromOdontogram,
   mergeSuggestedTreatments,
 } from './odontogramTreatmentPlan'
