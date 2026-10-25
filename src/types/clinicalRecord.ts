@@ -12,6 +12,12 @@ import type { ImplantFdiQuadrant } from '@/constants/implantPlanning'
 /** Tipo de certeza diagnóstica CIE-10 */
 export type DiagnosisCertainty = 'impresion' | 'confirmado' | 'repetido'
 
+/**
+ * Alcance de un diagnóstico que no se limita a una pieza.
+ * Un maxilar o toda la dentición.
+ */
+export type DiagnosisAnatomicalScope = 'maxilar_superior' | 'maxilar_inferior' | 'denticion'
+
 /** Diagnóstico CIE-10 — codificación obligatoria RIPS */
 export interface Cie10Diagnosis {
   code: string
@@ -22,6 +28,12 @@ export interface Cie10Diagnosis {
   source?: 'odontograma' | 'manual' | 'odontograma_suplementario'
   /** Piezas dentales FDI asociadas (si proviene del odontograma) */
   affectedTeeth?: number[]
+  /**
+   * Asociación cuando el diagnóstico no es de una pieza concreta:
+   * maxilar superior, maxilar inferior o toda la dentición.
+   * Si hay piezas en affectedTeeth, esas piezas son la asociación.
+   */
+  anatomicalScope?: DiagnosisAnatomicalScope
   /**
    * CIE que el odontograma sugirió y el clínico reemplazó por este diagnóstico.
    * La reimportación no vuelve a crear esos códigos.

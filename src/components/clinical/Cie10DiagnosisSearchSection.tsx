@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import type { Cie10Diagnosis, DiagnosisCertainty } from '@/types/clinicalRecord'
-import { DIAGNOSIS_CERTAINTY_LABELS } from '@/constants/dental'
+import type { Cie10Diagnosis, DiagnosisAnatomicalScope, DiagnosisCertainty } from '@/types/clinicalRecord'
+import { DIAGNOSIS_ANATOMICAL_SCOPE_LABELS, DIAGNOSIS_CERTAINTY_LABELS } from '@/constants/dental'
 import { ENDO_FDI_TEETH } from '@/types/endoAnnex.types'
+import { parseDiagnosisAssociation } from '@/utils/diagnosisAssociation'
+import { DiagnosisAssociationOptions } from '@/components/clinical/diagnostics/DiagnosisAssociationFields'
 import {
   CLINICAL_HISTORY_SECTION_NUMBERS,
   CLINICAL_SECTION_TITLE_CLASS,
@@ -12,7 +14,12 @@ import { VoiceDictationButton, FieldVoiceHeader } from '@/components/voice'
 
 interface Cie10DiagnosisSearchSectionProps {
   diagnoses: Cie10Diagnosis[]
-  onAddDiagnosis: (code: string, description: string, affectedTeeth?: number[]) => void
+  onAddDiagnosis: (
+    code: string,
+    description: string,
+    affectedTeeth?: number[],
+    anatomicalScope?: DiagnosisAnatomicalScope,
+  ) => void
   onUpdateDiagnosis: (code: string, patch: Partial<Cie10Diagnosis>) => void
   onRemoveDiagnosis: (code: string) => void
   disabled?: boolean
@@ -29,27 +36,44 @@ export function Cie10DiagnosisSearchSection({
   enableToothSelection = false,
 }: Cie10DiagnosisSearchSectionProps) {
   const [search, setSearch] = useState('')
-  const [selectedTooth, setSelectedTooth] = useState('')
+  const [associationValue, setAssociationValue] = useState('')
+  const [associationError, setAssociationError] = useState<string | null>(null)
   const results = useCatalogSearch('cie10', search, 30)
   const cie10Meta = useCatalogMeta('cie10')
 
   const addDiagnosis = (code: string, description: string) => {
-    const toothNumber = selectedTooth ? Number(selectedTooth) : undefined
+    const association = enableToothSelection ? parseDiagnosisAssociation(associationValue) : null
+    if (enableToothSelection && !association) {
+      setAssociationError('Asocie el diagnóstico a un diente, a un maxilar o a toda la dentición.')
+      return
+    }
+
+    const toothNumber =
+      enableToothSelection && association?.kind === 'tooth' ? association.toothNumber : undefined
+    const anatomicalScope = association?.kind === 'scope' ? association.scope : undefined
     const affectedTeeth = toothNumber ? [toothNumber] : undefined
     const existing = diagnoses.find((item) => item.code === code)
 
     if (existing) {
+      if (association?.kind === 'scope') {
+        onUpdateDiagnosis(code, { anatomicalScope: association.scope, affectedTeeth: undefined })
+        setSearch('')
+        setAssociationError(null)
+        return
+      }
       if (!toothNumber) return
       const mergedTeeth = [...new Set([...(existing.affectedTeeth ?? []), toothNumber])].sort(
         (a, b) => a - b,
       )
-      onUpdateDiagnosis(code, { affectedTeeth: mergedTeeth })
+      onUpdateDiagnosis(code, { affectedTeeth: mergedTeeth, anatomicalScope: undefined })
       setSearch('')
+      setAssociationError(null)
       return
     }
 
-    onAddDiagnosis(code, description, affectedTeeth)
+    onAddDiagnosis(code, description, affectedTeeth, anatomicalScope)
     setSearch('')
+    setAssociationError(null)
   }
 
   const addToothToDiagnosis = (code: string, toothValue: string) => {
@@ -60,7 +84,7 @@ export function Cie10DiagnosisSearchSection({
     const mergedTeeth = [...new Set([...(existing.affectedTeeth ?? []), toothNumber])].sort(
       (a, b) => a - b,
     )
-    onUpdateDiagnosis(code, { affectedTeeth: mergedTeeth })
+    onUpdateDiagnosis(code, { affectedTeeth: mergedTeeth, anatomicalScope: undefined })
   }
 
   const removeToothFromDiagnosis = (code: string, toothNumber: number) => {
@@ -83,28 +107,33 @@ export function Cie10DiagnosisSearchSection({
           </span>
         )}
         .
+        {enableToothSelection &&
+          ' Cada diagnóstico se asocia a un diente, a un maxilar o a toda la dentición.'}
       </p>
 
       {!disabled && (
         <div className="mb-4 space-y-3">
           {enableToothSelection && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="rapid-cie10-tooth">
-                Pieza FDI (opcional)
+              <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="rapid-cie10-association">
+                Asociar a
               </label>
               <select
-                id="rapid-cie10-tooth"
-                value={selectedTooth}
-                onChange={(event) => setSelectedTooth(event.target.value)}
-                className="input-field text-sm"
+                id="rapid-cie10-association"
+                value={associationValue}
+                onChange={(event) => {
+                  setAssociationValue(event.target.value)
+                  setAssociationError(null)
+                }}
+                className={`input-field text-sm ${associationError ? 'border-amber-400' : ''}`}
               >
-                <option value="">Sin pieza específica</option>
-                {ENDO_FDI_TEETH.map((tooth) => (
-                  <option key={tooth} value={tooth}>
-                    Pieza {tooth}
-                  </option>
-                ))}
+                <DiagnosisAssociationOptions />
               </select>
+              {associationError && (
+                <p className="mt-1 text-xs text-amber-700" role="alert">
+                  {associationError}
+                </p>
+              )}
             </div>
           )}
           <div>
@@ -164,6 +193,37 @@ export function Cie10DiagnosisSearchSection({
             >
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono font-medium text-dental-700">{diagnosis.code}</span>
+                {enableToothSelection && !disabled && (diagnosis.affectedTeeth?.length ?? 0) === 0 && (
+                  <select
+                    value={diagnosis.anatomicalScope ?? ''}
+                    onChange={(event) => {
+                      const parsed = parseDiagnosisAssociation(event.target.value)
+                      if (!parsed) return
+                      if (parsed.kind === 'tooth') {
+                        onUpdateDiagnosis(diagnosis.code, {
+                          affectedTeeth: [parsed.toothNumber],
+                          anatomicalScope: undefined,
+                        })
+                        return
+                      }
+                      onUpdateDiagnosis(diagnosis.code, {
+                        anatomicalScope: parsed.scope,
+                        affectedTeeth: undefined,
+                      })
+                    }}
+                    className={`rounded border bg-white px-1.5 py-0.5 text-xs ${
+                      diagnosis.anatomicalScope ? 'border-slate-300' : 'border-amber-400'
+                    }`}
+                    aria-label={`Asociar ${diagnosis.code} a un diente, un maxilar o toda la dentición`}
+                  >
+                    <DiagnosisAssociationOptions placeholder="Asociar a…" />
+                  </select>
+                )}
+                {enableToothSelection && disabled && diagnosis.anatomicalScope && (
+                  <span className="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">
+                    {DIAGNOSIS_ANATOMICAL_SCOPE_LABELS[diagnosis.anatomicalScope]}
+                  </span>
+                )}
                 {enableToothSelection && (diagnosis.affectedTeeth?.length ?? 0) > 0 && (
                   <span className="flex flex-wrap items-center gap-1">
                     {(diagnosis.affectedTeeth ?? []).map((tooth) => (
@@ -188,7 +248,7 @@ export function Cie10DiagnosisSearchSection({
                 )}
                 {!disabled && (
                   <>
-                    {enableToothSelection && (
+                    {enableToothSelection && (diagnosis.affectedTeeth?.length ?? 0) > 0 && (
                       <select
                         defaultValue=""
                         onChange={(event) => {
@@ -245,6 +305,13 @@ export function Cie10DiagnosisSearchSection({
                   </>
                 )}
               </div>
+              {enableToothSelection &&
+                (diagnosis.affectedTeeth?.length ?? 0) === 0 &&
+                !diagnosis.anatomicalScope && (
+                  <p className="text-[11px] text-amber-700">
+                    Falta asociar este diagnóstico a un diente, un maxilar o toda la dentición.
+                  </p>
+                )}
               <div>
                 <FieldVoiceHeader
                   label="Descripción"

@@ -131,6 +131,10 @@ function reassignWholeDiagnosis(
       return {
         ...copyDiagnosis(diagnosis),
         affectedTeeth: mergedTeeth.length > 0 ? mergedTeeth : diagnosis.affectedTeeth,
+        anatomicalScope:
+          mergedTeeth.length > 0
+            ? undefined
+            : diagnosis.anatomicalScope ?? source.anatomicalScope,
         source: fromOdontogram(diagnosis) ? diagnosis.source : source.source ?? diagnosis.source,
         overridesOdontogramCodes: mergeOverrides(diagnosis, source, toCode),
       }
@@ -184,6 +188,7 @@ export function reassignImportedDiagnosisCie(
   const target = next.find((diagnosis) => diagnosis.code === toCode)
   if (target) {
     target.affectedTeeth = sortedUnique([...(target.affectedTeeth ?? []), tooth])
+    target.anatomicalScope = undefined
     if (!fromOdontogram(target) && fromOdontogram(source)) {
       target.source = source.source
     }
@@ -246,10 +251,19 @@ export function assignCieToTooth(
   const already =
     (existing.affectedTeeth ?? []).length === affectedTeeth.length &&
     affectedTeeth.every((tooth, index) => existing.affectedTeeth?.[index] === tooth)
-  if (already) return diagnoses
+  if (already) {
+    if (!existing.anatomicalScope) return diagnoses
+    return diagnoses.map((diagnosis) =>
+      diagnosis.code === code
+        ? { ...copyDiagnosis(diagnosis), anatomicalScope: undefined }
+        : diagnosis,
+    )
+  }
 
   return diagnoses.map((diagnosis) =>
-    diagnosis.code === code ? { ...copyDiagnosis(diagnosis), affectedTeeth } : diagnosis,
+    diagnosis.code === code
+      ? { ...copyDiagnosis(diagnosis), affectedTeeth, anatomicalScope: undefined }
+      : diagnosis,
   )
 }
 

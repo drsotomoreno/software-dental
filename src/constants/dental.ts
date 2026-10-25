@@ -1,5 +1,10 @@
 import type { ToothNumber, DeciduousToothNumber } from '@/types/odontogram'
-import type { TreatmentPhase, DiagnosisCertainty, PaymentMethod } from '@/types/clinicalRecord'
+import type {
+  TreatmentPhase,
+  DiagnosisCertainty,
+  DiagnosisAnatomicalScope,
+  PaymentMethod,
+} from '@/types/clinicalRecord'
 
 /** Cuadrantes FDI permanentes — numeración ISO 3950 */
 export const UPPER_RIGHT: ToothNumber[] = [18, 17, 16, 15, 14, 13, 12, 11]
@@ -70,6 +75,12 @@ export const DIAGNOSIS_CERTAINTY_LABELS: Record<DiagnosisCertainty, string> = {
   impresion: 'Impresión diagnóstica',
   confirmado: 'Confirmado',
   repetido: 'Repetido',
+}
+
+export const DIAGNOSIS_ANATOMICAL_SCOPE_LABELS: Record<DiagnosisAnatomicalScope, string> = {
+  maxilar_superior: 'Maxilar superior',
+  maxilar_inferior: 'Maxilar inferior',
+  denticion: 'Toda la dentición',
 }
 
 export const TREATMENT_PHASE_LABELS: Record<TreatmentPhase, string> = {

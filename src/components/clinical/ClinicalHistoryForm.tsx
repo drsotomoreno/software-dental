@@ -384,7 +384,7 @@ export function ClinicalHistoryForm({
             )
             if (diagnoses !== form.diagnoses) update({ diagnoses })
           }}
-          onAddAdditionalDiagnosis={(code, description) => {
+          onAddAdditionalDiagnosis={(code, description, anatomicalScope) => {
             if (form.diagnoses.some((diagnosis) => diagnosis.code === code)) return
             update({
               diagnoses: [
@@ -395,6 +395,7 @@ export function ClinicalHistoryForm({
                   type: form.diagnoses.length === 0 ? 'principal' : 'relacionado',
                   certainty: 'impresion',
                   source: 'manual',
+                  anatomicalScope,
                 },
               ],
             })

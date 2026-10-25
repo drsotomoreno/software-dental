@@ -2,6 +2,7 @@ import type { ClinicalHistoryExportPackage } from '@/types/portability'
 import { APP_NAME } from '@/constants/branding'
 import { formatDate } from './crypto'
 import { getEvolutionCatalogServices } from '@/utils/evolutionCatalogServices'
+import { diagnosisLocationLabel } from './diagnosisAssociation.ts'
 
 function truncateHash(hash?: string, len = 16): string {
   if (!hash) return '—'
@@ -16,7 +17,11 @@ export function buildPortabilityHtml(pkg: ClinicalHistoryExportPackage): string 
     .map((record, index) => {
       const integrity = integrityReport.find((r) => r.recordId === String(record.id ?? ''))
       const diagnoses = (record.diagnoses ?? [])
-        .map((d) => `<li><strong>${d.code}</strong> — ${d.description} (${d.type})</li>`)
+        .map((d) => {
+          const location = diagnosisLocationLabel(d)
+          const where = location ? ` · ${location}` : ''
+          return `<li><strong>${d.code}</strong> — ${d.description} (${d.type})${where}</li>`
+        })
         .join('')
 
       const notes = (record.evolutionNotes ?? [])
