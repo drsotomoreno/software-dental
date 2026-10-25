@@ -37,7 +37,6 @@ import {
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
 import { OdontogramArch } from './OdontogramArch'
-import { OdontogramSupplementaryFindingsForm } from './OdontogramSupplementaryFindings'
 
 interface OdontogramProps {
   data: OdontogramData
@@ -267,12 +266,6 @@ export function Odontogram({ data, onChange, disabled = false }: OdontogramProps
           />
         )}
       </div>
-
-      <OdontogramSupplementaryFindingsForm
-        findings={normalizedData.supplementaryFindings!}
-        disabled={disabled}
-        onChange={(supplementaryFindings) => updateData({ supplementaryFindings })}
-      />
     </div>
   )
 }
