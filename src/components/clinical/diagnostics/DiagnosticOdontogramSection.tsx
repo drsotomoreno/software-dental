@@ -327,7 +327,7 @@ export function DiagnosticOdontogramSection({
             className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            Importar diagnósticos CIE del odontograma
+            Importar Odontograma
           </button>
         )}
       </div>
