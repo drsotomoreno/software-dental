@@ -35,7 +35,7 @@ export {
 export { syncClinicalDataFromOrthodonticsAnnex } from './orthodonticsAnnexSync'
 export { syncClinicalDataFromEndodonticsAnnex } from './endodonticsAnnexSync'
 export { validateAcceptTreatment } from './patientPhase'
-export { validateClinicalRecordDraft } from './validateClinicalRecordDraft'
+export { hasRegisteredBudget, validateClinicalRecordDraft } from './validateClinicalRecordDraft'
 export {
   buildValuationConsentMetadata,
   getOrCreateDeviceId,
