@@ -201,6 +201,81 @@ export function reassignImportedDiagnosisCie(
   return settlePrincipal(next, toCode, removedPrincipal)
 }
 
+/**
+ * Asigna un CIE a una pieza. Si esa pieza ya tenía otro código, lo mueve:
+ * el diente queda en un solo diagnóstico.
+ */
+export function assignCieToTooth(
+  diagnoses: Cie10Diagnosis[],
+  params: { code: string; description: string; toothNumber: number },
+): Cie10Diagnosis[] {
+  const code = params.code.trim()
+  const description = params.description.trim()
+  const toothNumber = params.toothNumber
+  if (!code || !description || !Number.isFinite(toothNumber)) return diagnoses
+
+  const owner = diagnoses.find(
+    (diagnosis) =>
+      diagnosis.code !== code && (diagnosis.affectedTeeth ?? []).includes(toothNumber),
+  )
+  if (owner) {
+    return reassignImportedDiagnosisCie(diagnoses, {
+      fromCode: owner.code,
+      toCode: code,
+      toDescription: description,
+      toothNumber,
+    })
+  }
+
+  const existing = diagnoses.find((diagnosis) => diagnosis.code === code)
+  if (!existing) {
+    return [
+      ...diagnoses,
+      {
+        code,
+        description,
+        type: diagnoses.length === 0 ? 'principal' : 'relacionado',
+        certainty: 'impresion',
+        source: 'manual',
+        affectedTeeth: [toothNumber],
+      },
+    ]
+  }
+
+  const affectedTeeth = sortedUnique([...(existing.affectedTeeth ?? []), toothNumber])
+  const already =
+    (existing.affectedTeeth ?? []).length === affectedTeeth.length &&
+    affectedTeeth.every((tooth, index) => existing.affectedTeeth?.[index] === tooth)
+  if (already) return diagnoses
+
+  return diagnoses.map((diagnosis) =>
+    diagnosis.code === code ? { ...copyDiagnosis(diagnosis), affectedTeeth } : diagnosis,
+  )
+}
+
+/** Quita piezas de los diagnósticos y conserva el código CIE aunque ya no tenga dientes. */
+export function detachTeethFromDiagnoses(
+  diagnoses: Cie10Diagnosis[],
+  toothNumbers: number[],
+): Cie10Diagnosis[] {
+  const numbers = new Set(toothNumbers.filter((tooth) => Number.isFinite(tooth)))
+  if (numbers.size === 0) return diagnoses
+
+  let changed = false
+  const next = diagnoses.map((diagnosis) => {
+    const current = diagnosis.affectedTeeth ?? []
+    if (!current.some((tooth) => numbers.has(tooth))) return diagnosis
+    changed = true
+    const remaining = current.filter((tooth) => !numbers.has(tooth))
+    return {
+      ...copyDiagnosis(diagnosis),
+      affectedTeeth: remaining.length > 0 ? remaining : undefined,
+    }
+  })
+
+  return changed ? next : diagnoses
+}
+
 export function reassignDiagnosticChartCie(
   chart: ClinicalDiagnosticChart,
   params: { fromCode: string; toCode: string; toDescription: string; toothId?: string },

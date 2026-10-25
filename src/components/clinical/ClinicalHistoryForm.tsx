@@ -7,7 +7,9 @@ import {
   syncClinicalDataFromOdontogram,
   syncClinicalDataFromOrthodonticsAnnex,
   syncClinicalDataFromEndodonticsAnnex,
+  assignCieToTooth,
   collectOdontogramCieDiagnoses,
+  detachTeethFromDiagnoses,
   importOdontogramCieDiagnoses,
   reassignDiagnosticChartCie,
   reassignImportedDiagnosisCie,
@@ -368,28 +370,19 @@ export function ClinicalHistoryForm({
           onImportOdontogramDiagnoses={importOdontogramDiagnoses}
           onChange={(diagnosticChart) => update({ diagnosticChart })}
           onEnsureDiagnosis={({ code, description, toothId }) => {
-            const toothNumber = Number(toothId)
-            const existing = form.diagnoses.find((diagnosis) => diagnosis.code === code)
-            if (!existing) {
-              update({
-                diagnoses: [
-                  ...form.diagnoses,
-                  {
-                    code,
-                    description,
-                    type: form.diagnoses.length === 0 ? 'principal' : 'relacionado',
-                    certainty: 'impresion',
-                    source: 'manual',
-                    affectedTeeth: [toothNumber],
-                  },
-                ],
-              })
-              return
-            }
-            const affectedTeeth = [...new Set([...(existing.affectedTeeth ?? []), toothNumber])].sort(
-              (a, b) => a - b,
+            const diagnoses = assignCieToTooth(form.diagnoses, {
+              code,
+              description,
+              toothNumber: Number(toothId),
+            })
+            if (diagnoses !== form.diagnoses) update({ diagnoses })
+          }}
+          onDetachTeeth={(toothIds) => {
+            const diagnoses = detachTeethFromDiagnoses(
+              form.diagnoses,
+              toothIds.map((toothId) => Number(toothId)),
             )
-            updateDiagnosis(code, { affectedTeeth })
+            if (diagnoses !== form.diagnoses) update({ diagnoses })
           }}
           onAddAdditionalDiagnosis={(code, description) => {
             if (form.diagnoses.some((diagnosis) => diagnosis.code === code)) return

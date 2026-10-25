@@ -58,7 +58,7 @@ const VOICE_CONTEXT_COPY: Record<
 
     title: 'Asistente — Diagnósticos CIE-10',
 
-    hint: 'Asigne diagnósticos por pieza o agregue diagnósticos adicionales. También puede dictar en los campos de búsqueda CIE-10.',
+    hint: 'Seleccione una pieza y dicte el CIE-10. Sin pieza, el código queda como diagnóstico general.',
 
     examples:
 

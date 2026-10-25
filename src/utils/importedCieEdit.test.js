@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { importOdontogramCieDiagnoses } from './odontogramDiagnosis.ts'
 import {
+  assignCieToTooth,
+  detachTeethFromDiagnoses,
   reassignDiagnosticChartCie,
   reassignImportedDiagnosisCie,
 } from './importedCieEdit.ts'
@@ -201,6 +203,38 @@ test('el mismo CIE no modifica la lista', () => {
     }),
     current,
   )
+})
+
+test('asignar una pieza ocupada la mueve y no la deja en dos códigos', () => {
+  const next = assignCieToTooth(
+    [diagnosis(), diagnosis({ code: 'K08.8', description: 'Exodoncia indicada', type: 'relacionado', affectedTeeth: [48] })],
+    { code: 'K08.8', description: 'Exodoncia indicada', toothNumber: 16 },
+  )
+
+  const byCode = Object.fromEntries(next.map((item) => [item.code, item.affectedTeeth]))
+  assert.deepEqual(byCode['K02.1'], [26, 36, 46])
+  assert.deepEqual(byCode['K08.8'], [16, 48])
+})
+
+test('el primer CIE de una pieza nueva queda como principal', () => {
+  const next = assignCieToTooth([], {
+    code: 'K02.0',
+    description: 'Caries limitada al esmalte',
+    toothNumber: 11,
+  })
+  assert.equal(next.length, 1)
+  assert.equal(next[0].type, 'principal')
+  assert.deepEqual(next[0].affectedTeeth, [11])
+})
+
+test('desvincular la última pieza conserva el código sin dientes', () => {
+  const next = detachTeethFromDiagnoses(
+    [diagnosis({ affectedTeeth: [16] })],
+    [16],
+  )
+  assert.equal(next.length, 1)
+  assert.equal(next[0].code, 'K02.1')
+  assert.equal(next[0].affectedTeeth, undefined)
 })
 
 test('el esquema solo actualiza la pieza editada y hereda el color del CIE destino', () => {
