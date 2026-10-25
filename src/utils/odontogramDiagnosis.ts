@@ -288,8 +288,13 @@ export function importOdontogramCieDiagnoses(
       ...new Set([...(existing.affectedTeeth ?? []), ...availableTeeth]),
     ].sort((a, b) => a - b)
     const nextTeeth = mergedTeeth.length > 0 ? mergedTeeth : undefined
-    if (!sameAffectedTeeth(existing.affectedTeeth, nextTeeth)) {
-      next[index] = { ...existing, affectedTeeth: nextTeeth }
+    const shouldClearScope = Boolean(nextTeeth && existing.anatomicalScope)
+    if (!sameAffectedTeeth(existing.affectedTeeth, nextTeeth) || shouldClearScope) {
+      next[index] = {
+        ...existing,
+        affectedTeeth: nextTeeth,
+        anatomicalScope: nextTeeth ? undefined : existing.anatomicalScope,
+      }
       updated += 1
     }
   }

@@ -1,6 +1,7 @@
 import type { ClinicalDiagnosticToothEntry } from '@/types/clinicalDiagnosticChart'
 import type { Cie10Diagnosis, TreatmentPlanItem } from '@/types/clinicalRecord'
 import { generateId } from './crypto.ts'
+import { zoneFieldsForDiagnosisScope } from './diagnosisAssociation.ts'
 
 const DEFAULT_TREATMENT_PHASE = 'fase_ii' as const
 
@@ -8,10 +9,17 @@ export interface DiagnosisImportSource {
   code: string
   description: string
   toothNumber?: number
+  anatomicalZone?: string
+  arch?: 'superior' | 'inferior'
 }
 
-function sourceKey(source: Pick<DiagnosisImportSource, 'code' | 'toothNumber'>): string {
-  return `${source.code}|${source.toothNumber ?? ''}`
+function sourceKey(
+  source: Pick<DiagnosisImportSource, 'code' | 'toothNumber' | 'anatomicalZone'>,
+): string {
+  const zone =
+    source.anatomicalZone?.trim() ||
+    (source.toothNumber != null ? String(source.toothNumber) : '')
+  return `${source.code}|${zone}`
 }
 
 function planItemKey(item: TreatmentPlanItem): string | null {
@@ -55,7 +63,15 @@ export function collectSection4DiagnosisImports(
 
     if (teeth.length === 0) {
       if ([...seen].some((key) => key.startsWith(`${code}|`))) continue
-      const source = { code, description }
+      const zone = diagnosis.anatomicalScope
+        ? zoneFieldsForDiagnosisScope(diagnosis.anatomicalScope)
+        : null
+      const source: DiagnosisImportSource = {
+        code,
+        description,
+        anatomicalZone: zone?.anatomicalZone,
+        arch: zone?.arch,
+      }
       const key = sourceKey(source)
       if (seen.has(key)) continue
       seen.add(key)
@@ -93,7 +109,9 @@ export function importDiagnosesToTreatmentPlan(
 ): TreatmentPlanItem[] {
   const additions = previewDiagnosisTreatmentImports(diagnoses, plan, chartEntries).map(
     (source) => {
-      const zone = source.toothNumber != null ? String(source.toothNumber) : undefined
+      const zone =
+        source.anatomicalZone ??
+        (source.toothNumber != null ? String(source.toothNumber) : undefined)
       return {
         id: generateId(),
         phase: DEFAULT_TREATMENT_PHASE,
@@ -101,6 +119,7 @@ export function importDiagnosesToTreatmentPlan(
         diagnosisCode: source.code,
         diagnosisDescription: source.description,
         anatomicalZone: zone,
+        arch: source.arch,
         toothNumber: source.toothNumber,
         quantity: 1,
         unitPrice: 0,

@@ -1,4 +1,8 @@
 import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
+import {
+  diagnosisHasAnatomicalAssociation,
+  diagnosisLocationLabel,
+} from './diagnosisAssociation.ts'
 
 const MISSING_CHIEF_COMPLAINT = 'Falta registrar el motivo de consulta'
 const MISSING_DIAGNOSIS = 'Falta registrar al menos un diagnóstico en el esquema'
@@ -22,14 +26,31 @@ export function validateClinicalRecordDraft(
     issues.push(MISSING_CHIEF_COMPLAINT)
   }
 
-  const chartEntries = draft?.diagnosticChart?.entries
-  const hasDiagnosis =
-    Array.isArray(chartEntries) &&
-    chartEntries.some(
-      (entry) => hasText(entry?.diagnosisCode) || hasText(entry?.diagnosisDescription),
-    )
-  if (!hasDiagnosis) {
+  const chartEntries = Array.isArray(draft?.diagnosticChart?.entries)
+    ? draft.diagnosticChart.entries
+    : []
+  const diagnoses = Array.isArray(draft?.diagnoses) ? draft.diagnoses : []
+  const hasChartDiagnosis = chartEntries.some(
+    (entry) => hasText(entry?.diagnosisCode) || hasText(entry?.diagnosisDescription),
+  )
+  const hasLocatedDiagnosis = diagnoses.some((diagnosis) => diagnosisLocationLabel(diagnosis))
+  const missingAssociation = diagnoses.filter(
+    (diagnosis) => !diagnosisHasAnatomicalAssociation(diagnosis, chartEntries),
+  )
+
+  if (!hasChartDiagnosis && !hasLocatedDiagnosis && missingAssociation.length === 0) {
     issues.push(MISSING_DIAGNOSIS)
+  }
+
+  if (missingAssociation.length === 1) {
+    issues.push(
+      `El diagnóstico ${missingAssociation[0].code} debe asociarse a un diente, a un maxilar o a toda la dentición.`,
+    )
+  } else if (missingAssociation.length > 1) {
+    const codes = missingAssociation.map((diagnosis) => diagnosis.code).join(', ')
+    issues.push(
+      `Estos diagnósticos deben asociarse a un diente, a un maxilar o a toda la dentición: ${codes}.`,
+    )
   }
 
   const treatmentPlan = draft?.treatmentPlan

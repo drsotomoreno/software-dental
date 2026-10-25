@@ -272,7 +272,12 @@ export function executeClinicalVoiceCommand(
           transcript: '',
         }
       }
-      updatedClinical = addAdditionalDiagnosisToClinical(clinical, match.code, match.description)
+      updatedClinical = addAdditionalDiagnosisToClinical(
+        clinical,
+        match.code,
+        match.description,
+        command.anatomicalScope,
+      )
       handlers.setClinicalData(updatedClinical)
       break
     }

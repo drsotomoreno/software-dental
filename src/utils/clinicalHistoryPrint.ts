@@ -13,6 +13,7 @@ import {
 import type { ClinicalRecordFormData, PaymentPlanItem } from '@/types/clinicalRecord'
 import type { MainHistorySignatureStatus } from '@/utils/clinicalRecordSnapshot'
 import { formatClinicalDiagnosticChartSummary, normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
+import { diagnosisLocationLabel } from './diagnosisAssociation.ts'
 import { NO_REPORTA_LABEL } from '@/types/anamnesis'
 import { formatVitalSignsSummary } from '@/types/stomatologicalExam'
 import {
@@ -417,8 +418,8 @@ function buildDiagnosticChartSection(data: ClinicalRecordFormData): string {
 
   const diagnosisItems = data.diagnoses
     .map((diagnosis) => {
-      const teeth = [...new Set(diagnosis.affectedTeeth ?? [])].sort((a, b) => a - b)
-      const pieces = teeth.length > 0 ? ` · Piezas: ${teeth.join(', ')}` : ' · General'
+      const location = diagnosisLocationLabel(diagnosis)
+      const pieces = location ? ` · ${location}` : ' · Sin asociación anatómica'
       return `<li><strong>${escapeHtml(diagnosis.code)}</strong> — ${escapeHtml(diagnosis.description)} (${escapeHtml(diagnosis.type)}, ${escapeHtml(DIAGNOSIS_CERTAINTY_LABELS[diagnosis.certainty])})${escapeHtml(pieces)}</li>`
     })
     .join('')

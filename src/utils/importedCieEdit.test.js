@@ -227,6 +227,25 @@ test('el primer CIE de una pieza nueva queda como principal', () => {
   assert.deepEqual(next[0].affectedTeeth, [11])
 })
 
+test('asignar una pieza reemplaza el alcance de maxilar o dentición', () => {
+  const next = assignCieToTooth(
+    [
+      diagnosis({
+        affectedTeeth: undefined,
+        anatomicalScope: 'maxilar_superior',
+      }),
+    ],
+    {
+      code: 'K02.1',
+      description: 'Caries de la dentina',
+      toothNumber: 16,
+    },
+  )
+
+  assert.deepEqual(next[0].affectedTeeth, [16])
+  assert.equal(next[0].anatomicalScope, undefined)
+})
+
 test('desvincular la última pieza conserva el código sin dientes', () => {
   const next = detachTeethFromDiagnoses(
     [diagnosis({ affectedTeeth: [16] })],

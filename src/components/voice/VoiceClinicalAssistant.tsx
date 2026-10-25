@@ -58,11 +58,11 @@ const VOICE_CONTEXT_COPY: Record<
 
     title: 'Asistente — Diagnósticos CIE-10',
 
-    hint: 'Seleccione una pieza y dicte el CIE-10. Sin pieza, el código queda como diagnóstico general.',
+    hint: 'Dicte el CIE-10 asociado a una pieza, a un maxilar o a toda la dentición.',
 
     examples:
 
-      '"Pieza 16 diagnostico caries", "pieza 36 diagnostico K05.1", "diagnostico gingivitis adicional"',
+      '"Pieza 16 diagnostico caries", "diagnostico gingivitis en maxilar superior", "diagnostico adicional K07.4 en toda la dentición"',
 
   },
 

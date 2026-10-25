@@ -1,4 +1,4 @@
-import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
+import type { ClinicalRecordFormData, DiagnosisAnatomicalScope } from '@/types/clinicalRecord'
 import {
   getDiagnosisChartColor,
   normalizeClinicalDiagnosticChart,
@@ -60,9 +60,23 @@ export function addAdditionalDiagnosisToClinical(
   clinical: ClinicalRecordFormData,
   code: string,
   description: string,
+  anatomicalScope?: DiagnosisAnatomicalScope,
 ): ClinicalRecordFormData {
-  if (clinical.diagnoses.some((diagnosis) => diagnosis.code === code)) {
-    return clinical
+  const existing = clinical.diagnoses.find((diagnosis) => diagnosis.code === code)
+  if (existing) {
+    if (
+      !anatomicalScope ||
+      existing.anatomicalScope ||
+      (existing.affectedTeeth?.length ?? 0) > 0
+    ) {
+      return clinical
+    }
+    return {
+      ...clinical,
+      diagnoses: clinical.diagnoses.map((diagnosis) =>
+        diagnosis.code === code ? { ...diagnosis, anatomicalScope } : diagnosis,
+      ),
+    }
   }
 
   return {
@@ -75,6 +89,7 @@ export function addAdditionalDiagnosisToClinical(
         type: clinical.diagnoses.length === 0 ? 'principal' : 'relacionado',
         certainty: 'impresion',
         source: 'manual',
+        anatomicalScope,
       },
     ],
   }

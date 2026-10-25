@@ -1,5 +1,10 @@
-import type { TreatmentPhase } from '@/types/clinicalRecord'
+import { DIAGNOSIS_ANATOMICAL_SCOPE_LABELS } from '@/constants/dental'
+import type { DiagnosisAnatomicalScope, TreatmentPhase } from '@/types/clinicalRecord'
 import type { ToothFace, ToothFaceState, ToothGlobalState } from '@/types/odontogram'
+import {
+  detectDiagnosisAnatomicalScope,
+  stripDiagnosisScopePhrases,
+} from './diagnosisAssociation.ts'
 import { getAllToothFaces } from './odontogramMutations'
 
 const VALID_TOOTH_PATTERN =
@@ -153,6 +158,7 @@ export interface DiagnosisToothCommand {
 export interface DiagnosisAdditionalCommand {
   type: 'diagnosis_additional'
   searchQuery: string
+  anatomicalScope?: DiagnosisAnatomicalScope
 }
 
 export type ClinicalVoiceCommand =
@@ -237,7 +243,7 @@ function extractDiagnosisSearchQuery(text: string): string {
   const cieCode = extractCieCode(text)
   if (cieCode) return cieCode
 
-  return text
+  return stripDiagnosisScopePhrases(text)
     .replace(/\b(pieza|diente|numero|seleccionar|asignar)\b/g, ' ')
     .replace(VALID_TOOTH_PATTERN, ' ')
     .replace(
@@ -254,6 +260,7 @@ function parseDiagnosisCommand(text: string): DiagnosisToothCommand | DiagnosisA
   const toothNumbers = extractToothNumbers(text)
   const searchQuery = extractDiagnosisSearchQuery(text)
   if (!searchQuery) return null
+  const anatomicalScope = detectDiagnosisAnatomicalScope(text) ?? undefined
 
   if (toothNumbers.length > 0) {
     return {
@@ -267,6 +274,7 @@ function parseDiagnosisCommand(text: string): DiagnosisToothCommand | DiagnosisA
     return {
       type: 'diagnosis_additional',
       searchQuery,
+      anatomicalScope,
     }
   }
 
@@ -274,6 +282,7 @@ function parseDiagnosisCommand(text: string): DiagnosisToothCommand | DiagnosisA
     return {
       type: 'diagnosis_additional',
       searchQuery,
+      anatomicalScope,
     }
   }
 
@@ -368,7 +377,9 @@ export function describeClinicalVoiceCommand(command: ClinicalVoiceCommand): str
     case 'diagnosis_tooth':
       return `Diagnóstico pieza ${command.toothNumber}: ${command.searchQuery}`
     case 'diagnosis_additional':
-      return `Diagnóstico adicional: ${command.searchQuery}`
+      return command.anatomicalScope
+        ? `Diagnóstico adicional (${DIAGNOSIS_ANATOMICAL_SCOPE_LABELS[command.anatomicalScope]}): ${command.searchQuery}`
+        : `Diagnóstico adicional: ${command.searchQuery}`
     default:
       return 'Comando reconocido'
   }

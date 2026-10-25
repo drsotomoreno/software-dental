@@ -94,3 +94,47 @@ test('agrega la pieza que todavía no está en el plan', () => {
   assert.equal(next[0].procedure, '')
   assert.equal(next[0].source, 'diagnostico')
 })
+
+test('importa un diagnóstico adicional de maxilar o de toda la dentición', () => {
+  const next = importDiagnosesToTreatmentPlan(
+    [
+      {
+        code: 'K05.1',
+        description: 'Gingivitis crónica',
+        type: 'relacionado',
+        certainty: 'impresion',
+        anatomicalScope: 'maxilar_superior',
+      },
+      {
+        code: 'K07.4',
+        description: 'Maloclusión, no especificada',
+        type: 'relacionado',
+        certainty: 'confirmado',
+        anatomicalScope: 'denticion',
+      },
+    ],
+    [],
+  )
+
+  assert.equal(next.length, 2)
+  assert.equal(next[0].anatomicalZone, 'Arcada Superior')
+  assert.equal(next[0].arch, 'superior')
+  assert.equal(next[0].toothNumber, undefined)
+  assert.equal(next[1].anatomicalZone, 'General')
+  assert.equal(next[1].arch, undefined)
+  assert.equal(next[1].toothNumber, undefined)
+
+  const again = importDiagnosesToTreatmentPlan(
+    [
+      {
+        code: 'K05.1',
+        description: 'Gingivitis crónica',
+        type: 'relacionado',
+        certainty: 'impresion',
+        anatomicalScope: 'maxilar_superior',
+      },
+    ],
+    next,
+  )
+  assert.equal(again.length, 2)
+})

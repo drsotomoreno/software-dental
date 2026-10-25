@@ -128,7 +128,7 @@ export function RapidValuationForm({
       <Cie10DiagnosisSearchSection
         diagnoses={form.diagnoses}
         enableToothSelection
-        onAddDiagnosis={(code, description, affectedTeeth) => {
+        onAddDiagnosis={(code, description, affectedTeeth, anatomicalScope) => {
           if (form.diagnoses.some((item) => item.code === code)) return
           update({
             diagnoses: [
@@ -140,6 +140,7 @@ export function RapidValuationForm({
                 certainty: 'impresion',
                 source: 'manual',
                 affectedTeeth,
+                anatomicalScope,
               },
             ],
           })

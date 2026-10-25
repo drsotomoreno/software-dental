@@ -1,12 +1,18 @@
 import { useMemo, useState } from 'react'
 import { Download, Stethoscope } from 'lucide-react'
-import type { Cie10Diagnosis, DiagnosisCertainty } from '@/types/clinicalRecord'
+import type {
+  Cie10Diagnosis,
+  DiagnosisAnatomicalScope,
+  DiagnosisCertainty,
+} from '@/types/clinicalRecord'
 import type { ClinicalDiagnosticChart, ClinicalDiagnosticToothEntry } from '@/types/clinicalDiagnosticChart'
 import {
   getDiagnosisChartColor,
   normalizeClinicalDiagnosticChart,
 } from '@/types/clinicalDiagnosticChart'
-import { DIAGNOSIS_CERTAINTY_LABELS } from '@/constants/dental'
+import { DIAGNOSIS_ANATOMICAL_SCOPE_LABELS, DIAGNOSIS_CERTAINTY_LABELS } from '@/constants/dental'
+import { parseDiagnosisAssociation } from '@/utils/diagnosisAssociation'
+import { DiagnosisAssociationOptions } from '@/components/clinical/diagnostics/DiagnosisAssociationFields'
 import { REHAB_ODONTOGRAM_TEETH } from '@/components/clinical/rehabilitation/rehab-odontogram/constants'
 import { RehabOdontogramQuadrant } from '@/components/clinical/rehabilitation/rehab-odontogram/RehabOdontogramQuadrant'
 import type { RehabTreatmentPlanEntry } from '@/components/clinical/rehabilitation/rehab-odontogram/types'
@@ -49,7 +55,11 @@ interface DiagnosticOdontogramSectionProps {
   onImportOdontogramDiagnoses?: () => { added: number; updated: number }
   onChange: (value: ClinicalDiagnosticChart) => void
   onEnsureDiagnosis?: (payload: { code: string; description: string; toothId: string }) => void
-  onAddAdditionalDiagnosis?: (code: string, description: string) => void
+  onAddAdditionalDiagnosis?: (
+    code: string,
+    description: string,
+    anatomicalScope: DiagnosisAnatomicalScope,
+  ) => void
   onUpdateDiagnosis?: (code: string, patch: Partial<Cie10Diagnosis>) => void
   onRemoveAdditionalDiagnosis?: (code: string) => void
   onDetachTeeth?: (toothIds: string[]) => void
@@ -149,6 +159,8 @@ export function DiagnosticOdontogramSection({
   const [editQuery, setEditQuery] = useState('')
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const [actionNotice, setActionNotice] = useState<string | null>(null)
+  const [associationValue, setAssociationValue] = useState('')
+  const [pendingCie, setPendingCie] = useState<{ code: string; description: string } | null>(null)
 
   const cie10Results = useCatalogSearch('cie10', cieSearch, 30)
   const editResults = useCatalogSearch('cie10', editingCode ? editQuery : '', 30)
@@ -221,16 +233,15 @@ export function DiagnosticOdontogramSection({
     setActionNotice(null)
   }
 
-  const assignDiagnosisCode = (code: string, description: string) => {
-    if (!selectedToothId || disabled) return
-
-    const withoutCurrent = chart.entries.filter((entry) => entry.dienteId !== selectedToothId)
-    onEnsureDiagnosis?.({ code, description, toothId: selectedToothId })
+  const paintDiagnosisOnTooth = (toothId: string, code: string, description: string) => {
+    if (disabled) return
+    const withoutCurrent = chart.entries.filter((entry) => entry.dienteId !== toothId)
+    onEnsureDiagnosis?.({ code, description, toothId })
     updateChart({
       entries: [
         ...withoutCurrent,
         {
-          dienteId: selectedToothId,
+          dienteId: toothId,
           diagnosisCode: code,
           diagnosisDescription: description,
           color: diagnosisColorMap.get(code) ?? getDiagnosisChartColor(diagnosisColorMap.size),
@@ -238,19 +249,55 @@ export function DiagnosticOdontogramSection({
       ],
     })
     setCieSearch('')
+    setPendingCie(null)
     setActionNotice(null)
   }
 
-  const addGeneralDiagnosis = (code: string, description: string) => {
+  const assignDiagnosisCode = (code: string, description: string) => {
+    if (!selectedToothId) return
+    paintDiagnosisOnTooth(selectedToothId, code, description)
+  }
+
+  const addScopedDiagnosis = (code: string, description: string, scope: DiagnosisAnatomicalScope) => {
     if (disabled) return
-    if (diagnoses.some((diagnosis) => diagnosis.code === code)) {
+    const existing = diagnoses.find((diagnosis) => diagnosis.code === code)
+    if (existing) {
+      const hasTeeth =
+        (existing.affectedTeeth?.length ?? 0) > 0 ||
+        chart.entries.some((entry) => entry.diagnosisCode === code)
+      if (!hasTeeth && !existing.anatomicalScope) {
+        onUpdateDiagnosis?.(code, { anatomicalScope: scope, affectedTeeth: undefined })
+        setCieSearch('')
+        setPendingCie(null)
+        setActionNotice(null)
+        return
+      }
       setActionNotice(`${code} ya está en la lista. Seleccione una pieza del esquema para asignarlo.`)
+      setCieSearch('')
+      setPendingCie(null)
+      return
+    }
+    onAddAdditionalDiagnosis?.(code, description, scope)
+    setCieSearch('')
+    setPendingCie(null)
+    setActionNotice(null)
+  }
+
+  const commitAdditionalDiagnosis = (code: string, description: string, value: string) => {
+    const association = parseDiagnosisAssociation(value)
+    if (!association) {
+      setPendingCie({ code, description })
+      setActionNotice(
+        `Asocie ${code} a un diente, a un maxilar o a toda la dentición.`,
+      )
       setCieSearch('')
       return
     }
-    onAddAdditionalDiagnosis?.(code, description)
-    setCieSearch('')
-    setActionNotice(null)
+    if (association.kind === 'tooth') {
+      paintDiagnosisOnTooth(String(association.toothNumber), code, description)
+      return
+    }
+    addScopedDiagnosis(code, description, association.scope)
   }
 
   const applySearchResult = (code: string, description: string) => {
@@ -258,7 +305,7 @@ export function DiagnosticOdontogramSection({
       assignDiagnosisCode(code, description)
       return
     }
-    addGeneralDiagnosis(code, description)
+    commitAdditionalDiagnosis(code, description, associationValue)
   }
 
   const clearSelectedTooth = () => {
@@ -315,8 +362,8 @@ export function DiagnosticOdontogramSection({
             {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.diagnosticos, 'Diagnósticos')}
           </h3>
           <p className="mt-1 text-sm text-slate-500">
-            Elija una pieza en el esquema y asígnele el CIE-10. Sin pieza seleccionada, el código
-            queda como diagnóstico general.
+            Elija una pieza en el esquema y asígnele el CIE-10. Un diagnóstico adicional se asocia
+            a un diente, a un maxilar o a toda la dentición.
           </p>
         </div>
         {!disabled && onImportOdontogramDiagnoses && (
@@ -442,7 +489,8 @@ export function DiagnosticOdontogramSection({
                 </p>
               ) : (
                 <p className="text-sm text-slate-500">
-                  Seleccione una pieza para asignarle un CIE-10, o busque un código general.
+                  Seleccione una pieza para asignarle un CIE-10, o agregue un diagnóstico adicional
+                  asociado a un diente, a un maxilar o a toda la dentición.
                 </p>
               )}
 
@@ -452,7 +500,7 @@ export function DiagnosticOdontogramSection({
                     <label className="text-xs font-medium text-slate-600" htmlFor="diagnostic-chart-cie-search">
                       {selectedToothId
                         ? `Asignar CIE-10 a la pieza ${selectedToothId}`
-                        : 'Agregar diagnóstico general'}
+                        : 'Agregar diagnóstico adicional'}
                       {catalogHint && (
                         <span className="ml-1 font-normal text-slate-400">{catalogHint}</span>
                       )}
@@ -463,6 +511,32 @@ export function DiagnosticOdontogramSection({
                       onValueChange={setCieSearch}
                     />
                   </div>
+                  {!selectedToothId && (
+                    <div>
+                      <label
+                        className="mb-1 block text-xs font-medium text-slate-600"
+                        htmlFor="diagnostic-additional-association"
+                      >
+                        Asociar a
+                      </label>
+                      <select
+                        id="diagnostic-additional-association"
+                        value={associationValue}
+                        onChange={(event) => {
+                          const nextValue = event.target.value
+                          setAssociationValue(nextValue)
+                          setActionNotice(null)
+                          if (pendingCie && parseDiagnosisAssociation(nextValue)) {
+                            const pending = pendingCie
+                            commitAdditionalDiagnosis(pending.code, pending.description, nextValue)
+                          }
+                        }}
+                        className={`input-field text-sm ${pendingCie ? 'border-amber-400' : ''}`}
+                      >
+                        <DiagnosisAssociationOptions />
+                      </select>
+                    </div>
+                  )}
                   <input
                     id="diagnostic-chart-cie-search"
                     type="search"
@@ -471,6 +545,7 @@ export function DiagnosticOdontogramSection({
                     onChange={(event) => {
                       setCieSearch(event.target.value)
                       setActionNotice(null)
+                      setPendingCie(null)
                     }}
                     className="input-field text-sm"
                   />
@@ -480,7 +555,10 @@ export function DiagnosticOdontogramSection({
                     onSelect={applySearchResult}
                   />
                   {actionNotice && (
-                    <p className="text-xs font-medium text-dental-700" role="status">
+                    <p
+                      className={`text-xs font-medium ${pendingCie ? 'text-amber-700' : 'text-dental-700'}`}
+                      role="status"
+                    >
                       {actionNotice}
                     </p>
                   )}
@@ -539,6 +617,42 @@ export function DiagnosticOdontogramSection({
                         />
                         <span className="font-mono font-medium text-dental-700">{row.code}</span>
                         <span className="text-slate-700">— {row.description}</span>
+                        {row.pieces.length === 0 && row.diagnosis && !disabled && (
+                          <select
+                            value={row.diagnosis.anatomicalScope ?? ''}
+                            onChange={(event) => {
+                              const parsed = parseDiagnosisAssociation(event.target.value)
+                              if (!parsed) return
+                              if (parsed.kind === 'tooth') {
+                                paintDiagnosisOnTooth(
+                                  String(parsed.toothNumber),
+                                  row.code,
+                                  row.description,
+                                )
+                                return
+                              }
+                              onUpdateDiagnosis?.(row.code, {
+                                anatomicalScope: parsed.scope,
+                                affectedTeeth: undefined,
+                              })
+                            }}
+                            className={`rounded border bg-white px-1.5 py-0.5 text-xs ${
+                              row.diagnosis.anatomicalScope
+                                ? 'border-slate-300'
+                                : 'border-amber-400'
+                            }`}
+                            aria-label={`Asociar ${row.code} a un diente, un maxilar o toda la dentición`}
+                          >
+                            <DiagnosisAssociationOptions placeholder="Asociar a…" />
+                          </select>
+                        )}
+                        {row.pieces.length === 0 &&
+                          row.diagnosis?.anatomicalScope &&
+                          disabled && (
+                            <span className="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">
+                              {DIAGNOSIS_ANATOMICAL_SCOPE_LABELS[row.diagnosis.anatomicalScope]}
+                            </span>
+                          )}
                         {row.diagnosis && !disabled ? (
                           <>
                             <select
@@ -650,9 +764,11 @@ export function DiagnosticOdontogramSection({
                             )
                           })}
                         </div>
-                      ) : (
-                        <p className="text-[11px] text-slate-500">Diagnóstico general, sin pieza</p>
-                      )}
+                      ) : !row.diagnosis?.anatomicalScope ? (
+                        <p className="text-[11px] text-amber-700">
+                          Falta asociar este diagnóstico a un diente, un maxilar o toda la dentición.
+                        </p>
+                      ) : null}
 
                       {editing && !disabled && (
                         <div className="rounded-lg border border-slate-200 bg-white p-2">
