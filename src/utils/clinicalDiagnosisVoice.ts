@@ -3,6 +3,7 @@ import {
   getDiagnosisChartColor,
   normalizeClinicalDiagnosticChart,
 } from '@/types/clinicalDiagnosticChart'
+import { assignCieToTooth, detachTeethFromDiagnoses } from '@/utils/importedCieEdit'
 
 export function ensureDiagnosisOnTooth(
   clinical: ClinicalRecordFormData,
@@ -12,36 +13,23 @@ export function ensureDiagnosisOnTooth(
 ): ClinicalRecordFormData {
   const toothNumber = Number(toothId)
   const chart = normalizeClinicalDiagnosticChart(clinical.diagnosticChart)
-
-  let diagnoses = clinical.diagnoses
-  const existing = diagnoses.find((diagnosis) => diagnosis.code === code)
-  if (!existing) {
-    diagnoses = [
-      ...diagnoses,
-      {
-        code,
-        description,
-        type: diagnoses.length === 0 ? 'principal' : 'relacionado',
-        certainty: 'impresion',
-        source: 'manual',
-        affectedTeeth: [toothNumber],
-      },
-    ]
-  } else {
-    diagnoses = diagnoses.map((diagnosis) =>
-      diagnosis.code === code
-        ? {
-            ...diagnosis,
-            affectedTeeth: [...new Set([...(diagnosis.affectedTeeth ?? []), toothNumber])].sort(
-              (a, b) => a - b,
-            ),
-          }
-        : diagnosis,
-    )
-  }
-
   const withoutCurrent = chart.entries.filter((entry) => entry.dienteId !== toothId)
   const existingEntry = chart.entries.find((entry) => entry.dienteId === toothId)
+
+  if (existingEntry?.diagnosisCode === code) {
+    return {
+      ...clinical,
+      diagnoses: detachTeethFromDiagnoses(clinical.diagnoses, [toothNumber]),
+      diagnosticChart: { ...chart, entries: withoutCurrent },
+    }
+  }
+
+  const diagnoses = assignCieToTooth(clinical.diagnoses, {
+    code,
+    description,
+    toothNumber,
+  })
+  const knownColor = chart.entries.find((entry) => entry.diagnosisCode === code)?.color
   const codes = [
     ...new Set([
       ...diagnoses.map((diagnosis) => diagnosis.code),
@@ -49,25 +37,22 @@ export function ensureDiagnosisOnTooth(
       code,
     ]),
   ]
-  const color = getDiagnosisChartColor(codes.indexOf(code))
-
-  const entries =
-    existingEntry?.diagnosisCode === code
-      ? withoutCurrent
-      : [
-          ...withoutCurrent,
-          {
-            dienteId: toothId,
-            diagnosisCode: code,
-            diagnosisDescription: description,
-            color,
-          },
-        ]
 
   return {
     ...clinical,
     diagnoses,
-    diagnosticChart: { ...chart, entries },
+    diagnosticChart: {
+      ...chart,
+      entries: [
+        ...withoutCurrent,
+        {
+          dienteId: toothId,
+          diagnosisCode: code,
+          diagnosisDescription: description,
+          color: knownColor ?? getDiagnosisChartColor(Math.max(codes.indexOf(code), 0)),
+        },
+      ],
+    },
   }
 }
 

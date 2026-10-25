@@ -25,6 +25,8 @@ export {
   mergeFindingsWithOdontogram,
 } from './odontogramDiagnosis'
 export {
+  assignCieToTooth,
+  detachTeethFromDiagnoses,
   reassignDiagnosticChartCie,
   reassignImportedDiagnosisCie,
 } from './importedCieEdit'

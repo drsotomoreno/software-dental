@@ -415,32 +415,19 @@ function buildDiagnosticChartSection(data: ClinicalRecordFormData): string {
     normalizeClinicalDiagnosticChart(data.diagnosticChart),
   )
 
-  const additionalDiagnoses = data.diagnoses
-    .filter((diagnosis) => diagnosis.source === 'manual')
-    .filter((diagnosis) => !(diagnosis.affectedTeeth?.length))
-    .map(
-      (diagnosis) =>
-        `<li><strong>${escapeHtml(diagnosis.code)}</strong> — ${escapeHtml(diagnosis.description)} (${escapeHtml(diagnosis.type)}, ${escapeHtml(DIAGNOSIS_CERTAINTY_LABELS[diagnosis.certainty])})</li>`,
-    )
-    .join('')
-
-  const chartDiagnoses = data.diagnoses
-    .filter(
-      (diagnosis) =>
-        diagnosis.source === 'manual' && (diagnosis.affectedTeeth?.length ?? 0) > 0,
-    )
-    .map(
-      (diagnosis) =>
-        `<li><strong>${escapeHtml(diagnosis.code)}</strong> — ${escapeHtml(diagnosis.description)} (${escapeHtml(diagnosis.type)}, ${escapeHtml(DIAGNOSIS_CERTAINTY_LABELS[diagnosis.certainty])})${diagnosis.affectedTeeth?.length ? ` · Piezas: ${diagnosis.affectedTeeth.join(', ')}` : ''}</li>`,
-    )
+  const diagnosisItems = data.diagnoses
+    .map((diagnosis) => {
+      const teeth = [...new Set(diagnosis.affectedTeeth ?? [])].sort((a, b) => a - b)
+      const pieces = teeth.length > 0 ? ` · Piezas: ${teeth.join(', ')}` : ' · General'
+      return `<li><strong>${escapeHtml(diagnosis.code)}</strong> — ${escapeHtml(diagnosis.description)} (${escapeHtml(diagnosis.type)}, ${escapeHtml(DIAGNOSIS_CERTAINTY_LABELS[diagnosis.certainty])})${escapeHtml(pieces)}</li>`
+    })
     .join('')
 
   return `
     <section class="print-section">
       <h2>${printSectionHeading('diagnosticos')}</h2>
       ${paragraph(summary || 'Sin diagnósticos asignados por pieza en el esquema gráfico.')}
-      ${chartDiagnoses ? `<h3>Diagnósticos por pieza / odontograma</h3><ul>${chartDiagnoses}</ul>` : ''}
-      ${additionalDiagnoses ? `<h3>Diagnosticos Adicionales</h3><ul>${additionalDiagnoses}</ul>` : ''}
+      ${diagnosisItems ? `<h3>Diagnósticos CIE-10</h3><ul>${diagnosisItems}</ul>` : ''}
       ${data.diagnosisNotes ? `<h3>Observaciones</h3>${paragraph(data.diagnosisNotes)}` : ''}
       ${data.findings ? `<h3>${subheading('Hallazgos adicionales')}</h3>${paragraph(data.findings)}` : ''}
     </section>`

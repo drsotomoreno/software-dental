@@ -17,24 +17,6 @@ import {
 } from '@/constants/clinicalHistorySections'
 import { useCatalogMeta, useCatalogSearch } from '@/hooks/useCatalogSearch'
 import { VoiceDictationButton } from '@/components/voice'
-import { ImportedOdontogramDiagnoses } from './ImportedOdontogramDiagnoses'
-
-function isAdditionalDiagnosis(diagnosis: Cie10Diagnosis): boolean {
-  return diagnosis.source === 'manual' && !(diagnosis.affectedTeeth?.length)
-}
-
-function isQuickAssignableDiagnosis(diagnosis: Cie10Diagnosis): boolean {
-  return (
-    !diagnosis.source ||
-    diagnosis.source === 'manual' ||
-    diagnosis.source === 'odontograma' ||
-    diagnosis.source === 'odontograma_suplementario'
-  )
-}
-
-function isOdontogramDiagnosis(diagnosis: Cie10Diagnosis): boolean {
-  return diagnosis.source === 'odontograma' || diagnosis.source === 'odontograma_suplementario'
-}
 
 function formatImportNotice(added: number, updated: number): string {
   if (added === 0 && updated === 0) {
@@ -70,6 +52,7 @@ interface DiagnosticOdontogramSectionProps {
   onAddAdditionalDiagnosis?: (code: string, description: string) => void
   onUpdateDiagnosis?: (code: string, patch: Partial<Cie10Diagnosis>) => void
   onRemoveAdditionalDiagnosis?: (code: string) => void
+  onDetachTeeth?: (toothIds: string[]) => void
   onReassignImportedCie?: (payload: {
     fromCode: string
     toCode: string
@@ -79,11 +62,70 @@ interface DiagnosticOdontogramSectionProps {
   disabled?: boolean
 }
 
+interface DiagnosisRow {
+  code: string
+  description: string
+  diagnosis?: Cie10Diagnosis
+  pieces: string[]
+  color: string
+}
+
 function toVisualPlan(entries: ClinicalDiagnosticToothEntry[]): RehabTreatmentPlanEntry[] {
   return entries.map((entry) => ({
     dienteId: entry.dienteId,
     color: entry.color,
   }))
+}
+
+/** Cada pieza aparece una sola vez: el esquema manda si ya tiene otro código. */
+function piecesForDiagnosis(
+  code: string,
+  affectedTeeth: number[] | undefined,
+  entries: ClinicalDiagnosticToothEntry[],
+): string[] {
+  const paintedHere = entries
+    .filter((entry) => entry.diagnosisCode === code)
+    .map((entry) => entry.dienteId)
+  const paintedElsewhere = new Set(
+    entries.filter((entry) => entry.diagnosisCode !== code).map((entry) => entry.dienteId),
+  )
+  const fromRecord = (affectedTeeth ?? [])
+    .map(String)
+    .filter((toothId) => !paintedElsewhere.has(toothId))
+  return [...new Set([...paintedHere, ...fromRecord])].sort((a, b) => Number(a) - Number(b))
+}
+
+function CieSearchResults({
+  query,
+  results,
+  onSelect,
+}: {
+  query: string
+  results: Array<{ code: string; description: string }>
+  onSelect: (code: string, description: string) => void
+}) {
+  if (!query) return null
+  return (
+    <ul className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+      {results.length === 0 ? (
+        <li className="px-3 py-2 text-sm text-slate-500">Sin resultados en el catálogo.</li>
+      ) : (
+        results.map((item) => (
+          <li key={item.code}>
+            <button
+              type="button"
+              onClick={() => onSelect(item.code, item.description)}
+              className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+            >
+              <span className="font-mono font-medium text-dental-700">{item.code}</span>
+              {' — '}
+              {item.description}
+            </button>
+          </li>
+        ))
+      )}
+    </ul>
+  )
 }
 
 export function DiagnosticOdontogramSection({
@@ -96,23 +138,23 @@ export function DiagnosticOdontogramSection({
   onAddAdditionalDiagnosis,
   onUpdateDiagnosis,
   onRemoveAdditionalDiagnosis,
+  onDetachTeeth,
   onReassignImportedCie,
   disabled = false,
 }: DiagnosticOdontogramSectionProps) {
   const chart = normalizeClinicalDiagnosticChart(value)
   const [selectedToothId, setSelectedToothId] = useState<string | null>(null)
   const [cieSearch, setCieSearch] = useState('')
-  const [additionalCieSearch, setAdditionalCieSearch] = useState('')
+  const [editingCode, setEditingCode] = useState<string | null>(null)
+  const [editQuery, setEditQuery] = useState('')
   const [importNotice, setImportNotice] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
 
   const cie10Results = useCatalogSearch('cie10', cieSearch, 30)
-  const additionalCie10Results = useCatalogSearch('cie10', additionalCieSearch, 30)
+  const editResults = useCatalogSearch('cie10', editingCode ? editQuery : '', 30)
   const cie10Meta = useCatalogMeta('cie10')
   const filteredCie10 = cie10Results ?? []
-  const filteredAdditionalCie10 = additionalCie10Results ?? []
-  const additionalDiagnoses = diagnoses.filter(isAdditionalDiagnosis)
-  const importedOdontogramDiagnoses = diagnoses.filter(isOdontogramDiagnosis)
-  const quickAssignableDiagnoses = diagnoses.filter(isQuickAssignableDiagnosis)
+  const filteredEditCie10 = editResults ?? []
   const canImportOdontogramCie = odontogramCieDiagnoses.length > 0
 
   const visualPlan = useMemo(() => toVisualPlan(chart.entries), [chart.entries])
@@ -132,6 +174,42 @@ export function DiagnosticOdontogramSection({
     return map
   }, [diagnoses, chart.entries])
 
+  const rows = useMemo<DiagnosisRow[]>(() => {
+    const known = new Set(diagnoses.map((diagnosis) => diagnosis.code))
+    const listed: DiagnosisRow[] = diagnoses.map((diagnosis) => ({
+      code: diagnosis.code,
+      description: diagnosis.description,
+      diagnosis,
+      pieces: piecesForDiagnosis(diagnosis.code, diagnosis.affectedTeeth, chart.entries),
+      color: diagnosisColorMap.get(diagnosis.code) ?? getDiagnosisChartColor(0),
+    }))
+
+    const extras = new Map<string, { description: string; pieces: string[] }>()
+    for (const entry of chart.entries) {
+      if (known.has(entry.diagnosisCode)) continue
+      const current = extras.get(entry.diagnosisCode) ?? {
+        description: entry.diagnosisDescription,
+        pieces: [],
+      }
+      current.pieces.push(entry.dienteId)
+      extras.set(entry.diagnosisCode, current)
+    }
+    for (const [code, extra] of extras) {
+      listed.push({
+        code,
+        description: extra.description,
+        pieces: [...new Set(extra.pieces)].sort((a, b) => Number(a) - Number(b)),
+        color: diagnosisColorMap.get(code) ?? getDiagnosisChartColor(0),
+      })
+    }
+    return listed
+  }, [diagnoses, chart.entries, diagnosisColorMap])
+
+  const legendCodes = useMemo(
+    () => [...new Set(chart.entries.map((entry) => entry.diagnosisCode))],
+    [chart.entries],
+  )
+
   const updateChart = (patch: Partial<ClinicalDiagnosticChart>) => {
     onChange({ ...chart, ...patch })
   }
@@ -140,20 +218,14 @@ export function DiagnosticOdontogramSection({
     if (disabled) return
     setSelectedToothId((current) => (current === dienteId ? null : dienteId))
     setCieSearch('')
+    setActionNotice(null)
   }
 
   const assignDiagnosisCode = (code: string, description: string) => {
     if (!selectedToothId || disabled) return
 
-    onEnsureDiagnosis?.({ code, description, toothId: selectedToothId })
-
     const withoutCurrent = chart.entries.filter((entry) => entry.dienteId !== selectedToothId)
-    const existing = chart.entries.find((entry) => entry.dienteId === selectedToothId)
-    if (existing?.diagnosisCode === code) {
-      updateChart({ entries: withoutCurrent })
-      return
-    }
-
+    onEnsureDiagnosis?.({ code, description, toothId: selectedToothId })
     updateChart({
       entries: [
         ...withoutCurrent,
@@ -166,16 +238,27 @@ export function DiagnosticOdontogramSection({
       ],
     })
     setCieSearch('')
+    setActionNotice(null)
   }
 
-  const assignDiagnosis = (diagnosis: Cie10Diagnosis) => {
-    assignDiagnosisCode(diagnosis.code, diagnosis.description)
-  }
-
-  const addAdditionalDiagnosis = (code: string, description: string) => {
+  const addGeneralDiagnosis = (code: string, description: string) => {
     if (disabled) return
+    if (diagnoses.some((diagnosis) => diagnosis.code === code)) {
+      setActionNotice(`${code} ya está en la lista. Seleccione una pieza del esquema para asignarlo.`)
+      setCieSearch('')
+      return
+    }
     onAddAdditionalDiagnosis?.(code, description)
-    setAdditionalCieSearch('')
+    setCieSearch('')
+    setActionNotice(null)
+  }
+
+  const applySearchResult = (code: string, description: string) => {
+    if (selectedToothId) {
+      assignDiagnosisCode(code, description)
+      return
+    }
+    addGeneralDiagnosis(code, description)
   }
 
   const clearSelectedTooth = () => {
@@ -185,8 +268,14 @@ export function DiagnosticOdontogramSection({
     })
   }
 
+  const removeSelectedTooth = () => {
+    if (!selectedToothId || disabled) return
+    onDetachTeeth?.([selectedToothId])
+    clearSelectedTooth()
+  }
+
   const clearAll = () => {
-    if (disabled) return
+    if (disabled || chart.entries.length === 0) return
     updateChart({ entries: [] })
     setSelectedToothId(null)
   }
@@ -197,6 +286,16 @@ export function DiagnosticOdontogramSection({
     setImportNotice(formatImportNotice(result.added, result.updated))
   }
 
+  const applyCodeChange = (fromCode: string, code: string, description: string) => {
+    onReassignImportedCie?.({
+      fromCode,
+      toCode: code,
+      toDescription: description,
+    })
+    setEditingCode(null)
+    setEditQuery('')
+  }
+
   const quadrantProps = {
     selectedToothId,
     plan: visualPlan,
@@ -204,7 +303,9 @@ export function DiagnosticOdontogramSection({
     onSelectTooth: handleSelectTooth,
   }
 
-  const assignedDiagnoses = [...new Set(chart.entries.map((entry) => entry.diagnosisCode))]
+  const catalogHint = cie10Meta
+    ? `(v${cie10Meta.version} — ${cie10Meta.recordCount} códigos)`
+    : undefined
 
   return (
     <section id="clinical-section-diagnosticos" className="card space-y-4">
@@ -214,7 +315,8 @@ export function DiagnosticOdontogramSection({
             {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.diagnosticos, 'Diagnósticos')}
           </h3>
           <p className="mt-1 text-sm text-slate-500">
-            Esquema gráfico por pieza FDI para ubicar diagnósticos CIE-10 en la dentición.
+            Elija una pieza en el esquema y asígnele el CIE-10. Sin pieza seleccionada, el código
+            queda como diagnóstico general.
           </p>
         </div>
         {!disabled && onImportOdontogramDiagnoses && (
@@ -258,9 +360,9 @@ export function DiagnosticOdontogramSection({
           <div className="flex items-center gap-2">
             <Stethoscope className="h-5 w-5 text-dental-600" aria-hidden />
             <div>
-              <h4 className="text-sm font-semibold text-slate-800">Esquema de Diagnósticos por Pieza</h4>
+              <h4 className="text-sm font-semibold text-slate-800">Esquema de diagnósticos por pieza</h4>
               <p className="text-xs text-slate-500">
-                32 piezas permanentes (FDI) · Vista sagital/lateral · 8 piezas por cuadrante en fila única
+                32 piezas permanentes (FDI) · Vista sagital/lateral · 8 piezas por cuadrante
               </p>
             </div>
           </div>
@@ -301,10 +403,11 @@ export function DiagnosticOdontogramSection({
             />
           </div>
 
-          {assignedDiagnoses.length > 0 && (
+          {legendCodes.length > 0 && (
             <div className="flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              {assignedDiagnoses.map((code) => {
+              {legendCodes.map((code) => {
                 const diagnosis = diagnoses.find((item) => item.code === code)
+                const entry = chart.entries.find((item) => item.diagnosisCode === code)
                 const color = diagnosisColorMap.get(code) ?? getDiagnosisChartColor(0)
                 return (
                   <div key={code} className="flex items-center gap-2 text-xs text-slate-600">
@@ -313,7 +416,7 @@ export function DiagnosticOdontogramSection({
                       style={{ backgroundColor: color }}
                     />
                     <span>
-                      {code} — {diagnosis?.description ?? 'Diagnóstico'}
+                      {code} — {diagnosis?.description ?? entry?.diagnosisDescription ?? 'Diagnóstico'}
                     </span>
                   </div>
                 )
@@ -322,36 +425,36 @@ export function DiagnosticOdontogramSection({
           )}
         </div>
 
-        <footer className="border-t border-slate-200 bg-slate-50 px-4 py-3">
+        <footer className="space-y-4 border-t border-slate-200 bg-slate-50 px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Asignación por pieza
-              </p>
               {selectedToothId ? (
-                <p className="mt-1 text-sm text-slate-700">
-                  Pieza seleccionada: <strong>{selectedToothId}</strong>
-                  {selectedEntry && (
-                    <span className="ml-2 text-slate-500">
+                <p className="text-sm text-slate-700">
+                  Pieza <strong>{selectedToothId}</strong>
+                  {selectedEntry ? (
+                    <span className="text-slate-500">
+                      {' '}
                       — {selectedEntry.diagnosisCode} {selectedEntry.diagnosisDescription}
                     </span>
+                  ) : (
+                    <span className="text-slate-500"> — sin diagnóstico en el esquema</span>
                   )}
                 </p>
               ) : (
-                <p className="mt-1 text-sm text-slate-500">
-                  Seleccione una pieza en el esquema para asignar un diagnóstico.
+                <p className="text-sm text-slate-500">
+                  Seleccione una pieza para asignarle un CIE-10, o busque un código general.
                 </p>
               )}
 
-              {selectedToothId && !disabled && (
+              {!disabled && (
                 <div className="mt-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <label className="text-xs font-medium text-slate-600" htmlFor="diagnostic-chart-cie-search">
-                      Buscar diagnóstico CIE-10
-                      {cie10Meta && (
-                        <span className="ml-1 font-normal text-slate-400">
-                          (v{cie10Meta.version} — {cie10Meta.recordCount} códigos)
-                        </span>
+                      {selectedToothId
+                        ? `Asignar CIE-10 a la pieza ${selectedToothId}`
+                        : 'Agregar diagnóstico general'}
+                      {catalogHint && (
+                        <span className="ml-1 font-normal text-slate-400">{catalogHint}</span>
                       )}
                     </label>
                     <VoiceDictationButton
@@ -365,63 +468,22 @@ export function DiagnosticOdontogramSection({
                     type="search"
                     placeholder="Buscar código o descripción CIE-10..."
                     value={cieSearch}
-                    onChange={(e) => setCieSearch(e.target.value)}
+                    onChange={(event) => {
+                      setCieSearch(event.target.value)
+                      setActionNotice(null)
+                    }}
                     className="input-field text-sm"
                   />
-                  {cieSearch && (
-                    <ul className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-                      {filteredCie10.length === 0 ? (
-                        <li className="px-3 py-2 text-sm text-slate-500">Sin resultados en el catálogo.</li>
-                      ) : (
-                        filteredCie10.map((item) => (
-                          <li key={item.code}>
-                            <button
-                              type="button"
-                              onClick={() => assignDiagnosisCode(item.code, item.description)}
-                              className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
-                            >
-                              <span className="font-mono font-medium text-dental-700">{item.code}</span>
-                              {' — '}
-                              {item.description}
-                            </button>
-                          </li>
-                        ))
-                      )}
-                    </ul>
+                  <CieSearchResults
+                    query={cieSearch}
+                    results={filteredCie10}
+                    onSelect={applySearchResult}
+                  />
+                  {actionNotice && (
+                    <p className="text-xs font-medium text-dental-700" role="status">
+                      {actionNotice}
+                    </p>
                   )}
-                </div>
-              )}
-
-              {selectedToothId && quickAssignableDiagnoses.length > 0 && !disabled && (
-                <div className="mt-3">
-                  <p className="mb-2 text-xs font-medium text-slate-600">
-                    Diagnósticos ya registrados en la historia
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {quickAssignableDiagnoses.map((diagnosis) => {
-                      const isActive = selectedEntry?.diagnosisCode === diagnosis.code
-                      const color = diagnosisColorMap.get(diagnosis.code) ?? getDiagnosisChartColor(0)
-                      return (
-                        <button
-                          key={diagnosis.code}
-                          type="button"
-                          onClick={() => assignDiagnosis(diagnosis)}
-                          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium transition ${
-                            isActive
-                              ? 'border-slate-300 bg-white text-slate-800 shadow-sm ring-2 ring-offset-1'
-                              : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-                          }`}
-                          style={isActive ? { boxShadow: `0 0 0 2px ${color}55` } : undefined}
-                        >
-                          <span
-                            className="h-2.5 w-2.5 rounded-full border border-white shadow-sm"
-                            style={{ backgroundColor: color }}
-                          />
-                          {diagnosis.code}
-                        </button>
-                      )
-                    })}
-                  </div>
                 </div>
               )}
             </div>
@@ -439,7 +501,9 @@ export function DiagnosticOdontogramSection({
                 <button
                   type="button"
                   onClick={clearAll}
-                  className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                  disabled={chart.entries.length === 0}
+                  title="Quita las marcas de color del esquema. Los diagnósticos de la lista se conservan."
+                  className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   Limpiar todo
                 </button>
@@ -447,157 +511,197 @@ export function DiagnosticOdontogramSection({
             )}
           </div>
 
-          {chart.entries.length > 0 && (
-            <div className="mt-3 flex flex-col gap-2">
-              {[...chart.entries]
-                .sort((a, b) => Number(a.dienteId) - Number(b.dienteId))
-                .map((entry) => (
-                  <span
-                    key={entry.dienteId}
-                    className="inline-flex w-fit items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700"
-                  >
-                    <span
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{ backgroundColor: entry.color }}
-                    />
-                    Pieza {entry.dienteId}: {entry.diagnosisCode}
-                  </span>
-                ))}
-            </div>
-          )}
-        </footer>
-      </div>
+          <div>
+            <h4 className="text-sm font-semibold text-slate-800">Diagnósticos registrados</h4>
+            {rows.length === 0 ? (
+              <p className="mt-2 text-sm text-slate-500">
+                Todavía no hay diagnósticos. Use la búsqueda o importe los del odontograma.
+              </p>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {rows.map((row) => {
+                  const onSelectedTooth =
+                    selectedToothId != null && row.pieces.includes(selectedToothId)
+                  const editing = editingCode === row.code
+                  return (
+                    <li
+                      key={row.code}
+                      className={`space-y-2 rounded-lg border px-3 py-2 text-sm ${
+                        onSelectedTooth
+                          ? 'border-dental-300 bg-dental-50/70'
+                          : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full border border-white shadow-sm"
+                          style={{ backgroundColor: row.color }}
+                        />
+                        <span className="font-mono font-medium text-dental-700">{row.code}</span>
+                        <span className="text-slate-700">— {row.description}</span>
+                        {row.diagnosis && !disabled ? (
+                          <>
+                            <select
+                              value={row.diagnosis.type}
+                              onChange={(event) =>
+                                onUpdateDiagnosis?.(row.code, {
+                                  type: event.target.value as Cie10Diagnosis['type'],
+                                })
+                              }
+                              className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs"
+                              aria-label={`Tipo de ${row.code}`}
+                            >
+                              <option value="principal">Principal</option>
+                              <option value="relacionado">Relacionado</option>
+                            </select>
+                            <select
+                              value={row.diagnosis.certainty}
+                              onChange={(event) =>
+                                onUpdateDiagnosis?.(row.code, {
+                                  certainty: event.target.value as DiagnosisCertainty,
+                                })
+                              }
+                              className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs"
+                              aria-label={`Certeza de ${row.code}`}
+                            >
+                              {Object.entries(DIAGNOSIS_CERTAINTY_LABELS).map(([key, label]) => (
+                                <option key={key} value={key}>
+                                  {label}
+                                </option>
+                              ))}
+                            </select>
+                          </>
+                        ) : row.diagnosis ? (
+                          <>
+                            <span className="rounded bg-dental-100 px-1.5 py-0.5 text-xs text-dental-700">
+                              {row.diagnosis.type}
+                            </span>
+                            <span className="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">
+                              {DIAGNOSIS_CERTAINTY_LABELS[row.diagnosis.certainty]}
+                            </span>
+                          </>
+                        ) : null}
+                        {!disabled && selectedToothId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const painted =
+                                selectedEntry?.dienteId === selectedToothId &&
+                                selectedEntry.diagnosisCode === row.code
+                              if (painted) {
+                                removeSelectedTooth()
+                                return
+                              }
+                              assignDiagnosisCode(row.code, row.description)
+                            }}
+                            className="rounded border border-dental-200 bg-white px-2 py-0.5 text-xs font-medium text-dental-700 hover:bg-dental-50"
+                          >
+                            {selectedEntry?.diagnosisCode === row.code
+                              ? `Quitar de la pieza ${selectedToothId}`
+                              : onSelectedTooth
+                                ? 'Marcar en el esquema'
+                                : `Asignar a la pieza ${selectedToothId}`}
+                          </button>
+                        )}
+                        {!disabled && row.diagnosis && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCode((current) => (current === row.code ? null : row.code))
+                              setEditQuery('')
+                            }}
+                            className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                            aria-expanded={editing}
+                          >
+                            Cambiar código
+                          </button>
+                        )}
+                        {!disabled && (
+                          <button
+                            type="button"
+                            onClick={() => onRemoveAdditionalDiagnosis?.(row.code)}
+                            className="ml-auto text-red-500 hover:text-red-700"
+                            aria-label={`Quitar ${row.code}`}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
 
-      {importedOdontogramDiagnoses.length > 0 && (
-        <ImportedOdontogramDiagnoses
-          diagnoses={importedOdontogramDiagnoses}
-          disabled={disabled}
-          onUpdateDiagnosis={onUpdateDiagnosis}
-          onRemoveDiagnosis={onRemoveAdditionalDiagnosis}
-          onReassignCie={onReassignImportedCie}
-        />
-      )}
+                      {row.pieces.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {row.pieces.map((toothId) => {
+                            const selected = selectedToothId === toothId
+                            return (
+                              <button
+                                key={toothId}
+                                type="button"
+                                disabled={disabled}
+                                onClick={() => handleSelectTooth(toothId)}
+                                aria-pressed={selected}
+                                className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                                  selected
+                                    ? 'border-dental-400 bg-white text-dental-800'
+                                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-white'
+                                } disabled:cursor-default`}
+                              >
+                                Pieza {toothId}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-500">Diagnóstico general, sin pieza</p>
+                      )}
 
-      <div>
-        <h4 className="label-field mb-1">Diagnosticos Adicionales</h4>
-        <p className="mb-3 text-xs text-slate-500">
-          Agregue diagnósticos CIE-10 generales mediante búsqueda abreviada por código o descripción
-          {cie10Meta && (
-            <span className="ml-1 text-dental-600">
-              (v{cie10Meta.version} — {cie10Meta.recordCount} códigos)
-            </span>
-          )}
-          .
-        </p>
-
-        {!disabled && (
-          <div className="mb-3">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <label className="text-xs font-medium text-slate-600" htmlFor="clinical-additional-diagnosis-search">
-                Buscar diagnóstico adicional CIE-10
-              </label>
-              <VoiceDictationButton
-                targetInputId="clinical-additional-diagnosis-search"
-                getValue={() => additionalCieSearch}
-                onValueChange={setAdditionalCieSearch}
-              />
-            </div>
-            <input
-              id="clinical-additional-diagnosis-search"
-              type="search"
-              placeholder="Buscar código abreviado o descripción CIE-10..."
-              value={additionalCieSearch}
-              onChange={(e) => setAdditionalCieSearch(e.target.value)}
-              className="input-field text-sm"
-            />
-            {additionalCieSearch && (
-              <ul className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-                {filteredAdditionalCie10.length === 0 ? (
-                  <li className="px-3 py-2 text-sm text-slate-500">Sin resultados en el catálogo.</li>
-                ) : (
-                  filteredAdditionalCie10.map((item) => (
-                    <li key={item.code}>
-                      <button
-                        type="button"
-                        onClick={() => addAdditionalDiagnosis(item.code, item.description)}
-                        className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
-                      >
-                        <span className="font-mono font-medium text-dental-700">{item.code}</span>
-                        {' — '}
-                        {item.description}
-                      </button>
+                      {editing && !disabled && (
+                        <div className="rounded-lg border border-slate-200 bg-white p-2">
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <label
+                              className="text-xs font-medium text-slate-600"
+                              htmlFor={`diagnosis-code-edit-${row.code}`}
+                            >
+                              Nuevo CIE para {row.code}
+                              {catalogHint && (
+                                <span className="ml-1 font-normal text-slate-400">{catalogHint}</span>
+                              )}
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingCode(null)
+                                setEditQuery('')
+                              }}
+                              className="text-xs text-slate-500 hover:text-slate-700"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                          <input
+                            id={`diagnosis-code-edit-${row.code}`}
+                            type="search"
+                            autoFocus
+                            placeholder="Buscar código o descripción CIE-10..."
+                            value={editQuery}
+                            onChange={(event) => setEditQuery(event.target.value)}
+                            className="input-field text-sm"
+                          />
+                          <CieSearchResults
+                            query={editQuery}
+                            results={filteredEditCie10}
+                            onSelect={(code, description) =>
+                              applyCodeChange(row.code, code, description)
+                            }
+                          />
+                        </div>
+                      )}
                     </li>
-                  ))
-                )}
+                  )
+                })}
               </ul>
             )}
           </div>
-        )}
-
-        {additionalDiagnoses.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            Sin diagnosticos adicionales. Use la búsqueda para agregar códigos CIE-10.
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {additionalDiagnoses.map((diagnosis) => (
-              <li
-                key={diagnosis.code}
-                className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm"
-              >
-                <span className="font-mono font-medium text-dental-700">{diagnosis.code}</span>
-                <span>— {diagnosis.description}</span>
-                {!disabled ? (
-                  <>
-                    <select
-                      value={diagnosis.type}
-                      onChange={(e) =>
-                        onUpdateDiagnosis?.(diagnosis.code, {
-                          type: e.target.value as Cie10Diagnosis['type'],
-                        })
-                      }
-                      className="rounded border border-slate-300 px-1.5 py-0.5 text-xs"
-                    >
-                      <option value="principal">Principal</option>
-                      <option value="relacionado">Relacionado</option>
-                    </select>
-                    <select
-                      value={diagnosis.certainty}
-                      onChange={(e) =>
-                        onUpdateDiagnosis?.(diagnosis.code, {
-                          certainty: e.target.value as DiagnosisCertainty,
-                        })
-                      }
-                      className="rounded border border-slate-300 px-1.5 py-0.5 text-xs"
-                    >
-                      {Object.entries(DIAGNOSIS_CERTAINTY_LABELS).map(([key, label]) => (
-                        <option key={key} value={key}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => onRemoveAdditionalDiagnosis?.(diagnosis.code)}
-                      className="ml-auto text-red-500 hover:text-red-700"
-                    >
-                      ✕
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span className="rounded bg-dental-100 px-1.5 py-0.5 text-xs text-dental-700">
-                      {diagnosis.type}
-                    </span>
-                    <span className="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">
-                      {DIAGNOSIS_CERTAINTY_LABELS[diagnosis.certainty]}
-                    </span>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+        </footer>
       </div>
     </section>
   )
