@@ -81,7 +81,7 @@ export function validateRipsExport(
     issues.push({
       level: 'error',
       field: 'numDocumentoIdObligado',
-      message: 'Configure el NIT del prestador en su perfil o en el formulario de exportación.',
+      message: 'Configure el NIT del prestador en su perfil.',
     })
   } else if (!professional.providerNit?.replace(/\D/g, '') || !professional.repsCode?.replace(/\D/g, '')) {
     issues.push({
@@ -360,7 +360,7 @@ export function validateRipsExport(
       level: 'error',
       field: 'thsSpecialty',
       message:
-        'Configure la especialidad THS del profesional en su perfil o en el formulario RIPS. El MUV exige que coincida con el CUPS de consulta.',
+        'Configure la especialidad THS del profesional en su perfil. El MUV exige que coincida con el CUPS de consulta.',
     })
   }
 

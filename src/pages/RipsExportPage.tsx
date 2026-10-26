@@ -177,7 +177,7 @@ export function RipsExportPage() {
 
       <div className="card space-y-4">
         <h2 className="text-base font-semibold text-slate-800">
-          2. Datos de facturación y exportar
+          2. Exportar
         </h2>
         <RipsExportForm
           sources={sources}

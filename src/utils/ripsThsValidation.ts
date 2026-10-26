@@ -27,7 +27,7 @@ export function validateThsConsultationCupsMatch(
     return {
       valid: false,
       message:
-        'Configure la especialidad THS del profesional en su perfil o en el formulario RIPS antes de radicar.',
+        'Configure la especialidad THS del profesional en su perfil antes de radicar.',
     }
   }
 

@@ -18,14 +18,7 @@ import {
 } from '@/utils'
 import { userProfileToOrganizationId } from '@/utils/organizationId'
 import { DEFAULT_ODONTOLOGY_CONSULTATION_CUPS } from '@/constants/rips'
-import {
-  ODONTOLOGY_THS_SPECIALTIES,
-  RIPS_CONSULTATION_VISIT_TYPE_LABELS,
-  resolveConsultationCupsForThs,
-  type OdontologyThsSpecialtyId,
-  type RipsConsultationVisitType,
-} from '@/constants/ripsThsSpecialty'
-import { formatCupsCodeDotted } from '@/services/catalogService'
+import { buildRipsMetadataFromInvoice } from '@/services/invoiceService'
 import {
   checkRipsApiHealth,
   downloadDianXml,
@@ -183,53 +176,44 @@ export function RipsExportForm({
     if (invoices === undefined) return
     const suggested = pickInvoiceNumberForRips(sources, invoices)
     if (!suggested) return
+    const matched = invoices.find((invoice) => invoice.invoiceNumber?.trim() === suggested)
+    const fromInvoice = matched ? buildRipsMetadataFromInvoice(matched, professional) : null
     setMetadata((prev) => {
-      if (prev.numFactura === suggested) return prev
-      return {
+      const next = {
         ...prev,
         numFactura: suggested,
         fevReferencia: prev.fevReferencia?.trim() ? prev.fevReferencia : suggested,
         perfilFiscal,
-        esRipsTemporal: false,
+        esRipsTemporal: false as const,
+        ...(fromInvoice
+          ? {
+              conceptoRecaudo: fromInvoice.conceptoRecaudo,
+              valorPagoModerador: fromInvoice.valorPagoModerador,
+              numFEVPagoModerador: fromInvoice.numFEVPagoModerador,
+              vrConsulta: fromInvoice.vrConsulta,
+              codPrestador: prev.codPrestador.trim() || fromInvoice.codPrestador,
+              numDocumentoIdObligado:
+                prev.numDocumentoIdObligado.trim() || fromInvoice.numDocumentoIdObligado,
+            }
+          : {}),
       }
-    })
-  }, [invoices, sources, sourceKey, noObligado, perfilFiscal])
-
-  const update = (patch: Partial<RipsExportMetadata>) => {
-    setMetadata((prev) => {
-      const next = { ...prev, ...patch }
-      const specialty = next.thsSpecialty ?? professional.thsSpecialty ?? 'odontologia_general'
-      const visitType = next.tipoConsulta ?? prev.tipoConsulta ?? 'primera_vez'
-
-      if (patch.thsSpecialty !== undefined || patch.tipoConsulta !== undefined) {
-        if (
-          visitType === 'urgencias' &&
-          specialty !== 'odontologia_general'
-        ) {
-          next.tipoConsulta = 'primera_vez'
-        }
-        const effectiveVisitType = next.tipoConsulta ?? visitType
-        const resolved = resolveConsultationCupsForThs(specialty, effectiveVisitType)
-        if (resolved) {
-          next.codConsultaOdontologia = resolved
-        }
+      if (
+        next.numFactura === prev.numFactura &&
+        next.fevReferencia === prev.fevReferencia &&
+        next.perfilFiscal === prev.perfilFiscal &&
+        next.esRipsTemporal === prev.esRipsTemporal &&
+        next.conceptoRecaudo === prev.conceptoRecaudo &&
+        next.valorPagoModerador === prev.valorPagoModerador &&
+        next.numFEVPagoModerador === prev.numFEVPagoModerador &&
+        next.vrConsulta === prev.vrConsulta &&
+        next.codPrestador === prev.codPrestador &&
+        next.numDocumentoIdObligado === prev.numDocumentoIdObligado
+      ) {
+        return prev
       }
-
       return next
     })
-    setExported(false)
-    setCuvResult(null)
-    setMinistryErrors([])
-    setValidateMessage('')
-  }
-
-  const thsSpecialty = metadata.thsSpecialty ?? professional.thsSpecialty ?? 'odontologia_general'
-  const visitType = metadata.tipoConsulta ?? 'primera_vez'
-  const expectedConsultaCups =
-    resolveConsultationCupsForThs(thsSpecialty, visitType) ??
-    metadata.codConsultaOdontologia ??
-    DEFAULT_ODONTOLOGY_CONSULTATION_CUPS
-  const urgenciasDisabled = thsSpecialty !== 'odontologia_general'
+  }, [invoices, sources, sourceKey, noObligado, perfilFiscal, professional])
 
   const handleExport = () => {
     if (!canExport) return
@@ -385,169 +369,6 @@ export function RipsExportForm({
             consecutiva y la transmisión continúan sin interrupción.
           </p>
         )}
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label className="label-field">NIT prestador (obligado a reportar)</label>
-          <input
-            value={metadata.numDocumentoIdObligado}
-            onChange={(e) => update({ numDocumentoIdObligado: e.target.value })}
-            placeholder="900123456"
-            className="input-field font-mono"
-          />
-        </div>
-        <div>
-          <label className="label-field">Nº factura electrónica (FEV)</label>
-          <input
-            value={metadata.numFactura ?? ''}
-            disabled={noObligado}
-            onChange={(e) => {
-              invoiceTouchedRef.current = true
-              update({ numFactura: e.target.value.trim() ? e.target.value : null })
-            }}
-            placeholder={noObligado ? 'null — No obligado a FEV' : 'FV12345'}
-            className="input-field font-mono"
-          />
-          <p className="mt-1 text-[10px] text-slate-500">
-            {noObligado
-              ? 'Perfil No_Obligado: el JSON RIPS se almacena y radica con numFactura en null.'
-              : 'Formato Prefijo + Número (sin espacios ni guiones). Debe coincidir 1:1 con la FEV DIAN.'}
-            {!noObligado && metadata.numFactura
-              ? ' Si hay factura electrónica del paciente, se completa sola.'
-              : ''}
-          </p>
-        </div>
-        <div>
-          <label className="label-field">Referencia FEV (validación 1:1)</label>
-          <input
-            value={metadata.fevReferencia ?? ''}
-            onChange={(e) => update({ fevReferencia: e.target.value || undefined })}
-            placeholder={metadata.numFactura || 'Igual que numFactura'}
-            className="input-field font-mono"
-          />
-        </div>
-        <div>
-          <label className="label-field">Código REPS prestador</label>
-          <input
-            value={metadata.codPrestador}
-            onChange={(e) => update({ codPrestador: e.target.value })}
-            placeholder="6800103898-01"
-            className="input-field font-mono"
-          />
-          <p className="mt-1 text-[10px] text-slate-500">
-            12 dígitos REPS de la sede (ej. 6800103898-01 → 680010389801 en el JSON).
-          </p>
-        </div>
-        <div>
-          <label className="label-field">Inicio vigencia convenio</label>
-          <input
-            type="date"
-            value={metadata.convenioFechaInicio ?? ''}
-            onChange={(e) => update({ convenioFechaInicio: e.target.value || undefined })}
-            className="input-field"
-          />
-          <p className="mt-1 text-[10px] text-slate-500">
-            Las fechas de atención no pueden ser anteriores a esta fecha.
-          </p>
-        </div>
-        <div>
-          <label className="label-field">Especialidad THS (REPS)</label>
-          <select
-            value={thsSpecialty}
-            onChange={(e) =>
-              update({ thsSpecialty: e.target.value as OdontologyThsSpecialtyId })
-            }
-            className="input-field"
-          >
-            {ODONTOLOGY_THS_SPECIALTIES.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-[10px] text-slate-500">
-            Debe coincidir con la especialidad habilitada del profesional en REPS para el MUV.
-            Un odontólogo general que emita consulta 89.0.2.22 (ortodoncia) sin parametrizar la
-            especialidad generará rechazo en el validador.
-          </p>
-        </div>
-        <div>
-          <label className="label-field">Tipo de consulta</label>
-          <select
-            value={visitType}
-            onChange={(e) =>
-              update({ tipoConsulta: e.target.value as RipsConsultationVisitType })
-            }
-            className="input-field"
-          >
-            {(Object.keys(RIPS_CONSULTATION_VISIT_TYPE_LABELS) as RipsConsultationVisitType[]).map(
-              (type) => (
-                <option key={type} value={type} disabled={type === 'urgencias' && urgenciasDisabled}>
-                  {RIPS_CONSULTATION_VISIT_TYPE_LABELS[type]}
-                  {type === 'urgencias' && urgenciasDisabled ? ' (solo odontología general)' : ''}
-                </option>
-              ),
-            )}
-          </select>
-        </div>
-        <div>
-          <label className="label-field">CUPS consulta odontológica</label>
-          <input
-            value={metadata.codConsultaOdontologia ?? expectedConsultaCups}
-            onChange={(e) => update({ codConsultaOdontologia: e.target.value })}
-            className="input-field font-mono"
-          />
-          <p className="mt-1 text-[10px] text-slate-500">
-            CUPS esperado para MUV:{' '}
-            <span className="font-mono font-semibold">
-              {formatCupsCodeDotted(expectedConsultaCups)} ({expectedConsultaCups})
-            </span>
-          </p>
-        </div>
-        <div>
-          <label className="label-field">Valor consulta (COP)</label>
-          <input
-            type="number"
-            min={0}
-            value={metadata.vrConsulta ?? 0}
-            onChange={(e) => update({ vrConsulta: Number(e.target.value) })}
-            className="input-field"
-          />
-        </div>
-        <div>
-          <label className="label-field">Concepto de recaudo</label>
-          <select
-            value={metadata.conceptoRecaudo ?? '05'}
-            onChange={(e) => update({ conceptoRecaudo: e.target.value })}
-            className="input-field"
-          >
-            <option value="01">Copago</option>
-            <option value="02">Cuota moderadora</option>
-            <option value="03">Pagos compartidos</option>
-            <option value="04">Anticipo</option>
-            <option value="05">No aplica</option>
-          </select>
-        </div>
-        <div>
-          <label className="label-field">Valor pago moderador</label>
-          <input
-            type="number"
-            min={0}
-            value={metadata.valorPagoModerador ?? 0}
-            onChange={(e) => update({ valorPagoModerador: Number(e.target.value) })}
-            className="input-field"
-          />
-        </div>
-        <div>
-          <label className="label-field">Nº FEV pago moderador</label>
-          <input
-            value={metadata.numFEVPagoModerador ?? ''}
-            onChange={(e) => update({ numFEVPagoModerador: e.target.value || null })}
-            placeholder="Opcional"
-            className="input-field font-mono"
-          />
-        </div>
       </div>
 
       {result.issues.length > 0 && (
