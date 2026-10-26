@@ -182,7 +182,7 @@ export function RipsExportForm({
       const next = {
         ...prev,
         numFactura: suggested,
-        fevReferencia: prev.fevReferencia?.trim() ? prev.fevReferencia : suggested,
+        fevReferencia: suggested,
         perfilFiscal,
         esRipsTemporal: false as const,
         ...(fromInvoice
