@@ -76,6 +76,7 @@ import {
 import type { UserProfile } from '@/types/user'
 import { REGIME_TYPES } from '@/constants/dental'
 import { formatDate } from './crypto'
+import { etiquetaFechaHoraSesion } from './clinicDateTime'
 import { openPortabilityHtmlForPrint } from './portabilityHtml'
 import { differenceInYears } from 'date-fns'
 
@@ -804,7 +805,7 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
           : '<div style="height:48px;border-bottom:1px solid #94a3b8"></div>'
 
       return `<tr>
-          <td>${formatDate(note.date || note.createdAt)}</td>
+          <td>${escapeHtml(etiquetaFechaHoraSesion(note.date || note.createdAt))}</td>
           <td>${serviceLabel}</td>
           <td>${noteOrRx}</td>
           <td>${escapeHtml(note.professionalName)}</td>

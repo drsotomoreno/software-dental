@@ -4,6 +4,10 @@ import {
   createDefaultEvolutionNoteRipsMetadata,
   type EvolutionNoteRipsMetadata,
 } from '@/types/evolutionNoteRips'
+import {
+  fechaHoraSesionClinica,
+  fechaSesionClinicaSiEraUtc,
+} from '@/utils/clinicDateTime'
 
 /** Parche de la nota. La metadata RIPS puede ir incompleta: se fusiona con la actual. */
 export type EvolutionNotePatch = Omit<Partial<EvolutionNote>, 'ripsMetadata'> & {
@@ -168,10 +172,11 @@ export function createEmptyEvolutionNote(
   professionalLicense = '',
   authorUserId = '',
   authorEmail = '',
+  now: Date = new Date(),
 ): EvolutionNote {
   return {
     id: crypto.randomUUID(),
-    date: new Date().toISOString().slice(0, 16),
+    date: fechaHoraSesionClinica(now),
     procedure: '',
     anesthesia: { type: '', carpules: 0, vasoconstrictor: '' },
     prescriptions: '',
@@ -179,7 +184,7 @@ export function createEmptyEvolutionNote(
     professionalLicense,
     authorUserId: authorUserId || undefined,
     authorEmail: authorEmail || undefined,
-    createdAt: new Date().toISOString(),
+    createdAt: now.toISOString(),
     catalogServices: [],
     kind: 'evolution',
     isLocked: false,
@@ -193,6 +198,34 @@ export function createEmptyEvolutionNote(
     workflowStatus: 'DRAFT',
     ripsMetadata: createDefaultEvolutionNoteRipsMetadata(),
   }
+}
+
+/**
+ * El sello automático anterior guardó el reloj UTC en `date`. En un borrador
+ * que nadie ha corregido, se restituye la hora de Bogotá de `createdAt`.
+ * Una nota firmada no se toca: esa hora ya entra en el SHA-256.
+ */
+export function corregirFechaSesionClinica<
+  T extends Pick<EvolutionNote, 'date' | 'createdAt' | 'isLocked' | 'signedAt' | 'contentHash'>,
+>(note: T): T {
+  if (isEvolutionNoteImmutable(note)) return note
+  const corrected = fechaSesionClinicaSiEraUtc(note.date, note.createdAt)
+  if (!corrected) return note
+  return { ...note, date: corrected }
+}
+
+export function corregirFechasSesionClinica<
+  T extends Pick<EvolutionNote, 'date' | 'createdAt' | 'isLocked' | 'signedAt' | 'contentHash'>,
+>(notes: readonly T[] | null | undefined): T[] {
+  const list = notes ?? []
+  let changed = false
+  const next = list.map((note) => {
+    const fixed = corregirFechaSesionClinica(note)
+    if (fixed !== note) changed = true
+    return fixed
+  })
+  if (!changed) return Array.isArray(notes) ? (notes as T[]) : []
+  return next
 }
 
 export function createEmptyCatalogService(): EvolutionCatalogService {

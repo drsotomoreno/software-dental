@@ -75,7 +75,7 @@ import {
   finalizeEvolutionNote,
 } from '@/services/evolutionNoteService'
 import { reportarAtencionCerradaAlMuv } from '@/services/finalizarConsultaMuv'
-import { isEvolutionNoteImmutable } from '@/types/evolutionNote'
+import { corregirFechasSesionClinica, isEvolutionNoteImmutable } from '@/types/evolutionNote'
 import { validateEvolutionNote } from '@/utils/evolutionNoteValidation'
 import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
 import type { RipsShieldMismatch } from '@/types/consultationCheckout'
@@ -83,6 +83,7 @@ import { RipsShieldModal } from '@/components/rips/RipsShieldModal'
 import {
   clearPatientClinicalDraft,
   getPatientClinicalDraft,
+  persistCorrectedEvolutionSessionClocks,
   savePatientValuationDraft,
 } from '@/utils/patientClinicalDraft'
 import { isRemoteDraftNewer } from '@/utils/clinicalDraftMerge'
@@ -512,6 +513,25 @@ export function PatientDetailPage() {
             }
           } catch {
             // Borrador opcional: no bloquear la carga de la historia.
+          }
+        }
+
+        const originalNotes = base.evolutionNotes ?? []
+        const evolutionNotes = corregirFechasSesionClinica(originalNotes)
+        if (evolutionNotes !== originalNotes) {
+          base = {
+            ...base,
+            evolutionNotes: sortEvolutionNotesChronologically(evolutionNotes),
+          }
+        }
+
+        if (cancelled) return
+
+        if (evolutionNotes !== originalNotes && patientForeignKey) {
+          try {
+            await persistCorrectedEvolutionSessionClocks(patientForeignKey)
+          } catch {
+            // La pantalla ya muestra la hora de Bogotá; el próximo guardado la persiste.
           }
         }
 

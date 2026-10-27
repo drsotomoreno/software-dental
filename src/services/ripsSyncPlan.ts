@@ -4,6 +4,8 @@
  * no sale: el MUV lo radicaría como atención particular.
  */
 
+import { fechaHoraSesionClinica } from '../utils/clinicDateTime.ts'
+
 export const RIPS_BATCH_LIMIT = 200
 export const RIPS_SYNC_STALE_MS = 20 * 60 * 1000
 
@@ -35,17 +37,10 @@ export type RipsSyncDecision =
   | { kind: 'synchronized'; cuv: string }
   | { kind: 'retry'; errors: RipsSyncError[] }
 
-const ZONA_CLINICA = 'America/Bogota'
-
 export function fechaClinica(iso: string | Date): string {
   const date = iso instanceof Date ? iso : new Date(iso)
   if (Number.isNaN(date.getTime())) return ''
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: ZONA_CLINICA,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date)
+  return fechaHoraSesionClinica(date).slice(0, 10)
 }
 
 export function esMismoDiaClinico(iso: string, ahora: Date = new Date()): boolean {

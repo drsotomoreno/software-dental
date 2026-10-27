@@ -37,7 +37,10 @@ import {
   createEmptyClinicalDiagnosticChart,
   normalizeClinicalDiagnosticChart,
 } from '@/types/clinicalDiagnosticChart'
-import type { EvolutionNote } from '@/types/evolutionNote'
+import {
+  corregirFechasSesionClinica,
+  type EvolutionNote,
+} from '@/types/evolutionNote'
 import type { InformedConsent } from '@/types/consent'
 import type { UserProfile } from '@/types/user'
 import type { SignatureCaptureResult } from '@/types/signature'
@@ -163,6 +166,7 @@ export function ClinicalHistoryForm({
       ...initialData,
       anamnesis: normalizeAnamnesis({ ...emptyForm.anamnesis, ...initialData?.anamnesis }),
       diagnosticChart: normalizeClinicalDiagnosticChart(initialData?.diagnosticChart),
+      evolutionNotes: corregirFechasSesionClinica(initialData?.evolutionNotes),
     }
     try {
       return syncClinicalDataFromAnnexes(base)
@@ -198,6 +202,7 @@ export function ClinicalHistoryForm({
       ...initialData,
       anamnesis: normalizeAnamnesis({ ...emptyForm.anamnesis, ...initialData?.anamnesis }),
       diagnosticChart: normalizeClinicalDiagnosticChart(initialData?.diagnosticChart),
+      evolutionNotes: corregirFechasSesionClinica(initialData?.evolutionNotes),
     }
 
     try {
