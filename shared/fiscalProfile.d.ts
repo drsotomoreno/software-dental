@@ -7,6 +7,8 @@ export const PERFIL_FISCAL_NO_OBLIGADO_NOTICE: string
 export const UVT_2026_VALUE_COP: number
 export const UVT_OBLIGADO_FEV_THRESHOLD: number
 export const UVT_OBLIGADO_FEV_AMOUNT_COP: number
+export const UVT_2026_EDUCATION_INTRO: string
+export const UVT_2026_EDUCATION_REQUIREMENTS: Array<{ label: string; text: string }>
 export const UVT_2026_EDUCATION_BANNER: string
 export const PERFIL_FISCAL_OPTIONS: Array<{
   id: FiscalProfile

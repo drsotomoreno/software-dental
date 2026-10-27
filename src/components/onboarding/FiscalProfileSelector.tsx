@@ -45,7 +45,9 @@ export function FiscalProfileSelector({
             <LegalTooltip topic="fev" />
           </p>
           <p className="mt-1 text-sm text-slate-600">{description}</p>
-          <p className="mt-2 text-xs leading-relaxed text-slate-500">{UVT_2026_EDUCATION_BANNER}</p>
+          <p className="mt-2 whitespace-pre-line text-sm font-semibold leading-relaxed text-slate-700">
+            {UVT_2026_EDUCATION_BANNER}
+          </p>
         </div>
       </div>
 
