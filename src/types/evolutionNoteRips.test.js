@@ -8,6 +8,7 @@ import {
   applyEvolutionNoteRipsMetadata,
   backfillEvolutionNotesRipsMetadata,
   createDefaultEvolutionNoteRipsMetadata,
+  esVinculoSinFacturaElectronica,
   isRipsMetadataOnlyPatch,
   omitEvolutionNoteRipsMetadata,
 } from './evolutionNoteRips.ts'
@@ -237,4 +238,31 @@ test('la migración de notas existentes solo completa la metadata ausente', () =
   assert.equal(notes[0].ripsMetadata.ripsEstado, 'sin_preparar')
   assert.equal(notes[0].procedure, 'Control')
   assert.equal(notes[1].ripsMetadata, custom)
+})
+
+test('el recibo interno no pide factura aunque la nota firmada siga marcada como cobrable', () => {
+  assert.equal(
+    esVinculoSinFacturaElectronica({
+      cost: 200000,
+      isBillable: true,
+      ripsMetadata: { tipoVinculacionFinanciera: 'recibo_interno' },
+    }),
+    true,
+  )
+  assert.equal(
+    esVinculoSinFacturaElectronica({
+      cost: 200000,
+      isBillable: true,
+      ripsMetadata: { tipoVinculacionFinanciera: 'fev' },
+    }),
+    false,
+  )
+  assert.equal(
+    esVinculoSinFacturaElectronica({
+      cost: 200000,
+      isBillable: true,
+      ripsMetadata: { tipoVinculacionFinanciera: 'valor_cero' },
+    }),
+    false,
+  )
 })

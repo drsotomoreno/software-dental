@@ -190,20 +190,34 @@ test('un código punteado junto a «cap. 39» no se convierte en los últimos se
   assert.equal(rips.usuarios[0].servicios.procedimientos[0].codProcedimiento, '391402')
 })
 
-test('el recibo interno queda en el soporte de la línea y numFactura sigue vacío', () => {
+test('el recibo interno no pide factura aunque el soporte tenga número FV', () => {
   const rips = armarRipsNotaEvolucion({
     ...base,
-    numeroSoporte: 'RC-12',
+    numeroSoporte: 'FV00000002',
     note: notaFirmada({
-      numeroSoportePago: 'RC-12',
+      cost: 200000,
+      isBillable: true,
+      numeroSoportePago: 'FV00000002',
+      catalogServices: [
+        {
+          id: 's1',
+          procedure: 'Exodoncia de dientes permanentes',
+          cupsCode: '230103',
+          requiereCupsRips: true,
+          cost: 200000,
+        },
+      ],
       ripsMetadata: {
         ...notaFirmada().ripsMetadata,
         tipoVinculacionFinanciera: 'recibo_interno',
         idFacturaElectronica: null,
-        idReciboAsociado: 'pago-12',
+        idReciboAsociado: 'pago-2',
       },
     }),
   })
   assert.equal(rips.numFactura, null)
-  assert.equal(rips.usuarios[0].servicios.procedimientos[0].numFEVPagoModerador, 'RC-12')
+  const procedimiento = rips.usuarios[0].servicios.procedimientos[0]
+  assert.equal(procedimiento.numFEVPagoModerador, null)
+  assert.equal(procedimiento.vrServicio, 200000)
+  assert.equal(JSON.stringify(rips).includes('FV00000002'), false)
 })

@@ -22,6 +22,14 @@ import {
   resolveEvolutionNoteRipsMode,
 } from '@/utils/evolutionCatalogServices'
 
+function marcaRipsSinFev(note: EvolutionNote): string | null {
+  const tipo = note.ripsMetadata?.tipoVinculacionFinanciera
+  if (tipo === 'fev') return null
+  if (tipo === 'recibo_interno') return 'RIPS sin FEV'
+  if (tipo === 'valor_cero' || note.isBillable === false) return 'RIPS $0 — sin FEV'
+  return null
+}
+
 function etiquetaProcedimientoCups(procedure: string, cupsCode?: string | null): string {
   if (cupsExplicitosDeTexto(procedure).length > 0) return procedure
   const resolved = resolverProcedimientoCups(cupsCode) ?? resolverProcedimientoCups(procedure)
@@ -161,6 +169,7 @@ export function EvolutionNoteCard({
   const showRipsCollection = !isAddendum && ripsMode !== 'non_rips'
   const clinicalLocked = disabled || readOnly
   const procedimientoVisible = etiquetaProcedimientoCups(note.procedure, note.cupsCode)
+  const marcaSinFev = marcaRipsSinFev(note)
 
   return (
     <div
@@ -197,9 +206,9 @@ export function EvolutionNoteCard({
               Sin reporte RIPS
             </span>
           )}
-          {!nonRips && note.isBillable === false && (
+          {!nonRips && marcaSinFev && (
             <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800">
-              RIPS $0 — sin FEV
+              {marcaSinFev}
             </span>
           )}
         </div>

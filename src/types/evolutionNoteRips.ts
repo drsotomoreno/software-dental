@@ -200,6 +200,21 @@ type NotaConRipsMetadata = {
   estadoRips?: string | null
 }
 
+/**
+ * Recibo de caja interno: hay tarifa y RIPS, pero no hay factura electrónica.
+ * `valor_cero` solo cuenta como sin factura cuando la atención no tiene cobro;
+ * el relleno automático de notas viejas deja `valor_cero` aunque sigan siendo facturables.
+ */
+export function esVinculoSinFacturaElectronica(note: NotaConRipsMetadata): boolean {
+  const tipo = note.ripsMetadata?.tipoVinculacionFinanciera
+  if (tipo === 'fev') return false
+  if (tipo === 'recibo_interno') return true
+  if (tipo === 'valor_cero') {
+    return (note.cost ?? 0) === 0 || note.isBillable === false || note.estadoRips === 'SIN_COSTO'
+  }
+  return note.isBillable === false || note.estadoRips === 'SIN_COSTO'
+}
+
 /** Una nota con tarifa no nace como control de $0 al guardar el primer CIE-10. */
 function vinculoInicial(note: NotaConRipsMetadata): Partial<EvolutionNoteRipsMetadata> {
   if (note.ripsMetadata) return {}
