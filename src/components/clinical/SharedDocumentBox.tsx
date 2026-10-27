@@ -111,10 +111,10 @@ export function SharedDocumentBox({
   return (
     <article className="mt-6 rounded-xl border border-dental-200 bg-white p-4 shadow-sm print:hidden">
       <header className="mb-4">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-dental-700">
-          Mismo número de comprobante
-        </p>
-        <h4 className="text-sm font-semibold text-slate-900">
+        <h3 className="text-xl font-bold text-dental-800">
+          Agrupar Multiples Procedimientos en un Solo Pago
+        </h3>
+        <h4 className="mt-1 text-sm font-semibold text-slate-900">
           Varios procedimientos en una FEV o en un recibo de caja interno
         </h4>
         <p className="mt-1 text-xs text-slate-500">
