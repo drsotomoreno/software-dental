@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
+import { isMinsaludSandbox, readMinsaludEnv } from './services/minsaludEnv.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const port = Number(process.env.PORT) || 3000
@@ -31,15 +32,15 @@ export const config = {
   databaseUrl: DATABASE_URL,
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   minsalud: {
-    sandbox: process.env.MINSALUD_SANDBOX !== 'false',
-    apiBaseUrl: (process.env.MINSALUD_API_BASE_URL ?? '').replace(/\/$/, ''),
-    authUrl: process.env.MINSALUD_AUTH_URL ?? '',
-    validatePath: process.env.MINSALUD_VALIDATE_URL ?? '/api/v1/rips/validar',
-    clientId: process.env.MINSALUD_CLIENT_ID ?? '',
-    clientSecret: process.env.MINSALUD_CLIENT_SECRET ?? '',
-    username: process.env.MINSALUD_USERNAME ?? '',
-    password: process.env.MINSALUD_PASSWORD ?? '',
-    nit: process.env.MINSALUD_NIT ?? '',
+    sandbox: isMinsaludSandbox(process.env),
+    apiBaseUrl: readMinsaludEnv(process.env, 'MINSALUD_API_BASE_URL').replace(/\/$/, ''),
+    authUrl: readMinsaludEnv(process.env, 'MINSALUD_AUTH_URL'),
+    validatePath: readMinsaludEnv(process.env, 'MINSALUD_VALIDATE_URL') || '/api/v1/rips/validar',
+    clientId: readMinsaludEnv(process.env, 'MINSALUD_CLIENT_ID'),
+    clientSecret: readMinsaludEnv(process.env, 'MINSALUD_CLIENT_SECRET'),
+    username: readMinsaludEnv(process.env, 'MINSALUD_USERNAME'),
+    password: readMinsaludEnv(process.env, 'MINSALUD_PASSWORD'),
+    nit: readMinsaludEnv(process.env, 'MINSALUD_NIT').replace(/\D/g, ''),
   },
   dian: {
     softwareId: process.env.DIAN_SOFTWARE_ID ?? 'SOFTWARE-DENTAL-EMR',
@@ -76,13 +77,16 @@ export const config = {
   },
 }
 
-/** Credenciales completas para modo producción contra el API del ministerio. */
+/**
+ * Hay credenciales del ministerio si está el trío SISPRO (usuario, clave y NIT)
+ * o el par OAuth con URL base. El NIT no exige MINSALUD_API_BASE_URL: el host
+ * sale de MINSALUD_SANDBOX.
+ */
 export function hasMinsaludCredentials() {
-  const { clientId, clientSecret, username, password, apiBaseUrl } = config.minsalud
-  return Boolean(
-    apiBaseUrl &&
-      ((clientId && clientSecret) || (username && password)),
-  )
+  const { clientId, clientSecret, username, password, apiBaseUrl, nit } = config.minsalud
+  const sispro = Boolean(username && password && String(nit ?? '').replace(/\D/g, ''))
+  const oauth = Boolean(apiBaseUrl && clientId && clientSecret)
+  return sispro || oauth
 }
 
 export default config
