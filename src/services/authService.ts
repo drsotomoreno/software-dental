@@ -20,7 +20,7 @@ import {
   mapApiUserToAuthUser,
 } from '@/services/apiAuthService'
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
-import { checkUserLimits, userLimitMessage } from '../../shared/subscriptionPlans.js'
+import { checkRethusLimit, hasRethusCode, userLimitMessage } from '../../shared/subscriptionPlans.js'
 import {
   createClinicMember,
   deleteClinicMember,
@@ -273,14 +273,18 @@ async function requireUserManager(): Promise<
   return { ok: true, actorRole: actor.role ?? 'admin' }
 }
 
-function localRoleError(
+function localRethusError(
   members: UserProfile[],
-  account: Parameters<typeof checkUserLimits>[0],
-  isAssistant: boolean,
+  account: Parameters<typeof checkRethusLimit>[0],
+  candidate: { rethusNumber?: string | null },
 ): string | null {
-  const active = members.filter((item) => item.accessEnabled !== false)
-  const current = active.filter((item) => (item.role === 'recepcion') === isAssistant).length
-  return userLimitMessage(checkUserLimits(account, isAssistant, current))
+  if (!hasRethusCode(candidate)) return null
+  const current = members.filter((item) => hasRethusCode(item)).length
+  try {
+    return userLimitMessage(checkRethusLimit(account, current))
+  } catch (error) {
+    return error instanceof Error ? error.message : 'Plan de suscripción inválido'
+  }
 }
 
 function staffPhoneDigits(value: string | undefined): string {
@@ -415,8 +419,10 @@ export async function createAppUser(
   const members = clinicId
     ? allUsers.filter((item) => String(item.clinicId || item.id) === String(clinicId))
     : allUsers
-  const roleError = localRoleError(members, apiAuth?.user ?? {}, isAuxiliar)
-  if (roleError) return { ok: false, error: roleError }
+  const rethusError = localRethusError(members, apiAuth?.user ?? {}, {
+    rethusNumber: isAuxiliar ? '' : data.rethusNumber,
+  })
+  if (rethusError) return { ok: false, error: rethusError }
 
   const user: UserProfile = {
     id: data.id ?? generateId(),
@@ -529,17 +535,17 @@ export async function updateAppUser(
   }
   if (!current) return { ok: false, error: 'Usuario no encontrado.' }
 
-  if (
-    current.accessEnabled !== false &&
-    (current.role === 'recepcion') !== (nextRole === 'recepcion')
-  ) {
+  const nextRethus = nextPatch.rethusNumber !== undefined
+    ? nextPatch.rethusNumber
+    : current.rethusNumber
+  if (!hasRethusCode(current) && hasRethusCode({ rethusNumber: nextRethus })) {
     const { apiAuth } = currentClinicScope()
-    const roleError = localRoleError(
+    const rethusError = localRethusError(
       await localClinicMembers(current),
       apiAuth?.user ?? {},
-      nextRole === 'recepcion',
+      { rethusNumber: nextRethus },
     )
-    if (roleError) return { ok: false, error: roleError }
+    if (rethusError) return { ok: false, error: rethusError }
   }
 
   await db.users.update(userId, nextPatch)
@@ -574,16 +580,6 @@ export async function resetAppUserPassword(
 
   const user = await db.users.get(userId)
   if (!user) return { ok: false, error: 'Usuario no encontrado.' }
-
-  if (user.accessEnabled === false) {
-    const { apiAuth } = currentClinicScope()
-    const roleError = localRoleError(
-      await localClinicMembers(user),
-      apiAuth?.user ?? {},
-      user.role === 'recepcion',
-    )
-    if (roleError) return { ok: false, error: roleError }
-  }
 
   await seedUserCredentials(userId, newPassword)
   await db.users.update(userId, { accessEnabled: true })

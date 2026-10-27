@@ -4,7 +4,9 @@ import {
   PLAN_LIMITS,
   applyClinicAssistantLookup,
   checkRepsLimit,
+  checkRethusLimit,
   checkUserLimits,
+  hasRethusCode,
   snapshotLimitError,
   userLimitMessage,
 } from './subscriptionPlans.js'
@@ -61,6 +63,32 @@ test('la fila de clinics pisa custom_max_rethus', () => {
   })
   assert.equal(checkUserLimits(fromRow, false, 2).canAdd, false)
   assert.equal(checkUserLimits(fromRow, false, 1).canAdd, true)
+})
+
+test('checkRethusLimit cuenta códigos y rechaza clínica o plan inválidos', () => {
+  const smart = { subscription_plan: 'smart', estado_pago: 'activo' }
+  assert.equal(checkRethusLimit(smart, 3).canAdd, true)
+  assert.deepEqual(checkRethusLimit(smart, 4), {
+    canAdd: false,
+    current: 4,
+    limit: 4,
+    planName: 'Plan Smart',
+  })
+  assert.equal(
+    checkRethusLimit({ subscription_plan: 'corporativo', estado_pago: 'activo', custom_max_rethus: null }, 0).limit,
+    0,
+  )
+  assert.equal(checkRethusLimit({ plan: 'nomad', estado_pago: 'prueba' }, 0).limit, 1)
+  assert.equal(checkRethusLimit({ plan: 'nomad', estado_pago: 'exento' }, 9).canAdd, true)
+  assert.equal(checkRethusLimit({ rol: 'superadmin' }, 9).limit, null)
+  assert.equal(hasRethusCode({ rethusNumber: '' }), false)
+  assert.equal(hasRethusCode({ rethus_code: '   ' }), false)
+  assert.equal(hasRethusCode({ rethusNumber: '438265' }), true)
+  assert.throws(() => checkRethusLimit(null, 0), /Clínica no encontrada/)
+  assert.throws(
+    () => checkRethusLimit({ subscription_plan: 'pendiente', estado_pago: 'pendiente' }, 0),
+    /Plan de suscripción inválido/,
+  )
 })
 
 test('el mensaje nombra profesionales ReTHUS o la sede REPS', () => {

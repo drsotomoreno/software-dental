@@ -12,9 +12,9 @@ import {
   TTC_MESSAGE_PACKAGES,
   planDisplayName,
   applyClinicAssistantLookup,
-  checkUserLimits,
+  checkRethusLimit,
   checkRepsLimit,
-  snapshotLimitError,
+  hasRethusCode,
   userLimitMessage,
   normalizeCustomMaxAssistants,
 } from '../../shared/subscriptionPlans.js'
@@ -1472,6 +1472,13 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
   if (!repsCap.canAdd) {
     return { ok: false, status: 403, error: userLimitMessage(repsCap) }
   }
+  if (!hasRethusCode(current) && hasRethusCode({ rethusNumber })) {
+    const rethusLookup = await readClinicAssistantLimit(clinicIdForReps)
+    const rethusAccount = applyClinicAssistantLookup(repsOwner, rethusLookup)
+    const rethusUsed = usersInClinic(store, clinicIdForReps).filter(hasRethusCode).length
+    const rethusError = rethusGainError(rethusAccount, rethusUsed)
+    if (rethusError) return rethusError
+  }
 
   if (mustVerifyPrestador) {
     const claimed = await verifyAndClaimPrestador({
@@ -1779,24 +1786,48 @@ function countRoleBuckets(members) {
   const repsCodes = new Set()
   for (const member of members) {
     if (normalizeRole(member.rol) === 'recepcion') assistantsUsed += 1
-    else rethusUsed += 1
+    if (hasRethusCode(member)) rethusUsed += 1
     const digits = repsDigits(member.repsCode)
     if (digits) repsCodes.add(digits)
   }
   return { assistantsUsed, rethusUsed, repsUsed: repsCodes.size }
 }
 
+function rethusGainError(account, currentRethusUsers) {
+  try {
+    const result = checkRethusLimit(account, currentRethusUsers)
+    const error = userLimitMessage(result)
+    if (!error) return null
+    return { ok: false, status: 403, error }
+  } catch (error) {
+    return {
+      ok: false,
+      status: 400,
+      error: error instanceof Error ? error.message : 'Plan de suscripción inválido',
+    }
+  }
+}
+
 async function clinicSeats(store, clinicId) {
   const owner = store.users.find((item) => item.id === clinicId) || null
   const lookup = await readClinicAssistantLimit(clinicId)
   const account = applyClinicAssistantLookup(owner ?? {}, lookup)
-  const members = usersInClinic(store, clinicId).filter(hasClinicAccess)
+  const members = usersInClinic(store, clinicId)
+  const active = members.filter(hasClinicAccess)
   const { assistantsUsed, rethusUsed, repsUsed } = countRoleBuckets(members)
-  const rethus = checkUserLimits(account, false, rethusUsed)
+  let rethus
+  try {
+    rethus = checkRethusLimit(owner ? account : null, rethusUsed)
+  } catch (error) {
+    rethus = {
+      limit: 0,
+      planName: error instanceof Error ? error.message : 'Plan de suscripción inválido',
+    }
+  }
   const reps = checkRepsLimit(account, repsUsed)
   return {
     clinicId,
-    used: members.length,
+    used: active.length,
     max: null,
     assistantsUsed,
     maxAssistants: null,
@@ -1808,12 +1839,6 @@ async function clinicSeats(store, clinicId) {
     planName: rethus.planName || planDisplayName(owner?.plan, owner?.estado_pago),
     estado_pago: owner?.estado_pago ?? null,
   }
-}
-
-function roleCapError(seats, isAssistant) {
-  const error = snapshotLimitError(seats, isAssistant)
-  if (!error) return null
-  return { ok: false, status: 403, error, seats }
 }
 
 function publicClinicUser(user) {
@@ -1918,9 +1943,14 @@ export async function createClinicUser({ token, hint, member }) {
     return { ok: false, status: 404, error: 'No se encontró la cuenta de la clínica.' }
   }
 
-  const seats = await clinicSeats(store, clinicId)
-  const roleError = roleCapError(seats, isAuxiliar)
-  if (roleError) return roleError
+  const nextRethus = isAuxiliar ? '' : String(member?.rethusNumber ?? '').trim()
+  if (hasRethusCode({ rethusNumber: nextRethus })) {
+    const lookup = await readClinicAssistantLimit(clinicId)
+    const account = applyClinicAssistantLookup(owner, lookup)
+    const rethusUsed = usersInClinic(store, clinicId).filter(hasRethusCode).length
+    const rethusError = rethusGainError(account, rethusUsed)
+    if (rethusError) return rethusError
+  }
 
   const duplicateDoc = store.users.find(
     (item) => normalizeDocumentNumber(item.documentNumber) === documentNumber,
@@ -2039,13 +2069,16 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
   }
 
-  const active = hasClinicAccess(current)
-  const wasAssistant = active && normalizeRole(current.rol) === 'recepcion'
-  const willBeAssistant = active && isAuxiliar
-  if (active && wasAssistant !== willBeAssistant) {
-    const seats = await clinicSeats(store, clinicId)
-    const roleError = roleCapError(seats, willBeAssistant)
-    if (roleError) return roleError
+  const nextRethus = incoming.rethusNumber !== undefined
+    ? String(incoming.rethusNumber).trim()
+    : String(current.rethusNumber ?? '')
+  if (!hasRethusCode(current) && hasRethusCode({ rethusNumber: nextRethus })) {
+    const lookup = await readClinicAssistantLimit(clinicId)
+    const owner = store.users.find((item) => item.id === clinicId) || null
+    const account = applyClinicAssistantLookup(owner ?? {}, lookup)
+    const rethusUsed = usersInClinic(store, clinicId).filter(hasRethusCode).length
+    const rethusError = rethusGainError(owner ? account : null, rethusUsed)
+    if (rethusError) return rethusError
   }
 
   store.users[index] = {
@@ -2088,11 +2121,6 @@ export async function resetClinicUserPassword({ token, hint, userId, newPassword
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
   }
   const current = store.users[index]
-  if (!hasClinicAccess(current)) {
-    const seats = await clinicSeats(store, clinicId)
-    const roleError = roleCapError(seats, normalizeRole(current.rol) === 'recepcion')
-    if (roleError) return roleError
-  }
   store.users[index] = {
     ...current,
     passwordHash: hashPasswordSha256(password),

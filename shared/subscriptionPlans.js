@@ -181,28 +181,34 @@ function planDetailsFor(account = {}) {
   return PLAN_LIMITS.prueba
 }
 
+/** Equivale a `rethus_code IS NOT NULL` en la tabla de usuarios. */
+export function hasRethusCode(user) {
+  const value = user?.rethusNumber ?? user?.rethus_code ?? user?.rethusCode
+  return String(value ?? '').trim() !== ''
+}
+
 /**
- * Cupo según el rol que se está creando.
- * Un auxiliar no ocupa cupo ReTHUS.
- * Un profesional se compara con maxRethus. En Corporativo ese valor es custom_max_rethus (vacío = 0).
+ * Cupo de odontólogos con código ReTHUS.
+ * Corporativo lee custom_max_rethus (vacío = 0). Un código vacío no cuenta.
  */
-export function checkUserLimits(account = {}, isAssistant, currentUsers) {
-  const current = Number(currentUsers) || 0
-  const userType = isAssistant ? 'Auxiliares' : 'Profesionales (ReTHUS)'
-  if (isAssistant || isUnlimitedAccount(account)) {
-    return {
-      canAdd: true,
-      current,
-      limit: null,
-      planName: isUnlimitedAccount(account) ? 'Exento' : planDetailsFor(account).name,
-      userType,
-    }
+export function checkRethusLimit(clinic, currentRethusUsers) {
+  if (!clinic || typeof clinic !== 'object') {
+    throw new Error('Clínica no encontrada')
   }
-  const planDetails = planDetailsFor(account)
+  const current = Number(currentRethusUsers) || 0
+  if (isUnlimitedAccount(clinic)) {
+    return { canAdd: true, current, limit: null, planName: 'Exento' }
+  }
+  const estado = String(clinic.estado_pago ?? '').toLowerCase()
+  const planKey = String(clinic.subscription_plan ?? clinic.plan ?? '').trim().toLowerCase()
+  const planDetails = estado === 'prueba' ? PLAN_LIMITS.prueba : PLAN_LIMITS[planKey]
+  if (!planDetails) {
+    throw new Error('Plan de suscripción inválido')
+  }
   let maxAllowed = planDetails.maxRethus
   if (maxAllowed === CUSTOM_PLAN_LIMIT) {
     maxAllowed = normalizeCustomMaxAssistants(
-      account.custom_max_rethus ?? account.customMaxRethus,
+      clinic.custom_max_rethus ?? clinic.customMaxRethus,
     ) || 0
   }
   return {
@@ -210,8 +216,22 @@ export function checkUserLimits(account = {}, isAssistant, currentUsers) {
     current,
     limit: maxAllowed,
     planName: planDetails.name,
-    userType,
   }
+}
+
+/** Un auxiliar, o quien no lleva código ReTHUS, no entra en este cupo. */
+export function checkUserLimits(account = {}, isAssistant, currentUsers) {
+  if (isAssistant) {
+    return {
+      canAdd: true,
+      current: Number(currentUsers) || 0,
+      limit: null,
+      planName: isUnlimitedAccount(account) ? 'Exento' : planDetailsFor(account).name,
+      userType: 'Auxiliares',
+    }
+  }
+  const result = checkRethusLimit(account, currentUsers)
+  return { ...result, userType: 'Profesionales (ReTHUS)' }
 }
 
 /**

@@ -44,6 +44,28 @@ declare module '../../shared/subscriptionPlans.js' {
       custom_max_rethus?: unknown
     } | null,
   ): T
+  export function hasRethusCode(user?: {
+    rethusNumber?: unknown
+    rethus_code?: unknown
+    rethusCode?: unknown
+  } | null): boolean
+  export function checkRethusLimit(
+    clinic: {
+      plan?: string | null
+      subscription_plan?: string | null
+      estado_pago?: string | null
+      rol?: string | null
+      role?: string | null
+      customMaxRethus?: unknown
+      custom_max_rethus?: unknown
+    } | null | undefined,
+    currentRethusUsers: number,
+  ): {
+    canAdd: boolean
+    current: number
+    limit: number | null
+    planName: string
+  }
   export function checkUserLimits(
     account: {
       plan?: string | null

@@ -132,8 +132,9 @@ export function UsersManagementPage() {
       return
     }
     const { password, ...userData } = createForm
-    const creatingAssistant = userData.role === 'recepcion'
-    const limitError = seats ? snapshotLimitError(seats, creatingAssistant) : null
+    const assigningRethus =
+      userData.role !== 'recepcion' && String(userData.rethusNumber ?? '').trim() !== ''
+    const limitError = assigningRethus && seats ? snapshotLimitError(seats, false) : null
     if (limitError) {
       showErr(limitError)
       return
@@ -190,6 +191,15 @@ export function UsersManagementPage() {
     if (!canManage) {
       showErr(USERS_MANAGE_DENIED)
       return
+    }
+    const hadRethus = String(editingUser.rethusNumber ?? '').trim() !== ''
+    const willHaveRethus = String(editForm.rethusNumber ?? '').trim() !== ''
+    if (!hadRethus && willHaveRethus && seats) {
+      const limitError = snapshotLimitError(seats, false)
+      if (limitError) {
+        showErr(limitError)
+        return
+      }
     }
     const result = await updateAppUser(editingUser.id, {
       ...editForm,
@@ -263,14 +273,6 @@ export function UsersManagementPage() {
     if (!canManage) return
     if (u.isClinicOwner) return
     if (assignableRoleValue(u.role) === role) return
-    const switchingBucket = (u.role === 'recepcion') !== (role === 'recepcion')
-    if (switchingBucket && u.accessEnabled !== false && seats) {
-      const limitError = snapshotLimitError(seats, role === 'recepcion')
-      if (limitError) {
-        showErr(limitError)
-        return
-      }
-    }
     const result = await updateAppUser(u.id, { role })
     if (!result.ok) {
       showErr(result.error)
