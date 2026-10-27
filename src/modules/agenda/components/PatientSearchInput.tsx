@@ -1,18 +1,17 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import type { Patient } from '@/types/patient'
 import {
-  formatPatientLabel,
-  formatPatientFullName,
-  searchPatients,
-} from '@/hooks/usePatientsList'
+  formatAgendaPatientLabel,
+  searchAgendaPatients,
+  type AgendaPatientSummary,
+} from '../core/patientDirectory'
 
 interface PatientSearchInputProps {
-  patients: Patient[]
+  patients: AgendaPatientSummary[]
   isLoading?: boolean
   query: string
   selectedPatientId?: string
   onQueryChange: (query: string) => void
-  onSelectPatient: (patient: Patient) => void
+  onSelectPatient: (patient: AgendaPatientSummary) => void
   onClearPatient: () => void
   disabled?: boolean
 }
@@ -34,11 +33,11 @@ export function PatientSearchInput({
   const [activeIndex, setActiveIndex] = useState(-1)
 
   const selectedPatient = useMemo(
-    () => patients.find((patient) => String(patient.id ?? '') === selectedPatientId),
+    () => patients.find((patient) => patient.routeId === selectedPatientId),
     [patients, selectedPatientId],
   )
 
-  const results = useMemo(() => searchPatients(patients, query), [patients, query])
+  const results = useMemo(() => searchAgendaPatients(patients, query), [patients, query])
 
   useEffect(() => {
     setActiveIndex(results.length > 0 ? 0 : -1)
@@ -55,9 +54,9 @@ export function PatientSearchInput({
     return () => document.removeEventListener('mousedown', handlePointerDown)
   }, [])
 
-  const handleSelect = (patient: Patient) => {
+  const handleSelect = (patient: AgendaPatientSummary) => {
     onSelectPatient(patient)
-    onQueryChange(formatPatientFullName(patient))
+    onQueryChange(patient.fullName)
     setIsOpen(false)
     setActiveIndex(-1)
   }
@@ -162,7 +161,7 @@ export function PatientSearchInput({
 
       {selectedPatient && (
         <div className="mt-2 rounded-lg border border-dental-200 bg-dental-50 px-3 py-2 text-sm text-dental-900">
-          <span className="font-medium">Registrado:</span> {formatPatientLabel(selectedPatient)}
+          <span className="font-medium">Registrado:</span> {formatAgendaPatientLabel(selectedPatient)}
         </div>
       )}
 
@@ -180,7 +179,7 @@ export function PatientSearchInput({
             results.map((patient, index) => {
               const isActive = index === activeIndex
               return (
-                <li key={String(patient.id)} role="presentation">
+                <li key={patient.routeId} role="presentation">
                   <button
                     id={`${listboxId}-option-${index}`}
                     type="button"

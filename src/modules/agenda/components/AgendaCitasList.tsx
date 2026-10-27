@@ -3,8 +3,8 @@ import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import type { Appointment } from '@/types/appointment'
 import { PROCEDURE_TYPE_CONFIG, getAppointmentDisplayClasses } from '@/constants/procedures'
-import { ClinicalPrecautionAlertBanner } from '@/components/clinical/ClinicalPrecautionAlertBanner'
-import { usePatientPrecautionAlert } from '@/hooks/usePatientPrecautionAlert'
+import { AgendaPatientAlert } from '../core/AgendaPatientAlert'
+import { useAgendaPrecautionActive } from '../core/clinicalBridge'
 import { WhatsAppReminderButton } from './WhatsAppReminderButton'
 
 interface AgendaCitaListItemProps {
@@ -29,8 +29,7 @@ function AgendaCitaListItem({
   const end = parseISO(apt.endTime)
   const isNoShow = apt.status === 'no_asistio'
   const noShowClasses = isNoShow ? getAppointmentDisplayClasses(apt) : null
-  const precautionAlert = usePatientPrecautionAlert(apt.patientId)
-  const hasPrecaution = precautionAlert?.active ?? false
+  const hasPrecaution = useAgendaPrecautionActive(apt.patientId)
 
   return (
     <li
@@ -71,9 +70,7 @@ function AgendaCitaListItem({
             📞 {apt.patientPhone}
           </p>
         )}
-        {hasPrecaution && precautionAlert && (
-          <ClinicalPrecautionAlertBanner alert={precautionAlert} compact />
-        )}
+        {hasPrecaution && <AgendaPatientAlert patientRouteId={apt.patientId} compact />}
       </div>
 
       <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
