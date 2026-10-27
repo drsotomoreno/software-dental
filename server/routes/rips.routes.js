@@ -35,13 +35,20 @@ router.post('/recibo-caja', async (req, res) => {
       evoluciones: body.evoluciones,
       paciente: body.paciente,
       prestador: body.prestador,
+      fechaTransmision: body.fechaTransmision,
     })
     return res.status(201).json({
       success: true,
       identificadorPaquete: resultado.identificadorPaquete,
-      cuv: resultado.cuv,
-      reciboId: resultado.recibo.id,
+      cuv: resultado.cuv ?? null,
+      reciboId: resultado.recibo?.id ?? null,
       solicitudesMuv: resultado.solicitudesMuv,
+      transmitido: resultado.transmitido === true,
+      estado: resultado.estado ?? null,
+      fechaRecaudo: resultado.fechaRecaudo ?? null,
+      fechaCorte: resultado.fechaCorte ?? null,
+      code: resultado.code ?? null,
+      advertencia: resultado.advertencia ?? null,
       rips: resultado.rips,
     })
   } catch (error) {

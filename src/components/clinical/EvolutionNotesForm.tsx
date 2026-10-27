@@ -243,6 +243,7 @@ export function EvolutionNotesForm({
               patientId={patientId}
               paciente={paciente}
               pagosPaciente={pagosPaciente}
+              notasPaquete={sortedNotes}
               allowAddendums={allowAddendums}
               onChange={(patch) => updateNote(note.id, patch)}
               onRemove={() => removeNote(note.id)}

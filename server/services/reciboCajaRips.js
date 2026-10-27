@@ -3,11 +3,19 @@
  * Varias evoluciones, de citas distintas, salen en un solo JSON y un solo POST
  * a CargarRipsSinFactura. numFactura queda null: no hay FEV DIAN que cruzar.
  * El número del recibo es el identificador del paquete.
+ * En un anticipo, la cabecera del reporte es la fecha de corte, no la del recaudo.
  */
 import { withPgClient } from './durableStore.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
 import { formatFechaAtencion } from './ripsMapper.js'
 import { SisproMuvService } from './sisproMuvService.js'
+import {
+  ESTADO_PENDIENTE_TRANSMISION,
+  evaluarTransmisionAnticipo,
+  fechaDeEvolucion,
+} from '../../shared/reciboAnticipoRips.js'
+
+export { ESTADO_PENDIENTE_TRANSMISION, evaluarTransmisionAnticipo } from '../../shared/reciboAnticipoRips.js'
 
 /** Producción del MUV. El cliente usa esta base cuando MINSALUD_SANDBOX=false. */
 export const MUV_SIN_FACTURA_PRODUCCION =
@@ -53,18 +61,6 @@ export function esConsultaCups(cups) {
   return cupsDe(cups).startsWith('890')
 }
 
-function instante(raw, finDeDia) {
-  const text = String(raw ?? '').trim()
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-    return new Date(`${text}T${finDeDia ? '23:59:00' : '12:00:00'}-05:00`).getTime()
-  }
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(text)) {
-    return new Date(`${text.replace(' ', 'T')}:00-05:00`).getTime()
-  }
-  const parsed = new Date(text)
-  return parsed.getTime()
-}
-
 function repsDe(prestador) {
   const digits = String(prestador?.repsCode ?? prestador?.codPrestador ?? '').replace(/\D/g, '')
   if (digits.length !== 12) {
@@ -90,9 +86,10 @@ function cie10De(value) {
 }
 
 /**
- * Arma un único JSON. La fecha de cada línea es la de la evolución firmada,
- * nunca la del recibo. El recibo solo limita que esa fecha no quede en el futuro.
- * @param {{ recibo: object, evoluciones: object[], paciente: object, prestador: object }} input
+ * Arma un único JSON. Cada línea conserva la fecha en que se firmó la evolución.
+ * Si el anticipo es anterior a alguna de esas firmas, la cabecera del reporte
+ * pasa a la última evolución o al día en que se transmite, no a la fecha del dinero.
+ * @param {{ recibo: object, evoluciones: object[], paciente: object, prestador: object, fechaTransmision?: string }} input
  */
 export function compilarRipsReciboCaja(input) {
   const recibo = input?.recibo ?? {}
@@ -105,14 +102,20 @@ export function compilarRipsReciboCaja(input) {
     throw new ReciboCajaRipsError('Seleccione al menos una evolución pendiente.', 'SIN_EVOLUCIONES')
   }
 
-  const fechaRecibo = String(recibo.fechaExpedicion ?? recibo.fecha ?? '').trim()
-  if (!fechaRecibo) {
-    throw new ReciboCajaRipsError('La fecha de expedición del recibo de caja es obligatoria.', 'FECHA_RECIBO')
+  const fechaRecaudo = String(recibo.fechaExpedicion ?? recibo.fechaRecaudo ?? recibo.fecha ?? '').trim()
+  if (!fechaRecaudo) {
+    throw new ReciboCajaRipsError('La fecha de recaudo del recibo de caja es obligatoria.', 'FECHA_RECIBO')
   }
-  const tope = instante(fechaRecibo, true)
-  if (!Number.isFinite(tope)) {
-    throw new ReciboCajaRipsError('La fecha de expedición del recibo no es válida.', 'FECHA_RECIBO')
+
+  const transmision = evaluarTransmisionAnticipo({
+    evoluciones,
+    fechaRecaudo,
+    fechaTransmision: input.fechaTransmision,
+  })
+  if (!transmision.puedeTransmitir) {
+    throw new ReciboCajaRipsError(transmision.message, transmision.code || 'PAQUETE_INCOMPLETO')
   }
+  const fechaCorte = transmision.fechaCorte
 
   const prestadorDoc = documento(
     input.prestador?.documentType ?? input.prestador?.tipoDocumento,
@@ -138,17 +141,14 @@ export function compilarRipsReciboCaja(input) {
   let consecutivoOtro = 1
 
   for (const evolucion of evoluciones) {
-    const marcada = instante(evolucion.fechaEvolucion ?? evolucion.signedAt ?? evolucion.date, false)
-    if (!Number.isFinite(marcada) || marcada > tope) {
+    const cruda = fechaDeEvolucion(evolucion)
+    if (!cruda) {
       throw new ReciboCajaRipsError(
-        `La evolución ${evolucion.id ?? ''} tiene fecha posterior a la expedición del recibo ${numero}.`,
-        'FECHA_FUTURA',
+        `La evolución ${evolucion.id ?? ''} no tiene fecha de atención.`,
+        'SIN_FECHAS',
       )
     }
-    const fechaInicioAtencion = formatFechaAtencion(
-      evolucion.fechaEvolucion ?? evolucion.signedAt ?? evolucion.date,
-      'fechaInicioAtencion',
-    )
+    const fechaInicioAtencion = formatFechaAtencion(cruda, 'fechaInicioAtencion')
     const cups = cupsDe(evolucion.cupsCode ?? evolucion.codProcedimiento ?? evolucion.codConsulta)
     const valor = pesos(evolucion.valorNeto ?? evolucion.valorProcedimiento ?? evolucion.cost)
     const cie10 = cie10De(evolucion.cie10 ?? evolucion.codDiagnosticoPrincipal)
@@ -264,7 +264,10 @@ export function compilarRipsReciboCaja(input) {
 
   return {
     identificadorPaquete: numero,
-    fechaExpedicion: fechaRecibo,
+    fechaRecaudo,
+    fechaExpedicion: fechaCorte,
+    fechaCorte,
+    anticipo: transmision.anticipo === true,
     codPrestador,
     valorTotal: valorRecibo,
     evolucionIds: evoluciones.map((item) => String(item.id)),
@@ -275,10 +278,10 @@ export function compilarRipsReciboCaja(input) {
 export const SQL_INSERT_RECIBO = `
   INSERT INTO recibos_caja (
     usuario_titular_id, tipo_documento, consecutivo, prefijo, numero_soporte,
-    concepto, valor, fecha_expedicion, cod_prestador, estado, rips_json
+    concepto, valor, fecha_expedicion, fecha_corte_rips, cod_prestador, estado, rips_json
   ) VALUES (
     $1::uuid, 'RECIBO_CAJA', $2::int, $3, $4,
-    $5, $6::numeric, $7::timestamptz, $8, 'EMITIDO', $9::jsonb
+    $5, $6::numeric, $7::timestamptz, $8::timestamptz, $9, $10, $11::jsonb
   )
   RETURNING id, numero_soporte, valor, consecutivo
 `
@@ -321,8 +324,15 @@ export async function guardarReciboCajaConEvoluciones(client, input) {
     input.concepto || 'Recibo de caja particular',
     input.valorTotal,
     input.fechaExpedicion,
+    input.fechaCorteRips ?? null,
     input.codPrestador,
-    JSON.stringify({ identificadorPaquete: numero, rips: input.rips }),
+    input.estado || ESTADO_PENDIENTE_TRANSMISION,
+    JSON.stringify({
+      identificadorPaquete: numero,
+      fechaRecaudo: input.fechaExpedicion,
+      fechaCorteRips: input.fechaCorteRips ?? null,
+      rips: input.rips ?? null,
+    }),
   ])
   const recibo = insertado.rows[0]
   const vinculo = await client.query(SQL_VINCULAR_EVOLUCIONES, [
@@ -369,15 +379,66 @@ async function enviarUnSoloRips(envelope) {
 }
 
 /**
- * Compila, persiste el 1:N y hace un solo POST. El CUV queda en el recibo.
+ * Si el paquete clínico no está firmado, guarda el recaudo y no llama al MUV.
+ * Con el paquete completo hace un solo POST. El CUV queda en el recibo.
  * @param {object} input
  * @param {{ client?: { query: Function }, guardar?: Function, guardarCuv?: Function, enviar?: Function }} [deps]
  */
 export async function cobrarYRadicarReciboCaja(input, deps = {}) {
+  const reciboIn = input?.recibo ?? {}
+  const evoluciones = Array.isArray(input?.evoluciones) ? input.evoluciones : []
+  const fechaRecaudo = String(reciboIn.fechaExpedicion ?? reciboIn.fechaRecaudo ?? reciboIn.fecha ?? '').trim()
+  const numero = String(reciboIn.numero ?? reciboIn.numeroSoporte ?? '').trim()
+  if (evoluciones.length === 0) {
+    throw new ReciboCajaRipsError('Seleccione al menos una evolución pendiente.', 'SIN_EVOLUCIONES')
+  }
+  if (!fechaRecaudo) {
+    throw new ReciboCajaRipsError('La fecha de recaudo del recibo de caja es obligatoria.', 'FECHA_RECIBO')
+  }
+
+  const transmision = evaluarTransmisionAnticipo({
+    evoluciones,
+    fechaRecaudo,
+    fechaTransmision: input?.fechaTransmision,
+  })
+  const guardar = deps.guardar ?? (deps.client
+    ? (data) => guardarReciboCajaConEvoluciones(deps.client, data)
+    : guardarReciboEnTransaccion)
+
+  if (!transmision.puedeTransmitir) {
+    const recibo = await guardar({
+      usuarioTitularId: input.usuarioTitularId,
+      prefijo: input.prefijo,
+      numero: numero || undefined,
+      concepto: reciboIn.concepto,
+      fechaExpedicion: fechaRecaudo,
+      fechaCorteRips: null,
+      estado: ESTADO_PENDIENTE_TRANSMISION,
+      valorTotal: pesos(reciboIn.valorTotal ?? reciboIn.valor),
+      codPrestador: null,
+      evolucionIds: evoluciones.map((item) => String(item.id)),
+      rips: null,
+    })
+    return {
+      recibo,
+      identificadorPaquete: recibo.numero_soporte || numero,
+      rips: null,
+      cuv: null,
+      solicitudesMuv: 0,
+      transmitido: false,
+      estado: ESTADO_PENDIENTE_TRANSMISION,
+      code: transmision.code,
+      advertencia: transmision.message,
+      fechaRecaudo,
+      fechaCorte: null,
+      anticipo: transmision.anticipo === true,
+    }
+  }
+
   const compilado = compilarRipsReciboCaja(input)
   const localIssues = validateRipsPackageLocally(compilado.rips, {
     allowNullNumFactura: true,
-    fechaGeneracion: compilado.fechaExpedicion,
+    fechaGeneracion: compilado.fechaCorte,
     codPrestador: compilado.codPrestador,
     perfilFiscal: 'No_Obligado',
   })
@@ -385,14 +446,14 @@ export async function cobrarYRadicarReciboCaja(input, deps = {}) {
     throw new ReciboCajaRipsError(localIssues.find((issue) => issue.level === 'error')?.message ?? 'RIPS inválido.', 'RIPS_INVALIDO')
   }
 
-  const guardar = deps.guardar ?? (deps.client
-    ? (data) => guardarReciboCajaConEvoluciones(deps.client, data)
-    : guardarReciboEnTransaccion)
   const recibo = await guardar({
     usuarioTitularId: input.usuarioTitularId,
     prefijo: input.prefijo,
     numero: compilado.identificadorPaquete,
-    fechaExpedicion: compilado.fechaExpedicion,
+    concepto: reciboIn.concepto,
+    fechaExpedicion: compilado.fechaRecaudo,
+    fechaCorteRips: compilado.fechaCorte,
+    estado: ESTADO_PENDIENTE_TRANSMISION,
     valorTotal: compilado.valorTotal,
     codPrestador: compilado.codPrestador,
     evolucionIds: compilado.evolucionIds,
@@ -426,5 +487,10 @@ export async function cobrarYRadicarReciboCaja(input, deps = {}) {
     rips: compilado.rips,
     cuv,
     solicitudesMuv: 1,
+    transmitido: true,
+    estado: 'TRANSMITIDO',
+    fechaRecaudo: compilado.fechaRecaudo,
+    fechaCorte: compilado.fechaCorte,
+    anticipo: compilado.anticipo,
   }
 }

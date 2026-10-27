@@ -7,7 +7,13 @@ import { useToast } from '@/hooks/useToast'
 import { listPatientElectronicInvoices } from '@/services/invoiceService'
 import { routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
 import { Toast } from '@/components/ui/Toast'
-import type { EvolutionNote, EvolutionNotePatch } from '@/types/evolutionNote'
+import {
+  isEvolutionNoteAddendum,
+  isEvolutionNoteImmutable,
+  type EvolutionNote,
+  type EvolutionNotePatch,
+} from '@/types/evolutionNote'
+import { evaluarTransmisionAnticipo } from '../../../shared/reciboAnticipoRips.js'
 import type { OrthodonticsPaymentRecord, PaymentRecord } from '@/types/clinicalRecord'
 import {
   EvolutionNoteRipsMetadataError,
@@ -38,6 +44,28 @@ const OPCIONES_VINCULO: Array<{ value: TipoVinculacionFinanciera; label: string 
   { value: 'fev', label: 'Factura electrónica (FEV)' },
   { value: 'valor_cero', label: 'Atención valor $0 / control' },
 ]
+
+function mismoRecibo(origen: EvolutionNote, candidata: EvolutionNote): boolean {
+  const soporteOrigen = String(origen.numeroSoportePago ?? '').trim()
+  const soporte = String(candidata.numeroSoportePago ?? '').trim()
+  if (soporteOrigen && soporteOrigen === soporte) return true
+  const pagoOrigen = String(origen.pagoId ?? origen.ripsMetadata?.idReciboAsociado ?? '').trim()
+  const pago = String(candidata.pagoId ?? candidata.ripsMetadata?.idReciboAsociado ?? '').trim()
+  return Boolean(pagoOrigen && pagoOrigen === pago)
+}
+
+function notaAEvolucionRips(note: EvolutionNote) {
+  const firmada = isEvolutionNoteImmutable(note)
+  return {
+    id: note.id,
+    descripcion: note.procedure?.trim() || note.serviceName?.trim() || 'Evolución',
+    fechaEvolucion: note.date,
+    signedAt: firmada ? note.signedAt : undefined,
+    firmada,
+    isLocked: firmada,
+    sinFirmar: !firmada,
+  }
+}
 
 function metadataDe(note: EvolutionNote): EvolutionNoteRipsMetadata {
   return note.ripsMetadata ?? createDefaultEvolutionNoteRipsMetadata()
@@ -125,6 +153,8 @@ interface EvolutionRipsPanelProps {
   patientId?: string
   paciente?: PacienteRipsIdentidad
   pagosActuales?: Array<PaymentRecord | OrthodonticsPaymentRecord>
+  /** Evoluciones del mismo expediente, para no transmitir un anticipo a medias. */
+  notasPaquete?: EvolutionNote[]
   disabled?: boolean
   /** La nota firmada congela la tarifa clínica, no la metadata RIPS. */
   clinicalLocked?: boolean
@@ -137,6 +167,7 @@ export function EvolutionRipsPanel({
   patientId = '',
   paciente,
   pagosActuales = [],
+  notasPaquete = [],
   disabled = false,
   clinicalLocked = false,
   showDiagnosis = false,
@@ -148,6 +179,7 @@ export function EvolutionRipsPanel({
   const valorCero = tipo === 'valor_cero'
   const [isLoading, setIsLoading] = useState(false)
   const [verCuv, setVerCuv] = useState(false)
+  const [modalAnticipo, setModalAnticipo] = useState(false)
   const [mensajeLocal, setMensajeLocal] = useState('')
   const { toastMessage, showToast, clearToast } = useToast(8000)
   const pagosKey = pagosActuales
@@ -187,6 +219,35 @@ export function EvolutionRipsPanel({
 
   const soporteId = tipo === 'fev' ? metadata.idFacturaElectronica : metadata.idReciboAsociado
   const transmitido = metadata.ripsEstado === 'enviado_ok' && Boolean(metadata.cuv)
+  const esRecibo =
+    tipo === 'recibo_interno' &&
+    Boolean(
+      String(note.numeroSoportePago ?? '').trim() ||
+        String(note.pagoId ?? '').trim() ||
+        metadata.idReciboAsociado,
+    )
+  const paquete = (notasPaquete.length > 0 ? notasPaquete : [note]).filter(
+    (item) => !isEvolutionNoteAddendum(item) && mismoRecibo(note, item),
+  )
+  const notasDelRecibo = paquete.length > 0 ? paquete : [note]
+  const pagoVinculado = pagosActuales.find(
+    (pago) => pago.id === note.pagoId || pago.id === metadata.idReciboAsociado,
+  )
+  const opcionVinculada = (opciones ?? []).find(
+    (opcion) =>
+      opcion.id === (metadata.idReciboAsociado || note.pagoId) ||
+      (Boolean(note.numeroSoportePago) && opcion.consecutivo === note.numeroSoportePago),
+  )
+  const fechaRecaudo = pagoVinculado?.paymentDate || opcionVinculada?.fecha || ''
+  const transmisionPaquete = esRecibo
+    ? evaluarTransmisionAnticipo({
+        evoluciones: notasDelRecibo.map(notaAEvolucionRips),
+        fechaRecaudo,
+        fechaTransmision: new Date().toISOString(),
+      })
+    : null
+  const paqueteIncompleto = transmisionPaquete != null && transmisionPaquete.puedeTransmitir === false
+  const pendientesAnticipo = transmisionPaquete?.pendientes ?? []
 
   const publicar = (patch: EvolutionNotePatch) => {
     if (!clinicalLocked) {
@@ -304,6 +365,18 @@ export function EvolutionRipsPanel({
 
   const enviar = async () => {
     if (isLoading) return
+    if (esRecibo) {
+      const ahora = evaluarTransmisionAnticipo({
+        evoluciones: notasDelRecibo.map(notaAEvolucionRips),
+        fechaRecaudo,
+        fechaTransmision: new Date().toISOString(),
+      })
+      if (!ahora.puedeTransmitir) {
+        setModalAnticipo(true)
+        setMensajeLocal(ahora.message)
+        return
+      }
+    }
     setMensajeLocal('')
     setIsLoading(true)
     try {
@@ -519,6 +592,12 @@ export function EvolutionRipsPanel({
         </div>
       </fieldset>
 
+      {paqueteIncompleto && (
+        <p role="status" className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          {transmisionPaquete?.message}
+        </p>
+      )}
+
       <div className="mt-4 flex flex-col gap-2 border-t border-dental-100 pt-3 sm:flex-row sm:flex-wrap sm:items-center">
         {transmitido ? (
           <button
@@ -539,7 +618,7 @@ export function EvolutionRipsPanel({
             aria-busy={isLoading}
           >
             <Rocket className="mr-2 h-4 w-4" aria-hidden />
-            {isLoading ? 'Enviando RIPS…' : 'Preparar y enviar RIPS'}
+            {isLoading ? 'Enviando RIPS…' : esRecibo ? 'Enviar al MUV' : 'Preparar y enviar RIPS'}
           </button>
         )}
         <button type="button" className="btn-secondary text-xs" onClick={descargarJson} disabled={disabled}>
@@ -571,6 +650,31 @@ export function EvolutionRipsPanel({
         </p>
       )}
       <Toast message={toastMessage} onDismiss={clearToast} />
+      {modalAnticipo && paqueteIncompleto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`anticipo-rips-${note.id}`}
+            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+          >
+            <h6 id={`anticipo-rips-${note.id}`} className="text-base font-semibold text-slate-900">
+              Pendiente de transmisión RIPS
+            </h6>
+            <p className="mt-2 text-sm text-slate-700">{transmisionPaquete?.message}</p>
+            {pendientesAnticipo.length > 0 && (
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                {pendientesAnticipo.map((item) => (
+                  <li key={item.id || item.descripcion}>{item.descripcion || 'Evolución sin firmar'}</li>
+                ))}
+              </ul>
+            )}
+            <button type="button" className="btn-primary mt-4" onClick={() => setModalAnticipo(false)}>
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

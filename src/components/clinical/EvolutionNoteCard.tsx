@@ -123,6 +123,7 @@ interface EvolutionNoteCardProps {
   paciente?: PacienteRipsIdentidad
   parentRecordId?: string
   pagosPaciente?: Array<PaymentRecord | OrthodonticsPaymentRecord>
+  notasPaquete?: EvolutionNote[]
   allowAddendums?: boolean
   onChange: (patch: EvolutionNotePatch) => void
   onRemove: () => void
@@ -138,6 +139,7 @@ export function EvolutionNoteCard({
   paciente,
   parentRecordId,
   pagosPaciente = [],
+  notasPaquete = [],
   allowAddendums = true,
   onChange,
   onRemove,
@@ -499,6 +501,7 @@ export function EvolutionNoteCard({
             patientId={patientId}
             paciente={paciente}
             pagosActuales={pagosPaciente}
+            notasPaquete={notasPaquete}
             disabled={disabled}
             clinicalLocked={clinicalLocked}
             showDiagnosis={clinicalLocked}
