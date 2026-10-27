@@ -1,6 +1,9 @@
 import 'dotenv/config'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
+import { resolveMuvEndpoint } from './services/muvEndpoint.js'
+
+const muvEndpoint = resolveMuvEndpoint()
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const port = Number(process.env.PORT) || 3000
@@ -31,7 +34,7 @@ export const config = {
   databaseUrl: DATABASE_URL,
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   minsalud: {
-    sandbox: process.env.MINSALUD_SANDBOX !== 'false',
+    sandbox: muvEndpoint.sandbox,
     apiBaseUrl: (process.env.MINSALUD_API_BASE_URL ?? '').replace(/\/$/, ''),
     authUrl: process.env.MINSALUD_AUTH_URL ?? '',
     validatePath: process.env.MINSALUD_VALIDATE_URL ?? '/api/v1/rips/validar',
