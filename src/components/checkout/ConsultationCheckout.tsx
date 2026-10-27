@@ -136,8 +136,9 @@ export function ConsultationCheckout({
           <LegalTooltip topic="rips" />
         </h4>
         <p className="mt-1 text-xs text-slate-600">
-          El Recibo de Control no consume folios. La Factura Electrónica DIAN consume 1 folio y
-          debe coincidir peso a peso con el JSON RIPS.
+          Varios procedimientos salen en un solo recibo o en una sola FEV. El Recibo de Control
+          no consume folios. La Factura Electrónica DIAN consume 1 folio y su valor neto debe
+          coincidir peso a peso con la suma RIPS.
         </p>
         <p className="mt-1 text-xs font-medium text-slate-600">
           Saldo de folios: {state.foliosAvailable}

@@ -211,6 +211,14 @@ export type PaymentInvoiceStatus = 'active' | 'voided_by_credit_note'
 /** Comprobante generado al registrar un abono en Control de Pagos */
 export type PaymentDocumentKind = 'recibo_interno' | 'factura'
 
+/** Parte de un recibo o FEV que cubre un procedimiento del control de pagos. */
+export interface PaymentLineAllocation {
+  lineId: string
+  amount: number
+  cupsCode?: string
+  description: string
+}
+
 export interface PaymentInvoice {
   id: string
   invoiceNumber: string
@@ -239,6 +247,11 @@ export interface PaymentRecord {
   paymentPlanItemId?: string
   /** Vínculo con la fila de Control de Pagos que originó el abono */
   paymentControlLineId?: string
+  /**
+   * Varios procedimientos cobrados en el mismo recibo o FEV.
+   * Si viene informado, el abono de cada fila es su `amount`, no el total del comprobante.
+   */
+  lineAllocations?: PaymentLineAllocation[]
   paymentDate: string
   amount: number
   paymentMethod: PaymentMethod

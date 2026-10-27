@@ -3,7 +3,6 @@ import {
   REGIME_TO_TIPO_USUARIO,
   RIPS_DEFAULTS,
   TIPO_USUARIO_LABELS,
-  isOdontologyConsultationCups,
 } from '../constants/rips.ts'
 import type { DocumentType, RegimeType } from '../types/patient.ts'
 import type { EvolutionNote } from '../types/evolutionNote.ts'
@@ -11,6 +10,7 @@ import { CIE10_RIPS_PATTERN } from '../types/evolutionNoteRips.ts'
 import type { RipsConsulta, RipsProcedimiento } from '../types/rips.ts'
 import type { RipsEvolutionCloseData, RipsQueuePayload, RipsQueueUsuario } from '../types/ripsQueue.ts'
 import { fechaAtencionRips } from '../utils/evolutionRipsPayload.ts'
+import { asignarValorNetoPorCodigo, esCupsConsulta } from '../utils/paqueteDocumentoCobro.ts'
 import { cupsExplicitosDeTexto } from '../utils/cupsCodeResolve.ts'
 import {
   RIPS_IDENTIFICATION_TYPE_RULES,
@@ -384,6 +384,34 @@ function causaRips(input: RipsEvolutionCloseData): string {
   return text(input.note.ripsMetadata?.causaMotivoAtencion)
 }
 
+function codigoDeServicioCatalogo(service: {
+  cupsCode?: string | null
+  procedure?: string | null
+  serviceName?: string | null
+}): string {
+  const fuentes = [service.cupsCode, service.procedure, service.serviceName]
+  for (const fuente of fuentes) {
+    const raw = text(fuente)
+    if (!raw) continue
+    const explicitos = cupsExplicitosDeTexto(raw)
+    if (explicitos[0] && CUPS_VALIDO.test(explicitos[0])) return explicitos[0]
+    const compacto = raw.replace(/[.\s-]/g, '')
+    if (CUPS_VALIDO.test(compacto)) return compacto
+  }
+  return ''
+}
+
+function mapaCostosCatalogo(note: EvolutionNote): Map<string, number> {
+  const mapa = new Map<string, number>()
+  for (const service of note.catalogServices ?? []) {
+    if (service.requiereCupsRips === false || service.cost == null) continue
+    const codigo = codigoDeServicioCatalogo(service)
+    if (!codigo) continue
+    mapa.set(codigo, Math.round(service.cost))
+  }
+  return mapa
+}
+
 function codigosCups(note: EvolutionNote): string[] {
   const fuentes: Array<string | null | undefined> = [
     note.cupsCode,
@@ -447,15 +475,16 @@ export function buildPreliminaryRipsJson(input: RipsEvolutionCloseData): RipsQue
   const procedimientos: RipsProcedimiento[] = []
   let consecutivoConsulta = 1
   let consecutivoProcedimiento = 1
+  const valores = asignarValorNetoPorCodigo(cups, mapaCostosCatalogo(input.note), valor)
 
   cups.forEach((codigo, index) => {
-    const vrServicio = index === 0 ? valor : 0
+    const vrServicio = valores[index] ?? 0
     const diagnostico = {
       codDiagnosticoPrincipal: cie10,
       codDiagnosticoPrincipalCIE11: cie11,
       nomCodDiagnosticoPrincipalCIE11: cie11Nombre,
     }
-    if (isOdontologyConsultationCups(codigo)) {
+    if (esCupsConsulta(codigo)) {
       consultas.push({
         codPrestador: sede,
         fechaInicioAtencion: fecha,

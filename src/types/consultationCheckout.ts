@@ -1,6 +1,8 @@
 import type { PaymentMethod } from '@/types/clinicalRecord'
 import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
 import { DIAN_CONSUMIDOR_FINAL } from '@/constants/dianFiscalResponsibility'
+import type { GrupoRipsPaquete } from '@/utils/paqueteDocumentoCobro'
+import { validarReglaOroMuv } from '@/utils/paqueteDocumentoCobro'
 
 export type CheckoutDocumentKind = 'internal_receipt' | 'electronic_invoice'
 
@@ -23,7 +25,7 @@ export interface CheckoutLineItem {
   quantity: number
   unitPrice: number
   totalAmount: number
-  ripsGroup: 'procedimientos' | 'otrosServicios'
+  ripsGroup: GrupoRipsPaquete
   sourceType: 'evolution' | 'budget' | 'manual_aesthetic'
   sourceId?: string
 }
@@ -96,10 +98,20 @@ export function createEmptyCheckoutBuyer(
   }
 }
 
-export function assertFevEqualsRips(cart: CheckoutLineItem[]): { ok: boolean; dianTotal: number; ripsTotal: number } {
-  const dianTotal = sumCheckoutCart(cart)
-  const ripsTotal = cart
-    .filter((item) => item.ripsGroup === 'procedimientos' || item.ripsGroup === 'otrosServicios')
-    .reduce((sum, item) => sum + Math.max(0, item.totalAmount || 0), 0)
-  return { ok: dianTotal === ripsTotal, dianTotal, ripsTotal }
+export function assertFevEqualsRips(
+  cart: CheckoutLineItem[],
+  valorNetoDocumento?: number,
+): { ok: boolean; dianTotal: number; ripsTotal: number; message?: string } {
+  const declarado = valorNetoDocumento ?? sumCheckoutCart(cart)
+  const regla = validarReglaOroMuv({
+    valorNetoDocumento: declarado,
+    servicios: cart.map((item) => ({ valorNeto: item.totalAmount })),
+    tipo: 'FEV',
+  })
+  return {
+    ok: regla.ok,
+    dianTotal: regla.valorNetoDocumento,
+    ripsTotal: regla.valorNetoRips,
+    message: regla.message,
+  }
 }

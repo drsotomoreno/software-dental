@@ -152,11 +152,12 @@ export function useConsultationCheckout({
       return null
     }
 
-    const equality = assertFevEqualsRips(cart)
+    const equality = assertFevEqualsRips(cart, amountToCollect)
     if (!equality.ok) {
       setStatus('error')
       setLastError(
-        `El total DIAN (${equality.dianTotal}) no coincide con la suma RIPS (${equality.ripsTotal}).`,
+        equality.message ??
+          `El total DIAN (${equality.dianTotal}) no coincide con la suma RIPS (${equality.ripsTotal}).`,
       )
       return null
     }

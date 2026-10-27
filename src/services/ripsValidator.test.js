@@ -124,6 +124,38 @@ test('rechaza causa externa que no sea de dos dígitos y sexo fuera de catálogo
   assert.ok(result.errors.some((error) => error.code === 'EXTERNAL_CAUSE'))
 })
 
+test('varios CUPS de la misma atención conservan su valor y la consulta no cae en procedimientos', () => {
+  const payload = buildPreliminaryRipsJson(
+    cierre({
+      note: nota({
+        cupsCode: '890201',
+        cost: 280000,
+        procedure: 'Consulta, resina y profilaxis',
+        catalogServices: [
+          { id: 'c', procedure: 'Consulta de primera vez', cupsCode: '890201', requiereCupsRips: true, cost: 50000 },
+          { id: 'r', procedure: 'Restauración de resina', cupsCode: '232101', requiereCupsRips: true, cost: 150000 },
+          { id: 'p', procedure: 'Profilaxis', cupsCode: '997103', requiereCupsRips: true, cost: 80000 },
+        ],
+      }),
+    }),
+  )
+  const servicios = payload.usuarios[0].servicios
+  assert.equal(servicios.consultas.length, 1)
+  assert.equal(servicios.consultas[0].codConsulta, '890201')
+  assert.equal(servicios.consultas[0].vrServicio, 50000)
+  assert.deepEqual(
+    servicios.procedimientos.map((item) => [item.codProcedimiento, item.vrServicio]),
+    [
+      ['232101', 150000],
+      ['997103', 80000],
+    ],
+  )
+  const suma =
+    servicios.consultas[0].vrServicio +
+    servicios.procedimientos.reduce((total, item) => total + item.vrServicio, 0)
+  assert.equal(suma, 280000)
+})
+
 test('el flujo sin FEV queda en cola y el flujo con FEV no entra al lote', () => {
   const particular = dispositionForRipsClose(false)
   const fev = dispositionForRipsClose(true)

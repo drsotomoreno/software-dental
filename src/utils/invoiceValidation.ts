@@ -2,6 +2,7 @@ import type { ElectronicInvoice, InvoiceItem, InvoiceValidationIssue } from '@/t
 import type { UserProfile } from '@/types/user'
 import { RIPS_FEV_NUMERO_PATTERN } from '@/utils/ripsStructureValidation'
 import { isInvoiceItemRipsEligible } from '@/utils/buildRipsJson'
+import { validarReglaOroMuv } from '@/utils/paqueteDocumentoCobro'
 import { validateFevRipsEmissionPipeline } from '@/utils/fevRipsEmissionPipeline'
 import { parseRepsCodeWithDane } from '@/utils/repsCode'
 
@@ -143,6 +144,20 @@ export function validateInvoiceForSubmission(
       level: 'error',
       field: 'netPayable',
       message: 'El neto a pagar no puede ser negativo. Revise descuentos y copagos.',
+    })
+  }
+
+  const reglaOro = validarReglaOroMuv({
+    valorNetoDocumento: invoice.netPayable,
+    servicios: invoice.items.map((item) => ({ valorNeto: item.totalAmount })),
+    tipo: 'FEV',
+    numero: invoice.invoiceNumber,
+  })
+  if (!reglaOro.ok && invoice.items.length > 0) {
+    issues.push({
+      level: 'error',
+      field: 'netPayable',
+      message: reglaOro.message ?? 'La suma neta RIPS no coincide con el valor neto de la FEV.',
     })
   }
 

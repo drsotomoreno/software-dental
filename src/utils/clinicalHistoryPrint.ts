@@ -30,6 +30,7 @@ import { formatRehabArchToothColor } from '@/constants/vitaClassicShades'
 import { formatDentalWhiteningPlan, hasDentalWhiteningSelection } from '@/constants/dentalWhitening'
 import { formatSmileAnalysis, hasSmileAnalysisSelection } from '@/constants/smileAnalysis'
 import { getEvolutionCatalogServices } from '@/utils/evolutionCatalogServices'
+import { paymentHasProcedureLink } from '@/utils/paymentAbonos'
 import {
   formatDentalImplantPlanningSummaryLines,
   formatRehabMidlineDeviation,
@@ -697,7 +698,7 @@ function buildPaymentsSection(data: ClinicalRecordFormData): string {
     )
     .join('')
   const rows = `${lineBoxes}${agreementBoxes}`
-  const unlinkedPayments = data.paymentControl.filter((payment) => !payment.paymentControlLineId)
+  const unlinkedPayments = data.paymentControl.filter((payment) => !paymentHasProcedureLink(payment))
   const unlinkedRows = unlinkedPayments
     .map(
       (payment) =>

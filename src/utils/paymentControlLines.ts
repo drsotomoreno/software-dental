@@ -11,6 +11,7 @@ import { generateId } from '@/utils/crypto'
 import { formatAnatomicalZone } from '@/utils/treatmentPlanZone'
 import { treatmentPlanItemsForRipsPayload } from '@/utils/treatmentPlanRips'
 import { calcTotalPaid } from '@/utils/paymentControl'
+import { amountAppliedToLine } from '@/utils/paymentAbonos'
 
 function namesMatch(left: string, right: string): boolean {
   const a = left.trim().toLowerCase()
@@ -60,11 +61,7 @@ export function sumPaymentControlPrices(lines: PaymentControlLine[]): number {
 }
 
 export function paidAmountForLine(lineId: string, payments: PaymentRecord[]): number {
-  return payments.reduce(
-    (sum, payment) =>
-      payment.paymentControlLineId === lineId ? sum + Math.max(0, payment.amount) : sum,
-    0,
-  )
+  return payments.reduce((sum, payment) => sum + amountAppliedToLine(payment, lineId), 0)
 }
 
 /** Valor del tratamiento menos los pagos registrados. */
