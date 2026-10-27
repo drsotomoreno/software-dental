@@ -56,6 +56,16 @@ test('el host interno de Render y localhost no fuerzan TLS', () => {
   )
 })
 
+test('AWS RDS usa SSL sin verificar la CA y espera 10s para conectar', () => {
+  const config = poolConfig(
+    'postgresql://user:secret@mydb.abc123.us-east-1.rds.amazonaws.com:5432/mydb?sslmode=require',
+  )
+  assert.deepEqual(config.ssl, { rejectUnauthorized: false })
+  assert.equal(config.connectionTimeoutMillis, 10000)
+  assert.equal(config.host, 'mydb.abc123.us-east-1.rds.amazonaws.com')
+  assert.equal(config.connectionString, undefined)
+})
+
 test('una contraseña con % no apaga el SSL de la base externa', () => {
   const config = poolConfig(
     'postgresql://user:100%@dpg-abc123-a.oregon-postgres.render.com/mydb',

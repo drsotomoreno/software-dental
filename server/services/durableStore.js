@@ -28,7 +28,8 @@ function loadPgPool() {
 /**
  * El host interno de Render (dpg-…-a, sin dominio) no habla TLS.
  * sslmode en la URL no se reenvía al pool: pg lo interpretaría y el handshake
- * dejaría el arranque colgado. Fuera de ese host se usa SSL sin verificar CA.
+ * dejaría el arranque colgado. Fuera de ese host (Render externo, AWS RDS)
+ * se usa SSL sin verificar la CA.
  */
 export function postgresSslOption(connectionString) {
   try {
@@ -79,13 +80,15 @@ function decodeConnectionPart(value) {
 }
 
 export function poolConfig(url) {
-  // La URL externa de Render exige TLS sin verificar la CA. En pg 8, sslmode=require
-  // dentro de connectionString pisa este objeto y activa la verificación: la
-  // conexión se rechaza. El host interno (sin dominio) no habla TLS y se deja en false.
+  // La URL externa (Render o AWS RDS) exige TLS sin verificar la CA. En pg 8,
+  // sslmode=require dentro de connectionString pisa este objeto y activa la
+  // verificación: la conexión se rechaza. El host interno (sin dominio) no
+  // habla TLS y se deja en false.
   const ssl = postgresSslOption(url) === false ? false : { rejectUnauthorized: false }
   const common = {
     max: 2,
-    connectionTimeoutMillis: 8_000,
+    // RDS puede tardar en el handshake TLS; 10s evita el timeout del pool.
+    connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 20_000,
   }
   try {
