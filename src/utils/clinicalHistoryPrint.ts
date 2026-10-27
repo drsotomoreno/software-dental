@@ -30,6 +30,7 @@ import { formatRehabArchToothColor } from '@/constants/vitaClassicShades'
 import { formatDentalWhiteningPlan, hasDentalWhiteningSelection } from '@/constants/dentalWhitening'
 import { formatSmileAnalysis, hasSmileAnalysisSelection } from '@/constants/smileAnalysis'
 import { getEvolutionCatalogServices } from '@/utils/evolutionCatalogServices'
+import { formatAssociatedItemLabel } from '@/utils/evolutionNoteAssociation'
 import {
   formatDentalImplantPlanningSummaryLines,
   formatRehabMidlineDeviation,
@@ -785,18 +786,38 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
         : escapeHtml(
             [evolutionNoteText, note.prescriptions?.trim()].filter(Boolean).join(' · ') || '—',
           )
-      const procedureFallback = escapeHtml(note.procedure || '—')
+      const procedureFallback = escapeHtml(
+        formatAssociatedItemLabel(note.serviceName || note.procedure || '', note) || '—',
+      )
       const serviceLabel =
         catalogServices.length > 0
           ? catalogServices
               .map((service) => {
                 const suffix = service.requiereCupsRips === false ? ' (sin RIPS)' : ''
-                return `${escapeHtml(service.serviceName || service.procedure)}${suffix}`
+                const label = formatAssociatedItemLabel(
+                  service.serviceName || service.procedure,
+                  service,
+                )
+                return `${escapeHtml(label)}${suffix}`
               })
               .join('<br>')
           : note.serviceName
-            ? `${escapeHtml(note.serviceName)}${isNonRips ? ' (sin RIPS)' : ''}`
+            ? `${escapeHtml(formatAssociatedItemLabel(note.serviceName, note))}${isNonRips ? ' (sin RIPS)' : ''}`
             : procedureFallback
+      const diagnosisLines = (note.diagnoses ?? [])
+        .filter((diagnosis) => diagnosis.code.trim())
+        .map((diagnosis) =>
+          formatAssociatedItemLabel(
+            [diagnosis.code, diagnosis.description].filter(Boolean).join(' '),
+            diagnosis,
+          ),
+        )
+      const diagnosisHtml = diagnosisLines.length
+        ? `<div>${diagnosisLines.map((line) => escapeHtml(line)).join('<br>')}</div>`
+        : ''
+      const procedureCell = diagnosisHtml
+        ? `${serviceLabel}<div style="margin-top:0.35rem">${diagnosisHtml}</div>`
+        : serviceLabel
 
       const firmaDe = (src: string | undefined, alt: string) =>
         src
@@ -805,7 +826,7 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
 
       return `<tr>
           <td>${formatDate(note.date || note.createdAt)}</td>
-          <td>${serviceLabel}</td>
+          <td>${procedureCell}</td>
           <td>${noteOrRx}</td>
           <td>${escapeHtml(note.professionalName)}</td>
           <td>${firmaDe(note.patientSignatureDataUrl, 'Firma del paciente')}</td>

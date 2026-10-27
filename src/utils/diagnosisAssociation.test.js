@@ -21,6 +21,7 @@ test('interpreta diente, maxilar y toda la dentición', () => {
   })
   assert.deepEqual(parseDiagnosisAssociation('denticion'), { kind: 'scope', scope: 'denticion' })
   assert.equal(parseDiagnosisAssociation('tooth:99'), null)
+  assert.deepEqual(parseDiagnosisAssociation('tooth:55'), { kind: 'tooth', toothNumber: 55 })
   assert.equal(parseDiagnosisAssociation(''), null)
 })
 
@@ -32,6 +33,7 @@ test('describe la asociación guardada', () => {
   assert.equal(diagnosisLocationLabel({ affectedTeeth: [16, 26] }), 'Piezas 16, 26')
   assert.equal(diagnosisLocationLabel({ anatomicalScope: 'maxilar_inferior' }), 'Maxilar inferior')
   assert.equal(diagnosisLocationLabel({ anatomicalScope: 'denticion' }), 'Toda la dentición')
+  assert.equal(diagnosisLocationLabel({ toothNumber: 55 }), 'Pieza 55')
   assert.equal(diagnosisLocationLabel({}), null)
 })
 

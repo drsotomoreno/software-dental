@@ -5,7 +5,9 @@ import { useCatalogSearch } from '@/hooks/useCatalogSearch'
 interface Cie10PrincipalComboboxProps {
   value: string
   disabled?: boolean
-  onChange: (code: string) => void
+  label?: string
+  required?: boolean
+  onChange: (code: string, description?: string) => void
 }
 
 const engine = getDefaultCie10SearchEngine()
@@ -25,6 +27,8 @@ function describirCie10(code: string): { code: string; description: string } | n
 export function Cie10PrincipalCombobox({
   value,
   disabled = false,
+  label = 'Diagnóstico principal (CIE-10)',
+  required = true,
   onChange,
 }: Cie10PrincipalComboboxProps) {
   const listId = useId()
@@ -56,7 +60,7 @@ export function Cie10PrincipalCombobox({
   }, [catalogo, query, seleccionado])
 
   const elegir = (code: string, description: string) => {
-    onChange(code)
+    onChange(code, description)
     setQuery(`${code} — ${description}`)
     setAbierto(false)
   }
@@ -64,7 +68,8 @@ export function Cie10PrincipalCombobox({
   return (
     <div>
       <label className="label-field" htmlFor={inputId}>
-        Diagnóstico principal (CIE-10) <span className="text-red-500">*</span>
+        {label}
+        {required && <span className="text-red-500"> *</span>}
       </label>
       <div className="relative">
         <input
@@ -81,7 +86,7 @@ export function Cie10PrincipalCombobox({
           onChange={(event) => {
             setQuery(event.target.value)
             setAbierto(true)
-            if (!event.target.value.trim()) onChange('')
+            if (!event.target.value.trim()) onChange('', '')
           }}
           onBlur={() => {
             window.setTimeout(() => setAbierto(false), 120)
@@ -116,7 +121,9 @@ export function Cie10PrincipalCombobox({
           {seleccionado.description}
         </p>
       ) : (
-        <p className="mt-1 text-xs text-slate-500">Obligatorio para preparar el RIPS.</p>
+        <p className="mt-1 text-xs text-slate-500">
+          {required ? 'Obligatorio para preparar el RIPS.' : 'Diagnóstico complementario de esta sesión.'}
+        </p>
       )}
     </div>
   )

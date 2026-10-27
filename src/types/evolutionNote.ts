@@ -1,5 +1,6 @@
 import type { SignatureCaptureMetadata } from '@/types/signature'
 import type { CamposPagoAtencion } from '@/types/atencionPago'
+import type { DiagnosisAnatomicalScope } from '@/types/clinicalRecord'
 import {
   createDefaultEvolutionNoteRipsMetadata,
   type EvolutionNoteRipsMetadata,
@@ -32,6 +33,20 @@ export interface EvolutionCatalogService {
   requiereCupsRips?: boolean
   cost?: number
   isBillable?: boolean
+  /** Pieza FDI. Excluyente con `anatomicalScope`. */
+  toothNumber?: number
+  /** Maxilar superior, maxilar inferior o toda la dentición. */
+  anatomicalScope?: DiagnosisAnatomicalScope
+}
+
+/** Diagnóstico de la sesión. Cada uno se asocia a un diente, un maxilar o toda la dentición. */
+export interface EvolutionNoteDiagnosis {
+  id: string
+  code: string
+  description: string
+  type: 'principal' | 'relacionado'
+  toothNumber?: number
+  anatomicalScope?: DiagnosisAnatomicalScope
 }
 
 export interface EvolutionNote {
@@ -47,6 +62,15 @@ export interface EvolutionNote {
   date: string
   /** Texto libre o etiqueta CUPS — procedimiento realizado */
   procedure: string
+  /**
+   * Asociación del procedimiento cuando la nota no trae servicios del catálogo.
+   * Pieza FDI, excluyente con `anatomicalScope`.
+   */
+  toothNumber?: number
+  /** Maxilar superior, maxilar inferior o toda la dentición. */
+  anatomicalScope?: DiagnosisAnatomicalScope
+  /** Diagnósticos de esta sesión, cada uno con su asociación anatómica. */
+  diagnoses?: EvolutionNoteDiagnosis[]
   anesthesia: AnesthesiaRecord
   prescriptions: string
   professionalName: string

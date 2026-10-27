@@ -22,6 +22,8 @@ export function getEvolutionCatalogServices(note: EvolutionNote): EvolutionCatal
         requiereCupsRips: note.requiereCupsRips,
         cost: note.cost,
         isBillable: note.isBillable,
+        toothNumber: note.toothNumber,
+        anatomicalScope: note.anatomicalScope,
       },
     ]
   }

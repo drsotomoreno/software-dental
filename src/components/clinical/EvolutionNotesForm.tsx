@@ -197,7 +197,8 @@ export function EvolutionNotesForm({
           <p className="mt-1 text-xs text-slate-500">
             Res. 1995/1999: el bloqueo es por folio. Una evolución firmada no se edita ni se
             elimina; use «Agregar Nota de Aclaración». El odontograma y el resto del expediente
-            siguen abiertos.
+            siguen abiertos. Cada procedimiento y cada diagnóstico se asocia a un diente, a un
+            maxilar o a toda la dentición.
           </p>
         </div>
         {canAddNote && (

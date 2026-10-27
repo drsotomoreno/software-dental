@@ -12,8 +12,8 @@ import type { OrthodonticsPaymentRecord, PaymentRecord } from '@/types/clinicalR
 import { cupsExplicitosDeTexto, resolverProcedimientoCups } from '@/utils/cupsCodeResolve'
 import { formatCupsProcedureLabel } from '@/utils/cupsProcedureLabel'
 import { CupsProcedurePicker } from './CupsProcedurePicker'
-import { Cie10PrincipalCombobox } from './Cie10PrincipalCombobox'
 import { EvolutionCatalogServicesField } from './EvolutionCatalogServicesField'
+import { EvolutionNoteDiagnosesField } from './EvolutionNoteDiagnosesField'
 import { EvolutionNoteAddendumPanel } from './EvolutionNoteAddendumPanel'
 import { EvolutionRipsEstadoBadge, EvolutionRipsPanel } from './EvolutionRipsPanel'
 import type { PacienteRipsIdentidad } from '@/utils/evolutionRipsPayload'
@@ -327,6 +327,12 @@ export function EvolutionNoteCard({
               />
             </div>
 
+            <EvolutionNoteDiagnosesField
+              note={note}
+              disabled={clinicalLocked}
+              onChange={onChange}
+            />
+
             {!evolutionFormReady ? (
               <p className="rounded-lg border border-dashed border-slate-200 bg-white/70 px-3 py-2 text-sm text-slate-500">
                 Busque un CUPS o tratamiento personalizado arriba, o escriba el procedimiento
@@ -362,14 +368,6 @@ export function EvolutionNoteCard({
                     onChange={(procedure) => onChange(parcheProcedimientoCups(procedure))}
                   />
                 </div>
-
-                <Cie10PrincipalCombobox
-                  value={note.ripsMetadata?.codDiagnosticoPrincipal ?? ''}
-                  disabled={disabled}
-                  onChange={(codDiagnosticoPrincipal) =>
-                    onChange({ ripsMetadata: { codDiagnosticoPrincipal } })
-                  }
-                />
 
                 <div>
                   <h5 className="mb-2 text-xs font-semibold uppercase text-slate-500">Anestesia</h5>
@@ -500,7 +498,7 @@ export function EvolutionNoteCard({
             pagosActuales={pagosPaciente}
             disabled={disabled}
             clinicalLocked={clinicalLocked}
-            showDiagnosis={!showRipsForm && !evolutionFormReady}
+            showDiagnosis={clinicalLocked}
             onChange={onChange}
           />
         </div>

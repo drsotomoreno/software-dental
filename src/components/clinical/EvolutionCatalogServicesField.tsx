@@ -11,6 +11,8 @@ import {
 } from '@/utils/evolutionCatalogServices'
 import { formatCurrency } from '@/utils'
 import { AestheticServiceModal } from '@/components/checkout/AestheticServiceModal'
+import { AnatomicalAssociationSelect } from '@/components/clinical/diagnostics/DiagnosisAssociationFields'
+import { diagnosisLocationLabel } from '@/utils/diagnosisAssociation'
 import { EvolutionDentalServiceSelect } from './EvolutionDentalServiceSelect'
 
 interface EvolutionCatalogServicesFieldProps {
@@ -59,9 +61,10 @@ export function EvolutionCatalogServicesField({
       </div>
 
       <p className="text-[10px] text-slate-400">
-        Puede registrar varios CUPS o tratamientos realizados en la misma sesión clínica. Los
-        servicios estéticos sin CUPS se facturan a la DIAN con el nombre literal y van a RIPS como
-        Otros Servicios.
+        Puede registrar varios CUPS o tratamientos realizados en la misma sesión clínica. Cada
+        procedimiento se asocia a un diente, a un maxilar o a toda la dentición. Los servicios
+        estéticos sin CUPS se facturan a la DIAN con el nombre literal y van a RIPS como Otros
+        Servicios.
       </p>
 
       <div className="space-y-3">
@@ -109,6 +112,32 @@ export function EvolutionCatalogServicesField({
                 }}
               />
             )}
+
+            <div className="mt-3">
+              <AnatomicalAssociationSelect
+                toothNumber={service.toothNumber}
+                anatomicalScope={service.anatomicalScope}
+                disabled={disabled}
+                pending={
+                  !disabled &&
+                  Boolean(
+                    service.procedure?.trim() ||
+                      service.serviceName?.trim() ||
+                      service.dentalServiceId,
+                  ) &&
+                  !diagnosisLocationLabel(service)
+                }
+                ariaLabel={`Asociar ${service.serviceName || service.procedure || `procedimiento ${index + 1}`} a un diente, un maxilar o toda la dentición`}
+                onChange={(location) => {
+                  const nextService = { ...service, ...location }
+                  if (persistedServices.length === 0) {
+                    onChange(buildEvolutionNotePatchFromServices(note, [nextService]))
+                    return
+                  }
+                  onChange(updateCatalogServiceInNote(note, service.id, location))
+                }}
+              />
+            </div>
           </div>
         ))}
       </div>

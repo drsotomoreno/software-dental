@@ -9,6 +9,7 @@ import {
   createDefaultEvolutionNoteRipsMetadata,
 } from '@/types/evolutionNoteRips'
 import { buildEvolutionNoteHashPayload } from '@/utils/evolutionNoteHash'
+import { omitBlankEvolutionDiagnoses } from '@/utils/evolutionNoteAssociation'
 import type { EvolutionNoteAddendum } from '@/types/evolutionNoteAddendum'
 import type { SyncOutboxEntityType, SyncOutboxEntry } from '@/types/syncOutbox'
 import { computeContentHash, generateId, serializeForHash } from '@/utils'
@@ -71,9 +72,10 @@ export async function finalizeEvolutionNote(
   note: EvolutionNote,
   signedAtUtc = new Date().toISOString(),
 ): Promise<EvolutionNote> {
-  const contentHash = await computeEvolutionNoteContentHash(note)
+  const prepared = omitBlankEvolutionDiagnoses(note)
+  const contentHash = await computeEvolutionNoteContentHash(prepared)
   return {
-    ...note,
+    ...prepared,
     signedAt: signedAtUtc,
     contentHash,
     isLocked: true,

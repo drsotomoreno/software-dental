@@ -3,6 +3,7 @@ import { APP_NAME } from '@/constants/branding'
 import { formatDate } from './crypto'
 import { getEvolutionCatalogServices } from '@/utils/evolutionCatalogServices'
 import { diagnosisLocationLabel } from './diagnosisAssociation.ts'
+import { formatAssociatedItemLabel } from './evolutionNoteAssociation.ts'
 
 function truncateHash(hash?: string, len = 16): string {
   if (!hash) return '—'
@@ -30,11 +31,23 @@ export function buildPortabilityHtml(pkg: ClinicalHistoryExportPackage): string 
           const procedureLabel =
             catalogServices.length > 0
               ? catalogServices
-                  .map((service) => service.serviceName || service.procedure)
+                  .map((service) =>
+                    formatAssociatedItemLabel(service.serviceName || service.procedure, service),
+                  )
                   .filter(Boolean)
                   .join(' · ')
-              : n.procedure
-          return `<tr><td>${formatDate(n.date || n.createdAt)}</td><td>${procedureLabel}</td><td>${n.prescriptions || '—'}</td></tr>`
+              : formatAssociatedItemLabel(n.serviceName || n.procedure || '', n)
+          const diagnosisLabel = (n.diagnoses ?? [])
+            .filter((diagnosis) => diagnosis.code.trim())
+            .map((diagnosis) =>
+              formatAssociatedItemLabel(
+                [diagnosis.code, diagnosis.description].filter(Boolean).join(' '),
+                diagnosis,
+              ),
+            )
+            .join(' · ')
+          const procedureCell = [procedureLabel, diagnosisLabel].filter(Boolean).join(' · ')
+          return `<tr><td>${formatDate(n.date || n.createdAt)}</td><td>${procedureCell || '—'}</td><td>${n.prescriptions || '—'}</td></tr>`
         })
         .join('')
 

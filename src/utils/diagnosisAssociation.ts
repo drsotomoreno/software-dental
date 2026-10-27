@@ -1,7 +1,11 @@
-import { ALL_TEETH_NUMBERS, DIAGNOSIS_ANATOMICAL_SCOPE_LABELS } from '../constants/dental.ts'
+import {
+  ALL_DECIDUOUS_TEETH,
+  ALL_TEETH_NUMBERS,
+  DIAGNOSIS_ANATOMICAL_SCOPE_LABELS,
+} from '../constants/dental.ts'
 import type { Cie10Diagnosis, DiagnosisAnatomicalScope } from '@/types/clinicalRecord'
 
-const PERMANENT_TEETH = new Set<number>(ALL_TEETH_NUMBERS)
+const VALID_TEETH = new Set<number>([...ALL_TEETH_NUMBERS, ...ALL_DECIDUOUS_TEETH])
 
 const SCOPE_PHRASE =
   /\b(toda la denticion|denticion completa|toda la boca|maxilar superior|arcada superior|maxilar inferior|arcada inferior|mandibula|mandibular)\b/g
@@ -23,8 +27,39 @@ export function parseDiagnosisAssociation(value: string): DiagnosisAssociation |
   const match = /^tooth:(\d{2})$/.exec(trimmed)
   if (!match) return null
   const toothNumber = Number(match[1])
-  if (!PERMANENT_TEETH.has(toothNumber)) return null
+  if (!VALID_TEETH.has(toothNumber)) return null
   return { kind: 'tooth', toothNumber }
+}
+
+export function fieldsFromDiagnosisAssociation(association: DiagnosisAssociation | null): {
+  toothNumber?: number
+  anatomicalScope?: DiagnosisAnatomicalScope
+} {
+  if (association?.kind === 'tooth') {
+    return { toothNumber: association.toothNumber, anatomicalScope: undefined }
+  }
+  if (association?.kind === 'scope') {
+    return { toothNumber: undefined, anatomicalScope: association.scope }
+  }
+  return { toothNumber: undefined, anatomicalScope: undefined }
+}
+
+/** Valor del selector: pieza FDI, maxilar o dentición completa. */
+export function anatomicalAssociationValue(target: {
+  toothNumber?: number | null
+  anatomicalScope?: DiagnosisAnatomicalScope | null
+}): string {
+  if (target.toothNumber != null && Number.isFinite(target.toothNumber)) {
+    const parsed = parseDiagnosisAssociation(`tooth:${target.toothNumber}`)
+    if (parsed?.kind === 'tooth') return `tooth:${parsed.toothNumber}`
+  }
+  if (
+    target.anatomicalScope &&
+    Object.hasOwn(DIAGNOSIS_ANATOMICAL_SCOPE_LABELS, target.anatomicalScope)
+  ) {
+    return target.anatomicalScope
+  }
+  return ''
 }
 
 /** Texto ya normalizado (minúsculas, sin tildes) o texto clínico libre. */
@@ -47,9 +82,16 @@ export function stripDiagnosisScopePhrases(text: string): string {
 }
 
 export function diagnosisLocationLabel(
-  diagnosis: Pick<Cie10Diagnosis, 'affectedTeeth' | 'anatomicalScope'>,
+  diagnosis: Pick<Cie10Diagnosis, 'affectedTeeth' | 'anatomicalScope'> & {
+    toothNumber?: number | null
+  },
 ): string | null {
-  const teeth = [...new Set(diagnosis.affectedTeeth ?? [])]
+  const teeth = [
+    ...new Set([
+      ...(diagnosis.affectedTeeth ?? []),
+      ...(diagnosis.toothNumber != null ? [diagnosis.toothNumber] : []),
+    ]),
+  ]
     .filter((tooth) => Number.isFinite(tooth))
     .sort((left, right) => left - right)
 

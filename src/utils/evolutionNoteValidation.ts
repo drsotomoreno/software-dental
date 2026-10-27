@@ -1,5 +1,6 @@
 import { isNonRipsEvolutionNote, isEvolutionNoteAddendum, type EvolutionNote } from '@/types/evolutionNote'
 import { noteHasCatalogServices, resolveEvolutionNoteRipsMode } from '@/utils/evolutionCatalogServices'
+import { collectEvolutionAssociationIssues } from '@/utils/evolutionNoteAssociation'
 import { MIN_SIGNATURE_STROKES } from '@/types/signature'
 
 export interface EvolutionNoteValidationIssue {
@@ -95,6 +96,10 @@ export function validateEvolutionNote(note: EvolutionNote): EvolutionNoteValidat
       field: 'clinicalNote',
       message: 'La Nota de Evolución es obligatoria.',
     })
+  }
+
+  for (const issue of collectEvolutionAssociationIssues(note)) {
+    issues.push({ noteId: note.id, field: issue.field, message: issue.message })
   }
 
   const firmaPaciente = validarFirma(
