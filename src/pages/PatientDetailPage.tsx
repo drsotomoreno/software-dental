@@ -2130,35 +2130,24 @@ export function PatientDetailPage() {
       )}
 
       {!isArchiveView && !showRapidValuation && (
+        <div className="hidden">
+          <div className="sticky bottom-4 flex gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
+            <button type="button" onClick={() => void handleSaveDraft()} className="btn-secondary">
+              Guardar borrador
+            </button>
 
-        <div className="sticky bottom-4 flex gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
-
-          <button type="button" onClick={() => void handleSaveDraft()} className="btn-secondary">
-
-            Guardar borrador
-
-          </button>
-
-          {can('clinical.sign') && (
-          <button
-
-            type="button"
-
-            onClick={handleSignAndLock}
-
-            disabled={saving}
-
-            className="btn-primary"
-
-          >
-
-            {saving ? 'Cerrando atención...' : 'Cerrar atención (snapshot RIPS)'}
-
-          </button>
-          )}
-
+            {can('clinical.sign') && (
+              <button
+                type="button"
+                onClick={handleSignAndLock}
+                disabled={saving}
+                className="btn-primary"
+              >
+                {saving ? 'Cerrando atención...' : 'Cerrar atención (snapshot RIPS)'}
+              </button>
+            )}
+          </div>
         </div>
-
       )}
 
       <MissingFieldsAlert
