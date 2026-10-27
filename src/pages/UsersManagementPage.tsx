@@ -12,6 +12,7 @@ import {
   updateAppUser,
 } from '@/services/authService'
 import { fetchClinicUsers, type ClinicSeatSnapshot } from '@/services/subscriptionService'
+import { describeStaffLimit } from '../../shared/subscriptionPlans.js'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { UserProfile, UserRole } from '@/types/user'
 import {
@@ -97,7 +98,18 @@ export function UsersManagementPage() {
   const [error, setError] = useState('')
 
   const canManage = canManageClinicTeam(currentUser)
-  const seatsExhausted = Boolean(seats && seats.max != null && seats.used >= seats.max)
+  const rethusFull = Boolean(
+    seats && seats.maxRethus != null && (seats.rethusUsed ?? 0) >= seats.maxRethus,
+  )
+  const assistantsFull = Boolean(
+    seats && seats.maxAssistants != null && (seats.assistantsUsed ?? 0) >= seats.maxAssistants,
+  )
+  const seatsExhausted = Boolean(
+    seats &&
+      ((seats.maxRethus != null || seats.maxAssistants != null)
+        ? rethusFull && assistantsFull
+        : seats.max != null && seats.used >= seats.max),
+  )
 
   const reloadUsers = useCallback(async () => {
     const api = await fetchClinicUsers()
@@ -131,10 +143,14 @@ export function UsersManagementPage() {
       return
     }
     const { password, ...userData } = createForm
-    if (seatsExhausted) {
-      showErr(
-        `Su plan ${seats?.planName ?? 'actual'} permite máximo ${seats?.max} colaboradores. Actualmente tiene ${seats?.used}. Mejore el plan para agregar más usuarios.`,
-      )
+    const roleLimit = describeStaffLimit(
+      createForm.role === 'recepcion' ? 'assistant' : 'rethus',
+      createForm.role === 'recepcion' ? seats?.assistantsUsed ?? 0 : seats?.rethusUsed ?? 0,
+      createForm.role === 'recepcion' ? seats?.maxAssistants ?? null : seats?.maxRethus ?? null,
+      seats?.planName ?? 'actual',
+    )
+    if (roleLimit) {
+      showErr(roleLimit)
       return
     }
     const result = await createAppUser(userData, password)
@@ -302,7 +318,7 @@ export function UsersManagementPage() {
               onClick={() => {
                 if (seatsExhausted) {
                   showErr(
-                    `Su plan ${seats?.planName ?? 'actual'} permite máximo ${seats?.max} colaboradores. Actualmente tiene ${seats?.used}. Mejore el plan para agregar más usuarios.`,
+                    `Su plan ${seats?.planName ?? 'actual'} ya cubrió los profesionales ReTHUS (${seats?.rethusUsed ?? 0} de ${seats?.maxRethus}) y los auxiliares (${seats?.assistantsUsed ?? 0} de ${seats?.maxAssistants}). Mejore la suscripción para agregar más usuarios.`,
                   )
                   return
                 }
@@ -333,11 +349,25 @@ export function UsersManagementPage() {
                 : 'border-slate-200 bg-slate-50 text-slate-700'
             }`}
           >
-            {seats.max == null ? (
-              <>Licencias de colaboradores: sin tope en esta cuenta.</>
+            {seats.maxRethus == null && seats.maxAssistants == null ? (
+              seats.max == null ? (
+                <>Licencias de colaboradores: sin tope en esta cuenta.</>
+              ) : (
+                <>
+                  Plan {seats.planName}: {seats.used} de {seats.max} colaboradores.
+                </>
+              )
             ) : (
               <>
-                Plan {seats.planName}: {seats.used} de {seats.max} colaboradores.
+                Plan {seats.planName}: profesionales ReTHUS{' '}
+                {seats.maxRethus == null
+                  ? 'sin tope'
+                  : `${seats.rethusUsed ?? 0} de ${seats.maxRethus}`}
+                {' · '}auxiliares{' '}
+                {seats.maxAssistants == null
+                  ? 'sin tope'
+                  : `${seats.assistantsUsed ?? 0} de ${seats.maxAssistants}`}
+                .
                 {seatsExhausted
                   ? ' Alcanzó el máximo de su plan. Mejore la suscripción para agregar más usuarios.'
                   : ''}
