@@ -10,6 +10,7 @@ import {
   buildDefaultRipsMetadata,
   buildRipsFromRecords,
   countRipsIssues,
+  formatRipsIssuePatientLabel,
   createCatalogLookupFromServices,
   downloadRipsJson,
   hasRipsBlockingErrors,
@@ -476,24 +477,29 @@ function RipsValidationList({
         Validación local: {errors} error(es), {warnings} advertencia(s)
       </p>
       <ul className="max-h-48 space-y-1 overflow-y-auto text-xs text-amber-900">
-        {issues.map((issue, index) => (
-          <li key={index} className="flex gap-2">
-            <span
-              className={
-                issue.level === 'error'
-                  ? 'font-semibold text-red-700'
-                  : 'font-medium text-amber-800'
-              }
-            >
-              {issue.level === 'error' ? 'Error' : 'Aviso'}:
-            </span>
-            <span>
-              {issue.field && <span className="font-mono">[{issue.field}] </span>}
-              {issue.patientDocument ? `[${issue.patientDocument}] ` : ''}
-              {issue.message}
-            </span>
-          </li>
-        ))}
+        {issues.map((issue, index) => {
+          const patientLabel = formatRipsIssuePatientLabel(issue)
+          return (
+            <li key={index} className="flex gap-2">
+              <span
+                className={
+                  issue.level === 'error'
+                    ? 'font-semibold text-red-700'
+                    : 'font-medium text-amber-800'
+                }
+              >
+                {issue.level === 'error' ? 'Error' : 'Aviso'}:
+              </span>
+              <span>
+                {patientLabel ? (
+                  <span className="font-semibold">Paciente {patientLabel}. </span>
+                ) : null}
+                {issue.field && <span className="font-mono">[{issue.field}] </span>}
+                {issue.message}
+              </span>
+            </li>
+          )
+        })}
       </ul>
     </div>
   )

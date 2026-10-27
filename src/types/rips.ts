@@ -179,7 +179,10 @@ export interface RipsValidationIssue {
   field?: string
   message: string
   recordId?: string
+  /** Tipo y número, p. ej. «CC 37861325». */
   patientDocument?: string
+  /** Nombre del paciente al que pertenece el hallazgo. */
+  patientName?: string
 }
 
 export interface RipsExportResult {

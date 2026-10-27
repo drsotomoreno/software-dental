@@ -34,7 +34,7 @@ import {
   type EvolutionCatalogLookup,
 } from './ripsCompiler'
 import { compileOtrosServiciosForRecord } from './ripsOtrosServicios'
-import { validateRipsExport } from './ripsValidation'
+import { annotateRipsIssuesWithPatients, validateRipsExport } from './ripsValidation'
 import { armarRipsNotaEvolucion } from './evolutionRipsPayload'
 
 export interface RipsSourceRecord {
@@ -393,7 +393,7 @@ export function buildRipsFromRecords(
 
   return {
     rips,
-    issues,
+    issues: annotateRipsIssuesWithPatients(issues, sources),
     recordCount: sources.length,
     patientCount: grouped.size,
     compileStats: compileStats.length > 0 ? compileStats : undefined,

@@ -1,6 +1,6 @@
 import type { UserProfile } from '@/types/user'
 import type { BudgetLineItem, ClinicalRecord } from '@/types/clinicalRecord'
-import type { RipsExportMetadata, RipsTransaction, RipsValidationIssue } from '@/types/rips'
+import type { RipsExportMetadata, RipsTransaction, RipsUsuario, RipsValidationIssue } from '@/types/rips'
 import type { RipsSourceRecord } from './rips'
 import { formatCupsCodeDotted, normalizeCupsCode } from '@/services/catalogService'
 import { getThsSpecialtyDefinition } from '@/constants/ripsThsSpecialty'
@@ -16,6 +16,102 @@ import {
 } from './ripsStructureValidation'
 import { treatmentPlanItemsForRipsPayload } from './treatmentPlanRips'
 import { paymentControlLinesForRipsPayload } from './paymentControlLines'
+
+interface PatientIssueIdentity {
+  name: string
+  document: string
+}
+
+function collapseSpaces(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function patientNameFromSource(patient: RipsSourceRecord['patient']): string {
+  return collapseSpaces(`${patient.firstName ?? ''} ${patient.lastName ?? ''}`)
+}
+
+function patientDocumentFromSource(patient: RipsSourceRecord['patient']): string {
+  return collapseSpaces(`${patient.documentType ?? ''} ${patient.documentNumber ?? ''}`)
+}
+
+/**
+ * Texto que identifica al paciente en el recuadro de validación.
+ * Incluye el nombre cuando está disponible, para distinguirlo del documento solo.
+ */
+export function formatRipsIssuePatientLabel(
+  issue: Pick<RipsValidationIssue, 'patientName' | 'patientDocument'>,
+): string | null {
+  const name = issue.patientName?.trim()
+  const document = issue.patientDocument?.trim()
+  if (name && document) return `${name} (${document})`
+  return name || document || null
+}
+
+/**
+ * Completa nombre y documento en hallazgos que ya traen una referencia del paciente.
+ */
+export function annotateRipsIssuesWithPatients(
+  issues: RipsValidationIssue[],
+  sources: RipsSourceRecord[],
+): RipsValidationIssue[] {
+  if (issues.length === 0 || sources.length === 0) return issues
+
+  const byDocument = new Map<string, PatientIssueIdentity>()
+  const byNumber = new Map<string, PatientIssueIdentity | null>()
+
+  for (const { patient } of sources) {
+    const number = patient.documentNumber?.trim()
+    if (!number) continue
+    const identity: PatientIssueIdentity = {
+      name: patientNameFromSource(patient),
+      document: patientDocumentFromSource(patient),
+    }
+    byDocument.set(identity.document, identity)
+    const previous = byNumber.get(number)
+    if (previous === undefined) byNumber.set(number, identity)
+    else if (previous && previous.document !== identity.document) byNumber.set(number, null)
+  }
+
+  return issues.map((issue) => {
+    const raw = collapseSpaces(issue.patientDocument ?? '')
+    if (!raw) return issue
+    const identity = byDocument.get(raw) ?? byNumber.get(raw) ?? null
+    if (!identity) return issue
+    const patientName = issue.patientName?.trim() || identity.name || undefined
+    if (issue.patientDocument === identity.document && issue.patientName === patientName) return issue
+    return {
+      ...issue,
+      patientDocument: identity.document || issue.patientDocument,
+      patientName,
+    }
+  })
+}
+
+function uniqueNormalizedCups(codes: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>()
+  const unique: string[] = []
+  for (const code of codes) {
+    if (!code?.trim()) continue
+    const normalized = normalizeCupsCode(code)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    unique.push(normalized)
+  }
+  return unique
+}
+
+function cupsCodesForUsuario(usuario: RipsUsuario): string[] {
+  return uniqueNormalizedCups([
+    ...(usuario.servicios?.consultas ?? []).map((consulta) => consulta.codConsulta),
+    ...(usuario.servicios?.procedimientos ?? []).map((procedimiento) => procedimiento.codProcedimiento),
+  ])
+}
+
+function usuarioPatientDocument(usuario: RipsUsuario): string {
+  return collapseSpaces(
+    `${usuario.tipoDocumentoIdentificacion ?? ''} ${usuario.numDocumentoIdentificacion ?? ''}`,
+  )
+}
 
 function namesMatch(left: string, right: string): boolean {
   const a = left.trim().toLowerCase()
@@ -107,19 +203,53 @@ export function validateRipsExport(
     })
   }
 
-  const cupsFromRips = rips.usuarios.flatMap((usuario) => [
-    ...(usuario.servicios?.consultas ?? []).map((consulta) => consulta.codConsulta),
-    ...(usuario.servicios?.procedimientos ?? []).map((proc) => proc.codProcedimiento),
-  ])
-  for (const issue of [
-    ...validateRepsSedeStep(professional),
-    ...validateRethusProfessionalStep(professional, cupsFromRips),
-  ]) {
+  for (const issue of validateRepsSedeStep(professional)) {
     issues.push({
       level: issue.level,
       field: issue.field,
       message: issue.message,
     })
+  }
+
+  const usuarios = rips.usuarios ?? []
+  const rethusTargets =
+    usuarios.length > 0
+      ? usuarios.map((usuario) => ({
+          patientDocument: usuarioPatientDocument(usuario),
+          cups: cupsCodesForUsuario(usuario),
+        }))
+      : [{ patientDocument: '', cups: [] as string[] }]
+  const seenSharedRethus = new Set<string>()
+
+  for (const target of rethusTargets) {
+    for (const issue of validateRethusProfessionalStep(professional, target.cups)) {
+      const patientScoped = issue.field === 'cupsCode' || issue.field === 'repsEnabledSpecialties'
+      if (!patientScoped) {
+        const key = `${issue.level}:${issue.field ?? ''}:${issue.message}`
+        if (seenSharedRethus.has(key)) continue
+        seenSharedRethus.add(key)
+        issues.push({
+          level: issue.level,
+          field: issue.field,
+          message: issue.message,
+        })
+        continue
+      }
+      if (!target.patientDocument) {
+        issues.push({
+          level: issue.level,
+          field: issue.field,
+          message: issue.message,
+        })
+        continue
+      }
+      issues.push({
+        level: issue.level,
+        field: issue.field,
+        message: issue.message,
+        patientDocument: target.patientDocument,
+      })
+    }
   }
 
   if (sources.length === 0) {
@@ -397,7 +527,7 @@ export function validateRipsExport(
           issues.push({
             level: 'error',
             field: 'codConsulta',
-            patientDocument: usuario.numDocumentoIdentificacion,
+            patientDocument: usuarioPatientDocument(usuario),
             message:
               `El código de consulta en el JSON RIPS (${formatCupsCodeDotted(consulta.codConsulta)}) ` +
               `no coincide con la especialidad THS «${specialtyLabel ?? thsSpecialty}» ` +
@@ -408,7 +538,7 @@ export function validateRipsExport(
     }
   }
 
-  return issues
+  return annotateRipsIssuesWithPatients(issues, sources)
 }
 
 export function hasRipsBlockingErrors(issues: RipsValidationIssue[]): boolean {

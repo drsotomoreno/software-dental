@@ -131,6 +131,8 @@ export {
   validateRipsExport,
   hasRipsBlockingErrors,
   countRipsIssues,
+  formatRipsIssuePatientLabel,
+  annotateRipsIssuesWithPatients,
 } from './ripsValidation'
 export {
   validateRipsJsonStructure,
