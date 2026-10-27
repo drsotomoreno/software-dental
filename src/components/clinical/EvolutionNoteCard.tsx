@@ -14,7 +14,6 @@ import { cupsExplicitosDeTexto, resolverProcedimientoCups } from '@/utils/cupsCo
 import { formatCupsProcedureLabel } from '@/utils/cupsProcedureLabel'
 import { CupsProcedurePicker } from './CupsProcedurePicker'
 import { EvolutionCatalogServicesField } from './EvolutionCatalogServicesField'
-import { EvolutionNoteDiagnosesField } from './EvolutionNoteDiagnosesField'
 import { EvolutionNoteAddendumPanel } from './EvolutionNoteAddendumPanel'
 import { EvolutionRipsEstadoBadge, EvolutionRipsPanel } from './EvolutionRipsPanel'
 import type { PacienteRipsIdentidad } from '@/utils/evolutionRipsPayload'
@@ -217,20 +216,33 @@ export function EvolutionNoteCard({
               onClick={onRemove}
               className="text-xs text-red-500 hover:text-red-700"
             >
-              Eliminar
-            </button>
-          )}
-          {immutable && allowAddendums && (
-            <button
-              type="button"
-              onClick={onAddAddendum}
-              className="btn-secondary text-xs"
-            >
-              Agregar Nota de Aclaración
+              Eliminar nota
             </button>
           )}
         </div>
       </div>
+
+      {immutable && allowAddendums && !isAddendum && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          <p className="text-xs text-amber-950">
+            Evolución cerrada. El procedimiento ya no se elimina. Si debe corregir o completar
+            algo, deje una nota aclaratoria: la evolución original no se modifica.
+          </p>
+          <button type="button" onClick={onAddAddendum} className="btn-secondary shrink-0 text-xs">
+            Nota aclaratoria
+          </button>
+        </div>
+      )}
+
+      {immutable && allowAddendums && !isAddendum && user && patientId && (
+        <EvolutionNoteAddendumPanel
+          parentNote={note}
+          patientId={patientId}
+          parentRecordId={parentRecordId}
+          user={user}
+          hideComposer
+        />
+      )}
 
       {immutable && note.contentHash && (
         <p className="mb-3 font-mono text-[10px] text-slate-400">
@@ -332,12 +344,6 @@ export function EvolutionNoteCard({
               />
             </div>
 
-            <EvolutionNoteDiagnosesField
-              note={note}
-              disabled={clinicalLocked}
-              onChange={onChange}
-            />
-
             {!evolutionFormReady ? (
               <p className="rounded-lg border border-dashed border-slate-200 bg-white/70 px-3 py-2 text-sm text-slate-500">
                 Busque un CUPS o tratamiento personalizado arriba, o escriba el procedimiento
@@ -355,6 +361,7 @@ export function EvolutionNoteCard({
 
                 {showRipsForm && (
                   <>
+                {!hasServices && (
                 <div>
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <label className="label-field mb-0">Procedimiento / CUPS</label>
@@ -373,6 +380,7 @@ export function EvolutionNoteCard({
                     onChange={(procedure) => onChange(parcheProcedimientoCups(procedure))}
                   />
                 </div>
+                )}
 
                 <div>
                   <h5 className="mb-2 text-xs font-semibold uppercase text-slate-500">Anestesia</h5>
@@ -510,14 +518,6 @@ export function EvolutionNoteCard({
         </div>
       )}
 
-      {immutable && allowAddendums && user && patientId && (
-        <EvolutionNoteAddendumPanel
-          parentNote={note}
-          patientId={patientId}
-          parentRecordId={parentRecordId}
-          user={user}
-        />
-      )}
     </div>
   )
 }

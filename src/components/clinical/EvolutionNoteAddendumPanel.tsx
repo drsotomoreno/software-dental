@@ -22,6 +22,8 @@ interface EvolutionNoteAddendumPanelProps {
   patientId: string
   parentRecordId?: string
   user: AuthUser
+  /** La nota ya ofrece el botón de aclaratoria. Aquí solo se listan las ya guardadas. */
+  hideComposer?: boolean
 }
 
 export function EvolutionNoteAddendumPanel({
@@ -29,6 +31,7 @@ export function EvolutionNoteAddendumPanel({
   patientId,
   parentRecordId,
   user,
+  hideComposer = false,
 }: EvolutionNoteAddendumPanelProps) {
   const addendums = useLiveQuery(
     () =>
@@ -49,6 +52,7 @@ export function EvolutionNoteAddendumPanel({
   const [busy, setBusy] = useState(false)
 
   if (!parentNote.contentHash) return null
+  if (hideComposer && (!addendums || addendums.length === 0)) return null
 
   const resetForm = () => {
     setReason('')
@@ -134,15 +138,19 @@ export function EvolutionNoteAddendumPanel({
     <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium text-amber-900">
-          Evolución firmada — inmutable (Res. 1995/1999)
+          {hideComposer
+            ? 'Notas aclaratorias registradas'
+            : 'Evolución firmada — inmutable (Res. 1995/1999)'}
         </p>
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          className="btn-secondary text-xs"
-        >
-          {expanded ? 'Cancelar' : 'Agregar Nota de Aclaración'}
-        </button>
+        {!hideComposer && (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="btn-secondary text-xs"
+          >
+            {expanded ? 'Cancelar' : 'Agregar Nota de Aclaración'}
+          </button>
+        )}
       </div>
 
       {addendums && addendums.length > 0 && (
@@ -170,7 +178,7 @@ export function EvolutionNoteAddendumPanel({
         </ul>
       )}
 
-      {expanded && (
+      {!hideComposer && expanded && (
         <form onSubmit={handlePrepareSign} className="mt-3 space-y-2 border-t border-amber-200 pt-3">
           <div>
             <label className="label-field">Motivo de la aclaratoria</label>

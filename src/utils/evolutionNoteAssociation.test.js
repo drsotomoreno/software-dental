@@ -6,6 +6,8 @@ import {
   evolutionDiagnosesPatch,
   formatAssociatedItemLabel,
   omitBlankEvolutionDiagnoses,
+  procedureCardsWithDiagnoses,
+  sessionDiagnosesFromProcedures,
 } from './evolutionNoteAssociation.ts'
 import { serializeForHash } from './crypto.ts'
 
@@ -189,6 +191,116 @@ test('la firma incluye la asociación y descarta diagnósticos vacíos', () => {
   assert.notEqual(serializeForHash(withTooth), serializeForHash(withoutTooth))
   assert.equal(withTooth.diagnoses[0].toothNumber, 16)
   assert.equal(withTooth.ripsMetadata, undefined)
+})
+
+test('el diagnóstico queda en el procedimiento y usa su zona', () => {
+  const note = nota({
+    catalogServices: [{ id: 's1', procedure: 'Obturación', toothNumber: 16 }],
+    diagnoses: [
+      {
+        id: 'd1',
+        code: 'K02.1',
+        description: 'Caries de la dentina',
+        type: 'principal',
+      },
+    ],
+  })
+  const view = procedureCardsWithDiagnoses(note, note.catalogServices)
+  assert.equal(view.extras.length, 0)
+  assert.equal(view.services[0].cie10Code, 'K02.1')
+  assert.equal(view.services[0].toothNumber, 16)
+
+  const diagnoses = sessionDiagnosesFromProcedures(view.services, view.extras)
+  assert.equal(diagnoses.length, 1)
+  assert.equal(diagnoses[0].code, 'K02.1')
+  assert.equal(diagnoses[0].toothNumber, 16)
+  assert.equal(diagnoses[0].type, 'principal')
+  assert.deepEqual(
+    collectEvolutionAssociationIssues({ ...note, catalogServices: view.services, diagnoses }),
+    [],
+  )
+})
+
+test('cada procedimiento recibe el diagnóstico de su puesto y la zona no se pide dos veces', () => {
+  const note = nota({
+    catalogServices: [
+      { id: 's1', procedure: 'Obturación', toothNumber: 16 },
+      { id: 's2', procedure: 'Prótesis', anatomicalScope: 'maxilar_superior' },
+    ],
+    diagnoses: [
+      { id: 'd1', code: 'K02.1', description: 'Caries', type: 'principal' },
+      { id: 'd2', code: 'K05.1', description: 'Gingivitis', type: 'relacionado' },
+    ],
+  })
+  const view = procedureCardsWithDiagnoses(note, note.catalogServices)
+  assert.equal(view.extras.length, 0)
+  assert.equal(view.services[0].cie10Code, 'K02.1')
+  assert.equal(view.services[1].cie10Code, 'K05.1')
+
+  const diagnoses = sessionDiagnosesFromProcedures(view.services, view.extras)
+  assert.equal(diagnoses[0].type, 'principal')
+  assert.equal(diagnoses[0].toothNumber, 16)
+  assert.equal(diagnoses[1].code, 'K05.1')
+  assert.equal(diagnoses[1].type, 'relacionado')
+  assert.equal(diagnoses[1].anatomicalScope, 'maxilar_superior')
+  assert.deepEqual(
+    collectEvolutionAssociationIssues({ ...note, catalogServices: view.services, diagnoses }),
+    [],
+  )
+})
+
+test('el diagnóstico que no cabe en un procedimiento sigue en la sesión con la misma zona', () => {
+  const note = nota({
+    catalogServices: [{ id: 's1', procedure: 'Obturación', toothNumber: 16 }],
+    diagnoses: [
+      { id: 'd1', code: 'K02.1', description: 'Caries', type: 'principal' },
+      { id: 'd2', code: 'K05.1', description: 'Gingivitis', type: 'relacionado' },
+    ],
+  })
+  const view = procedureCardsWithDiagnoses(note, note.catalogServices)
+  assert.equal(view.services[0].cie10Code, 'K02.1')
+  assert.equal(view.extras.length, 1)
+  assert.equal(view.extras[0].code, 'K05.1')
+
+  const diagnoses = sessionDiagnosesFromProcedures(view.services, view.extras)
+  assert.equal(diagnoses[1].code, 'K05.1')
+  assert.equal(diagnoses[1].type, 'relacionado')
+  assert.equal(diagnoses[1].toothNumber, 16)
+})
+
+test('la zona del procedimiento alcanza para el diagnóstico', () => {
+  const messages = associationMessages(
+    nota({
+      catalogServices: [{ id: 's1', procedure: 'Obturación', toothNumber: 16 }],
+      diagnoses: [
+        {
+          id: 'd1',
+          code: 'K02.1',
+          description: 'Caries de la dentina',
+          type: 'principal',
+        },
+      ],
+    }),
+  )
+  assert.deepEqual(messages, [])
+})
+
+test('quitar el diagnóstico del procedimiento lo saca de la sesión', () => {
+  const note = nota({
+    catalogServices: [{ id: 's1', procedure: 'Obturación', toothNumber: 16, cie10Code: 'K02.1' }],
+    diagnoses: [
+      {
+        id: 'dx-s1',
+        code: 'K02.1',
+        description: 'Caries',
+        type: 'principal',
+        toothNumber: 16,
+      },
+    ],
+  })
+  const view = procedureCardsWithDiagnoses(note, note.catalogServices)
+  const cleared = [{ ...view.services[0], cie10Code: '', cie10Description: '' }]
+  assert.deepEqual(sessionDiagnosesFromProcedures(cleared, view.extras), [])
 })
 
 test('preparar la firma conserva la asociación y quita diagnósticos vacíos', () => {

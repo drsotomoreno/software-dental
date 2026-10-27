@@ -41,6 +41,7 @@ export function AnatomicalAssociationSelect({
   disabled = false,
   pending = false,
   ariaLabel,
+  label = 'Asociar a',
   onChange,
 }: {
   toothNumber?: number
@@ -48,12 +49,13 @@ export function AnatomicalAssociationSelect({
   disabled?: boolean
   pending?: boolean
   ariaLabel: string
+  label?: string
   onChange: (next: { toothNumber?: number; anatomicalScope?: DiagnosisAnatomicalScope }) => void
 }) {
   const value = anatomicalAssociationValue({ toothNumber, anatomicalScope })
   return (
     <div>
-      <label className="label-field">Asociar a</label>
+      <label className="label-field">{label}</label>
       <select
         disabled={disabled}
         value={value}
