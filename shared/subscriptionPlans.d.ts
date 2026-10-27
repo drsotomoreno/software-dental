@@ -10,7 +10,7 @@ declare module '../../shared/subscriptionPlans.js' {
     features: string[]
     maxSeats: number
     maxRethus: number | 'custom'
-    maxAssistants: number | 'custom'
+    maxReps: number | 'custom'
   }>
   export const PAID_PLAN_IDS: string[]
   export const TRIAL_DAYS: number
@@ -31,7 +31,7 @@ declare module '../../shared/subscriptionPlans.js' {
   export const CUSTOM_PLAN_LIMIT: 'custom'
   export const PLAN_LIMITS: Record<
     string,
-    { name: string; maxRethus: number | 'custom'; maxAssistants: number | 'custom' }
+    { name: string; maxRethus: number | 'custom'; maxReps: number | 'custom' }
   >
   export function isCorporatePlan(plan?: string | null): boolean
   export function normalizeCustomMaxAssistants(value: unknown): number | null
@@ -64,6 +64,25 @@ declare module '../../shared/subscriptionPlans.js' {
     limit: number | null
     planName: string
     userType: 'Auxiliares' | 'Profesionales (ReTHUS)'
+  }
+  export function checkRepsLimit(
+    account: {
+      plan?: string | null
+      subscription_plan?: string | null
+      estado_pago?: string | null
+      rol?: string | null
+      role?: string | null
+      customMaxReps?: unknown
+      custom_max_reps?: unknown
+    } | null | undefined,
+    projectedSedes: number,
+    previousSedes?: number,
+  ): {
+    canAdd: boolean
+    current: number
+    limit: number | null
+    planName: string
+    userType: 'Sedes REPS'
   }
   export function userLimitMessage(result: {
     canAdd?: boolean

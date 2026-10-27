@@ -8,7 +8,7 @@ export const PAID_PLANS = [
     featured: false,
     cta: 'Comenzar',
     features: [
-      '1 profesional ReTHUS + 1 auxiliar',
+      '1 profesional ReTHUS · 1 sede REPS',
       '1 GB de almacenamiento',
       'Dictado por voz IA (2 horas/mes)',
       'WhatsApp manual ilimitado',
@@ -16,7 +16,7 @@ export const PAID_PLANS = [
     ],
     maxSeats: 2,
     maxRethus: 1,
-    maxAssistants: 1,
+    maxReps: 1,
   },
   {
     id: 'smart',
@@ -27,7 +27,7 @@ export const PAID_PLANS = [
     featured: true,
     cta: 'Elegir Smart',
     features: [
-      '3 profesionales ReTHUS + 1 auxiliar',
+      '4 profesionales ReTHUS · 1 sede REPS',
       '5 GB de almacenamiento',
       'Dictado por voz IA (15 horas/mes)',
       'WhatsApp manual ilimitado + 150 automáticos',
@@ -35,8 +35,8 @@ export const PAID_PLANS = [
       'Compra de paquetes extra',
     ],
     maxSeats: 4,
-    maxRethus: 3,
-    maxAssistants: 1,
+    maxRethus: 4,
+    maxReps: 1,
   },
   {
     id: 'bionic',
@@ -47,7 +47,7 @@ export const PAID_PLANS = [
     featured: false,
     cta: 'Comenzar',
     features: [
-      '5 profesionales ReTHUS + 1 auxiliar',
+      '6 profesionales ReTHUS · 1 sede REPS',
       '15 GB de almacenamiento',
       'Dictado por voz IA (35 horas/mes)',
       'WhatsApp manual ilimitado + 500 automáticos',
@@ -55,8 +55,8 @@ export const PAID_PLANS = [
       'Compra de paquetes extra',
     ],
     maxSeats: 6,
-    maxRethus: 5,
-    maxAssistants: 1,
+    maxRethus: 6,
+    maxReps: 1,
   },
   {
     id: 'corporativo',
@@ -67,7 +67,7 @@ export const PAID_PLANS = [
     featured: false,
     cta: 'Hablemos',
     features: [
-      'Profesionales ReTHUS y auxiliares a medida',
+      'Profesionales ReTHUS a medida · 1 sede REPS',
       'Paquetes WhatsApp mayorista',
       'Facturación DIAN por volumen',
       'Capacitación presencial',
@@ -75,7 +75,7 @@ export const PAID_PLANS = [
     ],
     maxSeats: 100,
     maxRethus: 'custom',
-    maxAssistants: 'custom',
+    maxReps: 1,
   },
 ]
 
@@ -125,13 +125,13 @@ export const PLAN_SEAT_LIMITS = Object.fromEntries(
 export const CORPORATE_PLAN_ID = 'corporativo'
 export const CUSTOM_PLAN_LIMIT = 'custom'
 
-export const PLAN_LIMITS = Object.fromEntries(
-  PAID_PLANS.map((plan) => [
-    plan.id,
-    { name: plan.name, maxRethus: plan.maxRethus, maxAssistants: plan.maxAssistants },
-  ]),
-)
-PLAN_LIMITS.prueba = { name: 'Prueba', maxRethus: 1, maxAssistants: 1 }
+export const PLAN_LIMITS = {
+  nomad: { name: 'Plan Nomad', maxRethus: 1, maxReps: 1 },
+  smart: { name: 'Plan Smart', maxRethus: 4, maxReps: 1 },
+  bionic: { name: 'Plan Bionic', maxRethus: 6, maxReps: 1 },
+  corporativo: { name: 'Plan Corporativo', maxRethus: 'custom', maxReps: 1 },
+  prueba: { name: 'Prueba', maxRethus: 1, maxReps: 1 },
+}
 
 export function isCorporatePlan(plan) {
   return String(plan ?? '').trim().toLowerCase() === CORPORATE_PLAN_ID
@@ -183,23 +183,27 @@ function planDetailsFor(account = {}) {
 
 /**
  * Cupo según el rol que se está creando.
- * Auxiliar: cuenta auxiliares contra maxAssistants.
- * Profesional: cuenta ReTHUS contra maxRethus.
- * En Corporativo el catálogo vale 'custom' y se lee la columna de la clínica (vacío = 0).
+ * Un auxiliar no ocupa cupo ReTHUS.
+ * Un profesional se compara con maxRethus. En Corporativo ese valor es custom_max_rethus (vacío = 0).
  */
 export function checkUserLimits(account = {}, isAssistant, currentUsers) {
   const current = Number(currentUsers) || 0
   const userType = isAssistant ? 'Auxiliares' : 'Profesionales (ReTHUS)'
-  if (isUnlimitedAccount(account)) {
-    return { canAdd: true, current, limit: null, planName: 'Exento', userType }
+  if (isAssistant || isUnlimitedAccount(account)) {
+    return {
+      canAdd: true,
+      current,
+      limit: null,
+      planName: isUnlimitedAccount(account) ? 'Exento' : planDetailsFor(account).name,
+      userType,
+    }
   }
   const planDetails = planDetailsFor(account)
-  let maxAllowed = isAssistant ? planDetails.maxAssistants : planDetails.maxRethus
+  let maxAllowed = planDetails.maxRethus
   if (maxAllowed === CUSTOM_PLAN_LIMIT) {
-    const raw = isAssistant
-      ? (account.custom_max_assistants ?? account.customMaxAssistants)
-      : (account.custom_max_rethus ?? account.customMaxRethus)
-    maxAllowed = normalizeCustomMaxAssistants(raw) || 0
+    maxAllowed = normalizeCustomMaxAssistants(
+      account.custom_max_rethus ?? account.customMaxRethus,
+    ) || 0
   }
   return {
     canAdd: current < maxAllowed,
@@ -210,21 +214,51 @@ export function checkUserLimits(account = {}, isAssistant, currentUsers) {
   }
 }
 
+/**
+ * Sedes REPS. Hoy todos los planes, incluido Corporativo, permiten 1.
+ * `projectedSedes` ya incluye la sede que se quiere dejar guardada.
+ * Si la clínica ya superaba el tope, se puede guardar sin agregar otra sede.
+ */
+export function checkRepsLimit(account = {}, projectedSedes, previousSedes = 0) {
+  const current = Number(projectedSedes) || 0
+  const previous = Number(previousSedes) || 0
+  if (isUnlimitedAccount(account)) {
+    return { canAdd: true, current, limit: null, planName: 'Exento', userType: 'Sedes REPS' }
+  }
+  const planDetails = planDetailsFor(account)
+  let maxAllowed = planDetails.maxReps
+  if (maxAllowed === CUSTOM_PLAN_LIMIT) {
+    maxAllowed = normalizeCustomMaxAssistants(account.custom_max_reps ?? account.customMaxReps) || 0
+  }
+  const within = current <= maxAllowed
+  const growing = current > previous
+  return {
+    canAdd: within || !growing,
+    current,
+    limit: maxAllowed,
+    planName: planDetails.name,
+    userType: 'Sedes REPS',
+  }
+}
+
 export function userLimitMessage(result) {
   if (!result || result.canAdd || result.limit == null) return null
-  const noun = result.userType === 'Auxiliares' ? 'auxiliares' : 'profesionales (ReTHUS)'
-  return `Su plan ${result.planName} permite máximo ${result.limit} ${noun}. Actualmente tiene ${result.current}.`
+  let noun = 'profesionales (ReTHUS)'
+  if (result.userType === 'Auxiliares') noun = 'auxiliares'
+  if (result.userType === 'Sedes REPS') noun = Number(result.limit) === 1 ? 'sede REPS' : 'sedes REPS'
+  return `${result.planName} permite máximo ${result.limit} ${noun}. Actualmente tiene ${result.current}.`
 }
 
 export function snapshotLimitError(seats, isAssistant) {
-  const current = Number(isAssistant ? seats?.assistantsUsed : seats?.rethusUsed) || 0
-  const limit = isAssistant ? seats?.maxAssistants : seats?.maxRethus
+  if (isAssistant) return null
+  const current = Number(seats?.rethusUsed) || 0
+  const limit = seats?.maxRethus
   const result = {
     canAdd: limit == null || current < limit,
     current,
     limit: limit ?? null,
     planName: seats?.planName || 'su plan',
-    userType: isAssistant ? 'Auxiliares' : 'Profesionales (ReTHUS)',
+    userType: 'Profesionales (ReTHUS)',
   }
   if (result.canAdd) return null
   return userLimitMessage(result)

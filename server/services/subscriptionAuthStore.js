@@ -13,7 +13,9 @@ import {
   planDisplayName,
   applyClinicAssistantLookup,
   checkUserLimits,
+  checkRepsLimit,
   snapshotLimitError,
+  userLimitMessage,
   normalizeCustomMaxAssistants,
 } from '../../shared/subscriptionPlans.js'
 import { readClinicAssistantLimit } from './clinicAssistantLimit.js'
@@ -1455,6 +1457,21 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
   }
   const providerNitStored = nitCheck.display || providerNit
   const repsCodeStored = repsCheck.display || repsCode
+  const clinicIdForReps = clinicIdOf(current)
+  const repsOwner = store.users.find((item) => item.id === clinicIdForReps) || current
+  const existingReps = new Set()
+  const projectedReps = new Set()
+  for (const member of usersInClinic(store, clinicIdForReps)) {
+    const saved = repsDigits(member.repsCode)
+    if (saved) existingReps.add(saved)
+    const code = member.id === current.id ? repsCodeStored : member.repsCode
+    const digits = repsDigits(code)
+    if (digits) projectedReps.add(digits)
+  }
+  const repsCap = checkRepsLimit(repsOwner, projectedReps.size, existingReps.size)
+  if (!repsCap.canAdd) {
+    return { ok: false, status: 403, error: userLimitMessage(repsCap) }
+  }
 
   if (mustVerifyPrestador) {
     const claimed = await verifyAndClaimPrestador({
@@ -1752,15 +1769,21 @@ function hasClinicAccess(user) {
   return user?.accessEnabled !== false && Boolean(user?.passwordHash)
 }
 
+function repsDigits(value) {
+  return String(value ?? '').replace(/\D/g, '')
+}
+
 function countRoleBuckets(members) {
   let assistantsUsed = 0
   let rethusUsed = 0
+  const repsCodes = new Set()
   for (const member of members) {
-    // El rol que se crea elige el contador: auxiliar, o profesional del cupo ReTHUS.
     if (normalizeRole(member.rol) === 'recepcion') assistantsUsed += 1
     else rethusUsed += 1
+    const digits = repsDigits(member.repsCode)
+    if (digits) repsCodes.add(digits)
   }
-  return { assistantsUsed, rethusUsed }
+  return { assistantsUsed, rethusUsed, repsUsed: repsCodes.size }
 }
 
 async function clinicSeats(store, clinicId) {
@@ -1768,17 +1791,19 @@ async function clinicSeats(store, clinicId) {
   const lookup = await readClinicAssistantLimit(clinicId)
   const account = applyClinicAssistantLookup(owner ?? {}, lookup)
   const members = usersInClinic(store, clinicId).filter(hasClinicAccess)
-  const { assistantsUsed, rethusUsed } = countRoleBuckets(members)
-  const assistants = checkUserLimits(account, true, assistantsUsed)
+  const { assistantsUsed, rethusUsed, repsUsed } = countRoleBuckets(members)
   const rethus = checkUserLimits(account, false, rethusUsed)
+  const reps = checkRepsLimit(account, repsUsed)
   return {
     clinicId,
     used: members.length,
     max: null,
     assistantsUsed,
-    maxAssistants: assistants.limit,
+    maxAssistants: null,
     rethusUsed,
     maxRethus: rethus.limit,
+    repsUsed,
+    maxReps: reps.limit,
     plan: owner?.plan ?? null,
     planName: rethus.planName || planDisplayName(owner?.plan, owner?.estado_pago),
     estado_pago: owner?.estado_pago ?? null,

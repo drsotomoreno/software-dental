@@ -271,12 +271,16 @@ export type ClinicSeatSnapshot = {
   max: number | null
   /** Auxiliares con acceso (rol recepción). */
   assistantsUsed?: number
-  /** Tope de auxiliares del plan. Null = sin tope. */
+  /** Tope de auxiliares. Null: no consumen cupo ReTHUS. */
   maxAssistants?: number | null
   /** Profesionales con acceso (cupo ReTHUS). */
   rethusUsed?: number
   /** Tope de profesionales ReTHUS. Null = sin tope. */
   maxRethus?: number | null
+  /** Sedes REPS distintas en la clínica. */
+  repsUsed?: number
+  /** Tope de sedes REPS. Hoy es 1 en todos los planes. */
+  maxReps?: number | null
   plan: string | null
   planName: string
   estado_pago: string | null

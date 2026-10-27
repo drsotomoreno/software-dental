@@ -98,9 +98,7 @@ export function UsersManagementPage() {
   const [error, setError] = useState('')
 
   const canManage = canManageClinicTeam(currentUser)
-  const assistantsExhausted = Boolean(seats && snapshotLimitError(seats, true))
   const rethusExhausted = Boolean(seats && snapshotLimitError(seats, false))
-  const bothExhausted = assistantsExhausted && rethusExhausted
 
   const reloadUsers = useCallback(async () => {
     const api = await fetchClinicUsers()
@@ -311,14 +309,6 @@ export function UsersManagementPage() {
             <button
               type="button"
               onClick={() => {
-                if (bothExhausted && seats) {
-                  showErr(
-                    snapshotLimitError(seats, true) ||
-                      snapshotLimitError(seats, false) ||
-                      'Alcanzó el máximo de profesionales y de auxiliares de su plan.',
-                  )
-                  return
-                }
                 setShowCreate(true)
               }}
               className="btn-primary"
@@ -341,24 +331,23 @@ export function UsersManagementPage() {
         {seats && (
           <div
             className={`rounded-lg border px-4 py-3 text-sm ${
-              assistantsExhausted || rethusExhausted
+              rethusExhausted
                 ? 'border-amber-200 bg-amber-50 text-amber-900'
                 : 'border-slate-200 bg-slate-50 text-slate-700'
             }`}
           >
-            {seats.maxRethus == null && seats.maxAssistants == null ? (
-              <>Licencias de profesionales y auxiliares: sin tope en esta cuenta.</>
+            {seats.maxRethus == null && seats.maxReps == null ? (
+              <>Licencias sin tope en esta cuenta.</>
             ) : (
               <>
                 <p>
-                  Plan {seats.planName}: profesionales (ReTHUS) {seats.rethusUsed ?? 0}
+                  {seats.planName}: profesionales (ReTHUS) {seats.rethusUsed ?? 0}
                   {seats.maxRethus == null ? '' : ` de ${seats.maxRethus}`}.
                   {rethusExhausted ? ' Alcanzó el máximo de profesionales.' : ''}
                 </p>
                 <p className="mt-1">
-                  Auxiliares: {seats.assistantsUsed ?? 0}
-                  {seats.maxAssistants == null ? '' : ` de ${seats.maxAssistants}`}.
-                  {assistantsExhausted ? ' Alcanzó el máximo de auxiliares.' : ''}
+                  Sedes REPS: {seats.repsUsed ?? 0}
+                  {seats.maxReps == null ? '' : ` de ${seats.maxReps}`}.
                 </p>
               </>
             )}
