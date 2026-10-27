@@ -2,6 +2,7 @@ import { db } from '@/db/database'
 import type { ClinicalRecord, BudgetLineItem } from '@/types/clinicalRecord'
 import { expandEvolutionNoteServices } from '@/utils/evolutionCatalogServices'
 import type { EvolutionNote } from '@/types/evolutionNote'
+import { esVinculoSinFacturaElectronica } from '@/types/evolutionNoteRips'
 import type { Patient } from '@/types/patient'
 import type {
   ElectronicInvoice,
@@ -101,6 +102,7 @@ function resolveEvolutionCost(
 }
 
 function resolveEvolutionBillable(note: EvolutionNote, cost: number): boolean {
+  if (esVinculoSinFacturaElectronica(note)) return false
   if (note.isBillable === false) return false
   if (note.isBillable === true) return cost > 0
   return cost > 0

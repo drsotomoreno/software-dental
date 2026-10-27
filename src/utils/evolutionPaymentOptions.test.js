@@ -49,6 +49,10 @@ test('arma el selector con consecutivo, fecha, valor y concepto', () => {
   assert.equal(opciones[0].tipo, 'fev')
   assert.equal(opciones[1].tipo, 'recibo_interno')
   assert.match(etiquetaOpcionPago(opciones[1]), /RC-12/)
+  assert.match(
+    etiquetaOpcionPago({ ...opciones[1], consecutivo: 'FV00000002' }),
+    /^Recibo FV00000002/,
+  )
   assert.match(etiquetaOpcionPago(opciones[1]), /Obturación/)
   assert.match(etiquetaOpcionPago(opciones[1]), /80\.000|80000/)
 })
