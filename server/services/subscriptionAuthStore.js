@@ -10,8 +10,10 @@ import {
   PAID_PLAN_DAYS,
   TRIAL_DAYS,
   TTC_MESSAGE_PACKAGES,
-  seatLimitForAccount,
+  planLimitsForAccount,
   planDisplayName,
+  staffSeatBlock,
+  countStaffSeats,
 } from '../../shared/subscriptionPlans.js'
 import { readDurableJson, writeDurableJson } from './durableStore.js'
 import { splitPersonName, composeLegalName } from '../../shared/personName.js'
@@ -1745,15 +1747,36 @@ function hasClinicAccess(user) {
 function clinicSeatSnapshot(store, clinicId) {
   const owner = store.users.find((item) => item.id === clinicId) || null
   const members = usersInClinic(store, clinicId).filter(hasClinicAccess)
-  const maxSeats = owner ? seatLimitForAccount(owner) : seatLimitForAccount({})
+  const limits = planLimitsForAccount(owner || {})
+  const counts = countStaffSeats(members, (member) => member.rol)
+  const max = limits.maxRethus == null || limits.maxAssistants == null
+    ? null
+    : limits.maxRethus + limits.maxAssistants
   return {
     clinicId,
-    used: members.length,
-    max: maxSeats,
+    used: counts.rethus + counts.assistants,
+    max,
+    rethusUsed: counts.rethus,
+    maxRethus: limits.maxRethus,
+    assistantsUsed: counts.assistants,
+    maxAssistants: limits.maxAssistants,
+    maxReps: limits.maxReps,
     plan: owner?.plan ?? null,
     planName: planDisplayName(owner?.plan, owner?.estado_pago),
     estado_pago: owner?.estado_pago ?? null,
   }
+}
+
+function staffLimitForNewRole(store, clinicId, role, ignoreId) {
+  const owner = store.users.find((item) => item.id === clinicId) || null
+  const members = usersInClinic(store, clinicId).filter(hasClinicAccess)
+  return staffSeatBlock({
+    members,
+    role,
+    planName: planDisplayName(owner?.plan, owner?.estado_pago),
+    limits: planLimitsForAccount(owner || {}),
+    ignoreId,
+  })
 }
 
 function publicClinicUser(user) {
@@ -1858,13 +1881,13 @@ export async function createClinicUser({ token, hint, member }) {
     return { ok: false, status: 404, error: 'No se encontró la cuenta de la clínica.' }
   }
 
-  const seats = clinicSeatSnapshot(store, clinicId)
-  if (seats.max != null && seats.used >= seats.max) {
+  const staffLimit = staffLimitForNewRole(store, clinicId, role)
+  if (staffLimit) {
     return {
       ok: false,
       status: 403,
-      error: `Su plan ${seats.planName} permite máximo ${seats.max} colaboradores. Actualmente tiene ${seats.used}. Mejore el plan para agregar más usuarios.`,
-      seats,
+      error: staffLimit,
+      seats: clinicSeatSnapshot(store, clinicId),
     }
   }
 
@@ -1983,6 +2006,11 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     if (!lastName) lastName = current.lastName || 'Administrativo'
   } else if (!firstName || !lastName) {
     return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
+  }
+
+  const staffLimit = staffLimitForNewRole(store, clinicIdOf(current), role, current.id)
+  if (staffLimit) {
+    return { ok: false, status: 403, error: staffLimit }
   }
 
   store.users[index] = {

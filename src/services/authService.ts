@@ -20,7 +20,7 @@ import {
   mapApiUserToAuthUser,
 } from '@/services/apiAuthService'
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
-import { seatLimitForAccount, planDisplayName } from '../../shared/subscriptionPlans.js'
+import { planDisplayName, planLimitsForAccount, staffSeatBlock } from '../../shared/subscriptionPlans.js'
 import {
   createClinicMember,
   deleteClinicMember,
@@ -273,14 +273,6 @@ async function requireUserManager(): Promise<
   return { ok: true, actorRole: actor.role ?? 'admin' }
 }
 
-function localSeatError(used: number, max: number | null, planName: string): string | null {
-  if (max == null) return null
-  if (used >= max) {
-    return `Su plan ${planName} permite máximo ${max} colaboradores. Actualmente tiene ${used}. Mejore el plan para agregar más usuarios.`
-  }
-  return null
-}
-
 function staffPhoneDigits(value: string | undefined): string {
   return String(value ?? '').replace(/\D/g, '').slice(0, 12)
 }
@@ -413,12 +405,13 @@ export async function createAppUser(
   const members = clinicId
     ? allUsers.filter((item) => String(item.clinicId || item.id) === String(clinicId))
     : allUsers
-  const maxSeats = seatLimitForAccount(apiAuth?.user ?? {})
-  const seatError = localSeatError(
-    members.length,
-    maxSeats,
-    planDisplayName(apiAuth?.user?.plan, apiAuth?.user?.estado_pago),
-  )
+  const activeMembers = members.filter((item) => item.accessEnabled !== false)
+  const seatError = staffSeatBlock({
+    members: activeMembers,
+    role: roleResult.role,
+    planName: planDisplayName(apiAuth?.user?.plan, apiAuth?.user?.estado_pago),
+    limits: planLimitsForAccount(apiAuth?.user ?? {}),
+  })
   if (seatError) return { ok: false, error: seatError }
 
   const user: UserProfile = {
@@ -531,6 +524,24 @@ export async function updateAppUser(
     return { ok: false, error: api.error }
   }
   if (!current) return { ok: false, error: 'Usuario no encontrado.' }
+
+  if (nextPatch.role && nextPatch.role !== current.role) {
+    const { clinicId, apiAuth } = currentClinicScope()
+    const allUsers = await db.users.toArray()
+    const members = (
+      clinicId
+        ? allUsers.filter((item) => String(item.clinicId || item.id) === String(clinicId))
+        : allUsers
+    ).filter((item) => item.accessEnabled !== false)
+    const seatError = staffSeatBlock({
+      members,
+      role: nextPatch.role,
+      planName: planDisplayName(apiAuth?.user?.plan, apiAuth?.user?.estado_pago),
+      limits: planLimitsForAccount(apiAuth?.user ?? {}),
+      ignoreId: current.id,
+    })
+    if (seatError) return { ok: false, error: seatError }
+  }
 
   await db.users.update(userId, nextPatch)
   return { ok: true }

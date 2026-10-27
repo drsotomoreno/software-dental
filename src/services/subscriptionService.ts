@@ -269,6 +269,11 @@ export type ClinicSeatSnapshot = {
   clinicId: string
   used: number
   max: number | null
+  rethusUsed?: number
+  maxRethus?: number | null
+  assistantsUsed?: number
+  maxAssistants?: number | null
+  maxReps?: number | null
   plan: string | null
   planName: string
   estado_pago: string | null
