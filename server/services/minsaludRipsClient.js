@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { config, hasMinsaludCredentials } from '../config.js'
-import { getMinsaludAccessToken } from './minsaludAuth.js'
+import { MinsaludAuthError, minsaludAuthorizedRequest } from './minsaludAuth.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
 
 /**
@@ -88,7 +88,6 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     }
   }
 
-  const token = await getMinsaludAccessToken()
   const { apiBaseUrl, validatePath, nit } = config.minsalud
   const url = `${apiBaseUrl}${validatePath}`
 
@@ -101,20 +100,34 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     },
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
-      'X-NIT-Prestador': nit || rips.numDocumentoIdObligado,
-    },
-    body: JSON.stringify(payload),
-  })
+  let response
+  try {
+    response = await minsaludAuthorizedRequest({
+      url,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-NIT-Prestador': nit || rips.numDocumentoIdObligado,
+      },
+      body: JSON.stringify(payload),
+    })
+  } catch (error) {
+    if (error instanceof MinsaludAuthError) {
+      return {
+        success: false,
+        source: 'minsalud',
+        httpStatus: error.httpStatus ?? error.status,
+        localIssues,
+        ministryErrors: [{ code: error.code, message: error.message }],
+      }
+    }
+    throw error
+  }
 
-  const data = await response.json().catch(() => ({}))
+  const data = parseMinistryBody(response.text)
 
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     return {
       success: false,
       source: 'minsalud',
@@ -173,6 +186,18 @@ function simulateMinistryCrossValidation(rips) {
   }
 
   return errors
+}
+
+/**
+ * @param {string} text
+ */
+function parseMinistryBody(text) {
+  if (!text) return {}
+  try {
+    return JSON.parse(text)
+  } catch {
+    return {}
+  }
 }
 
 function getAgeYears(birthDate) {
