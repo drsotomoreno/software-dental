@@ -26,7 +26,9 @@ interface SharedDocumentBoxProps {
 }
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
+  const now = new Date()
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 10)
 }
 
 function parseAmount(value: string): number {
