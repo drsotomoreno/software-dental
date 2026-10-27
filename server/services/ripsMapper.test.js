@@ -55,9 +55,10 @@ test('en producción arma usuarios, servicios y consultas con el documento real'
   assert.equal(Array.isArray(rips.usuarios), true)
   assert.equal(Array.isArray(usuario.servicios.consultas), true)
 
-  assert.throws(
-    () => mapper.toRipsSinFactura(consultaOdontologica({ valorPagadoPaciente: 0, id: 'consulta-0' })),
-    (error) => error instanceof RipsMapperError && error.field === 'vrServicio' && /RVC091/.test(error.message),
+  assert.equal(
+    mapper.toRipsSinFactura(consultaOdontologica({ valorPagadoPaciente: 0, id: 'consulta-0' }))
+      .usuarios[0].servicios.consultas[0].vrServicio,
+    0,
   )
   assert.throws(
     () =>
@@ -124,6 +125,72 @@ test('el NIT con dígito de verificación se envía sin ese dígito', () => {
     consultaOdontologica({ numDocumentoIdObligado: '79904620-4' }),
   )
   assert.equal(rips.numDocumentoIdObligado, '79904620')
+})
+
+test('la evolución firmada usa el CUPS del nombre, admite valor 0 y omite la nota sin firmar', () => {
+  const mapper = new RipsMapper(PRESTADOR, { MINSALUD_ENV: 'production' })
+  const rips = mapper.toRipsSinFactura(
+    consultaOdontologica({
+      valorPagadoPaciente: undefined,
+      cupsCode: undefined,
+      codConsulta: undefined,
+      evolutionNotes: [
+        {
+          id: 'nota-consulta',
+          isLocked: true,
+          date: '2026-09-29T13:48',
+          signedAt: '2026-09-29T16:07:24.859Z',
+          procedure: 'Consulta de primera vez por otras especialidades en odontología',
+          cupsCode: null,
+          cost: 0,
+          catalogServices: [
+            { procedure: 'Consulta de primera vez por otras especialidades en odontología' },
+          ],
+        },
+        {
+          id: 'nota-exo',
+          isLocked: false,
+          date: '2026-10-06T16:47',
+          procedure: 'Exodoncia de dientes permanentes',
+          cupsCode: null,
+          cost: 0,
+          catalogServices: [{ procedure: 'Exodoncia de dientes permanentes' }],
+        },
+      ],
+    }),
+  )
+  const servicios = rips.usuarios[0].servicios
+  assert.equal(servicios.consultas.length, 1)
+  assert.equal(servicios.consultas[0].codConsulta, '890204')
+  assert.equal(servicios.consultas[0].vrServicio, 0)
+  assert.equal(servicios.consultas[0].fechaInicioAtencion, '2026-09-29 13:48')
+  assert.equal(servicios.procedimientos, undefined)
+})
+
+test('una exodoncia firmada va a procedimientos y no se reemplaza por la consulta 890203', () => {
+  const mapper = new RipsMapper(PRESTADOR, { MINSALUD_ENV: 'production' })
+  const rips = mapper.toRipsSinFactura(
+    consultaOdontologica({
+      valorPagadoPaciente: undefined,
+      cupsCode: undefined,
+      codConsulta: undefined,
+      evolutionNotes: [
+        {
+          isLocked: true,
+          date: '2026-10-06T16:47',
+          procedure: 'Exodoncia de dientes permanentes',
+          cost: 0,
+          catalogServices: [{ procedure: 'Exodoncia de dientes permanentes' }],
+        },
+      ],
+    }),
+  )
+  const servicios = rips.usuarios[0].servicios
+  assert.equal(servicios.consultas, undefined)
+  assert.equal(servicios.procedimientos.length, 1)
+  assert.equal(servicios.procedimientos[0].codProcedimiento, '230103')
+  assert.equal(servicios.procedimientos[0].vrServicio, 0)
+  assert.equal(servicios.procedimientos[0].fechaInicioAtencion, '2026-10-06 16:47')
 })
 
 test('un fin de atención ilegible no llega a armar el JSON', () => {

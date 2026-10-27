@@ -261,26 +261,33 @@ test('notificaciones sin CUV quedan RECHAZADO y el array se guarda', async () =>
   assert.equal(repo.rows.get('consulta-avisos').resultadoValidacion[0].Codigo, 'RVG08')
 })
 
-test('un vrServicio en 0 no llama al MUV, guarda RECHAZADO y no interrumpe el cierre', async () => {
+test('un vrServicio en 0 se radica y el MUV puede aprobarlo con la notificación RVC091', async () => {
   const repo = memoria()
-  let llamadas = 0
+  let enviado = null
   const result = await finalizarConsultaEnMuv(
     { atencion: atencionValida({ id: 'consulta-3', valorPagadoPaciente: 0 }) },
     {
       ...repo,
-      fevRipsService: {
-        async enviarRipsSinFactura() {
-          llamadas += 1
-          return { CUV: null, resultState: false, resultadosValidacion: [] }
+      minsaludService: {
+        async enviarRipsSinFactura(rips) {
+          enviado = rips
+          return {
+            CUV,
+            resultState: true,
+            resultadosValidacion: [
+              { Clase: 'NOTIFICACION', Codigo: 'RVC091', Descripcion: 'sin FEV el valor va en cero' },
+            ],
+          }
         },
       },
     },
   )
-  assert.equal(llamadas, 0)
+  assert.equal(enviado.usuarios[0].servicios.consultas[0].vrServicio, 0)
   assert.equal(result.clinicoGuardado, true)
-  assert.equal(result.estadoMuv, 'RECHAZADO')
-  assert.equal(repo.rows.get('consulta-3').estadoMuv, 'RECHAZADO')
-  assert.match(repo.rows.get('consulta-3').resultadoValidacion.error, /RVC091/)
+  assert.equal(result.estadoMuv, 'APROBADO')
+  assert.equal(result.cuv, CUV)
+  assert.equal(repo.rows.get('consulta-3').estadoMuv, 'APROBADO')
+  assert.equal(repo.rows.get('consulta-3').resultadoValidacion[0].Codigo, 'RVC091')
   assert.deepEqual(repo.calls, ['insert', 'update'])
 })
 

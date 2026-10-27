@@ -3,7 +3,7 @@
 export type EstadoMuv = 'PENDIENTE' | 'APROBADO' | 'RECHAZADO'
 
 const REGLAS: Record<string, string> = {
-  RVC091: 'Rechazado por regla RVC091: el valor pagado por el paciente no puede ser 0.',
+  RVC091: 'El valor del servicio no se informó. En un RIPS sin factura ese valor se envía en cero.',
   RVG01: 'Rechazado por regla RVG01: el documento del paciente no figura en las bases oficiales.',
 }
 
@@ -41,9 +41,9 @@ function textoDeItem(item: unknown): string {
   if (!item || typeof item !== 'object') return ''
   const row = item as Record<string, unknown>
   const codigo = String(row.Codigo ?? row.codigo ?? '').trim()
-  if (codigo && REGLAS[codigo]) return REGLAS[codigo]
-  const descripcion = String(row.Descripcion ?? row.descripcion ?? row.message ?? row.error ?? '').trim()
   const clase = String(row.Clase ?? row.clase ?? '').toUpperCase()
+  if (codigo && REGLAS[codigo] && clase !== 'NOTIFICACION') return REGLAS[codigo]
+  const descripcion = String(row.Descripcion ?? row.descripcion ?? row.message ?? row.error ?? '').trim()
   const prefijo = clase === 'NOTIFICACION' ? 'Notificación' : 'Rechazado'
   if (codigo && descripcion) return `${prefijo} por regla ${codigo}: ${descripcion}`
   if (codigo) return `${prefijo} por regla ${codigo}.`

@@ -5,12 +5,10 @@
 
 import http from 'node:http'
 import https from 'node:https'
+import { resolveMuvAppVersion, resolveMuvEndpoint } from './muvEndpoint.js'
 
-const SANDBOX_BASE_URL = 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
-const PRODUCTION_BASE_URL = 'https://fevrips.sispro.gov.co/fevrips-api'
 const LOGIN_PATH = '/api/Auth/LoginSISPRO'
 const CARGAR_SIN_FACTURA_PATH = '/api/PaquetesFevRips/CargarRipsSinFactura'
-const DEFAULT_APP_VERSION = '5.4.11'
 const DEFAULT_TIPO_MECANISMO = 1
 const TOKEN_RENEW_SKEW_MS = 60_000
 const DEFAULT_TOKEN_TTL_MS = 50 * 60 * 1000
@@ -76,12 +74,8 @@ export function resolveTipoUsuario(explicit, numeroDocumento, nit) {
  * @param {object} [overrides]
  */
 export function readFevRipsSettings(source = process.env, overrides = {}) {
-  const sandbox = envValue('MINSALUD_SANDBOX', source) !== 'false'
-  const baseUrl = (
-    overrides.baseUrl ||
-    envValue('MINSALUD_API_BASE_URL', source) ||
-    (sandbox ? SANDBOX_BASE_URL : PRODUCTION_BASE_URL)
-  ).replace(/\/$/, '')
+  const { sandbox, baseUrl } = resolveMuvEndpoint(source, overrides)
+  const appVersion = resolveMuvAppVersion(source, overrides, sandbox)
   const identidad = splitUsuarioDocumento(
     overrides.username ?? envValue('MINSALUD_USERNAME', source),
     overrides.tipoDocumento ?? (envValue('MINSALUD_TIPO_DOCUMENTO', source) || 'CC'),
@@ -103,7 +97,7 @@ export function readFevRipsSettings(source = process.env, overrides = {}) {
     clave: overrides.password ?? envValue('MINSALUD_PASSWORD', source),
     nit,
     tipoUsuario,
-    appVersion: overrides.appVersion || envValue('MINSALUD_APP_VERSION', source) || DEFAULT_APP_VERSION,
+    appVersion,
     tipoMecanismoValidacion: Number(
       overrides.tipoMecanismoValidacion ??
         (envValue('MINSALUD_TIPO_MECANISMO', source) || DEFAULT_TIPO_MECANISMO),
