@@ -8,6 +8,7 @@ const TZ = 'America/Bogota'
 const HOUR = 2
 const MINUTE = 0
 let timer = null
+let lastRunStartedAt = 0
 
 export function getBogotaParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -51,6 +52,27 @@ export function msUntilNextMonthlyRun(now = new Date()) {
   return Math.max(1_000, nextMonthlyRunDate(now).getTime() - now.getTime())
 }
 
+/**
+ * Node recorta cualquier setTimeout mayor a 2^31-1 ms (~24,8 días) a 1 ms
+ * y emite TimeoutOverflowWarning. De octubre a noviembre (y en casi todo mes)
+ * la espera real supera ese tope: el cron se reprogramaba cada milisegundo,
+ * saturaba el proceso y Render respondía 502.
+ */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647
+const MIN_TIMER_DELAY_MS = 1_000
+const MIN_RUN_GAP_MS = 60 * 60 * 1000
+
+export function timerDelayMs(waitMs) {
+  const wait = Number(waitMs)
+  if (!Number.isFinite(wait)) return MIN_TIMER_DELAY_MS
+  return Math.min(MAX_TIMER_DELAY_MS, Math.max(MIN_TIMER_DELAY_MS, Math.floor(wait)))
+}
+
+/** True solo cuando el instante programado ya llegó (con 1 s de margen). */
+export function shouldRunMonthlyJob(nowMs, dueAtMs) {
+  return Number(nowMs) + MIN_TIMER_DELAY_MS >= Number(dueAtMs)
+}
+
 export function shouldCatchUpOnStartup(now = new Date(), lastRunPeriod) {
   const bogota = getBogotaParts(now)
   if (bogota.day !== 1) return false
@@ -65,6 +87,7 @@ function cronEnabled() {
 }
 
 async function runJob(reason) {
+  lastRunStartedAt = Date.now()
   console.log(`[RIPS mensual] Inicio (${reason}) TZ=${TZ}`)
   try {
     const summary = await enviarRipsMensuales({ submit: true })
@@ -80,12 +103,25 @@ async function runJob(reason) {
 
 function armTimer() {
   if (timer) clearTimeout(timer)
-  const wait = msUntilNextMonthlyRun()
-  const next = nextMonthlyRunDate()
-  console.log(`[RIPS mensual] Próxima ejecución ${next.toISOString()} (cron 0 2 1 * * ${TZ})`)
+  const dueAt = nextMonthlyRunDate().getTime()
+  const delay = timerDelayMs(dueAt - Date.now())
+  console.log(
+    `[RIPS mensual] Próxima ejecución ${new Date(dueAt).toISOString()} (cron 0 2 1 * * ${TZ}); espera ${delay}ms`,
+  )
   timer = setTimeout(() => {
+    const now = Date.now()
+    if (!shouldRunMonthlyJob(now, dueAt)) {
+      armTimer()
+      return
+    }
+    if (now - lastRunStartedAt < MIN_RUN_GAP_MS) {
+      timer = setTimeout(() => armTimer(), timerDelayMs(MIN_RUN_GAP_MS - (now - lastRunStartedAt)))
+      if (typeof timer.unref === 'function') timer.unref()
+      return
+    }
+    lastRunStartedAt = now
     void runJob('cron').finally(() => armTimer())
-  }, wait)
+  }, delay)
   if (typeof timer.unref === 'function') timer.unref()
 }
 
