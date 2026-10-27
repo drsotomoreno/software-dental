@@ -1,6 +1,8 @@
 /**
- * Orquestación FEV / RIPS según perfil fiscal del prestador.
- * Tras el dictado (CIE-10 + CUPS), Obligado_FEV genera FEV+RIPS;
+ * Orquestación FEV / RIPS según perfil fiscal y vínculo de la atención.
+ * Obligado con factura electrónica genera FEV+RIPS.
+ * Recibo de caja interno, atención en $0 o un paquete sin número de FEV
+ * radican RIPS sin factura (numFactura null).
  * No_Obligado guarda RIPS pendiente con numFactura = null.
  */
 import { submitRipsToMinsalud } from './minsaludRipsClient.js'
@@ -225,14 +227,141 @@ export async function guardarRIPS_Pendiente({ rips, metadatos = {}, user }) {
   }
 }
 
-/**
- * If/Else de perfil fiscal: Obligado → FEV+RIPS; si no → RIPS pendiente (numFactura null).
- * @param {{ perfilFiscal?: unknown, rips: object, invoice?: object, metadatos?: object, user?: object }} params
- */
-export async function enrutarPorPerfilFiscal({ perfilFiscal, rips, invoice, metadatos, user }) {
-  const resolved = normalizePerfilFiscal(perfilFiscal ?? user?.perfilFiscal)
+function textoMetadato(metadatos, ...keys) {
+  for (const key of keys) {
+    const text = String(metadatos?.[key] ?? '').trim()
+    if (text) return text
+  }
+  return ''
+}
 
-  if (isObligadoFev(resolved)) {
+/**
+ * Recibo interno y valor cero no son FEV, aunque el prestador esté obligado
+ * a facturar otras atenciones. Un paquete sin número y sin factura tampoco.
+ * @param {{ perfilFiscal?: unknown, rips?: object, invoice?: object, metadatos?: object, user?: object }} params
+ * @returns {'generarFEV_y_RIPS' | 'muv_sin_factura' | 'guardarRIPS_Pendiente'}
+ */
+export function clasificarRutaFiscal({ perfilFiscal, rips, invoice, metadatos = {}, user } = {}) {
+  const resolved = normalizePerfilFiscal(perfilFiscal ?? metadatos.perfilFiscal ?? user?.perfilFiscal)
+  const canal = textoMetadato(metadatos, 'canal')
+  const vinculo = textoMetadato(metadatos, 'tipoVinculacionFinanciera', 'tipoVinculacion')
+  const vinculoFev = vinculo === 'fev' || vinculo === 'factura'
+  const vinculoSinFactura = vinculo === 'recibo_interno' || vinculo === 'valor_cero'
+  const explicitoSin = canal === 'sin_factura' || vinculoSinFactura
+  const explicitoFev = canal === 'fev' || vinculoFev
+  const numFactura = normalizeRipsNumFactura(rips?.numFactura)
+  const sinFactura = explicitoSin || (!explicitoFev && !invoice && numFactura == null)
+
+  if (!isObligadoFev(resolved)) return 'guardarRIPS_Pendiente'
+  if (sinFactura) return 'muv_sin_factura'
+  return 'generarFEV_y_RIPS'
+}
+
+/**
+ * RIPS sin FEV: el recibo de caja se queda en la clínica y numFactura va en null.
+ * @param {{ rips: object, metadatos?: object, user?: object }} params
+ * @param {{ submit?: typeof submitRipsToMinsalud, saveCuvRecord?: typeof saveCuvRecord }} [deps]
+ */
+export async function radicarRipsSinFev({ rips, metadatos = {}, user }, deps = {}) {
+  const submit = deps.submit ?? submitRipsToMinsalud
+  const guardarCuv = deps.saveCuvRecord ?? saveCuvRecord
+  const perfilFiscal = normalizePerfilFiscal(metadatos.perfilFiscal ?? user?.perfilFiscal)
+  const payload = stampNumFactura(rips, null)
+  const mergedMetadatos = {
+    ...metadatos,
+    perfilFiscal,
+    allowNullNumFactura: true,
+    canal: 'sin_factura',
+    clinicId: metadatos.clinicId || user?.clinicId || user?.id || null,
+  }
+
+  const localIssues = validateRipsPackageLocally(payload, {
+    perfilFiscal,
+    allowNullNumFactura: true,
+    crossValidateAgeSex: true,
+  })
+  if (hasBlockingValidationErrors(localIssues)) {
+    return {
+      ok: false,
+      success: false,
+      route: 'muv_sin_factura',
+      perfilFiscal,
+      numFactura: null,
+      estadoMuv: 'RECHAZADO',
+      error: 'El RIPS sin factura no cumple validaciones locales.',
+      localIssues,
+      rips: payload,
+    }
+  }
+
+  const ministryResult = await submit({ rips: payload, metadatos: mergedMetadatos })
+  if (!ministryResult.success) {
+    return {
+      ok: false,
+      success: false,
+      route: 'muv_sin_factura',
+      perfilFiscal,
+      numFactura: null,
+      estadoMuv: 'RECHAZADO',
+      error:
+        ministryResult.source === 'local'
+          ? 'El RIPS sin factura no cumple validaciones locales.'
+          : 'No se pudo radicar el RIPS sin factura ante MinSalud.',
+      localIssues: ministryResult.localIssues ?? localIssues,
+      ministryErrors: ministryResult.ministryErrors ?? [],
+      source: ministryResult.source,
+      rips: payload,
+    }
+  }
+
+  const cuvRecord = await guardarCuv({
+    cuv: ministryResult.cuv,
+    numFactura: null,
+    numDocumentoIdObligado: payload.numDocumentoIdObligado,
+    status: 'approved',
+    procesoId: ministryResult.procesoId,
+    fechaRadicacion: ministryResult.fechaRadicacion,
+    estado: ministryResult.estado,
+    source: ministryResult.source,
+    metadatos: { ...mergedMetadatos, ...ministryResult.metadatos },
+    clinicalRecordIds: mergedMetadatos.clinicalRecordIds ?? [],
+    patientUuid: mergedMetadatos.patientUuid ?? null,
+  })
+
+  return {
+    ok: true,
+    success: true,
+    approved: true,
+    route: 'muv_sin_factura',
+    perfilFiscal,
+    numFactura: null,
+    cuv: ministryResult.cuv,
+    cuvRecordId: cuvRecord.id,
+    estadoMuv: 'APROBADO',
+    procesoId: ministryResult.procesoId,
+    fechaRadicacion: ministryResult.fechaRadicacion,
+    estado: ministryResult.estado,
+    source: ministryResult.source,
+    localIssues: ministryResult.localIssues ?? [],
+    message: 'RIPS sin factura radicado. El recibo de caja queda en la clínica.',
+    rips: payload,
+  }
+}
+
+/**
+ * Obligado con FEV → FEV+RIPS. Recibo, valor cero o paquete sin número → RIPS sin factura.
+ * No obligado → RIPS pendiente (numFactura null).
+ * @param {{ perfilFiscal?: unknown, rips: object, invoice?: object, metadatos?: object, user?: object }} params
+ * @param {{ submit?: typeof submitRipsToMinsalud, saveCuvRecord?: typeof saveCuvRecord }} [deps]
+ */
+export async function enrutarPorPerfilFiscal({ perfilFiscal, rips, invoice, metadatos, user }, deps) {
+  const route = clasificarRutaFiscal({ perfilFiscal, rips, invoice, metadatos, user })
+
+  if (route === 'muv_sin_factura') {
+    return radicarRipsSinFev({ rips, metadatos: { ...metadatos, perfilFiscal }, user }, deps)
+  }
+
+  if (route === 'generarFEV_y_RIPS') {
     return generarFEV_y_RIPS({ rips, invoice, metadatos, user })
   }
 
