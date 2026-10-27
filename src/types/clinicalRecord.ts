@@ -238,6 +238,11 @@ export interface PaymentInvoice {
   dianQrUrl?: string | null
   /** RIPS JSON de salud asociado al cobro (stringificado) */
   ripsJsonSnapshot?: string | null
+  /**
+   * Copia del mismo número de FEV o recibo ya guardada en el comprobante principal.
+   * El libro de facturas cuenta solo el original.
+   */
+  sharedCopy?: boolean
 }
 
 /** Registro de pago efectuado — control de caja */

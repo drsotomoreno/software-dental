@@ -6,7 +6,10 @@ import type {
 import { calcOrthodonticsBudgetTotal, lineSubtotal } from './budget'
 import { attachAutoInvoiceToPayment } from '@/services/paymentInvoiceService'
 import { generateId } from './crypto'
-import { calcOrthodonticsPaymentsTotal } from './orthodonticsPaymentConcepts'
+import {
+  buildOrthodonticsPaymentReason,
+  calcOrthodonticsPaymentsTotal,
+} from './orthodonticsPaymentConcepts'
 
 export type { OrthodonticsPaymentConcept } from './orthodonticsPaymentConcepts'
 export {
@@ -21,6 +24,7 @@ export {
   suggestControlNumber,
   hasInitialInstallmentPaid,
   calcOrthodonticsPaymentsTotal,
+  buildOrthodonticsPaymentReason,
 } from './orthodonticsPaymentConcepts'
 
 export const ORTHODONTICS_PAYMENT_TYPE_LABELS: Record<OrthodonticsPaymentType, string> = {
@@ -29,27 +33,6 @@ export const ORTHODONTICS_PAYMENT_TYPE_LABELS: Record<OrthodonticsPaymentType, s
   retenedores: 'Retenedores',
   adicional: 'Pago adicional',
   pago_unico: 'Pago único de contado',
-}
-
-export function buildOrthodonticsPaymentReason(
-  paymentType: OrthodonticsPaymentType,
-  controlNumber?: number,
-  additionalDescription?: string,
-): string {
-  switch (paymentType) {
-    case 'cuota_inicial':
-      return 'Cuota inicial — ortodoncia'
-    case 'control':
-      return `Control ortodoncia #${controlNumber ?? '?'}`
-    case 'retenedores':
-      return 'Retenedores — ortodoncia'
-    case 'pago_unico':
-      return 'Pago único de contado — ortodoncia'
-    case 'adicional':
-      return additionalDescription?.trim()
-        ? `Pago adicional — ${additionalDescription.trim()}`
-        : 'Pago adicional — ortodoncia'
-  }
 }
 
 export function suggestOrthodonticsPaymentAmount(

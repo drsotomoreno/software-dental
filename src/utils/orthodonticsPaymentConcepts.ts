@@ -91,3 +91,24 @@ export function hasInitialInstallmentPaid(payments: OrthodonticsPaymentRecord[])
 export function calcOrthodonticsPaymentsTotal(payments: OrthodonticsPaymentRecord[]): number {
   return payments.reduce((sum, payment) => sum + (payment.amount || 0), 0)
 }
+
+export function buildOrthodonticsPaymentReason(
+  paymentType: OrthodonticsPaymentType,
+  controlNumber?: number,
+  additionalDescription?: string,
+): string {
+  switch (paymentType) {
+    case 'cuota_inicial':
+      return 'Cuota inicial — ortodoncia'
+    case 'control':
+      return `Control ortodoncia #${controlNumber ?? '?'}`
+    case 'retenedores':
+      return 'Retenedores — ortodoncia'
+    case 'pago_unico':
+      return 'Pago único de contado — ortodoncia'
+    case 'adicional':
+      return additionalDescription?.trim()
+        ? `Pago adicional — ${additionalDescription.trim()}`
+        : 'Pago adicional — ortodoncia'
+  }
+}

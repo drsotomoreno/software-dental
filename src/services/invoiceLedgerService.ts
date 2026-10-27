@@ -70,6 +70,7 @@ function pushPaymentInvoices(
 
   for (const payment of payments) {
     for (const invoice of payment.invoices ?? []) {
+      if (invoice.sharedCopy) continue
       if (!invoice.invoiceNumber?.trim() && !invoice.amount) continue
 
       target.push({
@@ -108,6 +109,7 @@ function pushOrthodonticsInvoices(
 
   for (const payment of payments) {
     for (const invoice of payment.invoices ?? []) {
+      if (invoice.sharedCopy) continue
       if (!invoice.invoiceNumber?.trim() && !invoice.amount) continue
 
       target.push({
