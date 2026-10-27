@@ -41,6 +41,12 @@ export interface EvolutionCatalogService {
   toothNumber?: number
   /** Maxilar superior, maxilar inferior o toda la dentición. */
   anatomicalScope?: DiagnosisAnatomicalScope
+  /**
+   * CIE-10 de este procedimiento. Comparte la zona o el diente del procedimiento:
+   * no se vuelve a pedir una asociación aparte.
+   */
+  cie10Code?: string
+  cie10Description?: string
 }
 
 /** Diagnóstico de la sesión. Cada uno se asocia a un diente, un maxilar o toda la dentición. */
@@ -73,7 +79,10 @@ export interface EvolutionNote {
   toothNumber?: number
   /** Maxilar superior, maxilar inferior o toda la dentición. */
   anatomicalScope?: DiagnosisAnatomicalScope
-  /** Diagnósticos de esta sesión, cada uno con su asociación anatómica. */
+  /**
+   * Diagnósticos de esta sesión. En la captura viven junto al procedimiento
+   * y heredan su zona o diente.
+   */
   diagnoses?: EvolutionNoteDiagnosis[]
   anesthesia: AnesthesiaRecord
   prescriptions: string

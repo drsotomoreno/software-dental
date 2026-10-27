@@ -183,6 +183,34 @@ export function EvolutionNotesForm({
   }
 
   const sortedNotes = sortEvolutionNotesChronologically(notes)
+  const addenda = sortedNotes.filter(
+    (note) => note.kind === 'addendum' && note.parentEvolutionNoteId,
+  )
+  const placed = new Set<string>()
+  const notesInReadingOrder: EvolutionNote[] = []
+  for (const note of sortedNotes) {
+    if (placed.has(note.id)) continue
+    if (note.kind === 'addendum' && note.parentEvolutionNoteId) continue
+    notesInReadingOrder.push(note)
+    placed.add(note.id)
+    for (const addendum of addenda) {
+      if (addendum.parentEvolutionNoteId !== note.id || placed.has(addendum.id)) continue
+      notesInReadingOrder.push(addendum)
+      placed.add(addendum.id)
+    }
+  }
+  for (const addendum of addenda) {
+    if (placed.has(addendum.id)) continue
+    notesInReadingOrder.push(addendum)
+    placed.add(addendum.id)
+  }
+  const evolutionOrdinal = new Map<string, number>()
+  let ordinal = 0
+  for (const note of notesInReadingOrder) {
+    if (note.kind === 'addendum') continue
+    evolutionOrdinal.set(note.id, ordinal)
+    ordinal += 1
+  }
 
   return (
     <section className="card">
@@ -195,10 +223,9 @@ export function EvolutionNotesForm({
             )}
           </h3>
           <p className="mt-1 text-xs text-slate-500">
-            Res. 1995/1999: el bloqueo es por folio. Una evolución firmada no se edita ni se
-            elimina; use «Agregar Nota de Aclaración». El odontograma y el resto del expediente
-            siguen abiertos. Cada procedimiento y cada diagnóstico se asocia a un diente, a un
-            maxilar o a toda la dentición.
+            Cada procedimiento lleva, en el mismo bloque, la zona o el diente y el diagnóstico.
+            Mientras la evolución esté abierta puede eliminar el procedimiento. Cuando se cierra,
+            la nota no se edita ni se borra (Res. 1995/1999): use «Nota aclaratoria».
           </p>
         </div>
         {canAddNote && (
@@ -231,13 +258,14 @@ export function EvolutionNotesForm({
       ) : (
         <div className="space-y-4">
           <p className="text-xs text-slate-500">
-            Orden cronológico: de la nota más antigua a la más reciente.
+            De la nota más antigua a la más reciente. La aclaratoria queda debajo de la evolución
+            que corrige.
           </p>
-          {sortedNotes.map((note, index) => (
+          {notesInReadingOrder.map((note) => (
             <EvolutionNoteCard
               key={note.id}
               note={note}
-              index={index}
+              index={evolutionOrdinal.get(note.id) ?? 0}
               disabled={disabled}
               parentRecordId={parentRecordId}
               patientId={patientId}
