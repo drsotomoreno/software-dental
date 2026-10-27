@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FileText, Wallet } from 'lucide-react'
+import { FileText, Rocket, Wallet } from 'lucide-react'
 import type { PaymentMethod, PaymentRecord } from '@/types/clinicalRecord'
 import { PAYMENT_METHOD_LABELS } from '@/constants/dental'
 import { DOCUMENT_TYPES } from '@/constants/dental'
@@ -12,6 +12,7 @@ import { FolioRechargeModal } from '@/components/invoices/FolioRechargeModal'
 import { RipsShieldModal } from '@/components/rips/RipsShieldModal'
 import { useConsultationCheckout } from '@/hooks/useConsultationCheckout'
 import { emitChargeReceipt } from '@/services/chargeEmissionService'
+import { cerrarEvolucionSinCosto } from '@/services/ripsApiService'
 import { attachAutoInvoiceToPayment } from '@/services/paymentInvoiceService'
 import { printThermalReceipt, buildThermalDataFromPayment } from '@/utils/thermalInvoicePrint'
 import { formatCurrency, generateId } from '@/utils'
@@ -22,6 +23,8 @@ import { CheckoutCart } from './CheckoutCart'
 import { AestheticServiceModal } from './AestheticServiceModal'
 import { FolioDepletedModal } from './FolioDepletedModal'
 import type { UserProfile } from '@/types/user'
+import { sesionEsSinCosto } from '../../../shared/ripsSinCosto.js'
+import { isEvolutionNoteAddendum, isEvolutionNoteImmutable } from '@/types/evolutionNote'
 
 const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]
 
@@ -39,6 +42,9 @@ interface ConsultationCheckoutProps {
   patientDocumentType?: string
   patientDocumentNumber?: string
   patientEmail?: string
+  patientBirthDate?: string
+  patientGender?: string
+  patientMunicipalityCode?: string
   evolutionNotes?: EvolutionNote[]
   budgetItems?: BudgetLineItem[]
   paymentControl: PaymentRecord[]
@@ -54,6 +60,9 @@ export function ConsultationCheckout({
   patientDocumentType,
   patientDocumentNumber,
   patientEmail,
+  patientBirthDate,
+  patientGender,
+  patientMunicipalityCode,
   evolutionNotes,
   budgetItems,
   paymentControl,
@@ -72,7 +81,71 @@ export function ConsultationCheckout({
   })
   const [aestheticOpen, setAestheticOpen] = useState(false)
   const [rechargeOpen, setRechargeOpen] = useState(false)
+  const [transmitiendo, setTransmitiendo] = useState(false)
+  const [avisoSinCosto, setAvisoSinCosto] = useState('')
   const { state } = checkout
+  const notasClinicas = (evolutionNotes ?? []).filter((note) => !isEvolutionNoteAddendum(note))
+  const hayPresupuestoConCobro = (budgetItems ?? []).some((item) => item.unitPrice > 0 && item.quantity > 0)
+  const sinCosto = sesionEsSinCosto(notasClinicas) && !hayPresupuestoConCobro
+
+  const transmitirSinCosto = async () => {
+    if (transmitiendo) return
+    setAvisoSinCosto('')
+    if (!patientBirthDate?.trim()) {
+      setAvisoSinCosto('Indique la fecha de nacimiento del paciente antes de transmitir el RIPS.')
+      return
+    }
+    const titular = user?.clinicId || user?.id
+    if (!titular) {
+      setAvisoSinCosto('No hay un titular de la clínica para reservar el consecutivo sin costo.')
+      return
+    }
+    setTransmitiendo(true)
+    try {
+      const motivo = notasClinicas.find((note) => note.motivoSinCosto)?.motivoSinCosto ?? 'control'
+      const resultado = await cerrarEvolucionSinCosto({
+        usuarioTitularId: titular,
+        motivo,
+        evoluciones: notasClinicas.map((note) => ({
+          id: note.id,
+          cupsCode: note.cupsCode,
+          catalogServices: note.catalogServices,
+          descripcion: note.procedure?.trim() || note.serviceName?.trim() || 'Evolución',
+          procedure: note.procedure,
+          fechaEvolucion: note.date,
+          signedAt: note.signedAt,
+          firmada: isEvolutionNoteImmutable(note),
+          isLocked: isEvolutionNoteImmutable(note),
+          cie10: note.ripsMetadata?.codDiagnosticoPrincipal,
+          es_sin_costo: true,
+          motivoSinCosto: note.motivoSinCosto ?? motivo,
+          valorNeto: note.valorProcedimiento ?? note.cost ?? 0,
+        })),
+        paciente: {
+          documentType: patientDocumentType,
+          documentNumber: patientDocumentNumber,
+          birthDate: patientBirthDate,
+          gender: patientGender,
+          municipalityCode: patientMunicipalityCode,
+        },
+        prestador: {
+          documentType: user?.documentType,
+          documentNumber: user?.documentNumber,
+          providerNit: user?.providerNit,
+          repsCode: user?.repsCode,
+        },
+      })
+      if (!resultado.success || !resultado.cuv) {
+        setAvisoSinCosto(resultado.error || 'El MUV no devolvió un CUV para la atención sin costo.')
+        return
+      }
+      checkout.markSuccess(`RIPS sin costo transmitido. ${resultado.identificadorPaquete}. CUV ${resultado.cuv}.`)
+    } catch (error) {
+      setAvisoSinCosto(error instanceof Error ? error.message : 'No se pudo transmitir el RIPS sin costo.')
+    } finally {
+      setTransmitiendo(false)
+    }
+  }
 
   const handleRegister = async () => {
     const payload = checkout.prepareRegisterPayment()
@@ -152,6 +225,34 @@ export function ConsultationCheckout({
         onAddAesthetic={() => setAestheticOpen(true)}
       />
 
+      {sinCosto ? (
+        <div className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50 p-4">
+          <p className="text-sm text-slate-800">
+            Esta atención es control, garantía o cortesía. No se selecciona efectivo, tarjeta ni otro
+            medio de pago. El RIPS sale con todos los valores en cero.
+          </p>
+          {avisoSinCosto && (
+            <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              {avisoSinCosto}
+            </p>
+          )}
+          {state.status === 'success' && state.lastError && (
+            <p role="status" className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900">
+              {state.lastError}
+            </p>
+          )}
+          <button
+            type="button"
+            className="btn-primary w-full gap-2 py-3 text-base"
+            disabled={disabled || transmitiendo}
+            onClick={() => void transmitirSinCosto()}
+          >
+            <Rocket className="h-4 w-4" aria-hidden />
+            {transmitiendo ? 'Transmitiendo RIPS…' : 'Cerrar Evolución y Transmitir RIPS'}
+          </button>
+        </div>
+      ) : (
+      <>
       <div className="grid gap-3 lg:grid-cols-2">
         <button
           type="button"
@@ -288,6 +389,8 @@ export function ConsultationCheckout({
           ? 'Registrando…'
           : `💰 Registrar Pago · ${formatCurrency(state.amountToCollect)}`}
       </button>
+      </>
+      )}
 
       <RipsShieldModal
         open={state.status === 'blocked_rips'}

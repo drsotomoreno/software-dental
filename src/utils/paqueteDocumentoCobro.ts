@@ -90,6 +90,7 @@ export function sumaValorNeto(servicios: Array<{ valorNeto: number }>): number {
 /**
  * Regla de oro del MUV: consultas + procedimientos + otros servicios
  * = valor neto del recibo o de la FEV. Sin tolerancia.
+ * Un agrupador de costo cero es válido cuando la suma de los detalles también es 0.
  */
 export function validarReglaOroMuv(input: {
   valorNetoDocumento: number

@@ -81,6 +81,28 @@ test('el mismo paquete cabe en un recibo de caja y el MUV rechaza un peso de dif
   assert.match(descuadre.regla.message, /280001/)
 })
 
+test('un agrupador en cero cuadra cuando cada valor neto es cero', () => {
+  const cero = armarPaqueteDocumentoCobro({
+    tipo: 'RECIBO_CAJA',
+    numero: 'CTRL-050',
+    valorNetoDocumento: 0,
+    lineas: LINEAS.map((linea) => ({ ...linea, valorNeto: 0 })),
+  })
+  assert.equal(cero.regla.ok, true)
+  assert.equal(cero.regla.valorNetoDocumento, 0)
+  assert.equal(cero.regla.valorNetoRips, 0)
+  assert.equal(cero.paquete.consultas[0].valorNeto, 0)
+
+  const descuadre = armarPaqueteDocumentoCobro({
+    tipo: 'RECIBO_CAJA',
+    numero: 'CTRL-050',
+    valorNetoDocumento: 0,
+    lineas: LINEAS,
+  })
+  assert.equal(descuadre.regla.ok, false)
+  assert.match(descuadre.regla.message, /CTRL-050/)
+})
+
 test('la consulta va a consultas y el control mecánico de ortodoncia sigue siendo procedimiento', () => {
   assert.equal(esCupsConsulta('890201'), true)
   assert.equal(esCupsConsulta('89.0.2.03'), true)

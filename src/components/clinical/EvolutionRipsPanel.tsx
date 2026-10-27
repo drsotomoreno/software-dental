@@ -5,7 +5,7 @@ import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/useToast'
 import { listPatientElectronicInvoices } from '@/services/invoiceService'
-import { routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
+import { cerrarEvolucionSinCosto, routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
 import { Toast } from '@/components/ui/Toast'
 import {
   isEvolutionNoteAddendum,
@@ -14,6 +14,12 @@ import {
   type EvolutionNotePatch,
 } from '@/types/evolutionNote'
 import { evaluarTransmisionAnticipo } from '../../../shared/reciboAnticipoRips.js'
+import {
+  esPrefijoSinCosto,
+  etiquetaMotivoSinCosto,
+  motivoSinCostoDe,
+  type MotivoSinCosto,
+} from '../../../shared/ripsSinCosto.js'
 import type { OrthodonticsPaymentRecord, PaymentRecord } from '@/types/clinicalRecord'
 import {
   EvolutionNoteRipsMetadataError,
@@ -42,7 +48,13 @@ import {
 const OPCIONES_VINCULO: Array<{ value: TipoVinculacionFinanciera; label: string }> = [
   { value: 'recibo_interno', label: 'Recibo de caja interno' },
   { value: 'fev', label: 'Factura electrónica (FEV)' },
-  { value: 'valor_cero', label: 'Atención valor $0 / control' },
+  { value: 'valor_cero', label: 'Control / Garantía' },
+]
+
+const MOTIVOS_SIN_COSTO: Array<{ value: MotivoSinCosto; label: string }> = [
+  { value: 'control', label: 'Control' },
+  { value: 'garantia', label: 'Garantía' },
+  { value: 'cortesia', label: 'Cortesía' },
 ]
 
 function mismoRecibo(origen: EvolutionNote, candidata: EvolutionNote): boolean {
@@ -177,6 +189,7 @@ export function EvolutionRipsPanel({
   const metadata = metadataDe(note)
   const tipo = tipoEfectivo(note)
   const valorCero = tipo === 'valor_cero'
+  const motivoSinCosto = motivoSinCostoDe(note.motivoSinCosto)
   const [isLoading, setIsLoading] = useState(false)
   const [verCuv, setVerCuv] = useState(false)
   const [modalAnticipo, setModalAnticipo] = useState(false)
@@ -261,6 +274,9 @@ export function EvolutionRipsPanel({
     if (patch.conceptoPago !== undefined) sidecar.conceptoPago = patch.conceptoPago
     if (patch.valorProcedimiento !== undefined) sidecar.valorProcedimiento = patch.valorProcedimiento
     if (patch.estadoRips !== undefined) sidecar.estadoRips = patch.estadoRips
+    if (patch.esSinCosto !== undefined) sidecar.esSinCosto = patch.esSinCosto
+    if (patch.motivoSinCosto !== undefined) sidecar.motivoSinCosto = patch.motivoSinCosto
+    if (patch.workflowStatus !== undefined) sidecar.workflowStatus = patch.workflowStatus
     onChange(sidecar)
   }
 
@@ -268,9 +284,11 @@ export function EvolutionRipsPanel({
     setMensajeLocal('')
     if (siguiente === 'valor_cero') {
       publicar({
+        esSinCosto: true,
+        motivoSinCosto: note.motivoSinCosto ?? 'control',
         pagoId: null,
         numeroSoportePago: null,
-        conceptoPago: 'No aplica',
+        conceptoPago: etiquetaMotivoSinCosto(note.motivoSinCosto ?? 'control'),
         valorProcedimiento: 0,
         estadoRips: 'SIN_COSTO',
         ...(clinicalLocked ? {} : { cost: 0, isBillable: false }),
@@ -284,6 +302,7 @@ export function EvolutionRipsPanel({
       return
     }
     publicar({
+      esSinCosto: false,
       ...(clinicalLocked ? {} : { isBillable: siguiente === 'fev' }),
       ripsMetadata: {
         tipoVinculacionFinanciera: siguiente,
@@ -389,6 +408,103 @@ export function EvolutionRipsPanel({
           return
         }
         throw error
+      }
+
+      if (valorCero) {
+        const titular = user?.clinicId || user?.id
+        if (!titular) {
+          setMensajeLocal('No hay un titular de la clínica para reservar el consecutivo CTRL, GAR o CORT.')
+          return
+        }
+        const reintento =
+          Boolean(note.pagoId) &&
+          esPrefijoSinCosto(note.numeroSoportePago) &&
+          metadata.ripsEstado !== 'enviado_ok'
+        const cierre = await cerrarEvolucionSinCosto({
+          usuarioTitularId: titular,
+          motivo: motivoSinCosto,
+          numero: reintento ? note.numeroSoportePago : undefined,
+          reciboId: reintento ? note.pagoId : undefined,
+          retransmitir: reintento,
+          evoluciones: [
+            {
+              id: note.id,
+              cupsCode: note.cupsCode,
+              catalogServices: note.catalogServices,
+              descripcion: note.procedure?.trim() || note.serviceName?.trim() || 'Evolución',
+              procedure: note.procedure,
+              fechaEvolucion: note.date,
+              signedAt: note.signedAt,
+              firmada: isEvolutionNoteImmutable(note),
+              isLocked: isEvolutionNoteImmutable(note),
+              cie10: metadata.codDiagnosticoPrincipal,
+              es_sin_costo: true,
+              esSinCosto: true,
+              motivoSinCosto,
+              valorNeto: note.valorProcedimiento ?? note.cost ?? 0,
+              valorProcedimiento: note.valorProcedimiento ?? note.cost ?? 0,
+            },
+          ],
+          paciente: paciente ?? { documentType: '', documentNumber: '', birthDate: '' },
+          prestador: {
+            documentType: user?.documentType || 'CC',
+            documentNumber: user?.documentNumber || note.professionalLicense,
+            providerNit: user?.providerNit,
+            repsCode: user?.repsCode,
+          },
+        })
+        if (!cierre.success || !cierre.cuv) {
+          const detalle = cierre.error || 'El MUV no devolvió un CUV para la atención sin costo.'
+          publicar({
+            esSinCosto: true,
+            motivoSinCosto,
+            valorProcedimiento: 0,
+            estadoRips: cierre.reciboId ? 'PROCESADO' : 'SIN_COSTO',
+            ...(cierre.reciboId
+              ? {
+                  pagoId: cierre.reciboId,
+                  numeroSoportePago: cierre.identificadorPaquete,
+                  conceptoPago: etiquetaMotivoSinCosto(motivoSinCosto),
+                }
+              : {}),
+            ripsMetadata: {
+              tipoVinculacionFinanciera: 'valor_cero',
+              idReciboAsociado: cierre.reciboId ?? null,
+              idFacturaElectronica: null,
+              conceptoRecaudo: RIPS_CONCEPTO_RECAUDO_DEFAULT,
+              ripsEstado: 'error',
+              ripsErrorLog: detalle,
+              cuv: null,
+              ripsFechaTransmision: null,
+            },
+          })
+          setMensajeLocal(detalle)
+          return
+        }
+        publicar({
+          esSinCosto: true,
+          motivoSinCosto,
+          pagoId: cierre.reciboId,
+          numeroSoportePago: cierre.identificadorPaquete,
+          conceptoPago: etiquetaMotivoSinCosto(motivoSinCosto),
+          valorProcedimiento: 0,
+          estadoRips: 'PROCESADO',
+          workflowStatus: 'CLOSED',
+          ...(clinicalLocked ? {} : { cost: 0, isBillable: false }),
+          ripsMetadata: {
+            tipoVinculacionFinanciera: 'valor_cero',
+            idReciboAsociado: cierre.reciboId ?? null,
+            idFacturaElectronica: null,
+            conceptoRecaudo: RIPS_CONCEPTO_RECAUDO_DEFAULT,
+            ripsEstado: 'enviado_ok',
+            cuv: cierre.cuv,
+            ripsFechaTransmision: new Date().toISOString(),
+            ripsErrorLog: null,
+          },
+        })
+        setVerCuv(true)
+        showToast(`RIPS sin costo transmitido. ${cierre.identificadorPaquete}. CUV: ${cierre.cuv}`)
+        return
       }
 
       const preparado = applyEvolutionNoteRipsMetadata(note, {
@@ -524,6 +640,49 @@ export function EvolutionRipsPanel({
           })}
         </div>
 
+        {valorCero ? (
+          <fieldset>
+            <legend className="label-field">Tipo de atención sin costo</legend>
+            <div className="mt-1 grid gap-2 sm:grid-cols-3">
+              {MOTIVOS_SIN_COSTO.map((opcion) => {
+                const activo = motivoSinCosto === opcion.value
+                return (
+                  <label
+                    key={opcion.value}
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                      activo ? 'border-dental-500 bg-white text-dental-900' : 'border-white bg-white/80 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name={`motivo-sin-costo-${note.id}`}
+                      checked={activo}
+                      onChange={() =>
+                        publicar({
+                          esSinCosto: true,
+                          motivoSinCosto: opcion.value,
+                          conceptoPago: opcion.label,
+                          valorProcedimiento: 0,
+                          estadoRips: note.estadoRips === 'PROCESADO' ? 'PROCESADO' : 'SIN_COSTO',
+                          ripsMetadata: {
+                            tipoVinculacionFinanciera: 'valor_cero',
+                            conceptoRecaudo: RIPS_CONCEPTO_RECAUDO_DEFAULT,
+                            idFacturaElectronica: null,
+                          },
+                        })
+                      }
+                    />
+                    {opcion.label}
+                  </label>
+                )
+              })}
+            </div>
+            <p className="mt-2 text-xs text-slate-600">
+              No hay cobro ni medio de pago. El agrupador sale en $0 ({etiquetaMotivoSinCosto(motivoSinCosto)})
+              y el RIPS lleva valorProcedimiento, valorDescuento y valorNeto en cero.
+            </p>
+          </fieldset>
+        ) : (
         <div>
           <label className="label-field" htmlFor={`pago-rips-${note.id}`}>
             {tipo === 'fev' ? 'Factura electrónica del paciente' : 'Recibo o pago del paciente'}
@@ -531,30 +690,26 @@ export function EvolutionRipsPanel({
           <select
             id={`pago-rips-${note.id}`}
             className="input-field disabled:bg-slate-100"
-            disabled={disabled || valorCero}
-            value={valorCero ? '' : (soporteId ?? '')}
+            disabled={disabled}
+            value={soporteId ?? ''}
             onChange={(event) => vincular(event.target.value)}
           >
             <option value="">
-              {valorCero
-                ? 'No aplica para atención en $0'
-                : visibles.length === 0
-                  ? 'No hay pagos registrados para este paciente'
-                  : 'Seleccione consecutivo, fecha, valor y concepto'}
+              {visibles.length === 0
+                ? 'No hay pagos registrados para este paciente'
+                : 'Seleccione consecutivo, fecha, valor y concepto'}
             </option>
-            {!valorCero &&
-              soporteId &&
-              !visibles.some((opcion) => opcion.id === soporteId) && (
-                <option value={soporteId}>Comprobante vinculado · {soporteId}</option>
-              )}
-            {!valorCero &&
-              visibles.map((opcion) => (
-                <option key={`${opcion.tipo}-${opcion.id}`} value={opcion.id}>
-                  {etiquetaOpcionPago(opcion)}
-                </option>
-              ))}
+            {soporteId && !visibles.some((opcion) => opcion.id === soporteId) && (
+              <option value={soporteId}>Comprobante vinculado · {soporteId}</option>
+            )}
+            {visibles.map((opcion) => (
+              <option key={`${opcion.tipo}-${opcion.id}`} value={opcion.id}>
+                {etiquetaOpcionPago(opcion)}
+              </option>
+            ))}
           </select>
         </div>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
@@ -618,7 +773,13 @@ export function EvolutionRipsPanel({
             aria-busy={isLoading}
           >
             <Rocket className="mr-2 h-4 w-4" aria-hidden />
-            {isLoading ? 'Enviando RIPS…' : esRecibo ? 'Enviar al MUV' : 'Preparar y enviar RIPS'}
+            {isLoading
+              ? 'Transmitiendo RIPS…'
+              : valorCero
+                ? 'Cerrar Evolución y Transmitir RIPS'
+                : esRecibo
+                  ? 'Enviar al MUV'
+                  : 'Preparar y enviar RIPS'}
           </button>
         )}
         <button type="button" className="btn-secondary text-xs" onClick={descargarJson} disabled={disabled}>

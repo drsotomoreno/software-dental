@@ -12,6 +12,7 @@ import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.co
 import { getMonthlyRipsStatus, runMonthlyRipsJob } from '../controllers/monthlyRips.controller.js'
 import { getBatchRips, sendBatchRips, sendSingleRips } from '../controllers/ripsTransmission.controller.js'
 import { ReciboCajaRipsError, cobrarYRadicarReciboCaja } from '../services/reciboCajaRips.js'
+import { cerrarYTransmitirRipsSinCosto } from '../services/ripsSinCostoService.js'
 
 const router = Router()
 
@@ -20,6 +21,50 @@ const router = Router()
  * Cierra la consulta: RIPS sin factura hacia el MUV, o FEV si hay factura.
  */
 router.post('/evolucion-dictada', processDictatedEvolution)
+
+/**
+ * POST /api/rips/sin-costo
+ * Control, garantía o cortesía: agrupador de $0 y RIPS al MUV de producción.
+ */
+router.post('/sin-costo', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const resultado = await cerrarYTransmitirRipsSinCosto({
+      usuarioTitularId: body.usuarioTitularId,
+      motivo: body.motivo ?? body.motivoSinCosto,
+      consecutivo: body.consecutivo,
+      numero: body.numero,
+      reciboId: body.reciboId,
+      retransmitir: body.retransmitir === true,
+      evoluciones: body.evoluciones,
+      paciente: body.paciente,
+      prestador: body.prestador,
+      fechaTransmision: body.fechaTransmision,
+    })
+    return res.status(201).json({
+      success: true,
+      identificadorPaquete: resultado.identificadorPaquete,
+      motivo: resultado.motivo,
+      cuv: resultado.cuv ?? null,
+      reciboId: resultado.recibo?.id ?? null,
+      estado: resultado.estado,
+      estadoAtencion: resultado.estadoAtencion,
+      valorTotal: 0,
+      transmitido: true,
+      endpoint: resultado.endpoint,
+      rips: resultado.rips,
+    })
+  } catch (error) {
+    const status = error instanceof ReciboCajaRipsError ? 422 : 500
+    return res.status(status).json({
+      success: false,
+      code: error?.code ?? 'RIPS_SIN_COSTO',
+      error: error instanceof Error ? error.message : 'No se pudo transmitir el RIPS sin costo.',
+      reciboId: error?.reciboId ?? null,
+      identificadorPaquete: error?.identificadorPaquete ?? null,
+    })
+  }
+})
 
 /**
  * POST /api/rips/recibo-caja

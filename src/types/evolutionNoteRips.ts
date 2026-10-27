@@ -128,12 +128,12 @@ export const evolutionNoteRipsMetadataSchema = z
     if (
       listoParaRadicar &&
       value.tipoVinculacionFinanciera === 'valor_cero' &&
-      (value.idReciboAsociado || value.idFacturaElectronica)
+      value.idFacturaElectronica
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['tipoVinculacionFinanciera'],
-        message: 'valor_cero no admite recibo ni factura electrónica asociados.',
+        path: ['idFacturaElectronica'],
+        message: 'Una atención sin costo no admite factura electrónica. El agrupador es un consecutivo interno de $0.',
       })
     }
     if (value.ripsEstado === 'enviado_ok' && !value.cuv) {
@@ -244,6 +244,8 @@ export const EVOLUTION_SIDECAR_KEYS = [
   'conceptoPago',
   'valorProcedimiento',
   'estadoRips',
+  'esSinCosto',
+  'motivoSinCosto',
 ] as const
 
 export function isEvolutionSidecarPatch(patch: object): boolean {
@@ -297,10 +299,14 @@ export function omitEvolutionNoteRipsMetadata<T extends NotaConRipsMetadata>(
   note: T,
 ): Omit<T, 'ripsMetadata'> {
   if (!note || typeof note !== 'object') return note
-  if (!('ripsMetadata' in note) && !('workflowStatus' in note)) return note
+  if (!('ripsMetadata' in note) && !('workflowStatus' in note) && !('esSinCosto' in note) && !('motivoSinCosto' in note)) {
+    return note
+  }
   const clinical = { ...note }
   delete clinical.ripsMetadata
   delete (clinical as { workflowStatus?: unknown }).workflowStatus
+  delete (clinical as { esSinCosto?: unknown }).esSinCosto
+  delete (clinical as { motivoSinCosto?: unknown }).motivoSinCosto
   return clinical
 }
 

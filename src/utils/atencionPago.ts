@@ -4,6 +4,11 @@ import type {
   EstadoRipsAtencion,
   TipoDocumentoCobro,
 } from '../types/atencionPago'
+import {
+  etiquetaMotivoSinCosto,
+  motivoSinCostoDe,
+  type MotivoSinCosto,
+} from '../../shared/ripsSinCosto.js'
 
 export const TIPOS_DOCUMENTO_COBRO: readonly TipoDocumentoCobro[] = [
   'RECIBO_CAJA',
@@ -16,6 +21,7 @@ export const ESTADOS_RIPS_ATENCION: readonly EstadoRipsAtencion[] = [
   'SIN_COSTO',
   'PAGADO',
   'COBRADO_PROCESADO',
+  'PROCESADO',
 ]
 
 export const PREFIJO_RECIBO_CAJA = 'RC-'
@@ -62,7 +68,8 @@ export function leerEstadoRips(value: unknown): EstadoRipsAtencion {
     raw === 'PENDIENTE' ||
     raw === 'SIN_COSTO' ||
     raw === 'PAGADO' ||
-    raw === 'COBRADO_PROCESADO'
+    raw === 'COBRADO_PROCESADO' ||
+    raw === 'PROCESADO'
   ) {
     return raw
   }
@@ -115,6 +122,30 @@ export function vincularPagoAtencion<T extends CamposPagoAtencion>(
           vinculo.valorProcedimiento ?? note.valorProcedimiento ?? 0,
         ),
     estadoRips,
+  }
+}
+
+/**
+ * Enlaza la evolución al agrupador de $0 (CTRL / GAR / CORT) sin reescribir la nota clínica.
+ */
+export function vincularAgrupadorSinCosto<T extends CamposPagoAtencion>(
+  note: T,
+  vinculo: {
+    pagoId: string
+    numeroSoportePago: string
+    motivo?: MotivoSinCosto | string | null
+  },
+): T {
+  const motivo = motivoSinCostoDe(vinculo.motivo)
+  return {
+    ...note,
+    esSinCosto: true,
+    motivoSinCosto: motivo,
+    pagoId: vinculo.pagoId,
+    numeroSoportePago: vinculo.numeroSoportePago,
+    conceptoPago: etiquetaMotivoSinCosto(motivo),
+    valorProcedimiento: 0,
+    estadoRips: 'PROCESADO',
   }
 }
 

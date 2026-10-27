@@ -138,8 +138,39 @@ test('la atención en $0 deja la tarifa en cero y no exige soporte', () => {
     }),
   })
   assert.equal(rips.numFactura, null)
+  assert.equal(rips.usuarios[0].tipoUsuario, '04')
   assert.equal(rips.usuarios[0].servicios.procedimientos[0].vrServicio, 0)
+  assert.equal(rips.usuarios[0].servicios.procedimientos[0].valorProcedimiento, 0)
+  assert.equal(rips.usuarios[0].servicios.procedimientos[0].valorDescuento, 0)
+  assert.equal(rips.usuarios[0].servicios.procedimientos[0].valorNeto, 0)
   assert.equal(rips.usuarios[0].servicios.consultas[0].conceptoRecaudo, '05')
+  assert.equal(rips.usuarios[0].servicios.consultas[0].valorPagoModerador, 0)
+})
+
+test('el costo cero sigue siendo paciente particular aunque el régimen guardado sea contributivo', () => {
+  const rips = armarRipsNotaEvolucion({
+    ...base,
+    paciente: { ...paciente, regime: 'contributivo' },
+    numeroSoporte: 'CTRL-050',
+    note: notaFirmada({
+      cost: 120000,
+      numeroSoportePago: 'CTRL-050',
+      esSinCosto: true,
+      motivoSinCosto: 'control',
+      ripsMetadata: {
+        ...notaFirmada().ripsMetadata,
+        tipoVinculacionFinanciera: 'valor_cero',
+        idFacturaElectronica: null,
+        idReciboAsociado: 'agrupador-1',
+        conceptoRecaudo: '05',
+      },
+    }),
+  })
+  assert.equal(rips.identificadorPaquete, 'CTRL-050')
+  assert.equal(rips.numFactura, null)
+  assert.equal(rips.usuarios[0].tipoUsuario, '04')
+  assert.equal(rips.usuarios[0].servicios.procedimientos[0].valorNeto, 0)
+  assert.equal(rips.usuarios[0].servicios.consultas[0].vrServicio, 0)
 })
 
 test('el nombre del catálogo legacy cap. 39 cuenta como CUPS 391402 aunque la nota no guardó el código', () => {
