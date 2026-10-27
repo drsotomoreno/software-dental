@@ -19,8 +19,38 @@ export const PERFIL_FISCAL_NO_OBLIGADO_NOTICE =
 export const UVT_2026_VALUE_COP = 52_374
 export const UVT_OBLIGADO_FEV_THRESHOLD = 3_500
 export const UVT_OBLIGADO_FEV_AMOUNT_COP = 183_309_000
-export const UVT_2026_EDUCATION_BANNER =
-  'Obligado: Empresas o independientes con ingresos > 3.500 UVT ($183.309.000 COP). No obligado: Independientes por debajo de este tope.'
+
+/** Texto del aviso educativo: odontólogo independiente no obligado a FEV. */
+export const UVT_2026_EDUCATION_INTRO =
+  'Los odontólogos personas naturales (independientes) que prestan servicios de salud por prestación de servicios o en consultorio propio NO ESTÁN OBLIGADOS a emitir factura electrónica, siempre que cumplan de manera simultánea con los siguientes requisitos:'
+
+export const UVT_2026_EDUCATION_REQUIREMENTS = [
+  {
+    label: 'Ingresos brutos',
+    text: 'Sus ingresos brutos totales en el año gravable anterior o en el año en curso son inferiores a 3.500 UVT (que para el año 2026 equivalen a $183.309.000 COP).',
+  },
+  {
+    label: 'Consignaciones bancarias',
+    text: 'El valor acumulado de sus consignaciones bancarias, depósitos o inversiones financieras no supera las 3.500 UVT ($183.309.000 COP) en el año anterior ni en el año en curso.',
+  },
+  {
+    label: 'Número de sedes',
+    text: 'Cuentan con máximo un (1) consultorio o establecimiento donde ejercen su profesión.',
+  },
+  {
+    label: 'Régimen tributario',
+    text: 'No están inscritos en el Régimen Simple de Tributación (RST).',
+  },
+  {
+    label: 'Comercio e intangibles',
+    text: 'No desarrollan su actividad bajo contratos de franquicia, concesión, regalía o explotación de intangibles, ni comercializan bienes gravados con IVA que superen los topes de ley.',
+  },
+]
+
+export const UVT_2026_EDUCATION_BANNER = [
+  UVT_2026_EDUCATION_INTRO,
+  ...UVT_2026_EDUCATION_REQUIREMENTS.map((item) => `${item.label}: ${item.text}`),
+].join('\n')
 
 export const PERFIL_FISCAL_OPTIONS = [
   {
