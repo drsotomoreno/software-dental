@@ -7,6 +7,7 @@ import {
   checkRethusLimit,
   checkUserLimits,
   hasRethusCode,
+  rethusLimitReachedMessage,
   snapshotLimitError,
   userLimitMessage,
 } from './subscriptionPlans.js'
@@ -91,9 +92,23 @@ test('checkRethusLimit cuenta códigos y rechaza clínica o plan inválidos', ()
   )
 })
 
+test('el alta bloqueada nombra el tope ReTHUS del plan', () => {
+  const blocked = checkRethusLimit({ plan: 'smart', estado_pago: 'activo' }, 4)
+  assert.equal(
+    rethusLimitReachedMessage(blocked),
+    'Límite alcanzado. Tu Plan Smart permite hasta 4 profesionales (ReTHUS). Por favor, actualiza tu plan.',
+  )
+  assert.equal(
+    rethusLimitReachedMessage(checkRethusLimit({ plan: 'smart', estado_pago: 'activo' }, 1)),
+    null,
+  )
+  const seats = { planName: 'Plan Smart', rethusUsed: 4, maxRethus: 4 }
+  assert.equal(snapshotLimitError(seats, false), rethusLimitReachedMessage(blocked))
+  assert.equal(snapshotLimitError(seats, true), null)
+})
+
 test('el mensaje nombra profesionales ReTHUS o la sede REPS', () => {
   const seats = { planName: 'Plan Smart', rethusUsed: 4, maxRethus: 4, repsUsed: 1, maxReps: 1 }
-  assert.match(snapshotLimitError(seats, false) ?? '', /Plan Smart permite máximo 4 profesionales/)
   assert.equal(snapshotLimitError(seats, true), null)
   const blocked = checkRepsLimit({ plan: 'smart', estado_pago: 'activo' }, 2, 1)
   assert.equal(blocked.canAdd, false)

@@ -269,6 +269,12 @@ export function userLimitMessage(result) {
   return `${result.planName} permite máximo ${result.limit} ${noun}. Actualmente tiene ${result.current}.`
 }
 
+/** Aviso del alta cuando el profesional con ReTHUS no cabe en el plan. */
+export function rethusLimitReachedMessage(limitCheck) {
+  if (!limitCheck || limitCheck.canAdd || limitCheck.limit == null) return null
+  return `Límite alcanzado. Tu ${limitCheck.planName} permite hasta ${limitCheck.limit} profesionales (ReTHUS). Por favor, actualiza tu plan.`
+}
+
 export function snapshotLimitError(seats, isAssistant) {
   if (isAssistant) return null
   const current = Number(seats?.rethusUsed) || 0
@@ -280,8 +286,7 @@ export function snapshotLimitError(seats, isAssistant) {
     planName: seats?.planName || 'su plan',
     userType: 'Profesionales (ReTHUS)',
   }
-  if (result.canAdd) return null
-  return userLimitMessage(result)
+  return rethusLimitReachedMessage(result)
 }
 
 /** `null` = sin tope (cuenta exenta / superadmin). */

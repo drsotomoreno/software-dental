@@ -143,6 +143,7 @@ export function normalizeRole(role: UserRole | string | undefined): CanonicalRol
       return 'odontologo'
     case 'recepcion':
     case 'auxiliar':
+    case 'assistant':
       return 'recepcion'
     default:
       return 'odontologo'

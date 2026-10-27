@@ -281,7 +281,7 @@ router.get('/clinic/users', async (req, res) => {
   }
 })
 
-router.post('/clinic/users', async (req, res) => {
+async function inviteClinicUser(req, res) {
   try {
     const authHeader = req.headers.authorization ?? ''
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
@@ -302,14 +302,18 @@ router.post('/clinic/users', async (req, res) => {
     return res.status(201).json({
       success: true,
       ok: true,
+      message: result.message,
       user: result.user,
       seats: result.seats,
     })
   } catch (error) {
-    console.error('[Auth] Error en POST /clinic/users:', error)
-    return res.status(500).json({ success: false, ok: false, error: 'No se pudo crear el colaborador.' })
+    console.error(`[Auth] Error en POST ${req.path}:`, error)
+    return res.status(500).json({ success: false, ok: false, error: 'Error interno del servidor' })
   }
-})
+}
+
+router.post('/clinic/users', inviteClinicUser)
+router.post('/users/invite', inviteClinicUser)
 
 router.put('/clinic/users/:id', async (req, res) => {
   try {

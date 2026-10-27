@@ -20,7 +20,7 @@ import {
   mapApiUserToAuthUser,
 } from '@/services/apiAuthService'
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
-import { checkRethusLimit, hasRethusCode, userLimitMessage } from '../../shared/subscriptionPlans.js'
+import { checkRethusLimit, hasRethusCode, rethusLimitReachedMessage } from '../../shared/subscriptionPlans.js'
 import {
   createClinicMember,
   deleteClinicMember,
@@ -281,7 +281,7 @@ function localRethusError(
   if (!hasRethusCode(candidate)) return null
   const current = members.filter((item) => hasRethusCode(item)).length
   try {
-    return userLimitMessage(checkRethusLimit(account, current))
+    return rethusLimitReachedMessage(checkRethusLimit(account, current))
   } catch (error) {
     return error instanceof Error ? error.message : 'Plan de suscripción inválido'
   }
@@ -399,7 +399,7 @@ export async function createAppUser(
   if (api.ok) {
     await db.users.put(api.user)
     await seedUserCredentials(api.user.id, password)
-    return { ok: true, user: api.user }
+    return { ok: true, user: api.user, message: api.message }
   }
   if (getStoredApiAuth()?.token) {
     return { ok: false, error: api.error }
@@ -451,7 +451,7 @@ export async function createAppUser(
 
   await db.users.add(user)
   await seedUserCredentials(user.id, password)
-  return { ok: true, user }
+  return { ok: true, user, message: undefined }
 }
 
 export async function updateAppUser(

@@ -106,6 +106,11 @@ declare module '../../shared/subscriptionPlans.js' {
     planName: string
     userType: 'Sedes REPS'
   }
+  export function rethusLimitReachedMessage(limitCheck: {
+    canAdd?: boolean
+    limit?: number | null
+    planName?: string
+  }): string | null
   export function userLimitMessage(result: {
     canAdd?: boolean
     current?: number

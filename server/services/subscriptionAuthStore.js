@@ -15,6 +15,7 @@ import {
   checkRethusLimit,
   checkRepsLimit,
   hasRethusCode,
+  rethusLimitReachedMessage,
   userLimitMessage,
   normalizeCustomMaxAssistants,
 } from '../../shared/subscriptionPlans.js'
@@ -168,7 +169,7 @@ function normalizeRole(rol) {
 
   if (value === 'administrador') return 'admin'
 
-  if (value === 'auxiliar') return 'recepcion'
+  if (value === 'auxiliar' || value === 'assistant') return 'recepcion'
 
   return 'odontologo'
 
@@ -1796,7 +1797,7 @@ function countRoleBuckets(members) {
 function rethusGainError(account, currentRethusUsers) {
   try {
     const result = checkRethusLimit(account, currentRethusUsers)
-    const error = userLimitMessage(result)
+    const error = rethusLimitReachedMessage(result)
     if (!error) return null
     return { ok: false, status: 403, error }
   } catch (error) {
@@ -1943,8 +1944,11 @@ export async function createClinicUser({ token, hint, member }) {
     return { ok: false, status: 404, error: 'No se encontró la cuenta de la clínica.' }
   }
 
-  const nextRethus = isAuxiliar ? '' : String(member?.rethusNumber ?? '').trim()
-  if (hasRethusCode({ rethusNumber: nextRethus })) {
+  const rethusCode = String(
+    member?.rethusNumber ?? member?.rethus_code ?? member?.rethusCode ?? '',
+  ).trim()
+  const administrative = isAuxiliar || !rethusCode
+  if (!administrative) {
     const lookup = await readClinicAssistantLimit(clinicId)
     const account = applyClinicAssistantLookup(owner, lookup)
     const rethusUsed = usersInClinic(store, clinicId).filter(hasRethusCode).length
@@ -1977,7 +1981,7 @@ export async function createClinicUser({ token, hint, member }) {
     rol: role,
     documentType,
     documentNumber,
-    rethusNumber: isAuxiliar ? '' : String(member?.rethusNumber ?? '').trim(),
+    rethusNumber: administrative ? '' : rethusCode,
     clinicId,
     clinicName: owner.clinicName || member?.clinicName || '',
     legalName: owner.legalName || '',
@@ -1998,6 +2002,9 @@ export async function createClinicUser({ token, hint, member }) {
   await saveStore(store)
   return {
     ok: true,
+    message: administrative
+      ? 'Usuario administrativo creado'
+      : 'Profesional agregado correctamente',
     user: publicClinicUser(user),
     seats: await clinicSeats(store, clinicId),
   }

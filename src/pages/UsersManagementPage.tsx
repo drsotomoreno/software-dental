@@ -156,7 +156,7 @@ export function UsersManagementPage() {
     setShowCreate(false)
     setCreateForm(emptyUserForm(sedeDefaults(currentUser)))
     await reloadUsers()
-    showMsg('Usuario creado correctamente.')
+    showMsg(result.message || 'Usuario creado correctamente.')
   }
 
   const openEdit = (u: UserProfile) => {

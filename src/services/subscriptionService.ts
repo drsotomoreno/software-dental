@@ -334,6 +334,7 @@ export async function createClinicMember(member: Record<string, unknown>) {
     ok: true as const,
     user: mapClinicMemberToProfile(payload.user),
     seats: (payload.seats ?? null) as ClinicSeatSnapshot | null,
+    message: typeof payload.message === 'string' ? payload.message : undefined,
   }
 }
 
