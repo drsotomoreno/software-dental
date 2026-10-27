@@ -18,6 +18,7 @@ import {
   type TipoVinculacionFinanciera,
 } from '../types/evolutionNoteRips.ts'
 import type { RipsConsulta, RipsProcedimiento, RipsTransaction, RipsUsuario } from '../types/rips.ts'
+import { fechaHoraSesionClinica } from './clinicDateTime.ts'
 import { cupsDesdeTexto } from './cupsCodeResolve.ts'
 
 const CUPS_PATTERN = /^\d{6}$/
@@ -111,17 +112,7 @@ function fechaNacimiento(value: string): string {
 }
 
 function fechaBogota(date: Date): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Bogota',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date)
-  const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '00'
-  return `${pick('year')}-${pick('month')}-${pick('day')} ${pick('hour')}:${pick('minute')}`
+  return fechaHoraSesionClinica(date).replace('T', ' ')
 }
 
 /** La hora digitada en la nota es la de la consulta, sin convertir otra vez desde UTC. */

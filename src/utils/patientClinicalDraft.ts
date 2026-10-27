@@ -3,8 +3,12 @@ import {
   isApplyingRemotePull,
   notifyClinicalRecordDirty,
 } from '@/services/clinicalSyncState'
-import type { EvolutionNote } from '@/types/evolutionNote'
-import { isEvolutionNoteImmutable, retainSignedEvolutionBody } from '@/types/evolutionNote'
+import {
+  corregirFechasSesionClinica,
+  isEvolutionNoteImmutable,
+  retainSignedEvolutionBody,
+  type EvolutionNote,
+} from '@/types/evolutionNote'
 import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
 import type { OdontogramData } from '@/types/odontogram'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
@@ -37,7 +41,9 @@ function normalizeClinicalDraft(draft: ClinicalRecordFormData): ClinicalRecordFo
     ...draft,
     anamnesis: normalizeAnamnesis(draft.anamnesis),
     diagnosticChart: normalizeClinicalDiagnosticChart(draft.diagnosticChart),
-    evolutionNotes: sortEvolutionNotesChronologically(draft.evolutionNotes ?? []),
+    evolutionNotes: sortEvolutionNotesChronologically(
+      corregirFechasSesionClinica(draft.evolutionNotes ?? []),
+    ),
   }
 }
 
@@ -59,6 +65,54 @@ function mergeDraftEvolutionNotes(
 function notifyDraftChanged(): void {
   if (isApplyingRemotePull()) return
   notifyClinicalRecordDirty()
+}
+
+function notasConRelojClinico(
+  notes: EvolutionNote[] | null | undefined,
+): EvolutionNote[] | null | undefined {
+  if (!notes?.length) return notes
+  const next = corregirFechasSesionClinica(notes)
+  return next === notes ? notes : next
+}
+
+/**
+ * Reescribe solo la fecha de sesión de borradores que todavía tienen el reloj UTC.
+ * No sustituye el resto de la historia ni toca una nota ya firmada.
+ */
+export async function persistCorrectedEvolutionSessionClocks(
+  patientRouteId: string,
+): Promise<boolean> {
+  const patientId = toPatientForeignKey(patientRouteId)
+  const existing = await db.patientClinicalDrafts.get(patientId)
+  if (!existing) return false
+
+  const evolutionNotes = notasConRelojClinico(existing.evolutionNotes) ?? existing.evolutionNotes
+  const clinicalNotes = notasConRelojClinico(existing.clinicalDraft?.evolutionNotes)
+  const valuationNotes = notasConRelojClinico(existing.valuationDraft?.evolutionNotes)
+  const topChanged = evolutionNotes !== existing.evolutionNotes
+  const clinicalChanged = Boolean(
+    existing.clinicalDraft && clinicalNotes !== existing.clinicalDraft.evolutionNotes,
+  )
+  const valuationChanged = Boolean(
+    existing.valuationDraft && valuationNotes !== existing.valuationDraft.evolutionNotes,
+  )
+  if (!topChanged && !clinicalChanged && !valuationChanged) return false
+
+  await db.patientClinicalDrafts.put({
+    ...existing,
+    evolutionNotes,
+    clinicalDraft:
+      clinicalChanged && existing.clinicalDraft
+        ? { ...existing.clinicalDraft, evolutionNotes: clinicalNotes ?? [] }
+        : existing.clinicalDraft,
+    valuationDraft:
+      valuationChanged && existing.valuationDraft
+        ? { ...existing.valuationDraft, evolutionNotes: valuationNotes ?? [] }
+        : existing.valuationDraft,
+    updatedAt: new Date().toISOString(),
+  })
+  notifyDraftChanged()
+  return true
 }
 
 export async function getPatientClinicalDraft(
