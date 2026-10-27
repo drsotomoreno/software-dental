@@ -269,6 +269,10 @@ export type ClinicSeatSnapshot = {
   clinicId: string
   used: number
   max: number | null
+  /** Auxiliares con acceso (rol recepción). */
+  assistantsUsed?: number
+  /** Tope manual. Solo viene informado en el plan corporativo. */
+  maxAssistants?: number | null
   plan: string | null
   planName: string
   estado_pago: string | null

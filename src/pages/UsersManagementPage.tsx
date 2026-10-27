@@ -12,6 +12,7 @@ import {
   updateAppUser,
 } from '@/services/authService'
 import { fetchClinicUsers, type ClinicSeatSnapshot } from '@/services/subscriptionService'
+import { assistantLimitMessage } from '../../shared/subscriptionPlans.js'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { UserProfile, UserRole } from '@/types/user'
 import {
@@ -98,6 +99,9 @@ export function UsersManagementPage() {
 
   const canManage = canManageClinicTeam(currentUser)
   const seatsExhausted = Boolean(seats && seats.max != null && seats.used >= seats.max)
+  const assistantsExhausted = Boolean(
+    seats && seats.maxAssistants != null && (seats.assistantsUsed ?? 0) >= seats.maxAssistants,
+  )
 
   const reloadUsers = useCallback(async () => {
     const api = await fetchClinicUsers()
@@ -131,6 +135,10 @@ export function UsersManagementPage() {
       return
     }
     const { password, ...userData } = createForm
+    if (userData.role === 'recepcion' && assistantsExhausted) {
+      showErr(assistantLimitMessage(seats?.maxAssistants ?? 0, seats?.assistantsUsed ?? 0))
+      return
+    }
     if (seatsExhausted) {
       showErr(
         `Su plan ${seats?.planName ?? 'actual'} permite máximo ${seats?.max} colaboradores. Actualmente tiene ${seats?.used}. Mejore el plan para agregar más usuarios.`,
@@ -262,6 +270,15 @@ export function UsersManagementPage() {
     if (!canManage) return
     if (u.isClinicOwner) return
     if (assignableRoleValue(u.role) === role) return
+    if (
+      role === 'recepcion' &&
+      u.role !== 'recepcion' &&
+      u.accessEnabled !== false &&
+      assistantsExhausted
+    ) {
+      showErr(assistantLimitMessage(seats?.maxAssistants ?? 0, seats?.assistantsUsed ?? 0))
+      return
+    }
     const result = await updateAppUser(u.id, { role })
     if (!result.ok) {
       showErr(result.error)
@@ -328,7 +345,7 @@ export function UsersManagementPage() {
         {seats && (
           <div
             className={`rounded-lg border px-4 py-3 text-sm ${
-              seatsExhausted
+              seatsExhausted || assistantsExhausted
                 ? 'border-amber-200 bg-amber-50 text-amber-900'
                 : 'border-slate-200 bg-slate-50 text-slate-700'
             }`}
@@ -342,6 +359,13 @@ export function UsersManagementPage() {
                   ? ' Alcanzó el máximo de su plan. Mejore la suscripción para agregar más usuarios.'
                   : ''}
               </>
+            )}
+            {seats.maxAssistants != null && (
+              <p className="mt-1">
+                Auxiliares: {seats.assistantsUsed ?? 0} de {seats.maxAssistants}. Este tope es
+                manual y exclusivo del plan Corporativo.
+                {assistantsExhausted ? ' Alcanzó el máximo de auxiliares.' : ''}
+              </p>
             )}
           </div>
         )}

@@ -12,7 +12,12 @@ import {
   TTC_MESSAGE_PACKAGES,
   seatLimitForAccount,
   planDisplayName,
+  applyClinicAssistantLookup,
+  customMaxAssistantsForAccount,
+  assistantLimitError,
+  normalizeCustomMaxAssistants,
 } from '../../shared/subscriptionPlans.js'
+import { readClinicAssistantLimit } from './clinicAssistantLimit.js'
 import { readDurableJson, writeDurableJson } from './durableStore.js'
 import { splitPersonName, composeLegalName } from '../../shared/personName.js'
 import { formatNitInput, validateProviderNit } from '../../shared/nit.js'
@@ -1213,6 +1218,9 @@ function sanitizeUser(user) {
     estado_pago: isSuperAdminUser(user) ? 'exento' : user.estado_pago,
     fecha_vencimiento: user.fecha_vencimiento,
     plan: isSuperAdminUser(user) ? 'exento' : user.plan ?? null,
+    customMaxAssistants: normalizeCustomMaxAssistants(
+      user.customMaxAssistants ?? user.custom_max_assistants,
+    ),
     documentType: user.documentType || 'CC',
     documentNumber: user.documentNumber ?? '',
     rethusNumber: user.rethusNumber ?? '',
@@ -1742,18 +1750,32 @@ function hasClinicAccess(user) {
   return user?.accessEnabled !== false && Boolean(user?.passwordHash)
 }
 
-function clinicSeatSnapshot(store, clinicId) {
+function countAssistants(members) {
+  return members.filter((item) => normalizeRole(item.rol) === 'recepcion').length
+}
+
+async function clinicSeats(store, clinicId) {
   const owner = store.users.find((item) => item.id === clinicId) || null
+  const lookup = await readClinicAssistantLimit(clinicId)
+  const account = applyClinicAssistantLookup(owner ?? {}, lookup)
   const members = usersInClinic(store, clinicId).filter(hasClinicAccess)
   const maxSeats = owner ? seatLimitForAccount(owner) : seatLimitForAccount({})
   return {
     clinicId,
     used: members.length,
     max: maxSeats,
+    assistantsUsed: countAssistants(members),
+    maxAssistants: customMaxAssistantsForAccount(account),
     plan: owner?.plan ?? null,
     planName: planDisplayName(owner?.plan, owner?.estado_pago),
     estado_pago: owner?.estado_pago ?? null,
   }
+}
+
+function assistantCapError(seats, becomingAssistant) {
+  const error = assistantLimitError(seats.maxAssistants, seats.assistantsUsed, becomingAssistant)
+  if (!error) return null
+  return { ok: false, status: 403, error, seats }
 }
 
 function publicClinicUser(user) {
@@ -1794,7 +1816,7 @@ export async function listClinicUsers({ token, hint }) {
     }
     await saveStore(store)
   }
-  const seats = clinicSeatSnapshot(store, clinicId)
+  const seats = await clinicSeats(store, clinicId)
   const users = usersInClinic(store, clinicId).map(publicClinicUser)
   return { ok: true, users, seats }
 }
@@ -1858,7 +1880,9 @@ export async function createClinicUser({ token, hint, member }) {
     return { ok: false, status: 404, error: 'No se encontró la cuenta de la clínica.' }
   }
 
-  const seats = clinicSeatSnapshot(store, clinicId)
+  const seats = await clinicSeats(store, clinicId)
+  const assistantError = assistantCapError(seats, isAuxiliar)
+  if (assistantError) return assistantError
   if (seats.max != null && seats.used >= seats.max) {
     return {
       ok: false,
@@ -1915,7 +1939,7 @@ export async function createClinicUser({ token, hint, member }) {
   return {
     ok: true,
     user: publicClinicUser(user),
-    seats: clinicSeatSnapshot(store, clinicId),
+    seats: await clinicSeats(store, clinicId),
   }
 }
 
@@ -1985,6 +2009,14 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
   }
 
+  const wasActiveAssistant = hasClinicAccess(current) && normalizeRole(current.rol) === 'recepcion'
+  const willBeActiveAssistant = hasClinicAccess(current) && isAuxiliar
+  if (!wasActiveAssistant && willBeActiveAssistant) {
+    const seats = await clinicSeats(store, clinicId)
+    const assistantError = assistantCapError(seats, true)
+    if (assistantError) return assistantError
+  }
+
   store.users[index] = {
     ...current,
     firstName,
@@ -2024,8 +2056,14 @@ export async function resetClinicUserPassword({ token, hint, userId, newPassword
   if (clinicIdOf(store.users[index]) !== clinicId && !isSuperAdminUser(session.user)) {
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
   }
+  const current = store.users[index]
+  if (!hasClinicAccess(current) && normalizeRole(current.rol) === 'recepcion') {
+    const seats = await clinicSeats(store, clinicId)
+    const assistantError = assistantCapError(seats, true)
+    if (assistantError) return assistantError
+  }
   store.users[index] = {
-    ...store.users[index],
+    ...current,
     passwordHash: hashPasswordSha256(password),
     accessEnabled: true,
     updatedAt: new Date().toISOString(),
@@ -2066,7 +2104,7 @@ export async function deleteClinicUser({ token, hint, userId }) {
   }
   store.sessions = store.sessions.filter((item) => item.userId !== userId)
   await saveStore(store)
-  return { ok: true, user: publicClinicUser(store.users[index]), seats: clinicSeatSnapshot(store, clinicId) }
+  return { ok: true, user: publicClinicUser(store.users[index]), seats: await clinicSeats(store, clinicId) }
 }
 
 export async function selectPaidPlan({ token, planId, hint }) {

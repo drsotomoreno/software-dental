@@ -114,6 +114,60 @@ export const PLAN_SEAT_LIMITS = Object.fromEntries(
   PAID_PLANS.map((plan) => [plan.id, plan.maxSeats]),
 )
 
+export const CORPORATE_PLAN_ID = 'corporativo'
+
+export function isCorporatePlan(plan) {
+  return String(plan ?? '').trim().toLowerCase() === CORPORATE_PLAN_ID
+}
+
+/** Entero ≥ 0, o `null` si el valor no es un tope manual válido. */
+export function normalizeCustomMaxAssistants(value) {
+  if (value == null || value === '') return null
+  const number = typeof value === 'number' ? value : Number(String(value).trim())
+  if (!Number.isInteger(number) || number < 0) return null
+  return number
+}
+
+/**
+ * Si la fila de `clinics` existe, su columna pisa el valor guardado en la cuenta.
+ * Sin fila (o sin Postgres) se conserva el valor de la cuenta.
+ */
+export function applyClinicAssistantLookup(account = {}, lookup) {
+  if (!lookup?.found) return account
+  const value = lookup.value ?? null
+  return {
+    ...account,
+    customMaxAssistants: value,
+    custom_max_assistants: value,
+  }
+}
+
+/**
+ * Tope manual de auxiliares. Solo el plan corporativo.
+ * Prueba, exento y superadmin no lo usan. `null` = la columna no aplica.
+ */
+export function customMaxAssistantsForAccount(account = {}) {
+  const estado = String(account.estado_pago ?? '').toLowerCase()
+  const rol = String(account.rol ?? account.role ?? '').toLowerCase()
+  if (estado === 'exento' || rol === 'superadmin') return null
+  if (estado === 'prueba') return null
+  if (!isCorporatePlan(account.plan)) return null
+  return normalizeCustomMaxAssistants(
+    account.customMaxAssistants ?? account.custom_max_assistants,
+  )
+}
+
+export function assistantLimitMessage(max, used) {
+  return `El plan Corporativo permite máximo ${max} auxiliares. Actualmente tiene ${used}. Este límite es manual y exclusivo del plan corporativo.`
+}
+
+/** `null` si se puede agregar el auxiliar o el tope no aplica. */
+export function assistantLimitError(maxAssistants, assistantsUsed, becomingAssistant = true) {
+  if (!becomingAssistant || maxAssistants == null) return null
+  if (assistantsUsed >= maxAssistants) return assistantLimitMessage(maxAssistants, assistantsUsed)
+  return null
+}
+
 /** `null` = sin tope (cuenta exenta / superadmin). */
 export function seatLimitForAccount(account = {}) {
   const estado = String(account.estado_pago ?? '').toLowerCase()

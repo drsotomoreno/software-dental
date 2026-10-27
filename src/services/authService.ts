@@ -20,7 +20,12 @@ import {
   mapApiUserToAuthUser,
 } from '@/services/apiAuthService'
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
-import { seatLimitForAccount, planDisplayName } from '../../shared/subscriptionPlans.js'
+import {
+  assistantLimitError,
+  customMaxAssistantsForAccount,
+  planDisplayName,
+  seatLimitForAccount,
+} from '../../shared/subscriptionPlans.js'
 import {
   createClinicMember,
   deleteClinicMember,
@@ -281,6 +286,13 @@ function localSeatError(used: number, max: number | null, planName: string): str
   return null
 }
 
+function localAssistantError(
+  assistantsUsed: number,
+  account: Parameters<typeof customMaxAssistantsForAccount>[0],
+): string | null {
+  return assistantLimitError(customMaxAssistantsForAccount(account), assistantsUsed)
+}
+
 function staffPhoneDigits(value: string | undefined): string {
   return String(value ?? '').replace(/\D/g, '').slice(0, 12)
 }
@@ -413,6 +425,13 @@ export async function createAppUser(
   const members = clinicId
     ? allUsers.filter((item) => String(item.clinicId || item.id) === String(clinicId))
     : allUsers
+  if (isAuxiliar) {
+    const assistantsUsed = members.filter(
+      (item) => item.role === 'recepcion' && item.accessEnabled !== false,
+    ).length
+    const assistantError = localAssistantError(assistantsUsed, apiAuth?.user ?? {})
+    if (assistantError) return { ok: false, error: assistantError }
+  }
   const maxSeats = seatLimitForAccount(apiAuth?.user ?? {})
   const seatError = localSeatError(
     members.length,
@@ -532,8 +551,32 @@ export async function updateAppUser(
   }
   if (!current) return { ok: false, error: 'Usuario no encontrado.' }
 
+  if (
+    current.role !== 'recepcion' &&
+    nextRole === 'recepcion' &&
+    current.accessEnabled !== false
+  ) {
+    const { apiAuth } = currentClinicScope()
+    const assistantError = localAssistantError(
+      await countLocalAssistants(current),
+      apiAuth?.user ?? {},
+    )
+    if (assistantError) return { ok: false, error: assistantError }
+  }
+
   await db.users.update(userId, nextPatch)
   return { ok: true }
+}
+
+async function countLocalAssistants(user: UserProfile): Promise<number> {
+  const clinicId = String(user.clinicId || user.id)
+  const all = await db.users.toArray()
+  return all.filter(
+    (item) =>
+      item.role === 'recepcion' &&
+      item.accessEnabled !== false &&
+      String(item.clinicId || item.id) === clinicId,
+  ).length
 }
 
 export async function resetAppUserPassword(
@@ -558,6 +601,15 @@ export async function resetAppUserPassword(
 
   const user = await db.users.get(userId)
   if (!user) return { ok: false, error: 'Usuario no encontrado.' }
+
+  if (user.role === 'recepcion' && user.accessEnabled === false) {
+    const { apiAuth } = currentClinicScope()
+    const assistantError = localAssistantError(
+      await countLocalAssistants(user),
+      apiAuth?.user ?? {},
+    )
+    if (assistantError) return { ok: false, error: assistantError }
+  }
 
   await seedUserCredentials(userId, newPassword)
   await db.users.update(userId, { accessEnabled: true })

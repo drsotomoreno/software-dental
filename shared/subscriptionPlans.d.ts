@@ -25,6 +25,27 @@ declare module '../../shared/subscriptionPlans.js' {
   }>
   export const TTC_MESSAGE_PACKAGE_IDS: string[]
   export const PLAN_SEAT_LIMITS: Record<string, number>
+  export const CORPORATE_PLAN_ID: string
+  export function isCorporatePlan(plan?: string | null): boolean
+  export function normalizeCustomMaxAssistants(value: unknown): number | null
+  export function applyClinicAssistantLookup<T extends Record<string, unknown>>(
+    account: T,
+    lookup?: { found?: boolean; value?: unknown } | null,
+  ): T
+  export function customMaxAssistantsForAccount(account?: {
+    plan?: string | null
+    estado_pago?: string | null
+    rol?: string | null
+    role?: string | null
+    customMaxAssistants?: unknown
+    custom_max_assistants?: unknown
+  }): number | null
+  export function assistantLimitMessage(max: number, used: number): string
+  export function assistantLimitError(
+    maxAssistants: number | null | undefined,
+    assistantsUsed: number,
+    becomingAssistant?: boolean,
+  ): string | null
   export function seatLimitForAccount(account?: {
     plan?: string | null
     estado_pago?: string | null

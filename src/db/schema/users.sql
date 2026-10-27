@@ -1,6 +1,8 @@
 -- Referencia SQLite — Usuarios / clínicas (prestador)
 -- Persistencia operativa en cliente: Dexie `users`
--- No hay tabla Clinicas separada: el titular (clinic_id = id) representa la clínica.
+-- En el cliente el titular (clinic_id = id) representa la clínica.
+-- El tope manual de auxiliares del plan corporativo está en PostgreSQL:
+-- clinics.custom_max_assistants.
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY NOT NULL,
