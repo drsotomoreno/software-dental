@@ -42,7 +42,7 @@ export function CheckoutCart({ cart, disabled, onRemove, onAddAesthetic }: Check
                     <>
                       CUPS {item.cupsCode}
                       <LegalTooltip topic="cups" />
-                      · RIPS procedimientos
+                      · RIPS {item.ripsGroup === 'consultas' ? 'consultas' : 'procedimientos'}
                     </>
                   ) : (
                     <>

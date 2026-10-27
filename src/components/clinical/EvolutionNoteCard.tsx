@@ -4,6 +4,7 @@ import {
   isEvolutionNoteImmutable,
 } from '@/types/evolutionNote'
 import { formatDate } from '@/utils'
+import { etiquetaFechaHoraSesion } from '@/utils/clinicDateTime'
 import { PenLine } from 'lucide-react'
 import { VoiceDictationButton } from '@/components/voice'
 import { DigitalSignatureCanvas } from '@/components/signature'
@@ -175,7 +176,9 @@ export function EvolutionNoteCard({
           <span className="text-sm font-medium text-slate-700">
             {isAddendum ? 'Aclaratoria' : `Nota #${index + 1}`}
             {note.date && (
-              <span className="ml-2 font-normal text-slate-500">— {formatDate(note.date)}</span>
+              <span className="ml-2 font-normal text-slate-500">
+                — {etiquetaFechaHoraSesion(note.date)}
+              </span>
             )}
           </span>
           {isAddendum && (

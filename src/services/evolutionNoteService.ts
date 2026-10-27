@@ -13,6 +13,7 @@ import { omitBlankEvolutionDiagnoses } from '@/utils/evolutionNoteAssociation'
 import type { EvolutionNoteAddendum } from '@/types/evolutionNoteAddendum'
 import type { SyncOutboxEntityType, SyncOutboxEntry } from '@/types/syncOutbox'
 import { computeContentHash, generateId, serializeForHash } from '@/utils'
+import { fechaHoraSesionClinica } from '@/utils/clinicDateTime'
 
 export { buildEvolutionNoteHashPayload }
 
@@ -126,6 +127,7 @@ export function createAddendumDraftNote(
   professionalLicense: string,
   authorUserId: string,
   authorEmail: string,
+  now: Date = new Date(),
 ): EvolutionNote {
   return {
     id: generateId(),
@@ -133,7 +135,7 @@ export function createAddendumDraftNote(
     parentEvolutionNoteId: parent.id,
     parentEvolutionNoteHash: parent.contentHash,
     addendumReason: '',
-    date: new Date().toISOString().slice(0, 16),
+    date: fechaHoraSesionClinica(now),
     procedure: `Aclaratoria — ${parent.serviceName || parent.procedure || 'Evolución'}`,
     anesthesia: { type: '', carpules: 0, vasoconstrictor: '' },
     prescriptions: '',
@@ -141,7 +143,7 @@ export function createAddendumDraftNote(
     professionalLicense,
     authorUserId: authorUserId || undefined,
     authorEmail: authorEmail || undefined,
-    createdAt: new Date().toISOString(),
+    createdAt: now.toISOString(),
     clinicalNote: '',
     requiereCupsRips: false,
     isLocked: false,

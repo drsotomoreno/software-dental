@@ -4,6 +4,7 @@ import type { CheckoutLineItem } from '@/types/consultationCheckout'
 import { generateId } from '@/utils/crypto'
 import { getEvolutionCatalogServices } from '@/utils/evolutionCatalogServices'
 import { normalizeCupsCode } from '@/services/catalogService'
+import { clasificarGrupoRips, type GrupoRipsPaquete } from '@/utils/paqueteDocumentoCobro'
 
 const CUPS_PATTERN = /^\d{6}$/
 
@@ -27,18 +28,23 @@ export function checkoutLineFromEvolutionService(
   if (!name) return null
 
   const aesthetic = service.requiereCupsRips === false || !isCupsCode(service.cupsCode)
+  const grupo: GrupoRipsPaquete = clasificarGrupoRips({
+    cupsCode: service.cupsCode,
+    esPersonalizado: aesthetic,
+    requiereCups: service.requiereCupsRips,
+  })
   const unitPrice = Math.max(0, service.cost ?? 0)
   if (unitPrice <= 0 && aesthetic && !name) return null
 
   return {
     id: `${note.id}:${service.id}`,
-    kind: aesthetic ? 'aesthetic' : 'cups',
+    kind: grupo === 'otrosServicios' ? 'aesthetic' : 'cups',
     name,
-    cupsCode: aesthetic ? null : normalizeCupsCode(String(service.cupsCode)),
+    cupsCode: grupo === 'otrosServicios' ? null : normalizeCupsCode(String(service.cupsCode)),
     quantity: 1,
     unitPrice,
     totalAmount: unitPrice,
-    ripsGroup: aesthetic ? 'otrosServicios' : 'procedimientos',
+    ripsGroup: grupo,
     sourceType: 'evolution',
     sourceId: note.id,
   }
@@ -82,6 +88,7 @@ export function buildCheckoutCartFromSources(input: {
     if (!name) continue
     const cups = item.cupsCode
     const aesthetic = !isCupsCode(cups) || String(cups).toUpperCase().startsWith('CUSTOM_')
+    const grupo = clasificarGrupoRips({ cupsCode: cups, esPersonalizado: aesthetic })
     const quantity = Math.max(1, item.quantity || 1)
     const unitPrice = Math.max(0, item.unitPrice || 0)
     const id = `budget:${item.id}`
@@ -89,13 +96,13 @@ export function buildCheckoutCartFromSources(input: {
     seen.add(id)
     cart.push({
       id,
-      kind: aesthetic ? 'aesthetic' : 'cups',
+      kind: grupo === 'otrosServicios' ? 'aesthetic' : 'cups',
       name,
-      cupsCode: aesthetic ? null : normalizeCupsCode(String(cups)),
+      cupsCode: grupo === 'otrosServicios' ? null : normalizeCupsCode(String(cups)),
       quantity,
       unitPrice,
       totalAmount: quantity * unitPrice,
-      ripsGroup: aesthetic ? 'otrosServicios' : 'procedimientos',
+      ripsGroup: grupo,
       sourceType: 'budget',
       sourceId: item.id,
     })

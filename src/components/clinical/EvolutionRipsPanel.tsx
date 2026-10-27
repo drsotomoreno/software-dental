@@ -336,6 +336,8 @@ export function EvolutionRipsPanel({
         metadatos: {
           patientUuid: patientId || undefined,
           patientDocument: paciente?.documentNumber,
+          tipoVinculacionFinanciera: tipo,
+          canal: tipo === 'fev' ? 'fev' : 'sin_factura',
         },
       })
       const cuv = resultado.cuv?.trim()

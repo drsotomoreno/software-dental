@@ -28,6 +28,10 @@ interface PaymentRegistrationModalProps {
   notice?: string | null
   /** Concepto fijado por la tarjeta que abrió el formulario. */
   conceptLabel?: string
+  /** Texto del saldo que se está cobrando. */
+  balanceCaption?: string
+  /** Aclara el valor cuando el comprobante cubre varias líneas. */
+  amountHint?: string
   controlOptions?: PaymentControlOption[]
   defaultControlNumber?: number
   /** Si viene definido, el abono es ese valor y no se puede cambiar. */
@@ -49,6 +53,8 @@ export function PaymentRegistrationModal({
   busy = false,
   notice = null,
   conceptLabel,
+  balanceCaption = 'Saldo pendiente del procedimiento',
+  amountHint,
   controlOptions,
   defaultControlNumber,
   fixedAmount,
@@ -155,7 +161,7 @@ export function PaymentRegistrationModal({
         </div>
 
         <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-          Saldo pendiente del procedimiento:{' '}
+          {balanceCaption}:{' '}
           <span className="font-semibold tabular-nums">{formatCurrency(remaining)}</span>
         </p>
 
@@ -184,9 +190,11 @@ export function PaymentRegistrationModal({
               }}
             />
             <span className="mt-1 block text-xs text-slate-500">
-              {fixedAmount != null
-                ? 'Pago único de contado por el saldo del tratamiento.'
-                : `Escriba el valor que el paciente abona en esta atención.${amount > 0 ? ` ${formatCurrency(amount)}.` : ''}`}
+              {amountHint
+                ? amountHint
+                : fixedAmount != null
+                  ? 'Pago único de contado por el saldo del tratamiento.'
+                  : `Escriba el valor que el paciente abona en esta atención.${amount > 0 ? ` ${formatCurrency(amount)}.` : ''}`}
             </span>
           </label>
 

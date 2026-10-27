@@ -2,7 +2,7 @@ import type { PaymentInvoice } from '@/types/clinicalRecord'
 import type { BillingModality } from '@/types/billingModality'
 import { FOLIO_DEPLETED_MESSAGE } from '@/types/billingModality'
 import type { CheckoutBuyerForm, CheckoutLineItem } from '@/types/consultationCheckout'
-import { assertFevEqualsRips } from '@/types/consultationCheckout'
+import { armarPaqueteDocumentoCobro, type TipoDocumentoPaquete } from '@/utils/paqueteDocumentoCobro'
 import {
   consumeElectronicFolio,
   getBillingModalitySettings,
@@ -33,33 +33,55 @@ export interface ChargeEmissionResult {
   message: string
 }
 
+function lineasDeCobro(context: ChargeEmissionContext) {
+  const cart = context.cart ?? []
+  if (cart.length > 0) {
+    return cart.map((item) => ({
+      id: item.id,
+      descripcion: item.name,
+      cupsCode: item.cupsCode,
+      cantidad: item.quantity,
+      valorNeto: item.totalAmount,
+      esPersonalizado: item.kind === 'aesthetic',
+    }))
+  }
+  return [
+    {
+      id: context.invoice.id,
+      descripcion: context.paymentReason || context.invoice.notes || 'Atención odontológica',
+      cupsCode: context.cupsCode,
+      cantidad: 1,
+      valorNeto: context.amount,
+    },
+  ]
+}
+
+function exigirPaquete(context: ChargeEmissionContext, tipo: TipoDocumentoPaquete) {
+  const armado = armarPaqueteDocumentoCobro({
+    tipo,
+    numero: context.invoice.invoiceNumber,
+    lineas: lineasDeCobro(context),
+    valorNetoDocumento: context.amount,
+  })
+  if (!armado.regla.ok) {
+    throw new Error(armado.regla.message ?? 'El valor neto del comprobante no coincide con la suma RIPS.')
+  }
+  return armado
+}
+
 function buildRipsSnapshot(
   context: ChargeEmissionContext,
   extras?: { cuv?: string | null; cufe?: string | null },
 ): Record<string, unknown> {
-  const cart = context.cart ?? []
-  const procedimientos = cart
-    .filter((item) => item.ripsGroup === 'procedimientos')
-    .map((item) => ({
-      cups: item.cupsCode || null,
-      descripcion: item.name,
-      vrServicio: item.totalAmount,
-      cantidad: item.quantity,
-    }))
-  const otrosServicios = cart
-    .filter((item) => item.ripsGroup === 'otrosServicios')
-    .map((item) => ({
-      tipoOS: '01',
-      codTecnologiaSalud: 'OTROS',
-      nomTecnologiaSalud: item.name,
-      vrServicio: item.totalAmount,
-      cantidadOS: item.quantity,
-    }))
-  const equality = cart.length > 0 ? assertFevEqualsRips(cart) : { ok: true, dianTotal: context.amount, ripsTotal: context.amount }
+  const tipo: TipoDocumentoPaquete = extras?.cufe ? 'FEV' : 'RECIBO_CAJA'
+  const { paquete, regla } = exigirPaquete(context, tipo)
+  const numero = paquete.numero
 
   return {
     tipo: extras?.cufe ? 'fev_salud_marca_blanca' : 'recibo_caja_salud',
-    numFactura: context.invoice.invoiceNumber,
+    numFactura: tipo === 'FEV' ? numero : null,
+    numeroRecibo: tipo === 'RECIBO_CAJA' ? numero : null,
+    numeroDocumento: numero,
     fecha: context.invoice.invoiceDate,
     cuv: extras?.cuv ?? null,
     cufe: extras?.cufe ?? null,
@@ -70,21 +92,34 @@ function buildRipsSnapshot(
       email: context.buyer?.email ?? null,
       responsabilidadFiscal: context.buyer?.fiscalResponsibility ?? null,
     },
-    procedimientos:
-      procedimientos.length > 0
-        ? procedimientos
-        : [
-            {
-              cups: context.cupsCode || null,
-              descripcion: context.paymentReason || context.invoice.notes || 'Atención odontológica',
-              vrServicio: context.amount,
-              cantidad: 1,
-            },
-          ],
-    otrosServicios,
-    vrTotalDian: equality.dianTotal,
-    vrTotalRips: equality.ripsTotal,
-    fevEqualsRips: equality.ok,
+    consultas: paquete.consultas.map((item) => ({
+      cups: item.cupsCode,
+      descripcion: item.descripcion,
+      vrServicio: item.valorNeto,
+      cantidad: item.cantidad,
+      consecutivo: item.consecutivo,
+      numeroDocumento: numero,
+    })),
+    procedimientos: paquete.procedimientos.map((item) => ({
+      cups: item.cupsCode,
+      descripcion: item.descripcion,
+      vrServicio: item.valorNeto,
+      cantidad: item.cantidad,
+      consecutivo: item.consecutivo,
+      numeroDocumento: numero,
+    })),
+    otrosServicios: paquete.otrosServicios.map((item) => ({
+      tipoOS: '01',
+      codTecnologiaSalud: 'OTROS',
+      nomTecnologiaSalud: item.descripcion,
+      vrServicio: item.valorNeto,
+      cantidadOS: item.cantidad,
+      consecutivo: item.consecutivo,
+      numeroDocumento: numero,
+    })),
+    vrTotalDian: regla.valorNetoDocumento,
+    vrTotalRips: regla.valorNetoRips,
+    fevEqualsRips: true,
     nota: extras?.cufe
       ? 'Factura electrónica DIAN (marca blanca). Folio consumido. Cruce CUFE ↔ RIPS JSON.'
       : 'Comprobante interno. No consume folios electrónicos.',
@@ -118,6 +153,7 @@ function cashReceiptResult(
 export async function emitChargeReceipt(
   context: ChargeEmissionContext,
 ): Promise<ChargeEmissionResult> {
+  exigirPaquete(context, context.forceCashReceipt ? 'RECIBO_CAJA' : 'FEV')
   const settings = getBillingModalitySettings()
   const depleted = getFoliosAvailable(settings) <= 0
 

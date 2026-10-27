@@ -78,8 +78,30 @@ export function procedurePaymentStatus(
 
 export interface PaymentAbonoView {
   payment: PaymentRecord
+  /** Valor de este procedimiento dentro del comprobante. En un paquete no es el total del recibo. */
+  appliedAmount: number
   remainingBalance: number
   documentKind: PaymentDocumentKind | null
+}
+
+export function amountAppliedToLine(
+  payment: Pick<PaymentRecord, 'paymentControlLineId' | 'amount' | 'lineAllocations'>,
+  lineId: string,
+): number {
+  if (payment.lineAllocations?.length) {
+    return payment.lineAllocations
+      .filter((item) => item.lineId === lineId)
+      .reduce((sum, item) => sum + Math.max(0, Math.round(item.amount || 0)), 0)
+  }
+  if (payment.paymentControlLineId !== lineId) return 0
+  return Math.max(0, Math.round(payment.amount || 0))
+}
+
+export function paymentHasProcedureLink(
+  payment: Pick<PaymentRecord, 'paymentControlLineId' | 'lineAllocations'>,
+): boolean {
+  if (payment.paymentControlLineId) return true
+  return Boolean(payment.lineAllocations?.some((item) => item.lineId && item.amount > 0))
 }
 
 /** Historial del procedimiento en el orden en que se registraron los abonos. */
@@ -92,13 +114,17 @@ export function abonoHistoryForLine(
   const history: PaymentAbonoView[] = []
 
   for (const payment of payments) {
-    if (payment.paymentControlLineId !== lineId) continue
-    runningPaid += Math.max(0, payment.amount || 0)
+    const applied = amountAppliedToLine(payment, lineId)
+    if (applied <= 0) continue
+    runningPaid += applied
     const computed = Math.max(0, Math.round(billable) - runningPaid)
+    const bundled = Boolean(payment.lineAllocations?.length)
     history.push({
       payment,
-      remainingBalance:
-        typeof payment.remainingBalance === 'number'
+      appliedAmount: applied,
+      remainingBalance: bundled
+        ? computed
+        : typeof payment.remainingBalance === 'number'
           ? Math.max(0, Math.round(payment.remainingBalance))
           : computed,
       documentKind: resolvePaymentDocumentKind(payment),

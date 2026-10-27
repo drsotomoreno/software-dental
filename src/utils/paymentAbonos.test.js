@@ -74,6 +74,7 @@ test('el historial descuenta cada abono y conserva saldo y tipo de comprobante',
   ])
 
   assert.equal(history.length, 2)
+  assert.equal(history[0].appliedAmount, 50000)
   assert.equal(history[0].remainingBalance, 150000)
   assert.equal(history[0].documentKind, 'recibo_interno')
   assert.equal(history[1].remainingBalance, 0)
@@ -105,4 +106,27 @@ test('un comprobante antiguo sin tipo usa la etiqueta genérica', () => {
   assert.equal(paymentReceiptActionLabel(kind), 'Ver Recibo / Factura')
   assert.equal(documentKindFromEmission('factura', 'manual'), 'recibo_interno')
   assert.equal(documentKindFromEmission('factura', 'provider'), 'factura')
+})
+
+test('un mismo recibo abona solo la parte de cada procedimiento', () => {
+  const history = abonoHistoryForLine('resina', 150000, [
+    {
+      id: 'paquete',
+      paymentDate: '2026-10-26',
+      amount: 280000,
+      paymentMethod: 'contado',
+      paymentReason: 'Consulta · Resina · Profilaxis',
+      documentKind: 'recibo_interno',
+      invoices: [],
+      lineAllocations: [
+        { lineId: 'consulta', amount: 50000, description: 'Consulta', cupsCode: '890201' },
+        { lineId: 'resina', amount: 150000, description: 'Resina', cupsCode: '232101' },
+        { lineId: 'profilaxis', amount: 80000, description: 'Profilaxis', cupsCode: '997103' },
+      ],
+    },
+  ])
+  assert.equal(history.length, 1)
+  assert.equal(history[0].appliedAmount, 150000)
+  assert.equal(history[0].remainingBalance, 0)
+  assert.equal(history[0].payment.amount, 280000)
 })

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import type { UserProfile } from '@/types/user'
+import type { CheckoutLineItem } from '@/types/consultationCheckout'
 import type {
   BudgetLineItem,
   DentalImplantsBudget,
@@ -10,6 +11,7 @@ import type {
   PaymentControlLine,
   PaymentDocumentKind,
   PaymentInvoice,
+  PaymentLineAllocation,
   PaymentPlanItem,
   PaymentRecord,
   TreatmentPlanItem,
@@ -77,14 +79,17 @@ import { PAYMENT_METHOD_LABELS } from '@/constants/dental'
 import { calcTotalPaid } from '@/utils/paymentControl'
 import {
   abonoHistoryForLine,
+  amountAppliedToLine,
   documentKindFromEmission,
   formatAbonoDate,
+  paymentHasProcedureLink,
   paymentReceiptActionLabel,
   paymentReceiptTypeLabel,
   procedurePaymentStatus,
   remainingAfterAbono,
   resolvePaymentDocumentKind,
 } from '@/utils/paymentAbonos'
+import { clasificarGrupoRips } from '@/utils/paqueteDocumentoCobro'
 import {
   ORTHODONTICS_CONCEPT_LABELS,
   ORTHODONTICS_PAYMENT_TYPE_LABELS,
@@ -324,6 +329,8 @@ export function PaymentControlForm({
   const cieCatalog = useCatalogSearch('cie10', cieQuery, 20)
   const [invoiceView, setInvoiceView] = useState<InvoiceViewMode | null>(null)
   const [paymentDraftLineId, setPaymentDraftLineId] = useState<string | null>(null)
+  const [selectedLineIds, setSelectedLineIds] = useState<string[]>([])
+  const [bundleOpen, setBundleOpen] = useState(false)
   const [orthoDraftId, setOrthoDraftId] = useState<string | null>(null)
   const [orthoContadoOpen, setOrthoContadoOpen] = useState(false)
   const [paymentBusy, setPaymentBusy] = useState(false)
@@ -388,11 +395,19 @@ export function PaymentControlForm({
   const draftRemaining = draftLine
     ? Math.max(0, lineBillablePrice(draftLine) - paidAmountForLine(draftLine.id, paymentControl))
     : 0
+  const selectedBundle = paymentControlLines
+    .filter((line) => selectedLineIds.includes(line.id))
+    .map((line) => ({
+      line,
+      remaining: Math.max(0, lineBillablePrice(line) - paidAmountForLine(line.id, paymentControl)),
+    }))
+    .filter((item) => item.remaining > 0 && item.line.procedure.trim())
+  const selectedBundleTotal = selectedBundle.reduce((sum, item) => sum + item.remaining, 0)
   const canImportFromBudget =
     budgetItems.some((item) => item.procedure.trim()) ||
     Boolean(orthodonticsBudget?.active) ||
     Boolean(dentalImplantsBudget?.active)
-  const unlinkedPayments = paymentControl.filter((payment) => !payment.paymentControlLineId)
+  const unlinkedPayments = paymentControl.filter((payment) => !paymentHasProcedureLink(payment))
   const pendingAgreements = supplementalPlanItems(paymentControlLines, paymentPlan)
   const orthoAgreements = orthodonticsPlanItems(paymentPlan)
   const orthoDraft = orthoAgreements.find((item) => item.id === orthoDraftId) ?? null
@@ -543,6 +558,100 @@ export function PaymentControlForm({
         remainingBalance === 0
           ? `Abono de ${formatCurrency(amount)} registrado. El procedimiento quedó en Pagado.`
           : `Abono de ${formatCurrency(amount)} registrado. Saldo del procedimiento: ${formatCurrency(remainingBalance)}.`,
+      )
+    } catch (error) {
+      setPaymentNotice(error instanceof Error ? error.message : 'No se pudo registrar el pago.')
+    } finally {
+      setPaymentBusy(false)
+    }
+  }
+
+  const registerBundlePayment = async (input: PaymentRegistrationInput) => {
+    if (disabled || paymentBusy || selectedBundle.length < 2) return
+    const amount = Math.round(input.amount)
+    if (amount !== selectedBundleTotal) {
+      setPaymentNotice('El comprobante debe cobrar la suma exacta de los procedimientos seleccionados.')
+      return
+    }
+
+    setPaymentBusy(true)
+    setPaymentNotice(null)
+    try {
+      const allocations: PaymentLineAllocation[] = selectedBundle.map(({ line, remaining }) => ({
+        lineId: line.id,
+        amount: remaining,
+        cupsCode: line.cupsCode,
+        description: line.procedure.trim(),
+      }))
+      const cart: CheckoutLineItem[] = selectedBundle.map(({ line, remaining }) => {
+        const grupo = clasificarGrupoRips({
+          cupsCode: line.cupsCode,
+          esPersonalizado: !line.cupsCode,
+        })
+        return {
+          id: line.id,
+          kind: grupo === 'otrosServicios' ? 'aesthetic' : 'cups',
+          name: line.procedure.trim(),
+          cupsCode: grupo === 'otrosServicios' ? null : line.cupsCode,
+          quantity: 1,
+          unitPrice: remaining,
+          totalAmount: remaining,
+          ripsGroup: grupo,
+          sourceType: 'budget',
+          sourceId: line.id,
+        }
+      })
+      const requestedKind: PaymentDocumentKind = input.documentKind
+      const draft: PaymentRecord = {
+        id: generateId(),
+        paymentDate: input.paymentDate,
+        amount,
+        paymentMethod: 'contado',
+        paymentReason: allocations.map((item) => item.description).join(' · '),
+        treatingDentistUserId: user?.id,
+        treatingDentistName: dentistName(user),
+        documentKind: requestedKind,
+        lineAllocations: allocations,
+        remainingBalance: remainingAfterAbono(balance, amount),
+        invoices: [],
+      }
+      const withInvoice = attachAutoInvoiceToPayment(draft, user?.id)
+      const invoice = withInvoice.invoices[withInvoice.invoices.length - 1]
+      if (!invoice) {
+        setPaymentNotice('No se pudo preparar el comprobante.')
+        return
+      }
+      const result = await emitChargeReceipt({
+        invoice,
+        patientName,
+        patientDocument,
+        paymentReason: draft.paymentReason,
+        amount,
+        forceCashReceipt: requestedKind === 'recibo_interno',
+        cart,
+      })
+      if (requestedKind === 'factura' && result.invoice.emissionMode !== 'provider') {
+        setPaymentNotice(
+          result.depleted
+            ? `${result.message} El cobro no se registró.`
+            : 'No se pudo emitir la factura electrónica (DIAN). Elija Recibo Interno o revise la modalidad de facturación. El cobro no se registró.',
+        )
+        return
+      }
+      const documentKind = documentKindFromEmission(requestedKind, result.invoice.emissionMode)
+      const numero = result.invoice.invoiceNumber
+      const payment: PaymentRecord = {
+        ...withInvoice,
+        documentKind,
+        invoices: withInvoice.invoices.map((item) =>
+          item.id === invoice.id ? { ...result.invoice, autoGenerated: true } : item,
+        ),
+      }
+      onChange([...paymentControl, payment])
+      setSelectedLineIds([])
+      setBundleOpen(false)
+      setPaymentNotice(
+        `${documentKind === 'factura' ? 'Factura' : 'Recibo'} ${numero} por ${formatCurrency(amount)} cubre ${allocations.length} procedimientos.`,
       )
     } catch (error) {
       setPaymentNotice(error instanceof Error ? error.message : 'No se pudo registrar el pago.')
@@ -842,9 +951,9 @@ export function PaymentControlForm({
         {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.planPagos, 'Plan y Control de Pagos')}
       </h3>
       <p className="mb-4 text-xs text-slate-500">
-        Para cada procedimiento defina la forma de pago y registre abonos parciales. Elija recibo
-        interno o factura electrónica; el saldo del procedimiento y el del tratamiento se actualizan
-        con cada abono.
+        Para cada procedimiento defina la forma de pago y registre abonos parciales. También puede
+        marcar varios y cobrarlos con un mismo número de recibo de caja o de FEV: la suma de las
+        líneas debe coincidir con el total del comprobante.
       </p>
 
       {!disabled && (
@@ -860,6 +969,20 @@ export function PaymentControlForm({
           <button type="button" onClick={addProcedure} className="btn-primary text-xs">
             Agregar procedimiento
           </button>
+          {selectedBundle.length >= 2 && (
+            <button
+              type="button"
+              disabled={paymentBusy}
+              onClick={() => {
+                setPaymentNotice(null)
+                setPaymentDraftLineId(null)
+                setBundleOpen(true)
+              }}
+              className="btn-primary text-xs"
+            >
+              Cobrar {selectedBundle.length} en un solo recibo o FEV ({formatCurrency(selectedBundleTotal)})
+            </button>
+          )}
         </div>
       )}
 
@@ -878,7 +1001,7 @@ export function PaymentControlForm({
             const paid = paidAmountForLine(line.id, paymentControl)
             const remaining = Math.max(0, billable - paid)
             const status = procedurePaymentStatus(remaining, paid)
-            const linePayments = paymentControl.filter((payment) => payment.paymentControlLineId === line.id)
+            const linePayments = paymentControl.filter((payment) => amountAppliedToLine(payment, line.id) > 0)
             const abonoHistory = abonoHistoryForLine(line.id, billable, paymentControl)
             const latestPayment = [...linePayments].reverse().find((payment) => payment.invoices.length > 0)
             const latestInvoice = latestPayment
@@ -906,6 +1029,23 @@ export function PaymentControlForm({
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-dental-700">
                       Procedimiento {index + 1}
                     </p>
+                    {remaining > 0 && line.procedure.trim() && !disabled && (
+                      <label className="mt-1 flex items-center gap-2 text-[11px] text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={selectedLineIds.includes(line.id)}
+                          onChange={() => {
+                            setBundleOpen(false)
+                            setSelectedLineIds((current) =>
+                              current.includes(line.id)
+                                ? current.filter((id) => id !== line.id)
+                                : [...current, line.id],
+                            )
+                          }}
+                        />
+                        Incluir en un mismo recibo o FEV
+                      </label>
+                    )}
                     <h4 className="text-sm font-semibold text-slate-900" title={procedureTitle}>
                       {procedureTitle}
                       {line.cupsCode ? (
@@ -1175,7 +1315,7 @@ export function PaymentControlForm({
                           </div>
                           <div className="text-right">
                             <p className="font-semibold tabular-nums text-slate-900">
-                              {formatCurrency(entry.payment.amount)}
+                              {formatCurrency(entry.appliedAmount)}
                             </p>
                             <p className="text-slate-500">
                               Saldo restante {formatCurrency(entry.remainingBalance)}
@@ -1401,6 +1541,24 @@ export function PaymentControlForm({
       {creditNoteMessage && (
         <p className="mt-3 text-sm text-dental-800">{creditNoteMessage}</p>
       )}
+      <PaymentRegistrationModal
+        open={bundleOpen && selectedBundle.length >= 2}
+        sessionKey={selectedBundle.map((item) => item.line.id).join(',')}
+        procedureTitle={`${selectedBundle.length} procedimientos en un solo comprobante`}
+        balanceCaption="Saldo de los procedimientos seleccionados"
+        amountHint="Un solo número de recibo o FEV para todas las líneas. El total es la suma exacta que debe reportar el RIPS."
+        remaining={selectedBundleTotal}
+        treatmentBalance={balance}
+        fixedAmount={selectedBundleTotal}
+        busy={paymentBusy}
+        notice={paymentNotice}
+        onClose={() => {
+          if (!paymentBusy) setBundleOpen(false)
+        }}
+        onSubmit={(input) => {
+          void registerBundlePayment(input)
+        }}
+      />
       <PaymentRegistrationModal
         open={draftLine != null && draftRemaining > 0}
         sessionKey={draftLine?.id ?? ''}

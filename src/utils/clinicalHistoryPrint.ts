@@ -31,6 +31,7 @@ import { formatDentalWhiteningPlan, hasDentalWhiteningSelection } from '@/consta
 import { formatSmileAnalysis, hasSmileAnalysisSelection } from '@/constants/smileAnalysis'
 import { getEvolutionCatalogServices } from '@/utils/evolutionCatalogServices'
 import { formatAssociatedItemLabel } from '@/utils/evolutionNoteAssociation'
+import { paymentHasProcedureLink } from '@/utils/paymentAbonos'
 import {
   formatDentalImplantPlanningSummaryLines,
   formatRehabMidlineDeviation,
@@ -77,6 +78,7 @@ import {
 import type { UserProfile } from '@/types/user'
 import { REGIME_TYPES } from '@/constants/dental'
 import { formatDate } from './crypto'
+import { etiquetaFechaHoraSesion } from './clinicDateTime'
 import { openPortabilityHtmlForPrint } from './portabilityHtml'
 import { differenceInYears } from 'date-fns'
 
@@ -697,7 +699,7 @@ function buildPaymentsSection(data: ClinicalRecordFormData): string {
     )
     .join('')
   const rows = `${lineBoxes}${agreementBoxes}`
-  const unlinkedPayments = data.paymentControl.filter((payment) => !payment.paymentControlLineId)
+  const unlinkedPayments = data.paymentControl.filter((payment) => !paymentHasProcedureLink(payment))
   const unlinkedRows = unlinkedPayments
     .map(
       (payment) =>
@@ -825,7 +827,7 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
           : '<div style="height:48px;border-bottom:1px solid #94a3b8"></div>'
 
       return `<tr>
-          <td>${formatDate(note.date || note.createdAt)}</td>
+          <td>${escapeHtml(etiquetaFechaHoraSesion(note.date || note.createdAt))}</td>
           <td>${procedureCell}</td>
           <td>${noteOrRx}</td>
           <td>${escapeHtml(note.professionalName)}</td>

@@ -14,6 +14,9 @@ export interface RipsValidateRequestMetadatos {
   perfilFiscal?: import('@/utils/fiscalProfile').FiscalProfile
   esRipsTemporal?: boolean
   allowNullNumFactura?: boolean
+  /** fev exige el número DIAN. sin_factura admite numFactura null (recibo o valor cero). */
+  canal?: 'fev' | 'sin_factura'
+  tipoVinculacionFinanciera?: 'recibo_interno' | 'fev' | 'valor_cero'
 }
 
 export interface RipsValidateRequest {

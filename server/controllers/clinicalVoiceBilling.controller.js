@@ -32,10 +32,24 @@ function respuestaMuv(res, status, payload) {
   })
 }
 
+function metadatosDeEvolucion(body, session, perfilFiscal) {
+  const metadatos = body.metadatos && typeof body.metadatos === 'object' ? body.metadatos : {}
+  return {
+    ...metadatos,
+    perfilFiscal,
+    clinicId: session.user.clinicId || session.user.id,
+    professionalId: session.user.id,
+    canal: metadatos.canal ?? body.canal,
+    tipoVinculacionFinanciera:
+      metadatos.tipoVinculacionFinanciera ?? body.tipoVinculacionFinanciera ?? body.tipoVinculacion,
+  }
+}
+
 /**
  * POST /api/rips/evolucion-dictada
+ * Recibo de caja interno o atención en $0: RIPS sin FEV (numFactura null).
  * Sin factura (no obligado): genera el RIPS, lo envía al MUV y guarda CUV y estado.
- * Con factura: conserva el enrutamiento FEV o RIPS pendiente.
+ * Con factura electrónica: conserva el enrutamiento FEV o RIPS pendiente.
  */
 export async function processDictatedEvolution(req, res, next) {
   try {
@@ -54,12 +68,7 @@ export async function processDictatedEvolution(req, res, next) {
     const sinFactura = !body.invoice && !isObligadoFev(perfilFiscal)
 
     if (atencion && sinFactura) {
-      const metadatos = {
-        ...(body.metadatos && typeof body.metadatos === 'object' ? body.metadatos : {}),
-        perfilFiscal,
-        clinicId: session.user.clinicId || session.user.id,
-        professionalId: session.user.id,
-      }
+      const metadatos = metadatosDeEvolucion(body, session, perfilFiscal)
       try {
         const result = await finalizarConsultaEnMuv({
           atencion,
@@ -154,12 +163,7 @@ export async function processDictatedEvolution(req, res, next) {
       perfilFiscal,
       rips,
       invoice: body.invoice,
-      metadatos: {
-        ...(body.metadatos && typeof body.metadatos === 'object' ? body.metadatos : {}),
-        perfilFiscal,
-        clinicId: session.user.clinicId || session.user.id,
-        professionalId: session.user.id,
-      },
+      metadatos: metadatosDeEvolucion(body, session, perfilFiscal),
       user: session.user,
     })
 
