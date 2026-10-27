@@ -8,6 +8,7 @@ import {
   type EvolutionCatalogLookup,
 } from '@/utils/ripsCompiler'
 import { isNonRipsEvolutionNote } from '@/types/evolutionNote'
+import { esVinculoSinFacturaElectronica } from '@/types/evolutionNoteRips'
 import { expandEvolutionNoteServices } from '@/utils/evolutionCatalogServices'
 
 const CUPS_PATTERN = /^\d{6}$/
@@ -27,6 +28,7 @@ function resolveEvolutionCost(
 }
 
 function resolveEvolutionBillable(note: EvolutionNote, cost: number): boolean {
+  if (esVinculoSinFacturaElectronica(note)) return false
   if (note.isBillable === false) return false
   if (note.isBillable === true) return cost > 0
   return cost > 0
@@ -48,6 +50,8 @@ export function mapEvolutionNoteToClinicalItem(
   const isCustom = isNonRipsEvolutionNote(note) || !cups
   const cost = resolveEvolutionCost(note, catalog)
   const isBillable = resolveEvolutionBillable(note, cost)
+  const reciboInterno = note.ripsMetadata?.tipoVinculacionFinanciera === 'recibo_interno'
+  const tarifa = reciboInterno || isBillable ? cost : 0
   const principal =
     record.diagnoses?.find((diagnosis) => diagnosis.type === 'principal') ?? record.diagnoses?.[0]
 
@@ -58,7 +62,7 @@ export function mapEvolutionNoteToClinicalItem(
     cie10Code: principal?.code ?? null,
     cie10Description: principal?.description ?? null,
     isCustomProcedure: isCustom,
-    cost: isBillable ? cost : 0,
+    cost: tarifa,
     isBillable,
     providerId: note.authorUserId || professional.id,
     providerDocument: professional.documentNumber,
@@ -120,7 +124,7 @@ export function isClinicalItemOtrosServicios(item: ClinicalEvolutionItem): boole
 
 export function getRipsVrServicioForClinicalItem(item: ClinicalEvolutionItem): number {
   if (!isClinicalItemRipsReportable(item) && !isClinicalItemOtrosServicios(item)) return 0
-  return isClinicalItemBillable(item) ? item.cost : 0
+  return item.cost
 }
 
 export function requiresDianBilling(items: ClinicalEvolutionItem[]): boolean {
@@ -129,7 +133,7 @@ export function requiresDianBilling(items: ClinicalEvolutionItem[]): boolean {
 
 export function computeDianTotal(items: ClinicalEvolutionItem[]): number {
   return items
-    .filter((item) => isClinicalItemBillable(item) || (item.isCustomProcedure && item.cost > 0))
+    .filter((item) => item.isBillable !== false && item.cost > 0)
     .reduce((sum, item) => sum + item.cost, 0)
 }
 

@@ -91,7 +91,8 @@ export function hasBlockingBillingIssues(issues: BillingValidationIssue[]): bool
 
 /**
  * Aplica reglas MinSalud:
- * - Procedimientos CUPS no facturables → vrServicio: 0 (sí van al RIPS)
+ * - Control o valor $0 → vrServicio 0 (sí van al RIPS)
+ * - Recibo de caja interno → vrServicio con la tarifa, sin factura electrónica
  * - Personalizados / estéticos → RIPS `otrosServicios` (nombre literal DIAN)
  */
 export function applyClinicalRulesToRips(

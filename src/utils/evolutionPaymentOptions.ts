@@ -26,7 +26,9 @@ export interface OpcionPagoPaciente {
 export function etiquetaOpcionPago(opcion: OpcionPagoPaciente): string {
   const consecutivo = opcion.consecutivo.trim() || 'Sin consecutivo'
   const concepto = opcion.concepto.trim() || 'Sin concepto'
-  return `${consecutivo} · ${formatAbonoDate(opcion.fecha)} · ${formatCurrency(opcion.valor)} · ${concepto}`
+  const numero =
+    opcion.tipo === 'recibo_interno' && /^FV/i.test(consecutivo) ? `Recibo ${consecutivo}` : consecutivo
+  return `${numero} · ${formatAbonoDate(opcion.fecha)} · ${formatCurrency(opcion.valor)} · ${concepto}`
 }
 
 export function opcionDesdePago(pago: PagoVinculable): OpcionPagoPaciente {

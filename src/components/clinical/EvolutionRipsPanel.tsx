@@ -526,7 +526,11 @@ export function EvolutionRipsPanel({
 
         <div>
           <label className="label-field" htmlFor={`pago-rips-${note.id}`}>
-            {tipo === 'fev' ? 'Factura electrónica del paciente' : 'Recibo o pago del paciente'}
+            {tipo === 'fev'
+              ? 'Factura electrónica del paciente'
+              : tipo === 'recibo_interno'
+                ? 'Recibo de caja del paciente'
+                : 'Recibo o pago del paciente'}
           </label>
           <select
             id={`pago-rips-${note.id}`}
@@ -540,7 +544,9 @@ export function EvolutionRipsPanel({
                 ? 'No aplica para atención en $0'
                 : visibles.length === 0
                   ? 'No hay pagos registrados para este paciente'
-                  : 'Seleccione consecutivo, fecha, valor y concepto'}
+                  : tipo === 'fev'
+                    ? 'Seleccione la factura electrónica'
+                    : 'Seleccione el recibo de caja'}
             </option>
             {!valorCero &&
               soporteId &&

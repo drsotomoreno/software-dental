@@ -250,7 +250,6 @@ function lineaComun(
 ) {
   const metadata = metadataDe(input.note)
   const tipo = input.tipoVinculacion ?? metadata.tipoVinculacionFinanciera
-  const soporte = soporteDe(input, tipo)
   const prestadorDoc = tipoDocumento(input.prestador.documentType)
   return {
     codPrestador: codPrestadorDe(input.prestador),
@@ -269,7 +268,8 @@ function lineaComun(
         ? RIPS_CONCEPTO_RECAUDO_DEFAULT
         : metadata.conceptoRecaudo || RIPS_CONCEPTO_RECAUDO_DEFAULT,
     valorPagoModerador: 0,
-    numFEVPagoModerador: tipo === 'recibo_interno' ? soporte : null,
+    // El recibo de caja se queda en la clínica. Este campo es una FEV y el flujo sin factura no la pide.
+    numFEVPagoModerador: null,
     consecutivo,
   }
 }

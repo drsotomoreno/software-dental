@@ -91,6 +91,7 @@ export function ConsultationCheckout({
           cupsCode: cupsCode ?? undefined,
           treatingDentistUserId: user?.id,
           treatingDentistName: formatDentistName(user),
+          documentKind: payload.documentKind === 'electronic_invoice' ? 'factura' : 'recibo_interno',
           invoices: [],
         },
         user?.id,

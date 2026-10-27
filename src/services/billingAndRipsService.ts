@@ -97,7 +97,8 @@ function buildInvoiceFromBillableSession(
  *
  * Reglas:
  * - Toda atención con CUPS genera RIPS (vrServicio puede ser 0).
- * - Solo atenciones facturables (isBillable && cost > 0) generan FEV DIAN.
+ * - Solo atenciones con vínculo FEV generan factura electrónica.
+ *   El recibo de caja interno conserva la tarifa en RIPS y no pide FEV.
  * - Procedimientos personalizados van a DIAN, no a RIPS.
  */
 export async function processClinicalSession(
