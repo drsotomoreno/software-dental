@@ -40,6 +40,42 @@ export async function checkRipsApiHealth(): Promise<boolean> {
   }
 }
 
+export interface RadicacionRipsResult {
+  success: boolean
+  cuv?: string | null
+  canal?: 'fev' | 'sin_factura' | string
+  logId?: string | null
+  retryable?: boolean
+  code?: string
+  error?: string
+  errors?: Array<{ code?: string; message?: string; path?: string }>
+}
+
+/**
+ * Entrega definitiva del paquete. Con CUFE o XML usa CargarFevRips.
+ * Sin ellos, CargarRipsSinFactura (registro epidemiológico).
+ */
+export async function radicarRipsAnteMinisterio(envelope: {
+  rips: RipsTransaction
+  cufe?: string | null
+  xmlFevFile?: string | null
+  evolutionId?: string | null
+  patientId?: string | null
+}): Promise<RadicacionRipsResult> {
+  const response = await fetch(`${API_BASE}/send-single`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...identityHeaders() },
+    body: JSON.stringify({
+      rips: envelope.rips,
+      cufe: envelope.cufe ?? '',
+      xmlFevFile: envelope.xmlFevFile ?? '',
+      evolutionId: envelope.evolutionId ?? null,
+      patientId: envelope.patientId ?? null,
+    }),
+  })
+  return parseJson<RadicacionRipsResult>(response)
+}
+
 /**
  * Radica el paquete RIPS ante MinSalud y obtiene el CUV si es aprobado.
  */

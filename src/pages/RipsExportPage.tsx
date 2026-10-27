@@ -10,6 +10,7 @@ import type { Patient } from '@/types/patient'
 import type { RipsValidationIssue } from '@/types/rips'
 import type { RipsSourceRecord } from '@/utils/rips'
 import { getBillingModalitySettings } from '@/services/billingModalityService'
+import { radicarRipsAnteMinisterio } from '@/services/ripsApiService'
 import { saveTemporaryRips } from '@/services/ripsTemporalService'
 import {
   atencionEnPeriodo,
@@ -21,12 +22,16 @@ import { isNoObligadoFev, normalizePerfilFiscal, normalizeRipsNumFactura } from 
 import {
   buildDefaultRipsMetadata,
   buildRipsFromRecords,
-  downloadRipsJson,
+  clasificarRadicacionRips,
+  cufeDeAtenciones,
+  evolucionIdDeAtencion,
+  facturasDelPaquete,
   formatDate,
   formatRipsIssuePatientLabel,
   hasRipsBlockingErrors,
   pickInvoiceNumberForRips,
-  suggestRipsFilename,
+  ripsParaRadicar,
+  vinculosDeAtenciones,
 } from '@/utils'
 
 export function RipsExportPage() {
@@ -106,11 +111,13 @@ export function RipsExportPage() {
         user.perfilFiscal ?? getBillingModalitySettings().perfilFiscal,
       )
       const noObligado = isNoObligadoFev(perfilFiscal)
-      let numFactura: string | null = null
-      if (!noObligado && patient.id != null) {
-        const invoices = await db.electronicInvoices.where('patientId').equals(String(patient.id)).toArray()
-        numFactura = normalizeRipsNumFactura(pickInvoiceNumberForRips([atencion], invoices))
-      }
+      const invoices =
+        patient.id == null
+          ? []
+          : await db.electronicInvoices.where('patientId').equals(String(patient.id)).toArray()
+      const numFactura = noObligado
+        ? null
+        : normalizeRipsNumFactura(pickInvoiceNumberForRips([atencion], invoices))
       const metadata = {
         ...buildDefaultRipsMetadata(user),
         perfilFiscal,
@@ -123,25 +130,65 @@ export function RipsExportPage() {
         return
       }
 
-      downloadRipsJson(result.rips, suggestRipsFilename(metadata.numFactura))
+      const cufe = cufeDeAtenciones([attention.record], facturasDelPaquete([attention.record], invoices))
+      const clasificacion = clasificarRadicacionRips({
+        vinculaciones: vinculosDeAtenciones([attention.record]),
+        cufe,
+      })
+      if (!clasificacion.listo) {
+        setExportMessage(clasificacion.motivo)
+        return
+      }
+
+      const rips = ripsParaRadicar(result.rips, clasificacion.canal)
+      let response
+      try {
+        response = await radicarRipsAnteMinisterio({
+          rips,
+          cufe: clasificacion.canal === 'fev' ? cufe : '',
+          evolutionId: evolucionIdDeAtencion(attention.record),
+          patientId: String(patient.id ?? ''),
+        })
+      } catch (error) {
+        setExportMessage(
+          error instanceof Error ? error.message : 'No se pudo contactar el Ministerio de Salud.',
+        )
+        return
+      }
+      if (!response.success || !response.cuv) {
+        setExportIssues(
+          (response.errors ?? []).map((item) => ({
+            level: 'error' as const,
+            field: item.path,
+            message: item.message || response.error || 'El Ministerio de Salud no radicó el paquete.',
+          })),
+        )
+        if (!response.errors?.length) {
+          setExportMessage(response.error || 'El Ministerio de Salud no radicó el paquete.')
+        }
+        return
+      }
+
       void saveTemporaryRips({
         clinicId: user.clinicId || user.id,
         patientId: String(patient.id ?? ''),
         professionalId: user.id,
         clinicalRecordId: String(attention.record.id ?? ''),
-        numDocumentoIdObligado: result.rips.numDocumentoIdObligado,
-        numFactura: normalizeRipsNumFactura(result.rips.numFactura),
+        numDocumentoIdObligado: rips.numDocumentoIdObligado,
+        numFactura: normalizeRipsNumFactura(rips.numFactura),
         perfilFiscal,
-        status: 'ready',
-        ripsJson: result.rips,
+        status: 'submitted',
+        ripsJson: { ...rips, cuv: response.cuv },
       })
       audit({
         action: 'EXPORT_RIPS',
         resourceType: 'rips',
-        details: `Exportación de ${patient.firstName} ${patient.lastName} (${patient.documentType} ${patient.documentNumber})`,
+        details: `Radicación ${clasificacion.canal} de ${patient.firstName} ${patient.lastName} (${patient.documentType} ${patient.documentNumber}). CUV ${response.cuv}`,
       })
       setExportMessage(
-        `RIPS de ${patient.firstName} ${patient.lastName} exportado.`,
+        clasificacion.canal === 'fev'
+          ? `RIPS con factura electrónica de ${patient.firstName} ${patient.lastName} radicado. CUV ${response.cuv}.`
+          : `RIPS sin factura de ${patient.firstName} ${patient.lastName} radicado en el Ministerio de Salud. CUV ${response.cuv}.`,
       )
     } finally {
       setExportingId(null)
@@ -158,9 +205,11 @@ export function RipsExportPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Exportación RIPS</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Genere el JSON RIPS, valídelo ante MinSalud y obtenga el CUV para la FEV-DIAN.
-          Aquí aparecen las historias clínicas firmadas y todas las notas de evolución
-          de la cuenta marcadas como RIPS listo para exportar.
+          Radique el paquete ante el Ministerio de Salud. Con factura electrónica se
+          envía el RIPS junto con la FEV. Sin factura (recibo estándar o atención
+          particular) se envía solo para el registro epidemiológico y estadístico.
+          Aquí aparecen las historias clínicas firmadas y las notas de evolución
+          marcadas como RIPS listo para radicar.
         </p>
         <p className="mt-2 text-xs text-slate-500">
           También puede exportar{' '}
@@ -332,7 +381,7 @@ function RecordRow({
               onClick={onExport}
               disabled={exporting}
             >
-              {exporting ? 'Exportando…' : 'Exportar'}
+              {exporting ? 'Radicando…' : 'Exportar'}
             </button>
           )}
         </div>

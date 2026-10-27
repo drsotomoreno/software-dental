@@ -136,6 +136,15 @@ export {
 } from './ripsValidation'
 export { isRipsPackageReadyForExport, ripsPackageServiceCount } from './ripsPackageReady'
 export {
+  clasificarRadicacionRips,
+  cufeDeAtenciones,
+  evolucionIdDeAtencion,
+  facturasDelPaquete,
+  normalizarVinculoRadicacion,
+  ripsParaRadicar,
+  vinculosDeAtenciones,
+} from './ripsRadicacion'
+export {
   validateRipsJsonStructure,
   validateRipsMetadataStructure,
   buildStructureValidationContext,

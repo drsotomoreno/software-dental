@@ -9,13 +9,17 @@ import type { UserProfile } from '@/types/user'
 import {
   buildDefaultRipsMetadata,
   buildRipsFromRecords,
+  clasificarRadicacionRips,
   countRipsIssues,
+  cufeDeAtenciones,
+  evolucionIdDeAtencion,
+  facturasDelPaquete,
   formatRipsIssuePatientLabel,
   createCatalogLookupFromServices,
-  downloadRipsJson,
   isRipsPackageReadyForExport,
   pickInvoiceNumberForRips,
-  suggestRipsFilename,
+  ripsParaRadicar,
+  vinculosDeAtenciones,
 } from '@/utils'
 import { userProfileToOrganizationId } from '@/utils/organizationId'
 import { DEFAULT_ODONTOLOGY_CONSULTATION_CUPS } from '@/constants/rips'
@@ -23,6 +27,7 @@ import { buildRipsMetadataFromInvoice } from '@/services/invoiceService'
 import {
   checkRipsApiHealth,
   downloadDianXml,
+  radicarRipsAnteMinisterio,
   validateRipsWithMinistry,
 } from '@/services/ripsApiService'
 import { saveTemporaryRips } from '@/services/ripsTemporalService'
@@ -62,6 +67,9 @@ export function RipsExportForm({
     }
   })
   const [exported, setExported] = useState(false)
+  const [radicando, setRadicando] = useState(false)
+  const [radicacionMensaje, setRadicacionMensaje] = useState('')
+  const [radicacionCuv, setRadicacionCuv] = useState('')
   const [apiOnline, setApiOnline] = useState<boolean | null>(null)
   const [validating, setValidating] = useState(false)
   const [cuvResult, setCuvResult] = useState<RipsValidateSuccessResponse | null>(null)
@@ -139,17 +147,26 @@ export function RipsExportForm({
     issues: result.issues,
     rips: result.rips,
   })
-  const canExport = packageReady
-  const canValidate = canExport && apiOnline === true
-  const exportHint = !canExport
+  const atenciones = sources.map(({ record }) => record)
+  const facturasPaquete = facturasDelPaquete(atenciones, invoices ?? [])
+  const cufePaquete = cufeDeAtenciones(atenciones, facturasPaquete)
+  const clasificacion = clasificarRadicacionRips({
+    vinculaciones: vinculosDeAtenciones(atenciones),
+    cufe: cufePaquete,
+  })
+  const canExport = packageReady && clasificacion.listo
+  const canValidate = packageReady && apiOnline === true
+  const exportHint = !packageReady
     ? sources.length === 0
-      ? 'Seleccione atenciones para armar el paquete. Exportar RIPS se habilita cuando quede listo.'
+      ? 'Seleccione atenciones para armar el paquete. Exportar RIPS se habilita cuando quede listo para radicar.'
       : errors > 0
-        ? 'Corrija los errores de bloqueo. Exportar RIPS se habilita cuando el paquete quede listo.'
-        : 'El paquete aún no tiene servicios para exportar.'
-    : warnings > 0
-      ? `Paquete listo para exportar. ${warnings} advertencia(s).`
-      : 'Paquete listo para exportar.'
+        ? 'Corrija los errores de bloqueo. Exportar RIPS radica el paquete cuando quede listo.'
+        : 'El paquete aún no tiene servicios para radicar.'
+    : !clasificacion.listo
+      ? clasificacion.motivo
+      : warnings > 0
+        ? `${clasificacion.motivo} ${warnings} advertencia(s).`
+        : clasificacion.motivo
 
   useEffect(() => {
     checkRipsApiHealth().then(setApiOnline)
@@ -230,21 +247,67 @@ export function RipsExportForm({
     })
   }, [invoices, sources, sourceKey, noObligado, perfilFiscal, professional])
 
-  const handleExport = () => {
-    if (!canExport) return
-    downloadRipsJson(result.rips, suggestRipsFilename(metadata.numFactura))
+  const handleExport = async () => {
+    if (!canExport || radicando) return
     const first = sources[0]
+    const rips = ripsParaRadicar(result.rips, clasificacion.canal)
+    const cufe = clasificacion.canal === 'fev' ? cufePaquete : ''
+    const patientIds = [...new Set(sources.map(({ patient }) => String(patient.id ?? '')).filter(Boolean))]
+    setRadicando(true)
+    setRadicacionMensaje('')
+    setRadicacionCuv('')
+    setExported(false)
+
+    let response
+    try {
+      response = await radicarRipsAnteMinisterio({
+        rips,
+        cufe,
+        evolutionId: sources.length === 1 && first ? evolucionIdDeAtencion(first.record) : null,
+        patientId: patientIds.length === 1 ? patientIds[0] : null,
+      })
+    } catch (error) {
+      setRadicando(false)
+      setRadicacionMensaje(
+        error instanceof Error ? error.message : 'No se pudo contactar el Ministerio de Salud.',
+      )
+      return
+    }
+    setRadicando(false)
+
+    if (!response.success || !response.cuv) {
+      const detalle =
+        response.errors?.map((item) => item.message).filter(Boolean).join(' ') ||
+        response.error ||
+        'El Ministerio de Salud no radicó el paquete.'
+      setRadicacionMensaje(detalle)
+      setMinistryErrors(
+        (response.errors ?? []).map((item) => ({
+          field: item.path,
+          code: item.code,
+          message: item.message || 'Rechazo del Ministerio de Salud.',
+        })),
+      )
+      return
+    }
+
     void saveTemporaryRips({
       clinicId: professional.clinicId || professional.id,
       patientId: first ? String(first.patient.id) : null,
       professionalId: professional.id,
       clinicalRecordId: first ? String(first.record.id ?? '') : null,
-      numDocumentoIdObligado: result.rips.numDocumentoIdObligado,
-      numFactura: normalizeRipsNumFactura(result.rips.numFactura),
+      numDocumentoIdObligado: rips.numDocumentoIdObligado,
+      numFactura: normalizeRipsNumFactura(rips.numFactura),
       perfilFiscal,
-      status: 'ready',
-      ripsJson: result.rips,
+      status: 'submitted',
+      ripsJson: { ...rips, cuv: response.cuv },
     })
+    setRadicacionCuv(response.cuv)
+    setRadicacionMensaje(
+      response.canal === 'fev'
+        ? 'Paquete RIPS con factura electrónica radicado en el Ministerio de Salud.'
+        : 'RIPS sin factura radicado en el Ministerio de Salud para registro epidemiológico y estadístico.',
+    )
     setExported(true)
     onExported?.()
   }
@@ -436,13 +499,13 @@ export function RipsExportForm({
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onClick={handleExport}
-          disabled={!canExport}
+          onClick={() => void handleExport()}
+          disabled={!canExport || radicando}
           title={exportHint}
           aria-label="Exportar RIPS"
           className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Exportar RIPS
+          {radicando ? 'Radicando ante MinSalud…' : 'Exportar RIPS'}
         </button>
         <button
           type="button"
@@ -452,17 +515,17 @@ export function RipsExportForm({
         >
           {validating ? 'Validando ante MinSalud…' : 'Validar y obtener CUV'}
         </button>
-        {exported ? (
-          <span className="text-sm text-green-600">Paquete RIPS exportado correctamente.</span>
+        {exported && radicacionCuv ? (
+          <span className="text-sm text-green-700">
+            {radicacionMensaje} CUV {radicacionCuv}.
+          </span>
         ) : (
           <span className={`text-sm ${canExport ? 'text-emerald-700' : 'text-amber-700'}`}>
-            {exportHint}
+            {radicacionMensaje || exportHint}
           </span>
         )}
         {apiOnline === false && (
-          <span className="text-sm text-red-700">
-            Inicie el servidor con <code className="font-mono">npm run server</code>
-          </span>
+          <span className="text-sm text-red-700">Sin conexión con el servicio de radicación.</span>
         )}
       </div>
 
