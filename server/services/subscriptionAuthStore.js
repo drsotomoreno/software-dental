@@ -26,6 +26,7 @@ import {
   normalizePerfilFiscal,
 } from '../../shared/fiscalProfile.js'
 import { parseRepsCodeWithDane } from './repsDane.js'
+import { UNIQUE_SUPERADMIN_EMAIL } from '../../shared/uniqueSuperAdmin.js'
 
 
 
@@ -42,7 +43,7 @@ function isLikelyEmail(value) {
 }
 
 export const SUPERADMIN_EMAIL = config.superAdmin.email
-export const MASTER_EMAIL = 'doctormauriciosoto@gmail.com'
+export const MASTER_EMAIL = UNIQUE_SUPERADMIN_EMAIL
 export const MASTER_PASSWORD = 'Dragon1976%'
 
 export function isMasterCredentials(email, password) {
