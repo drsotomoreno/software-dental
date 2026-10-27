@@ -12,7 +12,7 @@ import {
   countRipsIssues,
   createCatalogLookupFromServices,
   downloadRipsJson,
-  hasRipsBlockingErrors,
+  isRipsPackageReadyForExport,
   pickInvoiceNumberForRips,
   suggestRipsFilename,
 } from '@/utils'
@@ -133,8 +133,22 @@ export function RipsExportForm({
 
   const errors = countRipsIssues(result.issues, 'error')
   const warnings = countRipsIssues(result.issues, 'warning')
-  const canExport = !hasRipsBlockingErrors(result.issues) && sources.length > 0
+  const packageReady = isRipsPackageReadyForExport({
+    sourceCount: sources.length,
+    issues: result.issues,
+    rips: result.rips,
+  })
+  const canExport = packageReady
   const canValidate = canExport && apiOnline === true
+  const exportHint = !canExport
+    ? sources.length === 0
+      ? 'Seleccione atenciones para armar el paquete. Exportar RIPS se habilita cuando quede listo.'
+      : errors > 0
+        ? 'Corrija los errores de bloqueo. Exportar RIPS se habilita cuando el paquete quede listo.'
+        : 'El paquete aún no tiene servicios para exportar.'
+    : warnings > 0
+      ? `Paquete listo para exportar. ${warnings} advertencia(s).`
+      : 'Paquete listo para exportar.'
 
   useEffect(() => {
     checkRipsApiHealth().then(setApiOnline)
@@ -423,9 +437,11 @@ export function RipsExportForm({
           type="button"
           onClick={handleExport}
           disabled={!canExport}
-          className="btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
+          title={exportHint}
+          aria-label="Exportar RIPS"
+          className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Descargar RIPS JSON
+          Exportar RIPS
         </button>
         <button
           type="button"
@@ -435,12 +451,11 @@ export function RipsExportForm({
         >
           {validating ? 'Validando ante MinSalud…' : 'Validar y obtener CUV'}
         </button>
-        {exported && (
-          <span className="text-sm text-green-600">Archivo RIPS descargado correctamente.</span>
-        )}
-        {!canExport && (
-          <span className="text-sm text-amber-700">
-            Corrija los errores antes de exportar o validar.
+        {exported ? (
+          <span className="text-sm text-green-600">Paquete RIPS exportado correctamente.</span>
+        ) : (
+          <span className={`text-sm ${canExport ? 'text-emerald-700' : 'text-amber-700'}`}>
+            {exportHint}
           </span>
         )}
         {apiOnline === false && (

@@ -132,6 +132,7 @@ export {
   hasRipsBlockingErrors,
   countRipsIssues,
 } from './ripsValidation'
+export { isRipsPackageReadyForExport, ripsPackageServiceCount } from './ripsPackageReady'
 export {
   validateRipsJsonStructure,
   validateRipsMetadataStructure,
