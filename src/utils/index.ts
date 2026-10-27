@@ -134,6 +134,7 @@ export {
   formatRipsIssuePatientLabel,
   annotateRipsIssuesWithPatients,
 } from './ripsValidation'
+export { isRipsPackageReadyForExport, ripsPackageServiceCount } from './ripsPackageReady'
 export {
   validateRipsJsonStructure,
   validateRipsMetadataStructure,
