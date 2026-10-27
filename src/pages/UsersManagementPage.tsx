@@ -12,7 +12,7 @@ import {
   updateAppUser,
 } from '@/services/authService'
 import { fetchClinicUsers, type ClinicSeatSnapshot } from '@/services/subscriptionService'
-import { assistantLimitMessage } from '../../shared/subscriptionPlans.js'
+import { snapshotLimitError } from '../../shared/subscriptionPlans.js'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { UserProfile, UserRole } from '@/types/user'
 import {
@@ -98,10 +98,9 @@ export function UsersManagementPage() {
   const [error, setError] = useState('')
 
   const canManage = canManageClinicTeam(currentUser)
-  const seatsExhausted = Boolean(seats && seats.max != null && seats.used >= seats.max)
-  const assistantsExhausted = Boolean(
-    seats && seats.maxAssistants != null && (seats.assistantsUsed ?? 0) >= seats.maxAssistants,
-  )
+  const assistantsExhausted = Boolean(seats && snapshotLimitError(seats, true))
+  const rethusExhausted = Boolean(seats && snapshotLimitError(seats, false))
+  const bothExhausted = assistantsExhausted && rethusExhausted
 
   const reloadUsers = useCallback(async () => {
     const api = await fetchClinicUsers()
@@ -135,14 +134,10 @@ export function UsersManagementPage() {
       return
     }
     const { password, ...userData } = createForm
-    if (userData.role === 'recepcion' && assistantsExhausted) {
-      showErr(assistantLimitMessage(seats?.maxAssistants ?? 0, seats?.assistantsUsed ?? 0))
-      return
-    }
-    if (seatsExhausted) {
-      showErr(
-        `Su plan ${seats?.planName ?? 'actual'} permite máximo ${seats?.max} colaboradores. Actualmente tiene ${seats?.used}. Mejore el plan para agregar más usuarios.`,
-      )
+    const creatingAssistant = userData.role === 'recepcion'
+    const limitError = seats ? snapshotLimitError(seats, creatingAssistant) : null
+    if (limitError) {
+      showErr(limitError)
       return
     }
     const result = await createAppUser(userData, password)
@@ -270,14 +265,13 @@ export function UsersManagementPage() {
     if (!canManage) return
     if (u.isClinicOwner) return
     if (assignableRoleValue(u.role) === role) return
-    if (
-      role === 'recepcion' &&
-      u.role !== 'recepcion' &&
-      u.accessEnabled !== false &&
-      assistantsExhausted
-    ) {
-      showErr(assistantLimitMessage(seats?.maxAssistants ?? 0, seats?.assistantsUsed ?? 0))
-      return
+    const switchingBucket = (u.role === 'recepcion') !== (role === 'recepcion')
+    if (switchingBucket && u.accessEnabled !== false && seats) {
+      const limitError = snapshotLimitError(seats, role === 'recepcion')
+      if (limitError) {
+        showErr(limitError)
+        return
+      }
     }
     const result = await updateAppUser(u.id, { role })
     if (!result.ok) {
@@ -317,9 +311,11 @@ export function UsersManagementPage() {
             <button
               type="button"
               onClick={() => {
-                if (seatsExhausted) {
+                if (bothExhausted && seats) {
                   showErr(
-                    `Su plan ${seats?.planName ?? 'actual'} permite máximo ${seats?.max} colaboradores. Actualmente tiene ${seats?.used}. Mejore el plan para agregar más usuarios.`,
+                    snapshotLimitError(seats, true) ||
+                      snapshotLimitError(seats, false) ||
+                      'Alcanzó el máximo de profesionales y de auxiliares de su plan.',
                   )
                   return
                 }
@@ -345,27 +341,26 @@ export function UsersManagementPage() {
         {seats && (
           <div
             className={`rounded-lg border px-4 py-3 text-sm ${
-              seatsExhausted || assistantsExhausted
+              assistantsExhausted || rethusExhausted
                 ? 'border-amber-200 bg-amber-50 text-amber-900'
                 : 'border-slate-200 bg-slate-50 text-slate-700'
             }`}
           >
-            {seats.max == null ? (
-              <>Licencias de colaboradores: sin tope en esta cuenta.</>
+            {seats.maxRethus == null && seats.maxAssistants == null ? (
+              <>Licencias de profesionales y auxiliares: sin tope en esta cuenta.</>
             ) : (
               <>
-                Plan {seats.planName}: {seats.used} de {seats.max} colaboradores.
-                {seatsExhausted
-                  ? ' Alcanzó el máximo de su plan. Mejore la suscripción para agregar más usuarios.'
-                  : ''}
+                <p>
+                  Plan {seats.planName}: profesionales (ReTHUS) {seats.rethusUsed ?? 0}
+                  {seats.maxRethus == null ? '' : ` de ${seats.maxRethus}`}.
+                  {rethusExhausted ? ' Alcanzó el máximo de profesionales.' : ''}
+                </p>
+                <p className="mt-1">
+                  Auxiliares: {seats.assistantsUsed ?? 0}
+                  {seats.maxAssistants == null ? '' : ` de ${seats.maxAssistants}`}.
+                  {assistantsExhausted ? ' Alcanzó el máximo de auxiliares.' : ''}
+                </p>
               </>
-            )}
-            {seats.maxAssistants != null && (
-              <p className="mt-1">
-                Auxiliares: {seats.assistantsUsed ?? 0} de {seats.maxAssistants}. Este tope es
-                manual y exclusivo del plan Corporativo.
-                {assistantsExhausted ? ' Alcanzó el máximo de auxiliares.' : ''}
-              </p>
             )}
           </div>
         )}

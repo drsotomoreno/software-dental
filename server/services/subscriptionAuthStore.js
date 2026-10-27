@@ -10,11 +10,10 @@ import {
   PAID_PLAN_DAYS,
   TRIAL_DAYS,
   TTC_MESSAGE_PACKAGES,
-  seatLimitForAccount,
   planDisplayName,
   applyClinicAssistantLookup,
-  customMaxAssistantsForAccount,
-  assistantLimitError,
+  checkUserLimits,
+  snapshotLimitError,
   normalizeCustomMaxAssistants,
 } from '../../shared/subscriptionPlans.js'
 import { readClinicAssistantLimit } from './clinicAssistantLimit.js'
@@ -1221,6 +1220,9 @@ function sanitizeUser(user) {
     customMaxAssistants: normalizeCustomMaxAssistants(
       user.customMaxAssistants ?? user.custom_max_assistants,
     ),
+    customMaxRethus: normalizeCustomMaxAssistants(
+      user.customMaxRethus ?? user.custom_max_rethus,
+    ),
     documentType: user.documentType || 'CC',
     documentNumber: user.documentNumber ?? '',
     rethusNumber: user.rethusNumber ?? '',
@@ -1750,8 +1752,15 @@ function hasClinicAccess(user) {
   return user?.accessEnabled !== false && Boolean(user?.passwordHash)
 }
 
-function countAssistants(members) {
-  return members.filter((item) => normalizeRole(item.rol) === 'recepcion').length
+function countRoleBuckets(members) {
+  let assistantsUsed = 0
+  let rethusUsed = 0
+  for (const member of members) {
+    // El rol que se crea elige el contador: auxiliar, o profesional del cupo ReTHUS.
+    if (normalizeRole(member.rol) === 'recepcion') assistantsUsed += 1
+    else rethusUsed += 1
+  }
+  return { assistantsUsed, rethusUsed }
 }
 
 async function clinicSeats(store, clinicId) {
@@ -1759,21 +1768,25 @@ async function clinicSeats(store, clinicId) {
   const lookup = await readClinicAssistantLimit(clinicId)
   const account = applyClinicAssistantLookup(owner ?? {}, lookup)
   const members = usersInClinic(store, clinicId).filter(hasClinicAccess)
-  const maxSeats = owner ? seatLimitForAccount(owner) : seatLimitForAccount({})
+  const { assistantsUsed, rethusUsed } = countRoleBuckets(members)
+  const assistants = checkUserLimits(account, true, assistantsUsed)
+  const rethus = checkUserLimits(account, false, rethusUsed)
   return {
     clinicId,
     used: members.length,
-    max: maxSeats,
-    assistantsUsed: countAssistants(members),
-    maxAssistants: customMaxAssistantsForAccount(account),
+    max: null,
+    assistantsUsed,
+    maxAssistants: assistants.limit,
+    rethusUsed,
+    maxRethus: rethus.limit,
     plan: owner?.plan ?? null,
-    planName: planDisplayName(owner?.plan, owner?.estado_pago),
+    planName: rethus.planName || planDisplayName(owner?.plan, owner?.estado_pago),
     estado_pago: owner?.estado_pago ?? null,
   }
 }
 
-function assistantCapError(seats, becomingAssistant) {
-  const error = assistantLimitError(seats.maxAssistants, seats.assistantsUsed, becomingAssistant)
+function roleCapError(seats, isAssistant) {
+  const error = snapshotLimitError(seats, isAssistant)
   if (!error) return null
   return { ok: false, status: 403, error, seats }
 }
@@ -1881,16 +1894,8 @@ export async function createClinicUser({ token, hint, member }) {
   }
 
   const seats = await clinicSeats(store, clinicId)
-  const assistantError = assistantCapError(seats, isAuxiliar)
-  if (assistantError) return assistantError
-  if (seats.max != null && seats.used >= seats.max) {
-    return {
-      ok: false,
-      status: 403,
-      error: `Su plan ${seats.planName} permite máximo ${seats.max} colaboradores. Actualmente tiene ${seats.used}. Mejore el plan para agregar más usuarios.`,
-      seats,
-    }
-  }
+  const roleError = roleCapError(seats, isAuxiliar)
+  if (roleError) return roleError
 
   const duplicateDoc = store.users.find(
     (item) => normalizeDocumentNumber(item.documentNumber) === documentNumber,
@@ -2009,12 +2014,13 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     return { ok: false, status: 400, error: 'Nombres y apellidos son obligatorios.' }
   }
 
-  const wasActiveAssistant = hasClinicAccess(current) && normalizeRole(current.rol) === 'recepcion'
-  const willBeActiveAssistant = hasClinicAccess(current) && isAuxiliar
-  if (!wasActiveAssistant && willBeActiveAssistant) {
+  const active = hasClinicAccess(current)
+  const wasAssistant = active && normalizeRole(current.rol) === 'recepcion'
+  const willBeAssistant = active && isAuxiliar
+  if (active && wasAssistant !== willBeAssistant) {
     const seats = await clinicSeats(store, clinicId)
-    const assistantError = assistantCapError(seats, true)
-    if (assistantError) return assistantError
+    const roleError = roleCapError(seats, willBeAssistant)
+    if (roleError) return roleError
   }
 
   store.users[index] = {
@@ -2057,10 +2063,10 @@ export async function resetClinicUserPassword({ token, hint, userId, newPassword
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
   }
   const current = store.users[index]
-  if (!hasClinicAccess(current) && normalizeRole(current.rol) === 'recepcion') {
+  if (!hasClinicAccess(current)) {
     const seats = await clinicSeats(store, clinicId)
-    const assistantError = assistantCapError(seats, true)
-    if (assistantError) return assistantError
+    const roleError = roleCapError(seats, normalizeRole(current.rol) === 'recepcion')
+    if (roleError) return roleError
   }
   store.users[index] = {
     ...current,

@@ -1,6 +1,6 @@
 /**
- * Lee clinics.custom_max_assistants.
- * La columna solo limita auxiliares cuando el plan del titular es corporativo.
+ * Lee clinics.custom_max_assistants y clinics.custom_max_rethus.
+ * El plan corporativo usa esas columnas; el resto usa el catálogo del plan.
  */
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -14,7 +14,7 @@ const MIGRATION_FILE = join(
 )
 
 export const SQL_READ_CUSTOM_MAX_ASSISTANTS =
-  'SELECT custom_max_assistants FROM clinics WHERE id::text = $1 LIMIT 1'
+  'SELECT custom_max_assistants, custom_max_rethus FROM clinics WHERE id::text = $1 LIMIT 1'
 
 let schemaReady = null
 
@@ -49,13 +49,14 @@ export async function readClinicAssistantLimit(clinicId) {
       return {
         found: true,
         available: true,
-        value: rows[0].custom_max_assistants ?? null,
+        custom_max_assistants: rows[0].custom_max_assistants ?? null,
+        custom_max_rethus: rows[0].custom_max_rethus ?? null,
       }
     })
   } catch (error) {
     if (error?.code !== 'PG_UNAVAILABLE') {
       console.error(
-        '[clinics] No se pudo leer custom_max_assistants:',
+        '[clinics] No se pudo leer custom_max_assistants / custom_max_rethus:',
         error instanceof Error ? error.message : error,
       )
     }
