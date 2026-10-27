@@ -14,6 +14,7 @@ const MIGRATION_FILES = [
   join(MIGRATION_DIR, '20261023140000_atenciones_rips_metadata.sql'),
   join(MIGRATION_DIR, '20261026235500_recibos_caja_rips_sin_factura.sql'),
   join(MIGRATION_DIR, '20261027010000_recibo_anticipo_transmision.sql'),
+  join(MIGRATION_DIR, '20261027023000_rips_sin_costo_procesado.sql'),
 ]
 
 const TIPOS = new Set(['RECIBO_CAJA', 'CUENTA_COBRO'])

@@ -3,6 +3,8 @@
  *
  * vrServicio es el valor pagado por el paciente. 0, null o indefinido lanzan
  * RipsMapperError (RVC091) antes de llamar a MinsaludService.
+ * Una atención con es_sin_costo no usa esa regla: opción A, todos los
+ * financieros en cero, y el tipo de usuario sigue siendo particular (04).
  * Las fechas de atención quedan en hora de Bogotá: YYYY-MM-DD HH:mm.
  * Con MINSALUD_ENV=stage el documento del paciente se sustituye por el del
  * prestador para no tropezar con RVG01. En cualquier otro valor se envía
@@ -10,6 +12,7 @@
  */
 
 import { documentoObligadoDigits } from '../../shared/nit.js'
+import { esEvolucionSinCosto, valoresFinancierosCostoCero } from '../../shared/ripsSinCosto.js'
 import { splitUsuarioDocumento } from './fevRipsService.js'
 
 const RIPS_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
@@ -367,7 +370,9 @@ export class RipsMapper {
           patient?.numDocumentoIdentificacion ?? patient?.documentNumber ?? patient?.numDocumento,
         )
     const diagnostico = principalDiagnosis(atencion)
-    const vrServicio = assertVrServicio(resolveVrServicio(atencion))
+    const sinCosto = esEvolucionSinCosto(atencion)
+    const financieros = sinCosto ? valoresFinancierosCostoCero() : null
+    const vrServicio = sinCosto ? 0 : assertVrServicio(resolveVrServicio(atencion))
     const fechaInicioAtencion = formatFechaAtencion(fechaAtencionOf(atencion), 'fechaInicioAtencion')
     // La consulta de la Res. 2275 solo transmite fechaInicioAtencion.
     // El fin se normaliza al mismo formato para rechazarlo aquí si es inválido.
@@ -383,7 +388,7 @@ export class RipsMapper {
         {
           tipoDocumentoIdentificacion: pacienteDoc.tipo,
           numDocumentoIdentificacion: pacienteDoc.numero,
-          tipoUsuario: tipoUsuarioPaciente(patient, atencion),
+          tipoUsuario: sinCosto ? '04' : tipoUsuarioPaciente(patient, atencion),
           fechaNacimiento: birthDate(patient),
           codSexo: sexoOf(patient),
           codPaisResidencia: String(patient?.codPaisResidencia ?? '170'),
@@ -415,6 +420,13 @@ export class RipsMapper {
                 conceptoRecaudo: '05',
                 valorPagoModerador: 0,
                 numFEVPagoModerador: null,
+                ...(financieros
+                  ? {
+                      valorProcedimiento: financieros.valorProcedimiento,
+                      valorDescuento: financieros.valorDescuento,
+                      valorNeto: financieros.valorNeto,
+                    }
+                  : {}),
                 consecutivo: 1,
               },
             ],

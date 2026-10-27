@@ -14,6 +14,13 @@ import {
   evaluarTransmisionAnticipo,
   fechaDeEvolucion,
 } from '../../shared/reciboAnticipoRips.js'
+import {
+  TIPO_USUARIO_PARTICULAR as TIPO_USUARIO_PARTICULAR_SIN_COSTO,
+  esEvolucionSinCosto,
+  esPrefijoSinCosto,
+  validarSumatoriaAgrupador,
+  valoresFinancierosCostoCero,
+} from '../../shared/ripsSinCosto.js'
 
 export { ESTADO_PENDIENTE_TRANSMISION, evaluarTransmisionAnticipo } from '../../shared/reciboAnticipoRips.js'
 
@@ -21,8 +28,8 @@ export { ESTADO_PENDIENTE_TRANSMISION, evaluarTransmisionAnticipo } from '../../
 export const MUV_SIN_FACTURA_PRODUCCION =
   'https://fevrips.sispro.gov.co/fevrips-api/api/PaquetesFevRips/CargarRipsSinFactura'
 
-/** Catálogo RIPS: particular / paciente. No se envía NIT de EPS. */
-export const TIPO_USUARIO_PARTICULAR = '04'
+/** Catálogo RIPS: particular / pago de bolsillo. No cambia en una atención sin cobro. */
+export const TIPO_USUARIO_PARTICULAR = TIPO_USUARIO_PARTICULAR_SIN_COSTO
 
 export const ESTADO_COBRADO_PROCESADO = 'COBRADO_PROCESADO'
 
@@ -85,6 +92,13 @@ function cie10De(value) {
   return String(value ?? '').replace(/[.\s]/g, '').toUpperCase()
 }
 
+function paqueteEsSinCosto(input, evoluciones) {
+  if (input?.sinCosto === true || input?.recibo?.sinCosto === true) return true
+  const prefijo = input?.prefijo ?? input?.recibo?.prefijo ?? input?.recibo?.numero ?? input?.recibo?.numeroSoporte
+  if (esPrefijoSinCosto(prefijo)) return true
+  return evoluciones.length > 0 && evoluciones.every((item) => esEvolucionSinCosto(item))
+}
+
 /**
  * Arma un único JSON. Cada línea conserva la fecha en que se firmó la evolución.
  * Si el anticipo es anterior a alguna de esas firmas, la cabecera del reporte
@@ -139,6 +153,7 @@ export function compilarRipsReciboCaja(input) {
   let consecutivoConsulta = 1
   let consecutivoProcedimiento = 1
   let consecutivoOtro = 1
+  const paqueteSinCosto = paqueteEsSinCosto(input, evoluciones)
 
   for (const evolucion of evoluciones) {
     const cruda = fechaDeEvolucion(evolucion)
@@ -150,7 +165,18 @@ export function compilarRipsReciboCaja(input) {
     }
     const fechaInicioAtencion = formatFechaAtencion(cruda, 'fechaInicioAtencion')
     const cups = cupsDe(evolucion.cupsCode ?? evolucion.codProcedimiento ?? evolucion.codConsulta)
-    const valor = pesos(evolucion.valorNeto ?? evolucion.valorProcedimiento ?? evolucion.cost)
+    const sinCostoLinea = paqueteSinCosto || esEvolucionSinCosto(evolucion)
+    const nominal = pesos(evolucion.valorNeto ?? evolucion.valorProcedimiento ?? evolucion.cost)
+    const financieros = sinCostoLinea
+      ? valoresFinancierosCostoCero()
+      : {
+          valorProcedimiento: nominal,
+          valorDescuento: 0,
+          valorNeto: nominal,
+          vrServicio: nominal,
+          conceptoRecaudo: '05',
+          valorPagoModerador: 0,
+        }
     const cie10 = cie10De(evolucion.cie10 ?? evolucion.codDiagnosticoPrincipal)
     const base = {
       codPrestador,
@@ -159,10 +185,17 @@ export function compilarRipsReciboCaja(input) {
       tipoDocumentoIdentificacion: prestadorDoc.tipo,
       numDocumentoIdentificacion: prestadorDoc.numero,
       codDiagnosticoPrincipal: cie10,
-      vrServicio: valor,
-      conceptoRecaudo: '05',
-      valorPagoModerador: 0,
+      vrServicio: financieros.vrServicio,
+      conceptoRecaudo: financieros.conceptoRecaudo,
+      valorPagoModerador: financieros.valorPagoModerador,
       numFEVPagoModerador: null,
+      ...(sinCostoLinea
+        ? {
+            valorProcedimiento: 0,
+            valorDescuento: 0,
+            valorNeto: 0,
+          }
+        : {}),
     }
 
     if (!cups || evolucion.esPersonalizado === true) {
@@ -174,7 +207,7 @@ export function compilarRipsReciboCaja(input) {
         codTecnologiaSalud: 'OTROS',
         nomTecnologiaSalud: String(evolucion.descripcion ?? evolucion.procedure ?? 'Servicio').trim() || 'Servicio',
         cantidadOS: 1,
-        vrUnitOS: valor,
+        vrUnitOS: financieros.vrServicio,
         consecutivo: consecutivoOtro,
       })
       consecutivoOtro += 1
@@ -217,13 +250,14 @@ export function compilarRipsReciboCaja(input) {
   }
 
   const servicios = [...consultas, ...procedimientos, ...otrosServicios]
-  const suma = servicios.reduce((total, item) => total + pesos(item.vrServicio), 0)
   const valorRecibo = pesos(recibo.valorTotal ?? recibo.valor)
-  if (suma !== valorRecibo) {
-    throw new ReciboCajaRipsError(
-      `La suma neta del RIPS (${suma}) debe ser exactamente igual al valor del recibo ${numero} (${valorRecibo}).`,
-      'SUMA_RIPS',
-    )
+  const sumatoria = validarSumatoriaAgrupador({
+    valorTotal: valorRecibo,
+    numero,
+    items: servicios.map((item) => ({ valorNeto: item.valorNeto ?? item.vrServicio })),
+  })
+  if (!sumatoria.ok) {
+    throw new ReciboCajaRipsError(sumatoria.message, 'SUMA_RIPS')
   }
 
   const municipio = String(input.paciente?.municipalityCode ?? input.paciente?.codMunicipioResidencia ?? '68001')
@@ -236,6 +270,7 @@ export function compilarRipsReciboCaja(input) {
     numFactura: null,
     tipoNota: null,
     numNota: null,
+    ...(paqueteSinCosto ? { identificadorPaquete: numero } : {}),
     usuarios: [
       {
         tipoDocumentoIdentificacion: pacienteDoc.tipo,
@@ -264,6 +299,7 @@ export function compilarRipsReciboCaja(input) {
 
   return {
     identificadorPaquete: numero,
+    sinCosto: paqueteSinCosto,
     fechaRecaudo,
     fechaExpedicion: fechaCorte,
     fechaCorte,

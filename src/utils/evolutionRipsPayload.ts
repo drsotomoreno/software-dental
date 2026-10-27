@@ -6,6 +6,11 @@ import {
   isOdontologyConsultationCups,
 } from '../constants/rips.ts'
 import { documentoObligadoDigits } from '../../shared/nit.js'
+import {
+  TIPO_USUARIO_PARTICULAR,
+  esPrefijoSinCosto,
+  valoresFinancierosCostoCero,
+} from '../../shared/ripsSinCosto.js'
 import type { DocumentType, RegimeType } from '../types/patient.ts'
 import type { EvolutionNote } from '../types/evolutionNote.ts'
 import {
@@ -263,13 +268,14 @@ function lineaComun(
     tipoDocumentoIdentificacion: prestadorDoc,
     numDocumentoIdentificacion: String(input.prestador.documentNumber).replace(/[^A-Za-z0-9]/g, ''),
     codDiagnosticoPrincipal: compactCie10(metadata.codDiagnosticoPrincipal),
-    vrServicio,
+    vrServicio: tipo === 'valor_cero' ? 0 : vrServicio,
     conceptoRecaudo:
       tipo === 'valor_cero'
         ? RIPS_CONCEPTO_RECAUDO_DEFAULT
         : metadata.conceptoRecaudo || RIPS_CONCEPTO_RECAUDO_DEFAULT,
     valorPagoModerador: 0,
     numFEVPagoModerador: tipo === 'recibo_interno' ? soporte : null,
+    ...(tipo === 'valor_cero' ? valoresFinancierosCostoCero() : {}),
     consecutivo,
   }
 }
@@ -339,7 +345,7 @@ export function armarRipsNotaEvolucion(input: EnvioRipsNotaInput): RipsTransacti
   const usuario: RipsUsuario = {
     tipoDocumentoIdentificacion: tipoDocumento(input.paciente.documentType),
     numDocumentoIdentificacion: input.paciente.documentNumber.replace(/[^A-Za-z0-9]/g, ''),
-    tipoUsuario: tipoUsuarioDe(input.paciente.regime),
+    tipoUsuario: tipo === 'valor_cero' ? TIPO_USUARIO_PARTICULAR : tipoUsuarioDe(input.paciente.regime),
     fechaNacimiento: fechaNacimiento(input.paciente.birthDate),
     codSexo: sexoDe(input.paciente.gender),
     codPaisResidencia: '170',
@@ -361,7 +367,11 @@ export function armarRipsNotaEvolucion(input: EnvioRipsNotaInput): RipsTransacti
   }
 
   const numFactura = tipo === 'fev' ? soporteDe(input, tipo) : null
+  const candidatoPaquete = soporteDe({ ...input, tipoVinculacion: 'recibo_interno' }, 'recibo_interno')
+  const identificadorPaquete =
+    tipo === 'valor_cero' && esPrefijoSinCosto(candidatoPaquete) ? candidatoPaquete : null
   return {
+    ...(identificadorPaquete ? { identificadorPaquete } : {}),
     numDocumentoIdObligado:
       documentoObligadoDigits(input.prestador.providerNit) ||
       documentoObligadoDigits(input.prestador.documentNumber) ||

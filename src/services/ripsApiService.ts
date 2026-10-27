@@ -130,6 +130,48 @@ export interface DictatedEvolutionBillingResult {
  * FEV → generarFEV_y_RIPS(); recibo interno o valor cero → RIPS sin factura;
  * no obligado → guardarRIPS_Pendiente(numFactura: null).
  */
+export interface CierreSinCostoResult {
+  success: boolean
+  identificadorPaquete?: string
+  motivo?: string
+  cuv?: string | null
+  reciboId?: string | null
+  estado?: string
+  estadoAtencion?: string
+  valorTotal?: number
+  transmitido?: boolean
+  endpoint?: string
+  code?: string
+  error?: string
+  rips?: RipsTransaction
+}
+
+/**
+ * Cierra una evolución sin cobro: el backend crea el agrupador de $0
+ * y lo radica en el MUV de producción.
+ */
+export async function cerrarEvolucionSinCosto(input: {
+  usuarioTitularId?: string
+  motivo?: string
+  evoluciones: object[]
+  paciente?: object
+  prestador?: object
+  numero?: string | null
+  reciboId?: string | null
+  retransmitir?: boolean
+}): Promise<CierreSinCostoResult> {
+  const response = await fetch(`${API_BASE}/sin-costo`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...identityHeaders(),
+    },
+    body: JSON.stringify(input),
+  })
+  return parseJson<CierreSinCostoResult>(response)
+}
+
 export async function routeDictatedEvolutionByFiscalProfile(input: {
   rips?: RipsTransaction
   atencion?: object

@@ -12,6 +12,11 @@ export interface RipsTransaction {
   tipoNota: string | null
   numNota: string | null
   usuarios: RipsUsuario[]
+  /**
+   * Consecutivo interno del agrupador sin cobro (CTRL-050, GAR-002, CORT-001).
+   * No reemplaza numFactura: el MUV sin factura sigue recibiendo null.
+   */
+  identificadorPaquete?: string | null
   /** CUV MinSalud asociado a esta transacción (marca blanca / FEV) */
   cuv?: string | null
   /** CUFE DIAN asociado a la FEV */
@@ -73,6 +78,10 @@ export interface RipsConsulta {
   conceptoRecaudo: string
   valorPagoModerador: number
   numFEVPagoModerador: string | null
+  /** Opción A de costo cero. El nominal del catálogo no se envía. */
+  valorProcedimiento?: number
+  valorDescuento?: number
+  valorNeto?: number
   consecutivo: number
   codigoVIDA: string | null
 }
@@ -101,6 +110,10 @@ export interface RipsProcedimiento {
   conceptoRecaudo: string
   valorPagoModerador: number
   numFEVPagoModerador: string | null
+  /** Opción A de costo cero. El nominal del catálogo no se envía. */
+  valorProcedimiento?: number
+  valorDescuento?: number
+  valorNeto?: number
   consecutivo: number
   codigoVIDA: string | null
   /** Extensión EMR — pieza dental FDI asociada al procedimiento */

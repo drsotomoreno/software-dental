@@ -115,6 +115,13 @@ export interface EvolutionNote {
   /** false = control, garantía, retoque o valoración gratuita (sin factura DIAN) */
   isBillable?: boolean
   /**
+   * Atención sin cobro. Vive fuera del hash clínico: marcarla no reescribe la nota firmada.
+   * El agrupador RIPS sale en $0 con prefijo CTRL-, GAR- o CORT-.
+   */
+  esSinCosto?: boolean
+  /** control → CTRL-, garantia → GAR-, cortesia → CORT-. */
+  motivoSinCosto?: 'control' | 'garantia' | 'cortesia'
+  /**
    * Bloqueo de este folio/sesión (Res. 1995/1999).
    * No congela la historia del paciente ni el odontograma general.
    */
@@ -228,6 +235,8 @@ export function createEmptyEvolutionNote(
     estadoRips: 'SIN_COSTO',
     cost: 0,
     isBillable: false,
+    esSinCosto: true,
+    motivoSinCosto: 'control',
     workflowStatus: 'DRAFT',
     ripsMetadata: createDefaultEvolutionNoteRipsMetadata(),
   }

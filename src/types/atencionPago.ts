@@ -11,6 +11,7 @@ export type EstadoRipsAtencion =
   | 'SIN_COSTO'
   | 'PAGADO'
   | 'COBRADO_PROCESADO'
+  | 'PROCESADO'
 
 /** Control atómico del último consecutivo emitido por el titular. */
 export interface ConsecutivoPrestador {

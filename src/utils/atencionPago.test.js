@@ -76,4 +76,23 @@ test('la atención puede quedar sin costo o pendiente y suelta el recibo', () =>
   assert.equal(notes[1].estadoRips, 'SIN_COSTO')
   assert.equal(leerEstadoRips(''), 'PENDIENTE_PAGO')
   assert.equal(leerEstadoRips('sin_costo'), 'SIN_COSTO')
+  assert.equal(leerEstadoRips('procesado'), 'PROCESADO')
+})
+
+test('el agrupador de costo cero enlaza CTRL-050 y deja la atención procesada', async () => {
+  const { vincularAgrupadorSinCosto } = await import('./atencionPago.ts')
+  const original = nota()
+  const linked = vincularAgrupadorSinCosto(original, {
+    pagoId: 'agrupador-1',
+    numeroSoportePago: 'CTRL-050',
+    motivo: 'control',
+  })
+  assert.equal(linked.pagoId, 'agrupador-1')
+  assert.equal(linked.numeroSoportePago, 'CTRL-050')
+  assert.equal(linked.estadoRips, 'PROCESADO')
+  assert.equal(linked.valorProcedimiento, 0)
+  assert.equal(linked.esSinCosto, true)
+  assert.equal(linked.motivoSinCosto, 'control')
+  assert.equal(linked.clinicalNote, original.clinicalNote)
+  assert.equal(linked.contentHash, original.contentHash)
 })
