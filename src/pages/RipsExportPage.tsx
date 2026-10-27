@@ -7,14 +7,27 @@ import { RipsExportForm } from '@/components/rips'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import type { Patient } from '@/types/patient'
+import type { RipsValidationIssue } from '@/types/rips'
 import type { RipsSourceRecord } from '@/utils/rips'
+import { getBillingModalitySettings } from '@/services/billingModalityService'
+import { saveTemporaryRips } from '@/services/ripsTemporalService'
 import {
   atencionEnPeriodo,
   etiquetaAtencionRips,
   listRipsExportAttentions,
   type RipsExportAttention,
 } from '@/utils/ripsExportAttentions'
-import { formatDate } from '@/utils'
+import { isNoObligadoFev, normalizePerfilFiscal, normalizeRipsNumFactura } from '@/utils/fiscalProfile'
+import {
+  buildDefaultRipsMetadata,
+  buildRipsFromRecords,
+  downloadRipsJson,
+  formatDate,
+  formatRipsIssuePatientLabel,
+  hasRipsBlockingErrors,
+  pickInvoiceNumberForRips,
+  suggestRipsFilename,
+} from '@/utils'
 
 export function RipsExportPage() {
   const { user } = useAuth()
@@ -26,6 +39,9 @@ export function RipsExportPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [exportingId, setExportingId] = useState<string | null>(null)
+  const [exportIssues, setExportIssues] = useState<RipsValidationIssue[]>([])
+  const [exportMessage, setExportMessage] = useState('')
 
   const patientMap = useMemo(() => {
     const map = new Map<string, Patient>()
@@ -73,6 +89,64 @@ export function RipsExportPage() {
   }
 
   const clearSelection = () => setSelectedIds(new Set())
+
+  const exportarAtencion = async (attention: RipsExportAttention) => {
+    if (!user || exportingId) return
+    const patient = patientMap.get(attention.patientId)
+    if (!patient) return
+
+    setSelectedIds(new Set([attention.id]))
+    setExportingId(attention.id)
+    setExportIssues([])
+    setExportMessage('')
+
+    try {
+      const atencion: RipsSourceRecord = { record: attention.record, patient }
+      const perfilFiscal = normalizePerfilFiscal(
+        user.perfilFiscal ?? getBillingModalitySettings().perfilFiscal,
+      )
+      const noObligado = isNoObligadoFev(perfilFiscal)
+      let numFactura: string | null = null
+      if (!noObligado && patient.id != null) {
+        const invoices = await db.electronicInvoices.where('patientId').equals(String(patient.id)).toArray()
+        numFactura = normalizeRipsNumFactura(pickInvoiceNumberForRips([atencion], invoices))
+      }
+      const metadata = {
+        ...buildDefaultRipsMetadata(user),
+        perfilFiscal,
+        numFactura,
+        esRipsTemporal: noObligado || numFactura == null,
+      }
+      const result = buildRipsFromRecords([atencion], user, metadata)
+      if (hasRipsBlockingErrors(result.issues)) {
+        setExportIssues(result.issues)
+        return
+      }
+
+      downloadRipsJson(result.rips, suggestRipsFilename(metadata.numFactura))
+      void saveTemporaryRips({
+        clinicId: user.clinicId || user.id,
+        patientId: String(patient.id ?? ''),
+        professionalId: user.id,
+        clinicalRecordId: String(attention.record.id ?? ''),
+        numDocumentoIdObligado: result.rips.numDocumentoIdObligado,
+        numFactura: normalizeRipsNumFactura(result.rips.numFactura),
+        perfilFiscal,
+        status: 'ready',
+        ripsJson: result.rips,
+      })
+      audit({
+        action: 'EXPORT_RIPS',
+        resourceType: 'rips',
+        details: `Exportación de ${patient.firstName} ${patient.lastName} (${patient.documentType} ${patient.documentNumber})`,
+      })
+      setExportMessage(
+        `RIPS de ${patient.firstName} ${patient.lastName} exportado.`,
+      )
+    } finally {
+      setExportingId(null)
+    }
+  }
 
   if (!user) {
     return <p className="text-slate-500">Cargando perfil del prestador...</p>
@@ -161,7 +235,9 @@ export function RipsExportPage() {
                       attention={attention}
                       patient={patient}
                       checked={selectedIds.has(attention.id)}
+                      exporting={exportingId === attention.id}
                       onToggle={() => toggleRecord(attention.id)}
+                      onExport={() => void exportarAtencion(attention)}
                     />
                   )
                 })}
@@ -173,6 +249,9 @@ export function RipsExportPage() {
         <p className="text-xs text-slate-500">
           {selectedIds.size} atención(es) seleccionada(s) de {filteredAttentions.length}
         </p>
+
+        {exportMessage && <p className="text-sm text-green-700">{exportMessage}</p>}
+        {exportIssues.length > 0 && <ExportIssueList issues={exportIssues} />}
       </div>
 
       <div className="card space-y-4">
@@ -200,12 +279,16 @@ function RecordRow({
   attention,
   patient,
   checked,
+  exporting,
   onToggle,
+  onExport,
 }: {
   attention: RipsExportAttention
   patient?: Patient
   checked: boolean
+  exporting: boolean
   onToggle: () => void
+  onExport: () => void
 }) {
   const estado = etiquetaAtencionRips(attention)
   const estadoClass =
@@ -239,9 +322,46 @@ function RecordRow({
       </td>
       <td className="px-3 py-2 text-slate-600">{attention.diagnosisLabel}</td>
       <td className="px-3 py-2 text-slate-600">{attention.procedureLabel}</td>
-      <td className={`px-3 py-2 ${estadoClass}`} title={attention.ripsErrorLog ?? undefined}>
-        {estado}
+      <td className="px-3 py-2" title={attention.ripsErrorLog ?? undefined}>
+        <div className="flex flex-col items-start gap-2">
+          <span className={estadoClass}>{estado}</span>
+          {patient && (
+            <button
+              type="button"
+              className="btn-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={onExport}
+              disabled={exporting}
+            >
+              {exporting ? 'Exportando…' : 'Exportar'}
+            </button>
+          )}
+        </div>
       </td>
     </tr>
+  )
+}
+
+function ExportIssueList({ issues }: { issues: RipsValidationIssue[] }) {
+  const errors = issues.filter((issue) => issue.level === 'error')
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4">
+      <p className="mb-2 text-sm font-medium text-amber-900">
+        No se exportó esta atención. Corrija {errors.length} error(es):
+      </p>
+      <ul className="space-y-1 text-xs text-amber-900">
+        {issues.map((issue, index) => {
+          const patientLabel = formatRipsIssuePatientLabel(issue)
+          return (
+            <li key={index}>
+              <span className={issue.level === 'error' ? 'font-semibold text-red-700' : 'text-amber-800'}>
+                {issue.level === 'error' ? 'Error' : 'Aviso'}:
+              </span>{' '}
+              {patientLabel ? <span className="font-semibold">Paciente {patientLabel}. </span> : null}
+              {issue.message}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }

@@ -426,7 +426,7 @@ export function RipsExportForm({
           disabled={!canExport}
           className="btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Descargar RIPS JSON
+          Exportar RIPS
         </button>
         <button
           type="button"
