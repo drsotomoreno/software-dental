@@ -2131,7 +2131,7 @@ export function PatientDetailPage() {
 
       {!isArchiveView && !showRapidValuation && (
 
-        <div className="sticky bottom-4 flex gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
+        <div className="flex gap-3 rounded-xl border border-slate-200 bg-white p-4">
 
           <button type="button" onClick={() => void handleSaveDraft()} className="btn-secondary">
 
