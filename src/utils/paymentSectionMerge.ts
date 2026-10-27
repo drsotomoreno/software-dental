@@ -11,6 +11,7 @@ import {
   ORTHODONTICS_PAYMENT_PLAN_PROCEDURES,
   syncPaymentPlanWithBudget,
 } from '@/utils/budget'
+import { omitOrthodonticsPackageBudgetLines } from '@/utils/orthodonticsBudgetLines'
 import { generateId } from '@/utils/crypto'
 import { importBudgetIntoPaymentControl, lineBillablePrice } from '@/utils/paymentControlLines'
 
@@ -203,13 +204,14 @@ export function importBudgetIntoPaymentSection(input: {
   orthodonticsBudget?: OrthodonticsBudget
   dentalImplantsBudget?: DentalImplantsBudget
 }): { lines: PaymentControlLine[]; plan: PaymentPlanItem[] } {
+  const budgetItems = omitOrthodonticsPackageBudgetLines(input.budgetItems, input.treatmentPlan)
   const importedLines = importBudgetIntoPaymentControl(
-    input.budgetItems,
+    budgetItems,
     input.treatmentPlan,
     input.lines,
   )
   const syncedPlan = syncPaymentPlanWithBudget(
-    input.budgetItems,
+    budgetItems,
     input.plan,
     input.orthodonticsBudget,
     input.dentalImplantsBudget,

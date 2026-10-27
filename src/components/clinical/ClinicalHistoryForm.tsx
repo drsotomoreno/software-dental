@@ -176,6 +176,12 @@ export function ClinicalHistoryForm({
   })
 
   const orthodonticsSyncRef = useRef(false)
+  const loadedBudgetIdsRef = useRef<string | null>(null)
+  if (loadedBudgetIdsRef.current === null) {
+    loadedBudgetIdsRef.current = (initialData?.budgetItems ?? [])
+      .map((item) => item.id)
+      .join('\0')
+  }
 
   const odontogramSyncRef = useRef<string>('')
   const onChangeRef = useRef(onChange)
@@ -206,7 +212,13 @@ export function ClinicalHistoryForm({
     }
 
     try {
-      setForm(syncClinicalDataFromAnnexes(base))
+      const synced = syncClinicalDataFromAnnexes(base)
+      setForm(synced)
+      if (!disabledRef.current) {
+        const loadedIds = (initialData.budgetItems ?? []).map((item) => item.id).join('\0')
+        const nextIds = synced.budgetItems.map((item) => item.id).join('\0')
+        if (loadedIds !== nextIds) onChangeRef.current(synced)
+      }
     } catch {
       setForm(base)
     }
@@ -249,11 +261,13 @@ export function ClinicalHistoryForm({
     setForm((prev) => {
       try {
         const synced = syncClinicalDataFromAnnexes(prev)
-        if (JSON.stringify(synced) === JSON.stringify(prev)) return prev
-        if (!disabledRef.current) {
-          onChangeRef.current(synced)
+        const changed = JSON.stringify(synced) !== JSON.stringify(prev)
+        const next = changed ? synced : prev
+        const nextIds = next.budgetItems.map((item) => item.id).join('\0')
+        if (!disabledRef.current && (changed || loadedBudgetIdsRef.current !== nextIds)) {
+          onChangeRef.current(next)
         }
-        return synced
+        return next
       } catch {
         return prev
       }

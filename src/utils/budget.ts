@@ -17,6 +17,10 @@ import {
 } from './cupsBillingRules'
 import { resolveTariffUnitPrice } from './tariffLookup'
 import { formatAnatomicalZone } from './treatmentPlanZone'
+import {
+  isOrthodonticsAnnexPlanItem,
+  omitOrthodonticsPackageBudgetLines,
+} from './orthodonticsBudgetLines'
 
 export function createEmptyOrthodonticsBudget(): OrthodonticsBudget {
   return {
@@ -178,6 +182,7 @@ export function addTreatmentPlanItemToBudget(
   planItem: TreatmentPlanItem,
   existingItems: BudgetLineItem[] = [],
 ): BudgetLineItem[] | null {
+  if (isOrthodonticsAnnexPlanItem(planItem)) return null
   if (existingItems.some((line) => line.treatmentPlanItemId === planItem.id)) {
     return null
   }
@@ -212,11 +217,11 @@ export function buildBudgetFromTreatmentPlan(
   treatmentPlan: TreatmentPlanItem[],
   existingItems: BudgetLineItem[] = [],
 ): BudgetLineItem[] {
-  const next = [...existingItems]
+  const next = [...omitOrthodonticsPackageBudgetLines(existingItems, treatmentPlan)]
   const usedLineIds = new Set<string>()
 
   for (const item of treatmentPlan) {
-    if (!planProcedure(item)) continue
+    if (!planProcedure(item) || isOrthodonticsAnnexPlanItem(item)) continue
 
     const matchIndex = next.findIndex(
       (line) => !usedLineIds.has(line.id) && budgetLineMatchesPlanItem(line, item),
@@ -419,16 +424,17 @@ export function migrateLegacyBudget(
   const implants = normalizeDentalImplantsBudget(dentalImplantsBudget)
 
   if (budgetItems && budgetItems.length > 0) {
+    const cleaned = omitOrthodonticsPackageBudgetLines(budgetItems, treatmentPlan)
     return {
-      budgetItems,
+      budgetItems: cleaned,
       orthodonticsBudget: ortho,
       dentalImplantsBudget: implants,
-      budget: calcBudgetSummary(budgetItems, budget.discount, ortho, implants),
+      budget: calcBudgetSummary(cleaned, budget.discount, ortho, implants),
     }
   }
 
   const fromPlan = treatmentPlan
-    .filter((t) => (t.procedure ?? '').trim())
+    .filter((t) => (t.procedure ?? '').trim() && !isOrthodonticsAnnexPlanItem(t))
     .map((t) => ({
       id: generateId(),
       treatmentPlanItemId: t.id,

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -64,6 +64,7 @@ import { FieldVoiceHeader } from '@/components/voice'
 
 import { parseDictatedInteger } from '@/utils/voiceDictation'
 import { calcBillableLineTotal } from '@/utils/cupsBillingRules'
+import { omitOrthodonticsPackageBudgetLines } from '@/utils/orthodonticsBudgetLines'
 
 
 
@@ -165,7 +166,25 @@ export function BudgetForm({
 
 
 
-  const moduleItems = useMemo(() => mapLinesToBudgetItems(budgetItems), [budgetItems])
+  const clinicalBudgetItems = useMemo(
+    () => omitOrthodonticsPackageBudgetLines(budgetItems, treatmentPlan),
+    [budgetItems, treatmentPlan],
+  )
+
+  const moduleItems = useMemo(
+    () => mapLinesToBudgetItems(clinicalBudgetItems),
+    [clinicalBudgetItems],
+  )
+
+  const omittedPackageKey = useMemo(() => {
+    if (clinicalBudgetItems.length === budgetItems.length) return ''
+    return budgetItems
+      .filter((item) => !clinicalBudgetItems.some((kept) => kept.id === item.id))
+      .map((item) => item.id)
+      .join('\0')
+  }, [budgetItems, clinicalBudgetItems])
+
+  const persistedOmissionRef = useRef('')
 
 
 
@@ -177,6 +196,36 @@ export function BudgetForm({
 
   )
 
+  useEffect(() => {
+    if (disabled || !omittedPackageKey || persistedOmissionRef.current === omittedPackageKey) {
+      return
+    }
+    persistedOmissionRef.current = omittedPackageKey
+    const subtotal = clinicalBudgetItems.reduce(
+      (sum, line) => sum + calcBillableLineTotal(line.unitPrice, line.quantity, line.cupsCode),
+      0,
+    )
+    onChange({
+      budgetItems: clinicalBudgetItems,
+      orthodonticsBudget,
+      dentalImplantsBudget,
+      budget: buildClinicalBudgetSummary(
+        subtotal,
+        budget.discount,
+        orthodonticsBudget,
+        dentalImplantsBudget,
+      ),
+    })
+  }, [
+    disabled,
+    omittedPackageKey,
+    clinicalBudgetItems,
+    orthodonticsBudget,
+    dentalImplantsBudget,
+    budget.discount,
+    onChange,
+  ])
+
 
 
   const emitItemsWithDiscount = (
@@ -187,7 +236,7 @@ export function BudgetForm({
 
   ) => {
 
-    const lines = mapBudgetItemsToLines(items, budgetItems)
+    const lines = mapBudgetItemsToLines(items, clinicalBudgetItems)
 
     const subtotal = computeBudgetTotals(items, discount, DEFAULT_IVA_RATE).subtotal
 
@@ -211,7 +260,7 @@ export function BudgetForm({
 
     onChange({
 
-      budgetItems,
+      budgetItems: clinicalBudgetItems,
 
       orthodonticsBudget: ortho,
 
@@ -229,7 +278,7 @@ export function BudgetForm({
 
     onChange({
 
-      budgetItems,
+      budgetItems: clinicalBudgetItems,
 
       orthodonticsBudget,
 
@@ -255,9 +304,9 @@ export function BudgetForm({
 
   const importFromTreatmentPlan = () => {
 
-    const previousIds = new Set(budgetItems.map((item) => item.id))
+    const previousIds = new Set(clinicalBudgetItems.map((item) => item.id))
 
-    const lines = buildBudgetFromTreatmentPlan(treatmentPlan, budgetItems)
+    const lines = buildBudgetFromTreatmentPlan(treatmentPlan, clinicalBudgetItems)
 
     const added = lines.filter((line) => !previousIds.has(line.id)).length
 
@@ -343,7 +392,7 @@ export function BudgetForm({
         global.
       </p>
 
-      {(!disabled || budgetItems.length > 0) && (
+      {(!disabled || clinicalBudgetItems.length > 0) && (
         <BudgetModule
           items={moduleItems}
           globalDiscount={budget.discount}
@@ -371,7 +420,7 @@ export function BudgetForm({
 
 
 
-      {budgetItems.length === 0 && !hasSpecialtyBudget && disabled && (
+      {clinicalBudgetItems.length === 0 && !hasSpecialtyBudget && disabled && (
 
         <p className="text-sm text-slate-500 dark:text-slate-400">Agregue tratamientos al presupuesto.</p>
 
@@ -379,7 +428,7 @@ export function BudgetForm({
 
 
 
-      {(budgetItems.length > 0 || hasSpecialtyBudget) && (
+      {(clinicalBudgetItems.length > 0 || hasSpecialtyBudget) && (
 
         <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 sm:grid-cols-2 lg:grid-cols-4 dark:border-slate-700">
 

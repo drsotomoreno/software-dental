@@ -55,6 +55,10 @@ import {
 } from '@/utils/paymentSectionMerge'
 import { ORTHODONTICS_PAYMENT_TYPE_LABELS, orthodonticsPaymentBalance } from '@/utils/orthodonticsPaymentControl'
 import { formatEndoAnnexSummary } from '@/utils/endoAnnex'
+import {
+  omitOrthodonticsPackageBudgetLines,
+  orthodonticsPackageProcedureNames,
+} from '@/utils/orthodonticsBudgetLines'
 import { formatOrthodonticBudgetSummary } from '@/components/clinical/orthodontics/calculator/types'
 import {
   formatFacialAnalysis,
@@ -592,7 +596,11 @@ function buildTreatmentSection(data: ClinicalRecordFormData): string {
 }
 
 function buildBudgetSection(data: ClinicalRecordFormData): string {
-  const rows = data.budgetItems
+  const rows = omitOrthodonticsPackageBudgetLines(
+    data.budgetItems,
+    data.treatmentPlan,
+    orthodonticsPackageProcedureNames(data.specializedAnnexes?.orthodontics),
+  )
     .filter((item) => item.procedure.trim())
     .map(
       (item) =>

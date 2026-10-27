@@ -17,9 +17,14 @@ import {
 import {
   calcBudgetSummary,
   createEmptyOrthodonticsBudget,
+  ORTHODONTICS_PAYMENT_PLAN_PROCEDURES,
   syncPaymentPlanWithBudget,
 } from './budget'
 import { generateId } from './crypto'
+import {
+  omitOrthodonticsPackageBudgetLines,
+  orthodonticsPackageProcedureNames,
+} from './orthodonticsBudgetLines'
 
 const SYNC_NOTES_START = '--- Plan de ortodoncia (anexo) ---'
 const SYNC_NOTES_END = '--- Fin plan de ortodoncia ---'
@@ -191,29 +196,80 @@ export function syncClinicalDataFromOrthodonticsAnnex(
     : removeSyncedNotesBlock(data.treatmentPlanNotes ?? '')
 
   const orthodonticsBudget = mapAnnexBudgetToClinicalBudget(orthodontics)
+  const previousAnnexItems = (data.treatmentPlan ?? []).filter(
+    (item) => item.source === 'orthodontics_annex',
+  )
   const treatmentPlan = syncOrthodonticsTreatmentPlanItem(data.treatmentPlan ?? [], orthodontics)
-  const budget = calcBudgetSummary(
+  const budgetItems = omitOrthodonticsPackageBudgetLines(
     data.budgetItems ?? [],
+    [...treatmentPlan, ...previousAnnexItems],
+    orthodonticsPackageProcedureNames(orthodontics),
+  )
+  const removedBudgetIds = new Set(
+    (data.budgetItems ?? [])
+      .filter((item) => !budgetItems.some((kept) => kept.id === item.id))
+      .map((item) => item.id),
+  )
+  const removedNames = new Set(
+    (data.budgetItems ?? [])
+      .filter((item) => removedBudgetIds.has(item.id))
+      .map((item) => item.procedure.trim().toLowerCase())
+      .filter(Boolean),
+  )
+  const paidLineIds = new Set(
+    (data.paymentControl ?? [])
+      .flatMap((payment) => [
+        payment.paymentControlLineId,
+        ...(payment.lineAllocations ?? []).map((allocation) => allocation.lineId),
+      ])
+      .filter((id): id is string => Boolean(id)),
+  )
+  const paymentControlLines = (data.paymentControlLines ?? []).filter((line) => {
+    if (!line.budgetItemId || !removedBudgetIds.has(line.budgetItemId)) return true
+    return paidLineIds.has(line.id)
+  })
+  const removedUnpaidLineIds = new Set(
+    (data.paymentControlLines ?? [])
+      .filter((line) => !paymentControlLines.some((kept) => kept.id === line.id))
+      .map((line) => line.id),
+  )
+  const budget = calcBudgetSummary(
+    budgetItems,
     budgetSummary.discount,
     orthodonticsBudget,
     data.dentalImplantsBudget,
   )
-  const paymentPlan = enrichOrthodonticsPaymentPlan(
-    syncPaymentPlanWithBudget(
-      data.budgetItems ?? [],
-      data.paymentPlan ?? [],
-      orthodonticsBudget,
-      data.dentalImplantsBudget,
-    ),
-    orthodontics,
+  let paymentPlan = syncPaymentPlanWithBudget(
+    budgetItems,
+    data.paymentPlan ?? [],
+    orthodonticsBudget,
+    data.dentalImplantsBudget,
   )
+  if (removedBudgetIds.size > 0 || removedUnpaidLineIds.size > 0) {
+    paymentPlan = paymentPlan.filter((item) => {
+      if (item.budgetItemId && removedBudgetIds.has(item.budgetItemId)) return false
+      if (item.paymentControlLineId && removedUnpaidLineIds.has(item.paymentControlLineId)) {
+        return false
+      }
+      if (
+        removedNames.has(item.procedure.trim().toLowerCase()) &&
+        !ORTHODONTICS_PAYMENT_PLAN_PROCEDURES.has(item.procedure)
+      ) {
+        return false
+      }
+      return true
+    })
+  }
+  paymentPlan = enrichOrthodonticsPaymentPlan(paymentPlan, orthodontics)
 
   return {
     ...data,
     treatmentPlan,
     treatmentPlanNotes,
     orthodonticsBudget,
+    budgetItems,
     budget,
     paymentPlan,
+    ...(removedUnpaidLineIds.size > 0 ? { paymentControlLines } : {}),
   }
 }
