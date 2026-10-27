@@ -5,7 +5,12 @@ export type TipoDocumentoCobro = 'RECIBO_CAJA' | 'CUENTA_COBRO'
  * Estado de cobro / RIPS de una atención de evolución.
  * PENDIENTE_PAGO es el valor por defecto de `atenciones.estado_rips`.
  */
-export type EstadoRipsAtencion = 'PENDIENTE_PAGO' | 'PENDIENTE' | 'SIN_COSTO' | 'PAGADO'
+export type EstadoRipsAtencion =
+  | 'PENDIENTE_PAGO'
+  | 'PENDIENTE'
+  | 'SIN_COSTO'
+  | 'PAGADO'
+  | 'COBRADO_PROCESADO'
 
 /** Control atómico del último consecutivo emitido por el titular. */
 export interface ConsecutivoPrestador {

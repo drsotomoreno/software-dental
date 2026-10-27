@@ -11,6 +11,7 @@ import {
 import { processDictatedEvolution } from '../controllers/clinicalVoiceBilling.controller.js'
 import { getMonthlyRipsStatus, runMonthlyRipsJob } from '../controllers/monthlyRips.controller.js'
 import { getBatchRips, sendBatchRips, sendSingleRips } from '../controllers/ripsTransmission.controller.js'
+import { ReciboCajaRipsError, cobrarYRadicarReciboCaja } from '../services/reciboCajaRips.js'
 
 const router = Router()
 
@@ -19,6 +20,39 @@ const router = Router()
  * Cierra la consulta: RIPS sin factura hacia el MUV, o FEV si hay factura.
  */
 router.post('/evolucion-dictada', processDictatedEvolution)
+
+/**
+ * POST /api/rips/recibo-caja
+ * Varias evoluciones pendientes, un recibo de caja y un solo RIPS sin FEV.
+ */
+router.post('/recibo-caja', async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const resultado = await cobrarYRadicarReciboCaja({
+      usuarioTitularId: body.usuarioTitularId,
+      prefijo: body.prefijo,
+      recibo: body.recibo,
+      evoluciones: body.evoluciones,
+      paciente: body.paciente,
+      prestador: body.prestador,
+    })
+    return res.status(201).json({
+      success: true,
+      identificadorPaquete: resultado.identificadorPaquete,
+      cuv: resultado.cuv,
+      reciboId: resultado.recibo.id,
+      solicitudesMuv: resultado.solicitudesMuv,
+      rips: resultado.rips,
+    })
+  } catch (error) {
+    const status = error instanceof ReciboCajaRipsError ? 422 : 500
+    return res.status(status).json({
+      success: false,
+      code: error?.code ?? 'RECIBO_RIPS',
+      error: error instanceof Error ? error.message : 'No se pudo radicar el recibo de caja.',
+    })
+  }
+})
 
 /**
  * POST /api/rips/send-single

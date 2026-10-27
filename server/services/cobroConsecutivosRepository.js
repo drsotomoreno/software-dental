@@ -12,6 +12,7 @@ const MIGRATION_DIR = join(dirname(fileURLToPath(import.meta.url)), '../db/migra
 const MIGRATION_FILES = [
   join(MIGRATION_DIR, '20261022133400_consecutivos_prestador_atenciones.sql'),
   join(MIGRATION_DIR, '20261023140000_atenciones_rips_metadata.sql'),
+  join(MIGRATION_DIR, '20261026235500_recibos_caja_rips_sin_factura.sql'),
 ]
 
 const TIPOS = new Set(['RECIBO_CAJA', 'CUENTA_COBRO'])

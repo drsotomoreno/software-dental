@@ -15,6 +15,7 @@ export const ESTADOS_RIPS_ATENCION: readonly EstadoRipsAtencion[] = [
   'PENDIENTE',
   'SIN_COSTO',
   'PAGADO',
+  'COBRADO_PROCESADO',
 ]
 
 export const PREFIJO_RECIBO_CAJA = 'RC-'
@@ -60,7 +61,8 @@ export function leerEstadoRips(value: unknown): EstadoRipsAtencion {
     raw === 'PENDIENTE_PAGO' ||
     raw === 'PENDIENTE' ||
     raw === 'SIN_COSTO' ||
-    raw === 'PAGADO'
+    raw === 'PAGADO' ||
+    raw === 'COBRADO_PROCESADO'
   ) {
     return raw
   }
