@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   omitOrthodonticsPackageBudgetLines,
   orthodonticsPackageProcedureNames,
+  shouldShowOrthodonticsBudgetSection,
 } from './orthodonticsBudgetLines.ts'
 
 const PACKAGE =
@@ -80,4 +81,14 @@ test('no toca el listado si no hay tratamiento de ortodoncia', () => {
   const items = [resin]
   assert.equal(omitOrthodonticsPackageBudgetLines(items, []), items)
   assert.deepEqual(orthodonticsPackageProcedureNames(null), [])
+})
+
+test('oculta la caja de presupuesto si no hay plan ni presupuesto de ortodoncia', () => {
+  assert.equal(shouldShowOrthodonticsBudgetSection({ active: false }, []), false)
+  assert.equal(shouldShowOrthodonticsBudgetSection(undefined, []), false)
+})
+
+test('muestra la caja si el presupuesto está activo o hay plan del anexo', () => {
+  assert.equal(shouldShowOrthodonticsBudgetSection({ active: true }, []), true)
+  assert.equal(shouldShowOrthodonticsBudgetSection({ active: false }, [planItem]), true)
 })

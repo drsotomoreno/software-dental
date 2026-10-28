@@ -191,75 +191,79 @@ export function OrthodonticsBudgetSection({
         )}
       </div>
 
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full text-left text-sm text-slate-700 dark:text-slate-200">
-          <thead>
-            <tr className="border-b border-emerald-100 text-xs font-semibold text-slate-500 dark:border-emerald-900/60 dark:text-slate-400">
-              <th className="w-1/4 py-2 pl-1">Concepto</th>
-              <th className="w-1/6 px-2 py-2">Cantidad</th>
-              <th className="w-1/3 px-2 py-2">Valor unitario</th>
-              <th className="px-2 py-2 text-right">Subtotal</th>
-              {isPaymentMode && <th className="py-2 pl-4 text-center">Acciones</th>}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-emerald-50 dark:divide-emerald-950/40">
-            {ROWS.map((config) => (
-              <OrthoRow
-                key={config.key}
-                config={config}
-                line={orthodonticsBudget[config.key]}
-                readOnly={readOnly}
-                showPaymentAction={isPaymentMode}
-                paymentDisabled={
-                  disabled ||
-                  !onRegisterPayment ||
-                  (isRegisterPaymentDisabled?.(config.key) ??
-                    lineSubtotal(orthodonticsBudget[config.key]) <= 0)
-                }
-                onChange={(line) => updateLine(config.key, line)}
-                onRegisterPayment={
-                  onRegisterPayment ? () => onRegisterPayment(config.key) : undefined
-                }
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div
-        className={`mt-4 flex flex-wrap items-center gap-3 border-t border-emerald-100 pt-3 dark:border-emerald-900/60 ${
-          isPaymentMode && onRegisterFullPayment ? 'justify-between' : 'justify-end'
-        }`}
-      >
-        {isPaymentMode && onRegisterFullPayment ? (
-          <div className="flex flex-col items-start gap-1">
-            <button
-              type="button"
-              disabled={isFullPaymentDisabled || fullPaymentAmount <= 0}
-              title={
-                fullPaymentAmount <= 0
-                  ? 'El tratamiento ya está pagado'
-                  : 'Registrar el saldo del tratamiento en un solo pago de contado'
-              }
-              onClick={() => onRegisterFullPayment()}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <CreditCard className="h-3.5 w-3.5" />
-              Pagar de contado
-              {fullPaymentAmount > 0 ? ` · ${formatCurrency(fullPaymentAmount)}` : ''}
-            </button>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              Un solo pago por el saldo del tratamiento
-            </span>
+      {(isPaymentMode || orthodonticsBudget.active) && (
+        <>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-sm text-slate-700 dark:text-slate-200">
+              <thead>
+                <tr className="border-b border-emerald-100 text-xs font-semibold text-slate-500 dark:border-emerald-900/60 dark:text-slate-400">
+                  <th className="w-1/4 py-2 pl-1">Concepto</th>
+                  <th className="w-1/6 px-2 py-2">Cantidad</th>
+                  <th className="w-1/3 px-2 py-2">Valor unitario</th>
+                  <th className="px-2 py-2 text-right">Subtotal</th>
+                  {isPaymentMode && <th className="py-2 pl-4 text-center">Acciones</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-emerald-50 dark:divide-emerald-950/40">
+                {ROWS.map((config) => (
+                  <OrthoRow
+                    key={config.key}
+                    config={config}
+                    line={orthodonticsBudget[config.key]}
+                    readOnly={readOnly}
+                    showPaymentAction={isPaymentMode}
+                    paymentDisabled={
+                      disabled ||
+                      !onRegisterPayment ||
+                      (isRegisterPaymentDisabled?.(config.key) ??
+                        lineSubtotal(orthodonticsBudget[config.key]) <= 0)
+                    }
+                    onChange={(line) => updateLine(config.key, line)}
+                    onRegisterPayment={
+                      onRegisterPayment ? () => onRegisterPayment(config.key) : undefined
+                    }
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
-        ) : null}
-        <div className="text-right">
-          <span className="text-sm text-slate-600 dark:text-slate-300">Subtotal ortodoncia: </span>
-          <span className="ml-1 text-lg font-extrabold text-slate-900 dark:text-slate-50">
-            {formatCurrency(orthoTotal)}
-          </span>
-        </div>
-      </div>
+
+          <div
+            className={`mt-4 flex flex-wrap items-center gap-3 border-t border-emerald-100 pt-3 dark:border-emerald-900/60 ${
+              isPaymentMode && onRegisterFullPayment ? 'justify-between' : 'justify-end'
+            }`}
+          >
+            {isPaymentMode && onRegisterFullPayment ? (
+              <div className="flex flex-col items-start gap-1">
+                <button
+                  type="button"
+                  disabled={isFullPaymentDisabled || fullPaymentAmount <= 0}
+                  title={
+                    fullPaymentAmount <= 0
+                      ? 'El tratamiento ya está pagado'
+                      : 'Registrar el saldo del tratamiento en un solo pago de contado'
+                  }
+                  onClick={() => onRegisterFullPayment()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <CreditCard className="h-3.5 w-3.5" />
+                  Pagar de contado
+                  {fullPaymentAmount > 0 ? ` · ${formatCurrency(fullPaymentAmount)}` : ''}
+                </button>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Un solo pago por el saldo del tratamiento
+                </span>
+              </div>
+            ) : null}
+            <div className="text-right">
+              <span className="text-sm text-slate-600 dark:text-slate-300">Subtotal ortodoncia: </span>
+              <span className="ml-1 text-lg font-extrabold text-slate-900 dark:text-slate-50">
+                {formatCurrency(orthoTotal)}
+              </span>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

@@ -29,6 +29,18 @@ export function isOrthodonticsAnnexPlanItem(
 }
 
 /**
+ * Caja verde de presupuesto de ortodoncia (sección 8): solo si hay plan del anexo
+ * o el presupuesto ya está incluido. Sin ambos, no debe mostrarse.
+ */
+export function shouldShowOrthodonticsBudgetSection(
+  orthodonticsBudget: { active?: boolean } | null | undefined,
+  treatmentPlan: Pick<TreatmentPlanItem, 'source'>[],
+): boolean {
+  if (orthodonticsBudget?.active) return true
+  return treatmentPlan.some(isOrthodonticsAnnexPlanItem)
+}
+
+/**
  * El tratamiento de ortodoncia se cobra en la caja verde del presupuesto.
  * La fila del listado clínico repite ese mismo paquete.
  */

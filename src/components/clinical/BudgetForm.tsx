@@ -64,7 +64,10 @@ import { FieldVoiceHeader } from '@/components/voice'
 
 import { parseDictatedInteger } from '@/utils/voiceDictation'
 import { calcBillableLineTotal } from '@/utils/cupsBillingRules'
-import { omitOrthodonticsPackageBudgetLines } from '@/utils/orthodonticsBudgetLines'
+import {
+  omitOrthodonticsPackageBudgetLines,
+  shouldShowOrthodonticsBudgetSection,
+} from '@/utils/orthodonticsBudgetLines'
 
 
 
@@ -372,7 +375,10 @@ export function BudgetForm({
 
   const hasSpecialtyBudget = orthodonticsBudget.active || dentalImplantsBudget.active
 
-
+  const showOrthodonticsBudget = shouldShowOrthodonticsBudgetSection(
+    orthodonticsBudget,
+    treatmentPlan,
+  )
 
   return (
 
@@ -406,11 +412,13 @@ export function BudgetForm({
         />
       )}
 
-      <OrthodonticsBudgetSection
-        orthodonticsBudget={orthodonticsBudget}
-        disabled={disabled}
-        onChange={emitOrtho}
-      />
+      {showOrthodonticsBudget && (
+        <OrthodonticsBudgetSection
+          orthodonticsBudget={orthodonticsBudget}
+          disabled={disabled}
+          onChange={emitOrtho}
+        />
+      )}
 
       <DentalImplantsBudgetSection
         dentalImplantsBudget={dentalImplantsBudget}
