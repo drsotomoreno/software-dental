@@ -145,6 +145,74 @@ test('si la auditoría falla después del CUV, el CUV se conserva', async () => 
   assert.equal(estados[0].patch.estado, 'enviado_ok')
 })
 
+function ripsNicolas() {
+  return {
+    numDocumentoIdObligado: '900123456',
+    numFactura: null,
+    tipoNota: null,
+    numNota: null,
+    usuarios: [
+      {
+        tipoDocumentoIdentificacion: 'TI',
+        numDocumentoIdentificacion: '1097106893',
+        tipoUsuario: '04',
+        fechaNacimiento: '2012-04-18',
+        codSexo: 'M',
+        codPaisResidencia: '170',
+        codMunicipioResidencia: '68001',
+        codZonaTerritorialResidencia: '02',
+        incapacidad: 'NO',
+        consecutivo: 1,
+        codPaisOrigen: '170',
+        servicios: {
+          consultas: [],
+          procedimientos: [
+            {
+              codPrestador: '680010389801',
+              fechaInicioAtencion: '2026-10-24 11:06',
+              codProcedimiento: '391402',
+              viaIngresoServicioSalud: '01',
+              modalidadGrupoServicioTecSal: '01',
+              grupoServicios: '04',
+              codServicio: 344,
+              finalidadTecnologiaSalud: '44',
+              tipoDocumentoIdentificacion: 'CC',
+              numDocumentoIdentificacion: '1234567890',
+              codDiagnosticoPrincipal: 'K074',
+              vrServicio: 0,
+              conceptoRecaudo: '05',
+              valorPagoModerador: 0,
+              numFEVPagoModerador: null,
+              consecutivo: 1,
+            },
+          ],
+          otrosServicios: [],
+        },
+      },
+    ],
+  }
+}
+
+test('en sandbox Exportar no contacta el MUV y devuelve un CUV de prueba', async () => {
+  const estados = []
+  const result = await transmitirRips(
+    { rips: ripsNicolas(), evolutionId: 'nota-nicolas', patientId: '1097106893' },
+    { user: { id: 'user-1', nit: '900123456' }, modo: 'single' },
+    {
+      registrar: async () => ({ id: 'log-sandbox' }),
+      actualizarAtencion: async (evolutionId, patch) => {
+        estados.push({ evolutionId, patch })
+        return { updated: true }
+      },
+    },
+  )
+  assert.equal(result.success, true)
+  assert.equal(result.source, 'sandbox')
+  assert.match(String(result.cuv), /^CUV-[0-9A-F]{8}-[0-9A-F]{8}-[0-9A-F]{8}$/)
+  assert.equal(estados[0].patch.estado, 'enviado_ok')
+  assert.equal(estados[0].patch.cuv, result.cuv)
+})
+
 test('el lote sigue con el siguiente RIPS cuando uno falla', async () => {
   const vistos = []
   const resumen = await transmitirLote(

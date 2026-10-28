@@ -30,20 +30,41 @@ async function parseJson<T>(response: Response): Promise<T> {
   return data as T
 }
 
-/** Verifica que el backend RIPS esté disponible en localhost:3000 (vía proxy). */
-export async function checkRipsApiHealth(): Promise<boolean> {
+export interface RipsApiStatus {
+  online: boolean
+  /** true cuando el servidor simula el MUV. null si el health no lo dijo. */
+  sandbox: boolean | null
+}
+
+/** El health local no significa que el MUV haya respondido. */
+export async function fetchRipsApiStatus(): Promise<RipsApiStatus> {
   try {
     const response = await fetch('/api/health')
-    return response.ok
+    if (!response.ok) return { online: false, sandbox: null }
+    const data = (await response.json().catch(() => ({}))) as {
+      minsalud?: { sandbox?: boolean }
+    }
+    return {
+      online: true,
+      sandbox: data.minsalud?.sandbox === true ? true : data.minsalud?.sandbox === false ? false : null,
+    }
   } catch {
-    return false
+    return { online: false, sandbox: null }
   }
+}
+
+/** Verifica que el backend RIPS esté disponible (vía proxy). No consulta al MUV. */
+export async function checkRipsApiHealth(): Promise<boolean> {
+  const status = await fetchRipsApiStatus()
+  return status.online
 }
 
 export interface RadicacionRipsResult {
   success: boolean
   cuv?: string | null
   canal?: 'fev' | 'sin_factura' | string
+  /** sandbox: el CUV es de prueba y el MUV no fue contactado. */
+  source?: 'sandbox' | 'minsalud' | string | null
   logId?: string | null
   retryable?: boolean
   code?: string

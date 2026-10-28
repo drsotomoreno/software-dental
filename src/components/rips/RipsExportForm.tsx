@@ -13,20 +13,22 @@ import {
   countRipsIssues,
   cufeDeAtenciones,
   evolucionIdDeAtencion,
+  explicarFalloCuv,
   facturasDelPaquete,
   formatRipsIssuePatientLabel,
   createCatalogLookupFromServices,
   isRipsPackageReadyForExport,
   pickInvoiceNumberForRips,
   ripsParaRadicar,
+  textoRadicacionExitosa,
   vinculosDeAtenciones,
 } from '@/utils'
 import { userProfileToOrganizationId } from '@/utils/organizationId'
 import { DEFAULT_ODONTOLOGY_CONSULTATION_CUPS } from '@/constants/rips'
 import { buildRipsMetadataFromInvoice } from '@/services/invoiceService'
 import {
-  checkRipsApiHealth,
   downloadDianXml,
+  fetchRipsApiStatus,
   radicarRipsAnteMinisterio,
   validateRipsWithMinistry,
 } from '@/services/ripsApiService'
@@ -42,8 +44,12 @@ interface RipsExportFormProps {
   sources: RipsSourceRecord[]
   professional: UserProfile
   initialMetadata?: Partial<RipsExportMetadata>
-  onExported?: () => void
+  onExported?: (info: { cuv: string; source?: string | null; canal?: string | null }) => void
   onCuvObtained?: (result: RipsValidateSuccessResponse) => void
+  /** Cambia cuando la fila Exportar arranca, para borrar un rechazo viejo. */
+  formReset?: number
+  /** Limpia el aviso de la fila antes de validar o radicar el lote. */
+  onUserAction?: () => void
 }
 
 export function RipsExportForm({
@@ -52,6 +58,8 @@ export function RipsExportForm({
   initialMetadata,
   onExported,
   onCuvObtained,
+  formReset = 0,
+  onUserAction,
 }: RipsExportFormProps) {
   const [metadata, setMetadata] = useState<RipsExportMetadata>(() => {
     const perfilFiscal = normalizePerfilFiscal(
@@ -71,9 +79,11 @@ export function RipsExportForm({
   const [radicacionMensaje, setRadicacionMensaje] = useState('')
   const [radicacionCuv, setRadicacionCuv] = useState('')
   const [apiOnline, setApiOnline] = useState<boolean | null>(null)
+  const [apiSandbox, setApiSandbox] = useState<boolean | null>(null)
   const [validating, setValidating] = useState(false)
   const [cuvResult, setCuvResult] = useState<RipsValidateSuccessResponse | null>(null)
   const [ministryErrors, setMinistryErrors] = useState<RipsMinistryError[]>([])
+  const [serverIssues, setServerIssues] = useState<RipsValidationIssue[]>([])
   const [validateMessage, setValidateMessage] = useState('')
   const invoiceTouchedRef = useRef(Boolean(normalizeRipsNumFactura(initialMetadata?.numFactura)))
 
@@ -169,8 +179,21 @@ export function RipsExportForm({
         : clasificacion.motivo
 
   useEffect(() => {
-    checkRipsApiHealth().then(setApiOnline)
+    fetchRipsApiStatus().then((status) => {
+      setApiOnline(status.online)
+      setApiSandbox(status.sandbox)
+    })
   }, [])
+
+  useEffect(() => {
+    setExported(false)
+    setRadicacionMensaje('')
+    setRadicacionCuv('')
+    setCuvResult(null)
+    setMinistryErrors([])
+    setServerIssues([])
+    setValidateMessage('')
+  }, [sourceKey, formReset])
 
   useEffect(() => {
     const defaults = buildDefaultRipsMetadata(professional)
@@ -249,6 +272,7 @@ export function RipsExportForm({
 
   const handleExport = async () => {
     if (!canExport || radicando) return
+    onUserAction?.()
     const first = sources[0]
     const rips = ripsParaRadicar(result.rips, clasificacion.canal)
     const cufe = clasificacion.canal === 'fev' ? cufePaquete : ''
@@ -303,21 +327,19 @@ export function RipsExportForm({
       ripsJson: { ...rips, cuv: response.cuv },
     })
     setRadicacionCuv(response.cuv)
-    setRadicacionMensaje(
-      response.canal === 'fev'
-        ? 'Paquete RIPS con factura electrónica radicado en el Ministerio de Salud.'
-        : 'RIPS sin factura radicado en el Ministerio de Salud para registro epidemiológico y estadístico.',
-    )
+    setRadicacionMensaje(textoRadicacionExitosa({ source: response.source, canal: response.canal }))
     setExported(true)
-    onExported?.()
+    onExported?.({ cuv: response.cuv, source: response.source, canal: response.canal })
   }
 
   const handleValidateMinistry = async () => {
     if (!canValidate) return
+    onUserAction?.()
 
     setValidating(true)
     setCuvResult(null)
     setMinistryErrors([])
+    setServerIssues([])
     setValidateMessage('')
 
     const patientUuid = uuidv4()
@@ -339,7 +361,10 @@ export function RipsExportForm({
         0,
       )
 
-    const response = await validateRipsWithMinistry(result.rips, {
+    const sinFactura = noObligado || normalizeRipsNumFactura(result.rips.numFactura) == null
+    let response
+    try {
+      response = await validateRipsWithMinistry(result.rips, {
       metadatos: {
         patientUuid,
         clinicalRecordIds,
@@ -347,9 +372,10 @@ export function RipsExportForm({
           ? `${firstPatient.documentType} ${firstPatient.documentNumber}`
           : undefined,
         perfilFiscal,
-        esRipsTemporal: noObligado || normalizeRipsNumFactura(result.rips.numFactura) == null,
+        esRipsTemporal: sinFactura,
+        allowNullNumFactura: sinFactura,
       },
-      invoice: noObligado
+      invoice: sinFactura
         ? undefined
         : {
             nitEmisor: metadata.numDocumentoIdObligado,
@@ -370,7 +396,14 @@ export function RipsExportForm({
               },
             ],
           },
-    })
+      })
+    } catch (error) {
+      setValidating(false)
+      setValidateMessage(
+        error instanceof Error ? error.message : 'No se pudo contactar el servicio de validación.',
+      )
+      return
+    }
 
     setValidating(false)
 
@@ -382,13 +415,10 @@ export function RipsExportForm({
     }
 
     if (!response.success) {
+      const localIssues = response.localIssues ?? []
+      setServerIssues(localIssues)
       setMinistryErrors(response.ministryErrors ?? [])
-      const localCount = response.localIssues?.filter((i) => i.level === 'error').length ?? 0
-      setValidateMessage(
-        localCount > 0
-          ? 'Corrija los errores locales antes de radicar ante el Ministerio.'
-          : 'El Ministerio de Salud rechazó el paquete RIPS. Revise los detalles.',
-      )
+      setValidateMessage(explicarFalloCuv(response).message)
     }
   }
 
@@ -417,7 +447,9 @@ export function RipsExportForm({
           >
             API RIPS:{' '}
             {apiOnline === true
-              ? 'Conectada (localhost:3000)'
+              ? apiSandbox
+                ? 'Sandbox local · CUV de prueba'
+                : 'API local conectada'
               : apiOnline === false
                 ? 'Sin conexión — ejecute npm run server'
                 : 'Verificando…'}
@@ -453,10 +485,21 @@ export function RipsExportForm({
         <RipsValidationList issues={result.issues} errors={errors} warnings={warnings} />
       )}
 
+      {serverIssues.length > 0 && (
+        <RipsValidationList
+          issues={serverIssues}
+          errors={countRipsIssues(serverIssues, 'error')}
+          warnings={countRipsIssues(serverIssues, 'warning')}
+        />
+      )}
+
       {ministryErrors.length > 0 && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="mb-2 text-sm font-medium text-red-900">
-            Errores del Ministerio de Salud ({ministryErrors.length})
+            {ministryErrors.every((err) => err.code === 'RIPS_LOCAL')
+              ? 'Errores que impiden obtener el CUV'
+              : 'Errores del Ministerio de Salud'}{' '}
+            ({ministryErrors.length})
           </p>
           <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-red-800">
             {ministryErrors.map((err, index) => (
@@ -520,7 +563,11 @@ export function RipsExportForm({
             {radicacionMensaje} CUV {radicacionCuv}.
           </span>
         ) : (
-          <span className={`text-sm ${canExport ? 'text-emerald-700' : 'text-amber-700'}`}>
+          <span
+            className={`text-sm ${
+              radicacionMensaje ? 'text-red-700' : canExport ? 'text-emerald-700' : 'text-amber-700'
+            }`}
+          >
             {radicacionMensaje || exportHint}
           </span>
         )}
@@ -532,9 +579,9 @@ export function RipsExportForm({
       <p className="text-xs text-slate-500">
         Resolución 2275 de 2023 — RIPS JSON como soporte de la FEV en salud. El MUV valida que el{' '}
         <strong>codConsulta</strong> coincida con la especialidad THS del prestador declarada en REPS.
-        La validación se realiza mediante el API en{' '}
-        <code className="font-mono">http://localhost:3000</code> (proxy /api en desarrollo). En sandbox
-        se simula la respuesta del MUV y se genera un CUV de prueba.
+        En sandbox, Exportar y Validar no llaman al MUV: ambos devuelven un CUV de prueba. El aviso
+        «API RIPS» solo indica que este servidor respondió. Con{' '}
+        <code className="font-mono">MINSALUD_SANDBOX=false</code> la radicación sí contacta el MUV.
       </p>
     </div>
   )

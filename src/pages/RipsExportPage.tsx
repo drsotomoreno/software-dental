@@ -11,7 +11,9 @@ import type { RipsValidationIssue } from '@/types/rips'
 import type { RipsSourceRecord } from '@/utils/rips'
 import { getBillingModalitySettings } from '@/services/billingModalityService'
 import { radicarRipsAnteMinisterio } from '@/services/ripsApiService'
+import { guardarCuvEnNotas } from '@/services/ripsCuvNotaStore'
 import { saveTemporaryRips } from '@/services/ripsTemporalService'
+import { idsNotaDeFuentes } from '@/utils/ripsCuvNota'
 import {
   atencionEnPeriodo,
   etiquetaAtencionRips,
@@ -31,6 +33,7 @@ import {
   hasRipsBlockingErrors,
   pickInvoiceNumberForRips,
   ripsParaRadicar,
+  textoRadicacionExitosa,
   vinculosDeAtenciones,
 } from '@/utils'
 
@@ -47,6 +50,8 @@ export function RipsExportPage() {
   const [exportingId, setExportingId] = useState<string | null>(null)
   const [exportIssues, setExportIssues] = useState<RipsValidationIssue[]>([])
   const [exportMessage, setExportMessage] = useState('')
+  const [exportFailed, setExportFailed] = useState(false)
+  const [formReset, setFormReset] = useState(0)
 
   const patientMap = useMemo(() => {
     const map = new Map<string, Patient>()
@@ -80,7 +85,14 @@ export function RipsExportPage() {
     return result
   }, [filteredAttentions, selectedIds, patientMap])
 
+  const limpiarAvisoExportacion = () => {
+    setExportMessage('')
+    setExportIssues([])
+    setExportFailed(false)
+  }
+
   const toggleRecord = (id: string) => {
+    limpiarAvisoExportacion()
     setSelectedIds((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -90,10 +102,14 @@ export function RipsExportPage() {
   }
 
   const selectAll = () => {
+    limpiarAvisoExportacion()
     setSelectedIds(new Set(filteredAttentions.map((attention) => attention.id)))
   }
 
-  const clearSelection = () => setSelectedIds(new Set())
+  const clearSelection = () => {
+    limpiarAvisoExportacion()
+    setSelectedIds(new Set())
+  }
 
   const exportarAtencion = async (attention: RipsExportAttention) => {
     if (!user || exportingId) return
@@ -102,8 +118,10 @@ export function RipsExportPage() {
 
     setSelectedIds(new Set([attention.id]))
     setExportingId(attention.id)
+    setFormReset((value) => value + 1)
     setExportIssues([])
     setExportMessage('')
+    setExportFailed(false)
 
     try {
       const atencion: RipsSourceRecord = { record: attention.record, patient }
@@ -136,6 +154,7 @@ export function RipsExportPage() {
         cufe,
       })
       if (!clasificacion.listo) {
+        setExportFailed(true)
         setExportMessage(clasificacion.motivo)
         return
       }
@@ -150,6 +169,7 @@ export function RipsExportPage() {
           patientId: String(patient.id ?? ''),
         })
       } catch (error) {
+        setExportFailed(true)
         setExportMessage(
           error instanceof Error ? error.message : 'No se pudo contactar el Ministerio de Salud.',
         )
@@ -163,6 +183,7 @@ export function RipsExportPage() {
             message: item.message || response.error || 'El Ministerio de Salud no radicó el paquete.',
           })),
         )
+        setExportFailed(true)
         if (!response.errors?.length) {
           setExportMessage(response.error || 'El Ministerio de Salud no radicó el paquete.')
         }
@@ -185,10 +206,14 @@ export function RipsExportPage() {
         resourceType: 'rips',
         details: `Radicación ${clasificacion.canal} de ${patient.firstName} ${patient.lastName} (${patient.documentType} ${patient.documentNumber}). CUV ${response.cuv}`,
       })
+      setExportFailed(false)
+      void guardarCuvEnNotas([String(attention.record.ripsAtencionNotaId ?? evolucionIdDeAtencion(attention.record) ?? '')], response.cuv)
       setExportMessage(
-        clasificacion.canal === 'fev'
-          ? `RIPS con factura electrónica de ${patient.firstName} ${patient.lastName} radicado. CUV ${response.cuv}.`
-          : `RIPS sin factura de ${patient.firstName} ${patient.lastName} radicado en el Ministerio de Salud. CUV ${response.cuv}.`,
+        `${textoRadicacionExitosa({
+          source: response.source,
+          canal: response.canal ?? clasificacion.canal,
+          paciente: `${patient.firstName} ${patient.lastName}`,
+        })} CUV ${response.cuv}.`,
       )
     } finally {
       setExportingId(null)
@@ -299,7 +324,9 @@ export function RipsExportPage() {
           {selectedIds.size} atención(es) seleccionada(s) de {filteredAttentions.length}
         </p>
 
-        {exportMessage && <p className="text-sm text-green-700">{exportMessage}</p>}
+        {exportMessage && (
+          <p className={`text-sm ${exportFailed ? 'text-red-700' : 'text-green-700'}`}>{exportMessage}</p>
+        )}
         {exportIssues.length > 0 && <ExportIssueList issues={exportIssues} />}
       </div>
 
@@ -310,13 +337,16 @@ export function RipsExportPage() {
         <RipsExportForm
           sources={sources}
           professional={user}
-          onExported={() =>
+          formReset={formReset}
+          onUserAction={limpiarAvisoExportacion}
+          onExported={(info) => {
+            void guardarCuvEnNotas(idsNotaDeFuentes(sources), info.cuv)
             audit({
               action: 'EXPORT_RIPS',
               resourceType: 'rips',
-              details: `Exportación lote: ${sources.length} atención(es)`,
+              details: `Exportación lote: ${sources.length} atención(es). CUV ${info.cuv}`,
             })
-          }
+          }}
         />
       </div>
     </div>

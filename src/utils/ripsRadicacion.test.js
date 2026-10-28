@@ -3,7 +3,9 @@ import test from 'node:test'
 import {
   clasificarRadicacionRips,
   cufeDeAtenciones,
+  explicarFalloCuv,
   ripsParaRadicar,
+  textoRadicacionExitosa,
   vinculosDeAtenciones,
 } from './ripsRadicacion.ts'
 
@@ -59,4 +61,42 @@ test('lee el vínculo y el CUFE desde la atención', () => {
   ]
   assert.deepEqual(vinculosDeAtenciones(records), ['recibo_interno', 'recibo_interno'])
   assert.equal(cufeDeAtenciones(records, [{ cufe: '  ' }, { cufe: 'CUFE-9' }]), 'CUFE-9')
+})
+
+test('un fallo de red no se presenta como rechazo del Ministerio', () => {
+  const fallo = explicarFalloCuv({
+    error: 'No se pudo contactar el MUV.',
+    localIssues: [],
+    ministryErrors: [],
+  })
+  assert.equal(fallo.kind, 'infra')
+  assert.equal(fallo.message, 'No se pudo contactar el MUV.')
+  assert.equal(fallo.message.includes('rechazó'), false)
+})
+
+test('el rechazo del Ministerio solo se anuncia si hay errores de campo', () => {
+  assert.equal(
+    explicarFalloCuv({
+      ministryErrors: [{ message: 'CIE-10 inválido' }],
+    }).kind,
+    'ministry',
+  )
+  assert.equal(
+    explicarFalloCuv({
+      localIssues: [{ level: 'error', message: 'NIT obligatorio' }],
+      ministryErrors: [],
+    }).kind,
+    'local',
+  )
+})
+
+test('el CUV de sandbox no dice que el Ministerio radicó el paquete', () => {
+  const texto = textoRadicacionExitosa({
+    source: 'sandbox',
+    canal: 'sin_factura',
+    paciente: 'nicolas andres Álvarez bayona',
+  })
+  assert.match(texto, /CUV de prueba/)
+  assert.match(texto, /nicolas andres Álvarez bayona/)
+  assert.equal(texto.includes('radicado en el Ministerio'), false)
 })

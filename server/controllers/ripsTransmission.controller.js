@@ -158,6 +158,7 @@ export async function sendSingleRips(req, res, deps = {}) {
       return res.status(200).json({
         success: true,
         cuv: result.cuv,
+        source: result.source ?? null,
         logId: result.logId ?? null,
         auditStored: result.auditStored !== false,
         canal: result.canal,
@@ -166,6 +167,7 @@ export async function sendSingleRips(req, res, deps = {}) {
     return res.status(422).json({
       success: false,
       errors: result.errors ?? [],
+      source: result.source ?? null,
       logId: result.logId ?? null,
       auditStored: result.auditStored !== false,
       canal: result.canal,
