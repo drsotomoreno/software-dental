@@ -624,7 +624,7 @@ export function EvolutionRipsPanel({
             aria-busy={isLoading}
           >
             <Rocket className="mr-2 h-4 w-4" aria-hidden />
-            {isLoading ? 'Enviando RIPS…' : esRecibo ? 'Enviar al MUV' : 'Preparar y enviar RIPS'}
+            {isLoading ? 'Enviando RIPS…' : esRecibo ? 'Enviar RIPS al MUV' : 'Preparar y enviar RIPS'}
           </button>
         )}
         <button type="button" className="btn-secondary text-xs" onClick={descargarJson} disabled={disabled}>
