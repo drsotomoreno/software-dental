@@ -5,6 +5,17 @@ export const REHAB_FIXED_RESTORATION_MATERIALS = [
   { id: 'zirconio', label: 'Zirconio' },
 ] as const
 
+/** Materiales adicionales exclusivos de carillas dentales */
+export const REHAB_CARILLA_EXTRA_MATERIALS = [
+  { id: 'resina_directa', label: 'Resina Directa' },
+  { id: 'resina_impresa', label: 'Resina Impresa' },
+] as const
+
+export const REHAB_CARILLA_RESTORATION_MATERIALS = [
+  ...REHAB_FIXED_RESTORATION_MATERIALS,
+  ...REHAB_CARILLA_EXTRA_MATERIALS,
+]
+
 /** Materiales de restauración para el esquema de implantes en arcos dentados */
 export const IMPLANT_FIXED_RESTORATION_MATERIALS = [
   { id: 'disilicato_litio', label: 'Disilicato de Litio' },
@@ -18,9 +29,13 @@ export const REHAB_PPR_MATERIALS = [
 ] as const
 
 export type RehabFixedRestorationMaterialId = (typeof REHAB_FIXED_RESTORATION_MATERIALS)[number]['id']
+export type RehabCarillaExtraMaterialId = (typeof REHAB_CARILLA_EXTRA_MATERIALS)[number]['id']
 export type RehabPprMaterialId = (typeof REHAB_PPR_MATERIALS)[number]['id']
 
-export type RehabRestorationMaterialId = RehabFixedRestorationMaterialId | RehabPprMaterialId
+export type RehabRestorationMaterialId =
+  | RehabFixedRestorationMaterialId
+  | RehabCarillaExtraMaterialId
+  | RehabPprMaterialId
 
 export type RehabRestorationDetailKey = RehabTreatmentType | 'protesis_parcial_removible'
 
@@ -48,6 +63,9 @@ export type RehabRestorationDetails = Partial<
 >
 
 const FIXED_MATERIAL_IDS = new Set<string>(REHAB_FIXED_RESTORATION_MATERIALS.map((item) => item.id))
+const CARILLA_EXTRA_MATERIAL_IDS = new Set<string>(
+  REHAB_CARILLA_EXTRA_MATERIALS.map((item) => item.id),
+)
 const PPR_MATERIAL_IDS = new Set<string>(REHAB_PPR_MATERIALS.map((item) => item.id))
 
 export function isRehabRestorationDetailKey(value: unknown): value is RehabRestorationDetailKey {
@@ -83,6 +101,8 @@ export function getRehabRestorationMaterialLabel(
   if (!material) return ''
   const fixed = REHAB_FIXED_RESTORATION_MATERIALS.find((item) => item.id === material)
   if (fixed) return fixed.label
+  const carilla = REHAB_CARILLA_EXTRA_MATERIALS.find((item) => item.id === material)
+  if (carilla) return carilla.label
   const ppr = REHAB_PPR_MATERIALS.find((item) => item.id === material)
   return ppr?.label ?? material
 }
@@ -105,6 +125,8 @@ export function normalizeRestorationDetails(data?: RehabRestorationDetails): Reh
     let material: RehabRestorationMaterialId | '' = ''
     if (key === 'protesis_parcial_removible' && PPR_MATERIAL_IDS.has(materialRaw)) {
       material = materialRaw as RehabPprMaterialId
+    } else if (key === 'carilla' && CARILLA_EXTRA_MATERIAL_IDS.has(materialRaw)) {
+      material = materialRaw as RehabCarillaExtraMaterialId
     } else if (FIXED_MATERIAL_IDS.has(materialRaw)) {
       material = materialRaw as RehabFixedRestorationMaterialId
     }

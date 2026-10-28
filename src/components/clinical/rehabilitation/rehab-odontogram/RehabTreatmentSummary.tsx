@@ -7,6 +7,7 @@ import {
   REHAB_TREATMENT_OPTIONS,
 } from './constants'
 import {
+  REHAB_CARILLA_RESTORATION_MATERIALS,
   REHAB_FIXED_RESTORATION_MATERIALS,
   REHAB_FIXED_RESTORATION_TREATMENTS,
   REHAB_PPR_MATERIALS,
@@ -466,7 +467,11 @@ export function RehabTreatmentSummary({
               restoration={restorationDetails[group.key]}
               showMaterial={group.showMaterial}
               showColor={group.showColor}
-              materialOptions={[...REHAB_FIXED_RESTORATION_MATERIALS]}
+              materialOptions={
+                group.key === 'carilla'
+                  ? [...REHAB_CARILLA_RESTORATION_MATERIALS]
+                  : [...REHAB_FIXED_RESTORATION_MATERIALS]
+              }
               disabled={disabled}
               onRestorationChange={handleRestorationChange}
               treatmentColor={group.color}
