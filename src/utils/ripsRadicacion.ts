@@ -69,6 +69,64 @@ export function clasificarRadicacionRips(input: {
   }
 }
 
+export function textoRadicacionExitosa(input: {
+  source?: string | null
+  canal?: string | null
+  paciente?: string | null
+}): string {
+  const sandbox = input.source === 'sandbox'
+  const fev = input.canal === 'fev'
+  const paciente = input.paciente?.trim()
+  if (paciente) {
+    if (sandbox) {
+      return fev
+        ? `CUV de prueba (sandbox) para ${paciente}. El MUV no fue contactado.`
+        : `CUV de prueba (sandbox) del RIPS sin factura de ${paciente}. El MUV no fue contactado.`
+    }
+    return fev
+      ? `RIPS con factura electrónica de ${paciente} radicado.`
+      : `RIPS sin factura de ${paciente} radicado en el Ministerio de Salud.`
+  }
+  if (sandbox) {
+    return fev
+      ? 'CUV de prueba (sandbox) para el paquete con factura. El MUV no fue contactado.'
+      : 'CUV de prueba (sandbox). RIPS sin factura; el MUV no fue contactado.'
+  }
+  return fev
+    ? 'Paquete RIPS con factura electrónica radicado en el Ministerio de Salud.'
+    : 'RIPS sin factura radicado en el Ministerio de Salud para registro epidemiológico y estadístico.'
+}
+
+/**
+ * Un fallo sin errores de campo no es un rechazo del Ministerio.
+ * La red, la sesión y un 500 traen `error` y la pantalla debe decir eso.
+ */
+export function explicarFalloCuv(response: {
+  error?: string | null
+  localIssues?: Array<{ level?: string | null }> | null
+  ministryErrors?: Array<unknown> | null
+}): { kind: 'local' | 'ministry' | 'infra'; message: string } {
+  const localErrors = (response.localIssues ?? []).filter((issue) => issue?.level === 'error')
+  if (localErrors.length > 0) {
+    return {
+      kind: 'local',
+      message: 'Corrija los errores locales antes de radicar ante el Ministerio.',
+    }
+  }
+  if ((response.ministryErrors ?? []).length > 0) {
+    return {
+      kind: 'ministry',
+      message: 'El Ministerio de Salud rechazó el paquete RIPS. Revise los detalles.',
+    }
+  }
+  const error = String(response.error ?? '').trim()
+  return {
+    kind: 'infra',
+    message:
+      error || 'No se obtuvo el CUV. No hay un rechazo del Ministerio ni un error local.',
+  }
+}
+
 /** El MUV sin factura no lleva número de FEV. El recibo de caja se queda en la clínica. */
 export function ripsParaRadicar<T extends Pick<RipsTransaction, 'numFactura'>>(
   rips: T,

@@ -139,9 +139,11 @@ export {
   clasificarRadicacionRips,
   cufeDeAtenciones,
   evolucionIdDeAtencion,
+  explicarFalloCuv,
   facturasDelPaquete,
   normalizarVinculoRadicacion,
   ripsParaRadicar,
+  textoRadicacionExitosa,
   vinculosDeAtenciones,
 } from './ripsRadicacion'
 export {

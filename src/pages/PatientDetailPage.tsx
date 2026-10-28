@@ -107,6 +107,8 @@ import {
 } from '@/utils/clinicalRecordSnapshot'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { RipsExportForm } from '@/components/rips'
+import { guardarCuvEnNotas } from '@/services/ripsCuvNotaStore'
+import { idsNotaDeFuentes } from '@/utils/ripsCuvNota'
 import { FhirExportForm } from '@/components/fhir'
 import { ClinicalHistoryExportPanel } from '@/components/portability'
 import { InvoiceLedgerPanel } from '@/components/invoices/InvoiceLedgerPanel'
@@ -1974,14 +1976,18 @@ export function PatientDetailPage() {
 
               professional={user}
 
-              onExported={() =>
+              onExported={(info) => {
+                void guardarCuvEnNotas(
+                  idsNotaDeFuentes([{ record: viewingRecord, patient }]),
+                  info.cuv,
+                )
                 audit({
                   action: 'EXPORT_RIPS',
                   resourceType: 'rips',
                   resourceId: String(viewingRecord.id),
-                  details: 'Exportación RIPS atención individual',
+                  details: `Exportación RIPS atención individual. CUV ${info.cuv}`,
                 })
-              }
+              }}
 
             />
 

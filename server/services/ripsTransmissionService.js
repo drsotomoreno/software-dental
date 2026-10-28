@@ -3,6 +3,9 @@
  * Un CUV ya otorgado se devuelve aunque falle el insert de auditoría.
  * Un timeout no marca la atención como error: queda disponible para reintentar.
  */
+import { config } from '../config.js'
+import { normalizeRipsNumFactura } from '../../shared/fiscalProfile.js'
+import { submitRipsToMinsalud } from './minsaludRipsClient.js'
 import { MuvInfrastructureError, SisproMuvService, canalDeEnvio } from './sisproMuvService.js'
 import { actualizarAtencionRips, registrarRipsLog } from './ripsLogRepository.js'
 
@@ -87,6 +90,63 @@ function erroresDeInfra(error) {
   return [{ code: error?.code || 'MUV_INFRASTRUCTURE', message: error?.message || 'No se pudo contactar el MUV.', path: '', clase: 'INFRA' }]
 }
 
+function erroresSandbox(simulado) {
+  const locales = (simulado.localIssues ?? [])
+    .filter((item) => item?.level === 'error')
+    .map((item) => ({
+      code: 'RIPS_LOCAL',
+      message: item.message || 'El paquete no cumple la validación local.',
+      path: item.field || '',
+      clase: 'ERROR',
+    }))
+  const ministerio = (simulado.ministryErrors ?? []).map((item) => ({
+    code: item.code || 'MUV_VALIDACION',
+    message: item.message || 'El sandbox rechazó el campo.',
+    path: item.field || '',
+    clase: 'ERROR',
+  }))
+  const errors = [...locales, ...ministerio]
+  if (errors.length > 0) return errors
+  return [{ code: 'MUV_RECHAZO', message: 'El paquete no pasó la validación de sandbox.', path: '', clase: 'ERROR' }]
+}
+
+/**
+ * En sandbox no se llama al MUV. El CUV es de prueba, el mismo criterio de submitRipsToMinsalud.
+ * Un servicio inyectado (pruebas) sigue hablando con el transporte que le pasaron.
+ */
+async function outcomeSandbox(envelope, canal) {
+  const numFactura = normalizeRipsNumFactura(envelope?.rips?.numFactura)
+  const simulado = await submitRipsToMinsalud({
+    rips: envelope.rips,
+    metadatos: {
+      esRipsTemporal: numFactura == null,
+      allowNullNumFactura: numFactura == null,
+    },
+  })
+  if (!simulado.success) {
+    return {
+      success: false,
+      cuv: null,
+      errors: erroresSandbox(simulado),
+      httpStatus: 422,
+      canal,
+      durationMs: 0,
+      source: 'sandbox',
+      response: { source: 'sandbox', ResultState: false },
+    }
+  }
+  return {
+    success: true,
+    cuv: simulado.cuv,
+    errors: [],
+    httpStatus: 200,
+    canal,
+    durationMs: 0,
+    source: 'sandbox',
+    response: { source: 'sandbox', ResultState: true, CodigoUnicoValidacion: simulado.cuv },
+  }
+}
+
 async function guardarLog(entry, registrar) {
   try {
     return await registrar(entry)
@@ -125,8 +185,12 @@ export async function transmitirRips(envelope, context = {}, deps = {}) {
 
   let outcome
   try {
-    const service = deps.service ?? servicioMuvCompartido()
-    outcome = await service.enviar(envelope)
+    if (config.minsalud.sandbox && deps.service == null) {
+      outcome = await outcomeSandbox(envelope, canalPrevisto)
+    } else {
+      const service = deps.service ?? servicioMuvCompartido()
+      outcome = await service.enviar(envelope)
+    }
   } catch (error) {
     const infra = asInfrastructure(error)
     const saved = await guardarLog(
@@ -183,6 +247,7 @@ export async function transmitirRips(envelope, context = {}, deps = {}) {
     errors: outcome.errors ?? [],
     httpStatus: outcome.httpStatus ?? null,
     canal: outcome.canal || canalPrevisto,
+    source: outcome.source ?? null,
     durationMs: outcome.durationMs ?? null,
     logId: saved?.id ?? null,
     auditStored: Boolean(saved?.id),
