@@ -19,6 +19,7 @@ import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import { normalizeAnamnesis } from '@/types/anamnesis'
 import { normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import { keepStoredConsentSignatures } from '@/types/consent'
+import { normalizeSpecializedAnnexes } from '@/types/specializedAnnexes'
 import {
   preserveEvolutionWorkflowStatus,
   shouldPersistClinicalDraft,
@@ -94,6 +95,7 @@ function normalizeClinicalDraft(draft: ClinicalRecordFormData): ClinicalRecordFo
     ...draft,
     anamnesis: normalizeAnamnesis(draft.anamnesis),
     diagnosticChart: normalizeClinicalDiagnosticChart(draft.diagnosticChart),
+    specializedAnnexes: normalizeSpecializedAnnexes(draft.specializedAnnexes),
     evolutionNotes: sortEvolutionNotesChronologically(
       corregirFechasSesionClinica(draft.evolutionNotes ?? []),
     ),

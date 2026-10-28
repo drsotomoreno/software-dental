@@ -9,6 +9,7 @@ import {
 } from '@/constants/dentalWhitening'
 import {
   createBlankAnnexProcedureBudgetLine,
+  normalizeAnnexProcedureBudget,
   type AnnexProcedureBudget,
   type AnnexProcedureBudgetLine,
 } from '@/types/annexProcedureBudget'
@@ -86,7 +87,7 @@ export function collectRehabPlanningBudgetCandidates(
 ): Array<Omit<AnnexProcedureBudgetLine, 'id'>> {
   const candidates: Array<Omit<AnnexProcedureBudgetLine, 'id'>> = []
 
-  for (const entry of annex.visualTreatmentPlan) {
+  for (const entry of annex.visualTreatmentPlan ?? []) {
     const candidate = visualPlanCandidate(entry)
     if (candidate) candidates.push(candidate)
   }
@@ -98,7 +99,9 @@ export function collectRehabPlanningBudgetCandidates(
     candidates.push(prosthesisLine('protesis_parcial_removible', annex.protesisParcialRemovible))
   }
 
-  candidates.push(...whiteningCandidates(annex.dentalWhitening))
+  if (annex.dentalWhitening) {
+    candidates.push(...whiteningCandidates(annex.dentalWhitening))
+  }
   return candidates
 }
 
@@ -112,10 +115,11 @@ export function canImportRehabPlanningBudget(annex: RehabilitationAestheticsAnne
  */
 export function importRehabPlanningIntoBudget(
   annex: RehabilitationAestheticsAnnex,
-  budget: AnnexProcedureBudget,
+  budget: AnnexProcedureBudget | null | undefined,
 ): { budget: AnnexProcedureBudget; added: number; skipped: number } {
+  const safeBudget = normalizeAnnexProcedureBudget(budget)
   const existingKeys = new Set(
-    budget.lines.map((line) => line.importKey).filter((key): key is string => Boolean(key)),
+    safeBudget.lines.map((line) => line.importKey).filter((key): key is string => Boolean(key)),
   )
   const candidates = collectRehabPlanningBudgetCandidates(annex)
   const additions: AnnexProcedureBudgetLine[] = []
@@ -136,13 +140,13 @@ export function importRehabPlanningIntoBudget(
   }
 
   if (additions.length === 0) {
-    return { budget, added: 0, skipped }
+    return { budget: safeBudget, added: 0, skipped }
   }
 
   return {
     budget: {
       active: true,
-      lines: [...budget.lines, ...additions],
+      lines: [...safeBudget.lines, ...additions],
     },
     added: additions.length,
     skipped,

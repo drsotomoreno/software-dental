@@ -1,9 +1,11 @@
+import { useEffect, useMemo } from 'react'
 import { VoiceDictationButton } from '@/components/voice'
 import { AnnexProcedureBudgetSection } from '@/components/clinical/AnnexProcedureBudgetSection'
 import { RehabOdontogram } from '@/components/clinical/rehabilitation/rehab-odontogram'
 import { InitialFindingsSection } from '@/components/clinical/rehabilitation/InitialFindingsSection'
 import { DentalWhiteningSection } from '@/components/clinical/rehabilitation/DentalWhiteningSection'
 import type { RehabilitationAestheticsAnnex } from '@/types/rehabilitationAestheticsAnnex'
+import { normalizeRehabilitationAestheticsAnnex } from '@/types/rehabilitationAestheticsAnnex'
 import { SPECIALIZED_ANNEX_LABELS } from '@/types/specializedAnnexes'
 import {
   canImportRehabPlanningBudget,
@@ -11,9 +13,21 @@ import {
 } from '@/utils/rehabAnnexBudget'
 
 interface RehabilitationAestheticsAnnexPanelProps {
-  data: RehabilitationAestheticsAnnex
+  data: RehabilitationAestheticsAnnex | null | undefined
   onChange: (data: RehabilitationAestheticsAnnex) => void
   disabled?: boolean
+}
+
+function rehabAnnexNeedsHeal(
+  raw: RehabilitationAestheticsAnnex | null | undefined,
+): boolean {
+  if (!raw || typeof raw !== 'object') return true
+  return (
+    raw.budget == null ||
+    raw.initialFindings == null ||
+    raw.dentalWhitening == null ||
+    !Array.isArray(raw.visualTreatmentPlan)
+  )
 }
 
 interface FieldProps {
@@ -76,10 +90,22 @@ function AnnexField({
 }
 
 export function RehabilitationAestheticsAnnexPanel({
-  data,
+  data: dataProp,
   onChange,
   disabled = false,
 }: RehabilitationAestheticsAnnexPanelProps) {
+  const data = useMemo(
+    () => normalizeRehabilitationAestheticsAnnex(dataProp ?? undefined),
+    [dataProp],
+  )
+
+  // Historias/borradores previos al campo `budget` (u otros campos nuevos):
+  // al abrir el anexo se reescribe la forma completa para que no vuelva a fallar.
+  useEffect(() => {
+    if (disabled || !rehabAnnexNeedsHeal(dataProp)) return
+    onChange(data)
+  }, [data, dataProp, disabled, onChange])
+
   const update = (patch: Partial<RehabilitationAestheticsAnnex>) =>
     onChange({ ...data, ...patch })
 

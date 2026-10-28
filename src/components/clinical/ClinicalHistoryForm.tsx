@@ -33,7 +33,10 @@ import type { Anamnesis } from '@/types/anamnesis'
 import { normalizeAnamnesis } from '@/types/anamnesis'
 import type { StomatologicalExam } from '@/types/stomatologicalExam'
 import type { SpecializedAnnexes } from '@/types/specializedAnnexes'
-import { createEmptySpecializedAnnexes } from '@/types/specializedAnnexes'
+import {
+  createEmptySpecializedAnnexes,
+  normalizeSpecializedAnnexes,
+} from '@/types/specializedAnnexes'
 import { createEmptyStomatologicalExam } from '@/types/stomatologicalExam'
 import {
   appendUnassignedDiagnosticChartEntries,
@@ -169,6 +172,9 @@ export function ClinicalHistoryForm({
       ...initialData,
       anamnesis: normalizeAnamnesis({ ...emptyForm.anamnesis, ...initialData?.anamnesis }),
       diagnosticChart: normalizeClinicalDiagnosticChart(initialData?.diagnosticChart),
+      specializedAnnexes: normalizeSpecializedAnnexes(
+        initialData?.specializedAnnexes ?? emptyForm.specializedAnnexes,
+      ),
       evolutionNotes: corregirFechasSesionClinica(initialData?.evolutionNotes),
     }
     try {
@@ -211,6 +217,9 @@ export function ClinicalHistoryForm({
       ...initialData,
       anamnesis: normalizeAnamnesis({ ...emptyForm.anamnesis, ...initialData?.anamnesis }),
       diagnosticChart: normalizeClinicalDiagnosticChart(initialData?.diagnosticChart),
+      specializedAnnexes: normalizeSpecializedAnnexes(
+        initialData?.specializedAnnexes ?? emptyForm.specializedAnnexes,
+      ),
       evolutionNotes: corregirFechasSesionClinica(initialData?.evolutionNotes),
     }
 
@@ -279,7 +288,13 @@ export function ClinicalHistoryForm({
 
   const update = (patch: Partial<ClinicalRecordFormData>) => {
     setForm((prev) => {
-      const merged = { ...prev, ...patch }
+      const merged = {
+        ...prev,
+        ...patch,
+        ...(patch.specializedAnnexes != null
+          ? { specializedAnnexes: normalizeSpecializedAnnexes(patch.specializedAnnexes) }
+          : {}),
+      }
       const next =
         patch.specializedAnnexes != null
           ? syncClinicalDataFromAnnexes(merged)

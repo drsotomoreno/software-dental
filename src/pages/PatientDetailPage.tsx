@@ -94,6 +94,7 @@ import {
   pickOdontogram,
   pickOdontogramFromCandidates,
 } from '@/utils/odontogramPersistence'
+import { normalizeSpecializedAnnexes } from '@/types/specializedAnnexes'
 import { upsertPatientOdontogram } from '@/utils/patientId'
 import { validateAcceptTreatment } from '@/utils/patientPhase'
 import {
@@ -505,6 +506,9 @@ export function PatientDetailPage() {
           ...emptyForm,
           ...(draftClinicalData ?? {}),
           diagnosticChart: normalizeClinicalDiagnosticChart(draftClinicalData?.diagnosticChart),
+          specializedAnnexes: normalizeSpecializedAnnexes(
+            draftClinicalData?.specializedAnnexes ?? emptyForm.specializedAnnexes,
+          ),
         }
         let loadedWithWarning = false
         let signedRecord: ClinicalRecord | null = null
@@ -555,6 +559,10 @@ export function PatientDetailPage() {
                 },
                 newer,
               )
+              base = {
+                ...base,
+                specializedAnnexes: normalizeSpecializedAnnexes(base.specializedAnnexes),
+              }
               loadedDraft = newer || !signedRecord
             }
             if (draft?.evolutionNotes?.length) {
@@ -1507,6 +1515,10 @@ export function PatientDetailPage() {
               draft.updatedAt,
             ),
           )
+          form = {
+            ...form,
+            specializedAnnexes: normalizeSpecializedAnnexes(form.specializedAnnexes),
+          }
         }
         setClinicalData(form)
       } else {

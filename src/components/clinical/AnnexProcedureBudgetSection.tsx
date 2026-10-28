@@ -4,6 +4,7 @@ import { PaymentPlanProcedureField } from '@/components/clinical/PaymentPlanProc
 import {
   annexProcedureLineSubtotal,
   createBlankAnnexProcedureBudgetLine,
+  normalizeAnnexProcedureBudget,
   type AnnexProcedureBudget,
   type AnnexProcedureBudgetLine,
 } from '@/types/annexProcedureBudget'
@@ -14,7 +15,8 @@ import { parseDictatedInteger, parseDictatedNumber } from '@/utils/voiceDictatio
 export interface AnnexProcedureBudgetSectionProps {
   title: string
   description?: string
-  value: AnnexProcedureBudget
+  /** Historias antiguas pueden no tener presupuesto; se normaliza al renderizar. */
+  value: AnnexProcedureBudget | null | undefined
   onChange: (value: AnnexProcedureBudget) => void
   disabled?: boolean
   importButtonLabel?: string
@@ -33,7 +35,7 @@ function parseNonNegative(raw: string): number {
 export function AnnexProcedureBudgetSection({
   title,
   description,
-  value,
+  value: valueProp,
   onChange,
   disabled = false,
   importButtonLabel = 'Importar',
@@ -42,6 +44,7 @@ export function AnnexProcedureBudgetSection({
   emptyHint = 'Importe procedimientos o agregue uno manualmente.',
   className = '',
 }: AnnexProcedureBudgetSectionProps) {
+  const value = useMemo(() => normalizeAnnexProcedureBudget(valueProp), [valueProp])
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const total = useMemo(
     () =>
