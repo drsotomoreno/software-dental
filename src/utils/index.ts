@@ -36,6 +36,7 @@ export {
 } from './odontogramTreatmentPlan'
 export { syncClinicalDataFromOrthodonticsAnnex } from './orthodonticsAnnexSync'
 export { syncClinicalDataFromEndodonticsAnnex } from './endodonticsAnnexSync'
+export { syncClinicalDataFromRehabilitationAnnex } from './rehabilitationAnnexSync'
 export { validateAcceptTreatment } from './patientPhase'
 export { validateClinicalRecordDraft } from './validateClinicalRecordDraft'
 export {

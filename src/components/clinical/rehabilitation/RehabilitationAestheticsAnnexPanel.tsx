@@ -1,9 +1,14 @@
 import { VoiceDictationButton } from '@/components/voice'
+import { AnnexProcedureBudgetSection } from '@/components/clinical/AnnexProcedureBudgetSection'
 import { RehabOdontogram } from '@/components/clinical/rehabilitation/rehab-odontogram'
 import { InitialFindingsSection } from '@/components/clinical/rehabilitation/InitialFindingsSection'
 import { DentalWhiteningSection } from '@/components/clinical/rehabilitation/DentalWhiteningSection'
 import type { RehabilitationAestheticsAnnex } from '@/types/rehabilitationAestheticsAnnex'
 import { SPECIALIZED_ANNEX_LABELS } from '@/types/specializedAnnexes'
+import {
+  canImportRehabPlanningBudget,
+  importRehabPlanningIntoBudget,
+} from '@/utils/rehabAnnexBudget'
 
 interface RehabilitationAestheticsAnnexPanelProps {
   data: RehabilitationAestheticsAnnex
@@ -140,6 +145,23 @@ export function RehabilitationAestheticsAnnexPanel({
           />
         </div>
       </div>
+
+      <AnnexProcedureBudgetSection
+        title="Presupuesto de Rehabilitación Estética y Aclaramiento"
+        description="Asigne precio a cada procedimiento, defina el plan de pagos y consulte el total al final."
+        value={data.budget}
+        onChange={(budget) => update({ budget })}
+        disabled={disabled}
+        importButtonLabel="Importar Desde Esquema de Planificación — Rehabilitación y Estética"
+        canImport={canImportRehabPlanningBudget(data)}
+        onImport={() => {
+          const result = importRehabPlanningIntoBudget(data, data.budget)
+          update({ budget: result.budget })
+          return { added: result.added, skipped: result.skipped }
+        }}
+        emptyHint="Importe el esquema de planificación o agregue un procedimiento."
+        className="mt-1"
+      />
     </div>
   )
 }

@@ -34,6 +34,7 @@ import { formatAssociatedItemLabel } from '@/utils/evolutionNoteAssociation'
 import { paymentHasProcedureLink } from '@/utils/paymentAbonos'
 import {
   formatDentalImplantPlanningSummaryLines,
+  formatRehabBudgetSummary,
   formatRehabMidlineDeviation,
   formatRehabPlanningSummaryLines,
 } from '@/types/rehabilitationAestheticsAnnex'
@@ -530,6 +531,10 @@ function buildAnnexesSection(data: ClinicalRecordFormData): string {
     hasDentalWhiteningSelection(rehabilitation.dentalWhitening)
       ? `Blanqueamiento: ${formatDentalWhiteningPlan(rehabilitation.dentalWhitening)}`
       : '',
+    (() => {
+      const budgetSummary = formatRehabBudgetSummary(rehabilitation.budget)
+      return budgetSummary ? `Presupuesto: ${budgetSummary}` : ''
+    })(),
     rehabilitation.contraindications,
     rehabilitation.notes,
   ]
