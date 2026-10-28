@@ -21,7 +21,7 @@ export function RehabOdontogram({
   onProtesisParcialRemovibleChange,
   restorationDetails = {},
   onRestorationDetailsChange,
-  title = 'Esquema de Planificación — Rehabilitación y Estética',
+  title = 'Plan de tratamiento de Rehabilitación y Estética',
   variant = 'rehabilitation',
   disabled = false,
   className = '',
