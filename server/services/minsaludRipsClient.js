@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { config, hasMinsaludCredentials } from '../config.js'
-import { getMinsaludAccessToken } from './minsaludAuth.js'
 import { hasBlockingValidationErrors, validateRipsPackageLocally } from './ripsLocalValidator.js'
+import { MuvInfrastructureError, SisproMuvService, describirFalloTransporte } from './sisproMuvService.js'
 
 /**
  * Genera CUV simulado para entorno sandbox / desarrollo local.
@@ -12,42 +12,14 @@ function generateSandboxCuv() {
 }
 
 /**
- * Normaliza errores devueltos por el motor de validación del Ministerio.
- * @param {unknown} payload
- * @returns {Array<{code?:string,field?:string,message:string,line?:number}>}
- */
-function normalizeMinistryErrors(payload) {
-  if (!payload) return []
-
-  const candidates =
-    payload.Errores ??
-    payload.errores ??
-    payload.errors ??
-    payload.ResultadosValidacion ??
-    []
-
-  if (!Array.isArray(candidates)) {
-    if (typeof payload.message === 'string') {
-      return [{ message: payload.message }]
-    }
-    return []
-  }
-
-  return candidates.map((item) => ({
-    code: item.Codigo ?? item.codigo ?? item.code,
-    field: item.Campo ?? item.campo ?? item.field ?? item.Path,
-    message: item.Descripcion ?? item.descripcion ?? item.message ?? 'Error de validación',
-    line: item.Linea ?? item.linea ?? item.line,
-  }))
-}
-
-/**
- * Envía el paquete RIPS al API REST del Ministerio y procesa la respuesta (CUV o errores).
+ * Envía el paquete RIPS al MUV y procesa la respuesta (CUV o errores).
+ * En producción usa LoginSISPRO y CargarRipsSinFactura / CargarFevRips.
  * @param {object} params
  * @param {object} params.rips - Paquete JSON RIPS Res. 2275
  * @param {object} [params.metadatos] - Metadatos de trazabilidad (UUID paciente, IDs clínicos)
+ * @param {{ service?: { enviar: Function }, sandbox?: boolean, hasCredentials?: boolean }} [deps]
  */
-export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
+export async function submitRipsToMinsalud({ rips, metadatos = {} }, deps = {}) {
   const localIssues = validateRipsPackageLocally(rips, {
     crossValidateAgeSex: true,
     perfilFiscal: metadatos.perfilFiscal,
@@ -63,7 +35,9 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     }
   }
 
-  const useSandbox = config.minsalud.sandbox || !hasMinsaludCredentials()
+  const sandbox = deps.sandbox ?? config.minsalud.sandbox
+  const credenciales = deps.hasCredentials ?? hasMinsaludCredentials()
+  const useSandbox = sandbox || !credenciales
 
   if (useSandbox) {
     const ministryErrors = simulateMinistryCrossValidation(rips)
@@ -88,69 +62,35 @@ export async function submitRipsToMinsalud({ rips, metadatos = {} }) {
     }
   }
 
-  const token = await getMinsaludAccessToken()
-  const { apiBaseUrl, validatePath, nit } = config.minsalud
-  const url = `${apiBaseUrl}${validatePath}`
-
-  const payload = {
-    rips,
-    metadatos: {
-      ...metadatos,
-      nitObligado: rips.numDocumentoIdObligado,
-      numFactura: rips.numFactura,
-    },
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
-      'X-NIT-Prestador': nit || rips.numDocumentoIdObligado,
-    },
-    body: JSON.stringify(payload),
-  })
-
-  const data = await response.json().catch(() => ({}))
-
-  if (!response.ok) {
-    return {
-      success: false,
-      source: 'minsalud',
-      httpStatus: response.status,
-      localIssues,
-      ministryErrors: normalizeMinistryErrors(data),
-      raw: data,
+  try {
+    const service = deps.service ?? servicioParaValidar()
+    const outcome = await service.enviar({
+      rips,
+      cufe: metadatos.cufe ?? metadatos.CUFE ?? '',
+      xmlFevFile: metadatos.xmlFevFile ?? '',
+    })
+    if (!outcome.success) {
+      return {
+        success: false,
+        source: 'minsalud',
+        httpStatus: outcome.httpStatus ?? 422,
+        localIssues,
+        ministryErrors: erroresDeMinisterio(outcome.errors),
+        code: 'MUV_RECHAZO',
+      }
     }
-  }
-
-  const approved =
-    data.ResultState === true ||
-    data.resultState === true ||
-    data.estado === 'APROBADO' ||
-    Boolean(data.CUV ?? data.cuv)
-
-  if (!approved) {
     return {
-      success: false,
+      success: true,
       source: 'minsalud',
-      localIssues,
-      ministryErrors: normalizeMinistryErrors(data),
-      raw: data,
+      localIssues: localIssues.filter((i) => i.level === 'warning'),
+      cuv: outcome.cuv,
+      procesoId: outcome.response?.ProcesoId ?? outcome.response?.procesoId ?? null,
+      fechaRadicacion: new Date().toISOString(),
+      estado: 'APROBADO',
+      metadatos,
     }
-  }
-
-  return {
-    success: true,
-    source: 'minsalud',
-    localIssues: localIssues.filter((i) => i.level === 'warning'),
-    cuv: data.CUV ?? data.cuv,
-    procesoId: data.ProcesoId ?? data.procesoId,
-    fechaRadicacion: data.FechaRadicacion ?? data.fechaRadicacion ?? new Date().toISOString(),
-    estado: data.Estado ?? data.estado ?? 'APROBADO',
-    metadatos,
-    raw: data,
+  } catch (error) {
+    return falloDeInfraestructura(error, localIssues)
   }
 }
 
@@ -173,6 +113,50 @@ function simulateMinistryCrossValidation(rips) {
   }
 
   return errors
+}
+
+let servicioValidacion = null
+
+function servicioParaValidar() {
+  if (!servicioValidacion) servicioValidacion = new SisproMuvService()
+  return servicioValidacion
+}
+
+function erroresDeMinisterio(errors) {
+  return (Array.isArray(errors) ? errors : []).map((item) => ({
+    code: item?.code,
+    field: item?.path || undefined,
+    message: item?.message || 'El MUV rechazó el campo.',
+  }))
+}
+
+function falloDeInfraestructura(error, localIssues) {
+  const infra = error instanceof MuvInfrastructureError || error?.name === 'MuvInfrastructureError' ? error : null
+  const fallo = infra
+    ? { message: infra.message, code: infra.code, status: infra.status }
+    : describirFalloTransporte(error)
+  const deCampo = infra && Array.isArray(infra.errors) ? erroresDeMinisterio(infra.errors) : []
+  const esRed =
+    fallo.code === 'MUV_NETWORK' ||
+    fallo.code === 'MUV_TIMEOUT' ||
+    fallo.code === 'MUV_AUTH' ||
+    fallo.code === 'MUV_CREDENTIALS_MISSING'
+  const detalle = esRed
+    ? deCampo
+        .map((item) => item.message)
+        .filter((message) => message && message !== fallo.message)
+        .slice(0, 2)
+        .join(' ')
+    : ''
+  return {
+    success: false,
+    source: 'minsalud',
+    localIssues,
+    ministryErrors: esRed ? [] : deCampo,
+    error: detalle ? `${fallo.message} ${detalle}`.slice(0, 500) : fallo.message,
+    code: fallo.code,
+    httpStatus: fallo.status ?? 503,
+  }
 }
 
 function getAgeYears(birthDate) {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { MinsaludService, TOKEN_RENEW_SKEW_MS } from './minsaludService.js'
+import { MinsaludService, TOKEN_RENEW_SKEW_MS, resolveMinsaludSettings } from './minsaludService.js'
 
 const CUV = 'ab'.repeat(48)
 
@@ -19,6 +19,51 @@ function credenciales(extra = {}) {
     ...extra,
   }
 }
+
+const CREDENCIALES_ENV = {
+  MINSALUD_USERNAME: 'CC79904620',
+  MINSALUD_PASSWORD: 'clave-prueba',
+  MINSALUD_NIT: '79904620',
+}
+
+test('un oauth o un host ajeno no reemplazan LoginSISPRO de producción', () => {
+  const settings = resolveMinsaludSettings({
+    ...CREDENCIALES_ENV,
+    MINSALUD_SANDBOX: 'false',
+    MINSALUD_API_BASE_URL: 'https://api.vieja.invalid/oauth',
+    MINSALUD_AUTH_URL: 'https://host-muerto.example/oauth/token',
+  })
+  assert.equal(settings.baseUrl, 'https://fevrips.sispro.gov.co/fevrips-api')
+  assert.equal(settings.loginUrl, 'https://fevrips.sispro.gov.co/fevrips-api/api/Auth/LoginSISPRO')
+  assert.equal(settings.sandbox, false)
+})
+
+test('el host fevrips configurado se conserva y el login oauth se ignora', () => {
+  const settings = resolveMinsaludSettings({
+    ...CREDENCIALES_ENV,
+    MINSALUD_SANDBOX: 'false',
+    MINSALUD_API_BASE_URL: 'https://fevrips.sispro.gov.co/fevrips-api/',
+    MINSALUD_AUTH_URL: 'https://fevrips.sispro.gov.co/fevrips-api/oauth/token',
+  })
+  assert.equal(settings.baseUrl, 'https://fevrips.sispro.gov.co/fevrips-api')
+  assert.equal(settings.loginUrl, 'https://fevrips.sispro.gov.co/fevrips-api/api/Auth/LoginSISPRO')
+})
+
+test('en sandbox un host ajeno vuelve al stage y localhost se conserva', () => {
+  const stage = resolveMinsaludSettings({
+    ...CREDENCIALES_ENV,
+    MINSALUD_SANDBOX: 'true',
+    MINSALUD_API_BASE_URL: 'https://api.vieja.invalid/v1',
+  })
+  assert.equal(stage.baseUrl, 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api')
+  const local = resolveMinsaludSettings({
+    ...CREDENCIALES_ENV,
+    MINSALUD_SANDBOX: 'false',
+    MINSALUD_API_BASE_URL: 'http://127.0.0.1:3999/fevrips-api',
+  })
+  assert.equal(local.baseUrl, 'http://127.0.0.1:3999/fevrips-api')
+  assert.equal(local.loginUrl, 'http://127.0.0.1:3999/fevrips-api/api/Auth/LoginSISPRO')
+})
 
 test('la margen de renovación del token es de 5 minutos', () => {
   assert.equal(TOKEN_RENEW_SKEW_MS, 5 * 60 * 1000)

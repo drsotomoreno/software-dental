@@ -34,6 +34,45 @@ function joinUrl(base, path) {
   return `${root}${suffix}`
 }
 
+/** localhost o un host FEV-RIPS/SISPRO. Un OAuth viejo no sirve para radicar. */
+function hostUsableParaMuv(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
+    return (
+      host.includes('fevrips') ||
+      host === 'sispro.gov.co' ||
+      host.endsWith('.sispro.gov.co') ||
+      host === 'sispropreprod.gov.co' ||
+      host.endsWith('.sispropreprod.gov.co')
+    )
+  } catch {
+    return false
+  }
+}
+
+function loginApuntaASispro(url) {
+  if (!hostUsableParaMuv(url)) return false
+  try {
+    return /\/LoginSISPRO\/?$/i.test(new URL(url).pathname)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * El MUV real es LoginSISPRO sobre fevrips. Una base o un /oauth/token que no
+ * conectan se sustituyen por el host oficial del ambiente.
+ */
+function urlsDeRadicacion(sandbox, baseConfigurada, loginConfigurada) {
+  const oficial = sandbox ? SANDBOX_BASE_URL : PRODUCTION_BASE_URL
+  const base = hostUsableParaMuv(baseConfigurada) ? String(baseConfigurada).replace(/\/$/, '') : oficial
+  const login = loginApuntaASispro(loginConfigurada)
+    ? String(loginConfigurada).replace(/\/$/, '')
+    : joinUrl(base, LOGIN_PATH)
+  return { baseUrl: base, loginUrl: login }
+}
+
 function isLocalHttps(url) {
   return /^https:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(url)
 }
@@ -61,11 +100,11 @@ export function resolveMinsaludSettings(source = process.env, overrides = {}) {
   }
 
   const sandbox = envValue('MINSALUD_SANDBOX', source) !== 'false'
-  const baseUrl = (
-    overrides.baseUrl ||
-    envValue('MINSALUD_API_BASE_URL', source) ||
-    (sandbox ? SANDBOX_BASE_URL : PRODUCTION_BASE_URL)
-  ).replace(/\/$/, '')
+  const { baseUrl, loginUrl } = urlsDeRadicacion(
+    sandbox,
+    overrides.baseUrl || envValue('MINSALUD_API_BASE_URL', source),
+    overrides.loginUrl || envValue('MINSALUD_AUTH_URL', source),
+  )
   const identidad = splitUsuarioDocumento(
     username,
     overrides.tipoDocumento ?? (envValue('MINSALUD_TIPO_DOCUMENTO', source) || 'CC'),
@@ -74,7 +113,7 @@ export function resolveMinsaludSettings(source = process.env, overrides = {}) {
   return {
     sandbox,
     baseUrl,
-    loginUrl: overrides.loginUrl || envValue('MINSALUD_AUTH_URL', source) || joinUrl(baseUrl, LOGIN_PATH),
+    loginUrl,
     cargarSinFacturaUrl: joinUrl(baseUrl, CARGAR_SIN_FACTURA_PATH),
     tipoDocumento: identidad.tipo,
     numeroDocumento: identidad.numero,
@@ -114,6 +153,7 @@ function requestJson(url, { method = 'POST', headers = {}, body } = {}) {
         path: `${target.pathname}${target.search}`,
         method,
         headers: requestHeaders,
+        family: 4,
         rejectUnauthorized: !isLocalHttps(url),
       },
       (response) => {

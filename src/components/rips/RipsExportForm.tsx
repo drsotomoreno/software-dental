@@ -14,6 +14,7 @@ import {
   cufeDeAtenciones,
   evolucionIdDeAtencion,
   explicarFalloCuv,
+  textoFalloDeRed,
   facturasDelPaquete,
   formatRipsIssuePatientLabel,
   createCatalogLookupFromServices,
@@ -400,7 +401,9 @@ export function RipsExportForm({
     } catch (error) {
       setValidating(false)
       setValidateMessage(
-        error instanceof Error ? error.message : 'No se pudo contactar el servicio de validación.',
+        textoFalloDeRed(
+          error instanceof Error ? error.message : 'No se pudo contactar el servicio de validación.',
+        ),
       )
       return
     }

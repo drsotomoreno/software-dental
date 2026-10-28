@@ -41,6 +41,21 @@ test('el timeout del MUV sale de MINSALUD_TIMEOUT_MS y se recorta', () => {
   assert.equal(resolveSisproTimeoutMs({ MINSALUD_TIMEOUT_MS: 'no-numero' }), 45_000)
 })
 
+test('fetch failed se explica con la causa y sin el texto de Node', async () => {
+  const service = servicioCon(async () => {
+    const error = new TypeError('fetch failed')
+    error.cause = Object.assign(new Error('getaddrinfo ENOTFOUND muv.invalid'), { code: 'ENOTFOUND' })
+    throw error
+  })
+  await assert.rejects(() => service.enviar({ rips: { usuarios: [] } }), (error) => {
+    assert.equal(error.code, 'MUV_NETWORK')
+    assert.equal(error.message, 'No se pudo contactar el MUV (ENOTFOUND).')
+    assert.equal(error.message.includes('fetch failed'), false)
+    assert.equal(error.message.includes('muv.invalid'), false)
+    return true
+  })
+})
+
 test('sin credenciales el cliente queda reintentable y no fabrica un CUV', () => {
   assert.throws(
     () => new SisproMuvService({ env: {} }),
