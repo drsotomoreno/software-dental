@@ -3,10 +3,15 @@ import {
   REHAB_PROTESIS_TOTAL_LABEL,
   REHAB_TREATMENT_OPTIONS,
 } from '@/components/clinical/rehabilitation/rehab-odontogram/constants'
+import type { RehabTreatmentType } from '@/components/clinical/rehabilitation/rehab-odontogram/types'
 import {
   REHAB_DENTAL_WHITENING_OPTIONS,
   type RehabDentalWhiteningPlan,
 } from '@/constants/dentalWhitening'
+import {
+  formatRehabRestorationSpecSummary,
+  type RehabRestorationDetails,
+} from '@/constants/rehabilitationRestoration'
 import {
   createBlankAnnexProcedureBudgetLine,
   normalizeAnnexProcedureBudget,
@@ -16,7 +21,6 @@ import {
 import {
   formatRehabArchProsthesisScope,
   type RehabArchProsthesisPlan,
-  type RehabVisualPlanEntry,
   type RehabilitationAestheticsAnnex,
 } from '@/types/rehabilitationAestheticsAnnex'
 import { generateId } from '@/utils/crypto'
@@ -25,20 +29,37 @@ function treatmentLabel(tratamiento: string): string {
   return REHAB_TREATMENT_OPTIONS.find((option) => option.id === tratamiento)?.label ?? tratamiento
 }
 
+function sortTeethIds(teeth: string[]): string[] {
+  return teeth.slice().sort((a, b) => Number(a) - Number(b))
+}
+
+function procedureWithRestoration(
+  baseLabel: string,
+  restorationKey: keyof RehabRestorationDetails | undefined,
+  restorationDetails: RehabRestorationDetails | undefined,
+): string {
+  if (!restorationKey || !restorationDetails) return baseLabel
+  const specSummary = formatRehabRestorationSpecSummary(restorationDetails[restorationKey])
+  return specSummary ? `${baseLabel} (${specSummary})` : baseLabel
+}
+
 function prosthesisLine(
   kind: 'protesis_total' | 'protesis_parcial_removible',
   plan: RehabArchProsthesisPlan,
+  restorationDetails?: RehabRestorationDetails,
 ): Omit<AnnexProcedureBudgetLine, 'id'> {
   const label =
     kind === 'protesis_total' ? REHAB_PROTESIS_TOTAL_LABEL : REHAB_PROTESIS_PARCIAL_REMOVIBLE_LABEL
+  const restorationKey =
+    kind === 'protesis_parcial_removible' ? 'protesis_parcial_removible' : undefined
   return {
-    procedure: `${label} (${formatRehabArchProsthesisScope(plan.scope)})`,
+    procedure: procedureWithRestoration(label, restorationKey, restorationDetails),
     anatomicalZone:
       plan.scope === 'superior'
         ? 'Arcada Superior'
         : plan.scope === 'inferior'
           ? 'Arcada Inferior'
-          : 'General',
+          : 'Superior e inferior',
     quantity: 1,
     unitPrice: 0,
     source: 'import',
@@ -48,22 +69,58 @@ function prosthesisLine(
   }
 }
 
-function visualPlanCandidate(
-  entry: RehabVisualPlanEntry,
-): Omit<AnnexProcedureBudgetLine, 'id'> | null {
-  if (!entry.tratamiento) return null
-  const label = treatmentLabel(entry.tratamiento)
-  return {
-    procedure: `${label} — pieza ${entry.dienteId}`,
-    toothNumber: Number(entry.dienteId) || undefined,
-    anatomicalZone: entry.dienteId,
-    quantity: 1,
-    unitPrice: 0,
-    source: 'import',
-    importKey: `visual:${entry.dienteId}:${entry.tratamiento}`,
-    paymentMethod: 'contado',
-    scheduleNotes: '',
+/**
+ * Agrupa el plan visual como el Resumen Tratamiento Restaurador:
+ * una fila por tipo de tratamiento, con piezas y cantidad.
+ */
+function restorativeSummaryCandidates(
+  annex: RehabilitationAestheticsAnnex,
+): Array<Omit<AnnexProcedureBudgetLine, 'id'>> {
+  const byTreatment = new Map<RehabTreatmentType, string[]>()
+
+  for (const entry of annex.visualTreatmentPlan ?? []) {
+    if (!entry.tratamiento) continue
+    const teeth = byTreatment.get(entry.tratamiento) ?? []
+    teeth.push(entry.dienteId)
+    byTreatment.set(entry.tratamiento, teeth)
   }
+
+  const candidates: Array<Omit<AnnexProcedureBudgetLine, 'id'>> = []
+
+  for (const option of REHAB_TREATMENT_OPTIONS) {
+    const teeth = byTreatment.get(option.id)
+    if (!teeth?.length) continue
+    const sorted = sortTeethIds(teeth)
+    candidates.push({
+      procedure: procedureWithRestoration(
+        option.label,
+        option.id,
+        annex.restorationDetails,
+      ),
+      anatomicalZone: sorted.join(', '),
+      quantity: sorted.length,
+      unitPrice: 0,
+      source: 'import',
+      importKey: `summary:${option.id}`,
+      paymentMethod: 'contado',
+      scheduleNotes: '',
+    })
+  }
+
+  if (annex.protesisTotal) {
+    candidates.push(prosthesisLine('protesis_total', annex.protesisTotal, annex.restorationDetails))
+  }
+  if (annex.protesisParcialRemovible) {
+    candidates.push(
+      prosthesisLine(
+        'protesis_parcial_removible',
+        annex.protesisParcialRemovible,
+        annex.restorationDetails,
+      ),
+    )
+  }
+
+  return candidates
 }
 
 function whiteningCandidates(
@@ -81,24 +138,19 @@ function whiteningCandidates(
   }))
 }
 
-/** Candidatos que saldrían del esquema de planificación + aclaramiento. */
+/** Prefijos de líneas importadas del esquema / resumen (no manuales). */
+const IMPORT_KEY_PREFIXES = ['summary:', 'visual:', 'prosthesis:', 'whitening:'] as const
+
+function isPlanningImportKey(key: string | undefined): boolean {
+  if (!key) return false
+  return IMPORT_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))
+}
+
+/** Candidatos del Resumen Tratamiento Restaurador (+ aclaramiento si aplica). */
 export function collectRehabPlanningBudgetCandidates(
   annex: RehabilitationAestheticsAnnex,
 ): Array<Omit<AnnexProcedureBudgetLine, 'id'>> {
-  const candidates: Array<Omit<AnnexProcedureBudgetLine, 'id'>> = []
-
-  for (const entry of annex.visualTreatmentPlan ?? []) {
-    const candidate = visualPlanCandidate(entry)
-    if (candidate) candidates.push(candidate)
-  }
-
-  if (annex.protesisTotal) {
-    candidates.push(prosthesisLine('protesis_total', annex.protesisTotal))
-  }
-  if (annex.protesisParcialRemovible) {
-    candidates.push(prosthesisLine('protesis_parcial_removible', annex.protesisParcialRemovible))
-  }
-
+  const candidates = restorativeSummaryCandidates(annex)
   if (annex.dentalWhitening) {
     candidates.push(...whiteningCandidates(annex.dentalWhitening))
   }
@@ -110,28 +162,50 @@ export function canImportRehabPlanningBudget(annex: RehabilitationAestheticsAnne
 }
 
 /**
- * Agrega al presupuesto las líneas nuevas del esquema de planificación
- * sin duplicar las que ya tienen la misma importKey.
+ * Sincroniza el presupuesto con el Resumen Tratamiento Restaurador:
+ * actualiza filas importadas (cantidad, zona, nombre), agrega nuevas,
+ * quita obsoletas y conserva precio/pago de claves que siguen existiendo.
  */
 export function importRehabPlanningIntoBudget(
   annex: RehabilitationAestheticsAnnex,
   budget: AnnexProcedureBudget | null | undefined,
 ): { budget: AnnexProcedureBudget; added: number; skipped: number } {
   const safeBudget = normalizeAnnexProcedureBudget(budget)
-  const existingKeys = new Set(
-    safeBudget.lines.map((line) => line.importKey).filter((key): key is string => Boolean(key)),
-  )
   const candidates = collectRehabPlanningBudgetCandidates(annex)
-  const additions: AnnexProcedureBudgetLine[] = []
+  const candidateByKey = new Map(
+    candidates
+      .filter((candidate) => candidate.importKey)
+      .map((candidate) => [candidate.importKey!, candidate]),
+  )
+
+  const manualLines = safeBudget.lines.filter((line) => !isPlanningImportKey(line.importKey))
+  const previousImportByKey = new Map(
+    safeBudget.lines
+      .filter((line) => isPlanningImportKey(line.importKey) && line.importKey)
+      .map((line) => [line.importKey!, line]),
+  )
+
+  const syncedImportLines: AnnexProcedureBudgetLine[] = []
+  let added = 0
   let skipped = 0
 
-  for (const candidate of candidates) {
-    if (candidate.importKey && existingKeys.has(candidate.importKey)) {
+  for (const [importKey, candidate] of candidateByKey) {
+    const previous = previousImportByKey.get(importKey)
+    if (previous) {
       skipped += 1
+      syncedImportLines.push({
+        ...previous,
+        procedure: candidate.procedure,
+        anatomicalZone: candidate.anatomicalZone,
+        toothNumber: candidate.toothNumber,
+        quantity: candidate.quantity,
+        source: 'import',
+        importKey,
+      })
       continue
     }
-    if (candidate.importKey) existingKeys.add(candidate.importKey)
-    additions.push(
+    added += 1
+    syncedImportLines.push(
       createBlankAnnexProcedureBudgetLine({
         ...candidate,
         id: generateId(),
@@ -139,16 +213,12 @@ export function importRehabPlanningIntoBudget(
     )
   }
 
-  if (additions.length === 0) {
-    return { budget: safeBudget, added: 0, skipped }
-  }
-
   return {
     budget: {
       active: true,
-      lines: [...safeBudget.lines, ...additions],
+      lines: [...syncedImportLines, ...manualLines],
     },
-    added: additions.length,
+    added,
     skipped,
   }
 }

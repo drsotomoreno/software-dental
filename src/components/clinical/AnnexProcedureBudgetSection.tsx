@@ -1,6 +1,5 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { PaymentAgreementFields } from '@/components/clinical/PaymentAgreementFields'
-import { PaymentPlanProcedureField } from '@/components/clinical/PaymentPlanProcedureField'
 import {
   annexProcedureLineSubtotal,
   createBlankAnnexProcedureBudgetLine,
@@ -46,6 +45,7 @@ export function AnnexProcedureBudgetSection({
 }: AnnexProcedureBudgetSectionProps) {
   const value = useMemo(() => normalizeAnnexProcedureBudget(valueProp), [valueProp])
   const [importNotice, setImportNotice] = useState<string | null>(null)
+  const [expandedPaymentId, setExpandedPaymentId] = useState<string | null>(null)
   const total = useMemo(
     () =>
       value.active
@@ -66,34 +66,41 @@ export function AnnexProcedureBudgetSection({
 
   const removeLine = (id: string) => {
     updateBudget({ lines: value.lines.filter((line) => line.id !== id) })
+    if (expandedPaymentId === id) setExpandedPaymentId(null)
   }
 
   const addProcedure = () => {
+    const id = generateId()
     updateBudget({
       active: true,
       lines: [
         ...value.lines,
         createBlankAnnexProcedureBudgetLine({
-          id: generateId(),
+          id,
           procedure: '',
           source: 'manual',
         }),
       ],
     })
     setImportNotice(null)
+    setExpandedPaymentId(id)
   }
 
   const handleImport = () => {
     if (!onImport) return
     const result = onImport()
-    if (result.added > 0) {
+    if (result.added > 0 && result.skipped > 0) {
       setImportNotice(
-        `Se agregaron ${result.added} procedimiento${result.added === 1 ? '' : 's'} del esquema de planificación.`,
+        `Resumen actualizado: ${result.added} nuevo${result.added === 1 ? '' : 's'}, ${result.skipped} actualizado${result.skipped === 1 ? '' : 's'}.`,
+      )
+    } else if (result.added > 0) {
+      setImportNotice(
+        `Se agregaron ${result.added} procedimiento${result.added === 1 ? '' : 's'} del Resumen Tratamiento Restaurador.`,
       )
     } else if (result.skipped > 0) {
-      setImportNotice('Los procedimientos del esquema ya están en el presupuesto.')
+      setImportNotice('El presupuesto ya refleja el Resumen Tratamiento Restaurador (cantidades y zonas actualizadas).')
     } else {
-      setImportNotice('No hay procedimientos planificados para importar.')
+      setImportNotice('No hay tratamientos en el Resumen Tratamiento Restaurador para importar.')
     }
   }
 
@@ -128,7 +135,7 @@ export function AnnexProcedureBudgetSection({
               className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-50"
               title={
                 canImport
-                  ? 'Agregar al presupuesto los procedimientos del esquema de planificación'
+                  ? 'Sincronizar con el Resumen Tratamiento Restaurador'
                   : 'Registre primero tratamientos en el esquema de planificación'
               }
             >
@@ -156,142 +163,185 @@ export function AnnexProcedureBudgetSection({
           {emptyHint}
         </p>
       ) : (
-        <div className="space-y-4">
-          {value.lines.map((line, index) => {
-            const subtotal = annexProcedureLineSubtotal(line)
-            return (
-              <article
-                key={line.id}
-                className="rounded-xl border border-rose-200 bg-white p-4 shadow-sm"
-              >
-                <header className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-2">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">
-                      Procedimiento {index + 1}
-                    </p>
-                    {line.anatomicalZone || line.toothNumber ? (
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        Zona: {line.anatomicalZone || String(line.toothNumber)}
-                      </p>
-                    ) : null}
-                  </div>
-                  {!disabled && (
-                    <button
-                      type="button"
-                      onClick={() => removeLine(line.id)}
-                      className="text-xs font-medium text-slate-400 hover:text-red-600"
-                    >
-                      Quitar
-                    </button>
-                  )}
-                </header>
-
-                <div className="space-y-3">
-                  <PaymentPlanProcedureField
-                    procedure={line.procedure}
-                    cupsCode={line.cupsCode}
-                    totalAmount={line.unitPrice}
-                    disabled={disabled}
-                    onChange={(patch) =>
-                      updateLine(line.id, {
-                        procedure: patch.procedure,
-                        cupsCode: patch.cupsCode,
-                        ...(patch.totalAmount != null ? { unitPrice: patch.totalAmount } : {}),
-                      })
-                    }
-                  />
-
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <div>
-                      <label className="mb-0.5 block text-[10px] text-slate-500">Cantidad</label>
-                      {disabled ? (
-                        <p className="text-sm font-medium text-slate-800">{line.quantity}</p>
-                      ) : (
-                        <div className="flex items-start gap-1">
+        <div className="overflow-x-auto rounded-xl border border-rose-200 bg-white shadow-sm">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr className="border-b border-rose-100 bg-rose-50/60 text-left text-[11px] uppercase tracking-wide text-rose-900/80">
+                <th className="px-3 py-2.5 font-semibold">Procedimiento</th>
+                <th className="px-3 py-2.5 font-semibold">Zona / piezas</th>
+                <th className="px-3 py-2.5 font-semibold">Cant.</th>
+                <th className="px-3 py-2.5 font-semibold">Precio unitario</th>
+                <th className="px-3 py-2.5 font-semibold">Subtotal</th>
+                <th className="px-3 py-2.5 font-semibold">Pago</th>
+                {!disabled ? <th className="px-3 py-2.5 font-semibold" /> : null}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-rose-50">
+              {value.lines.map((line) => {
+                const subtotal = annexProcedureLineSubtotal(line)
+                const paymentOpen = expandedPaymentId === line.id
+                return (
+                  <Fragment key={line.id}>
+                    <tr className="align-top hover:bg-rose-50/30">
+                      <td className="px-3 py-2">
+                        {disabled ? (
+                          <p className="font-medium text-slate-800">
+                            {line.procedure || '—'}
+                            {line.cupsCode ? (
+                              <span className="mt-0.5 block text-[11px] font-normal text-slate-500">
+                                CUPS {line.cupsCode}
+                              </span>
+                            ) : null}
+                          </p>
+                        ) : (
                           <input
-                            id={`annex-budget-qty-${line.id}`}
-                            type="number"
-                            min={0}
-                            value={line.quantity}
+                            type="text"
+                            value={line.procedure}
                             onChange={(event) =>
-                              updateLine(line.id, { quantity: parseNonNegative(event.target.value) })
+                              updateLine(line.id, { procedure: event.target.value })
                             }
-                            className="input-field"
+                            placeholder="Nombre del procedimiento"
+                            className="input-field min-w-[10rem] text-sm"
                           />
-                          <VoiceDictationButton
-                            targetInputId={`annex-budget-qty-${line.id}`}
-                            getValue={() => String(line.quantity || '')}
-                            onValueChange={(text) => {
-                              const parsed = parseDictatedInteger(text)
-                              if (parsed != null) {
-                                updateLine(line.id, { quantity: Math.max(0, parsed) })
-                              }
-                            }}
-                            className="shrink-0"
-                          />
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <label className="mb-0.5 block text-[10px] text-slate-500">
-                        Precio unitario
-                      </label>
-                      {disabled ? (
-                        <p className="text-sm font-medium text-slate-800">
-                          {formatCurrency(line.unitPrice)}
-                        </p>
-                      ) : (
-                        <div className="flex items-start gap-1">
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {disabled ? (
+                          <span className="text-slate-600">
+                            {line.anatomicalZone ||
+                              (line.toothNumber != null ? String(line.toothNumber) : '—')}
+                          </span>
+                        ) : (
                           <input
-                            id={`annex-budget-price-${line.id}`}
-                            type="number"
-                            min={0}
-                            value={line.unitPrice || ''}
+                            type="text"
+                            value={line.anatomicalZone ?? ''}
                             onChange={(event) =>
                               updateLine(line.id, {
-                                unitPrice: parseNonNegative(event.target.value),
+                                anatomicalZone: event.target.value || undefined,
                               })
                             }
-                            className="input-field"
+                            placeholder="Ej.: 11, 12, 21"
+                            className="input-field min-w-[7rem] text-sm"
                           />
-                          <VoiceDictationButton
-                            targetInputId={`annex-budget-price-${line.id}`}
-                            getValue={() => String(line.unitPrice || '')}
-                            onValueChange={(text) => {
-                              const parsed = parseDictatedNumber(text)
-                              if (parsed != null) {
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {disabled ? (
+                          <span className="font-medium text-slate-800">{line.quantity}</span>
+                        ) : (
+                          <div className="flex items-start gap-1">
+                            <input
+                              id={`annex-budget-qty-${line.id}`}
+                              type="number"
+                              min={0}
+                              value={line.quantity}
+                              onChange={(event) =>
                                 updateLine(line.id, {
-                                  unitPrice: Math.max(0, Math.round(parsed)),
+                                  quantity: parseNonNegative(event.target.value),
                                 })
                               }
-                            }}
-                            className="shrink-0"
+                              className="input-field w-16 text-sm"
+                            />
+                            <VoiceDictationButton
+                              targetInputId={`annex-budget-qty-${line.id}`}
+                              getValue={() => String(line.quantity || '')}
+                              onValueChange={(text) => {
+                                const parsed = parseDictatedInteger(text)
+                                if (parsed != null) {
+                                  updateLine(line.id, { quantity: Math.max(0, parsed) })
+                                }
+                              }}
+                              className="shrink-0"
+                            />
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {disabled ? (
+                          <span className="font-medium text-slate-800">
+                            {formatCurrency(line.unitPrice)}
+                          </span>
+                        ) : (
+                          <div className="flex items-start gap-1">
+                            <input
+                              id={`annex-budget-price-${line.id}`}
+                              type="number"
+                              min={0}
+                              value={line.unitPrice || ''}
+                              onChange={(event) =>
+                                updateLine(line.id, {
+                                  unitPrice: parseNonNegative(event.target.value),
+                                })
+                              }
+                              className="input-field w-28 text-sm"
+                            />
+                            <VoiceDictationButton
+                              targetInputId={`annex-budget-price-${line.id}`}
+                              getValue={() => String(line.unitPrice || '')}
+                              onValueChange={(text) => {
+                                const parsed = parseDictatedNumber(text)
+                                if (parsed != null) {
+                                  updateLine(line.id, {
+                                    unitPrice: Math.max(0, Math.round(parsed)),
+                                  })
+                                }
+                              }}
+                              className="shrink-0"
+                            />
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="font-semibold tabular-nums text-slate-800">
+                          {formatCurrency(subtotal)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedPaymentId(paymentOpen ? null : line.id)
+                          }
+                          className="text-xs font-medium text-rose-700 hover:text-rose-900"
+                        >
+                          {paymentOpen ? 'Ocultar' : 'Plan de pagos'}
+                        </button>
+                      </td>
+                      {!disabled ? (
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => removeLine(line.id)}
+                            className="text-xs font-medium text-slate-400 hover:text-red-600"
+                          >
+                            Quitar
+                          </button>
+                        </td>
+                      ) : null}
+                    </tr>
+                    {paymentOpen ? (
+                      <tr className="bg-slate-50/80">
+                        <td
+                          colSpan={disabled ? 6 : 7}
+                          className="border-t border-rose-50 px-3 py-3"
+                        >
+                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Plan de pagos
+                            {line.procedure ? ` — ${line.procedure}` : ''}
+                          </p>
+                          <PaymentAgreementFields
+                            item={line}
+                            disabled={disabled}
+                            onChange={(patch) => updateLine(line.id, patch)}
                           />
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <label className="mb-0.5 block text-[10px] text-slate-500">Subtotal</label>
-                      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800">
-                        {formatCurrency(subtotal)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      Plan de pagos
-                    </p>
-                    <PaymentAgreementFields
-                      item={line}
-                      disabled={disabled}
-                      onChange={(patch) => updateLine(line.id, patch)}
-                    />
-                  </div>
-                </div>
-              </article>
-            )
-          })}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 

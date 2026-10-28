@@ -174,18 +174,18 @@ export function RehabilitationAestheticsAnnexPanel({
 
       <AnnexProcedureBudgetSection
         title="Presupuesto de Rehabilitación Estética y Aclaramiento"
-        description="Asigne precio a cada procedimiento, defina el plan de pagos y consulte el total al final."
+        description="Tabla resumida según el Resumen Tratamiento Restaurador. Asigne precios, defina el plan de pagos y consulte el total."
         value={data.budget}
         onChange={(budget) => update({ budget })}
         disabled={disabled}
-        importButtonLabel="Importar Desde Esquema de Planificación — Rehabilitación y Estética"
+        importButtonLabel="Importar Desde Resumen Tratamiento Restaurador"
         canImport={canImportRehabPlanningBudget(data)}
         onImport={() => {
           const result = importRehabPlanningIntoBudget(data, data.budget)
           update({ budget: result.budget })
           return { added: result.added, skipped: result.skipped }
         }}
-        emptyHint="Importe el esquema de planificación o agregue un procedimiento."
+        emptyHint="Importe el Resumen Tratamiento Restaurador o agregue un procedimiento."
         className="mt-1"
       />
     </div>
