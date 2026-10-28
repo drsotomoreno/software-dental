@@ -25,6 +25,12 @@ import {
   createEmptyMidlineDeviation,
   type MidlineDeviationValue,
 } from '@/types/orthodonticsAnnex'
+import {
+  calcAnnexProcedureBudgetTotal,
+  createEmptyAnnexProcedureBudget,
+  normalizeAnnexProcedureBudget,
+  type AnnexProcedureBudget,
+} from '@/types/annexProcedureBudget'
 
 export type RehabTreatmentType =
   | 'corona_individual'
@@ -75,7 +81,11 @@ export interface RehabilitationAestheticsAnnex extends RehabPlanningSchema {
   notes: string
   /** Plan de blanqueamiento dental */
   dentalWhitening: RehabDentalWhiteningPlan
+  /** Presupuesto y plan de pagos del anexo */
+  budget: AnnexProcedureBudget
 }
+
+export type { AnnexProcedureBudget }
 
 export function createEmptyRehabInitialFindings(): RehabInitialFindings {
   return {
@@ -94,6 +104,7 @@ export function createEmptyRehabilitationAestheticsAnnex(): RehabilitationAesthe
     contraindications: '',
     notes: '',
     dentalWhitening: createEmptyDentalWhiteningPlan(),
+    budget: createEmptyAnnexProcedureBudget(),
   }
 }
 
@@ -324,5 +335,16 @@ export function normalizeRehabilitationAestheticsAnnex(
     contraindications: data?.contraindications ?? '',
     notes: data?.notes ?? '',
     dentalWhitening: normalizeDentalWhiteningPlan(data?.dentalWhitening),
+    budget: normalizeAnnexProcedureBudget(data?.budget),
   }
+}
+
+export function formatRehabBudgetSummary(
+  budget: AnnexProcedureBudget | null | undefined,
+): string {
+  if (!budget?.active || budget.lines.length === 0) return ''
+  const priced = budget.lines.filter((line) => line.procedure.trim())
+  if (priced.length === 0) return ''
+  const total = calcAnnexProcedureBudgetTotal(budget)
+  return `${priced.length} procedimiento${priced.length === 1 ? '' : 's'} · total ${total.toLocaleString('es-CO')}`
 }

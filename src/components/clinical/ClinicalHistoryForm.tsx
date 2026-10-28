@@ -7,6 +7,7 @@ import {
   syncClinicalDataFromOdontogram,
   syncClinicalDataFromOrthodonticsAnnex,
   syncClinicalDataFromEndodonticsAnnex,
+  syncClinicalDataFromRehabilitationAnnex,
   assignCieToTooth,
   collectOdontogramCieDiagnoses,
   detachTeethFromDiagnoses,
@@ -22,7 +23,9 @@ import {
 } from '@/utils/budget'
 
 function syncClinicalDataFromAnnexes(data: ClinicalRecordFormData): ClinicalRecordFormData {
-  return syncClinicalDataFromOrthodonticsAnnex(syncClinicalDataFromEndodonticsAnnex(data))
+  return syncClinicalDataFromRehabilitationAnnex(
+    syncClinicalDataFromOrthodonticsAnnex(syncClinicalDataFromEndodonticsAnnex(data)),
+  )
 }
 import type { OdontogramData } from '@/types/odontogram'
 import { createEmptyAnamnesis } from '@/types/anamnesis'

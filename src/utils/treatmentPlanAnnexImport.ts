@@ -47,6 +47,15 @@ function alreadyImported(plan: TreatmentPlanItem[], candidate: TreatmentPlanItem
       return true
     }
     if (
+      candidate.source === 'rehabilitation_annex' &&
+      item.source === 'rehabilitation_annex' &&
+      sameProcedure(item.procedure, candidate.procedure) &&
+      (item.toothNumber ?? 0) === (candidate.toothNumber ?? 0) &&
+      (item.cupsCode ?? '') === (candidate.cupsCode ?? '')
+    ) {
+      return true
+    }
+    if (
       candidate.source &&
       item.source === candidate.source &&
       item.toothNumber === candidate.toothNumber &&
@@ -148,6 +157,26 @@ function collectAnnexItems(annexes: SpecializedAnnexes | undefined): TreatmentPl
         source: 'periodontics_annex',
       }),
     )
+  }
+
+  const rehabBudget = annexes.rehabilitationAesthetics?.budget
+  if (rehabBudget?.active) {
+    for (const line of rehabBudget.lines) {
+      const procedure = line.procedure?.trim() ?? ''
+      if (!procedure) continue
+      items.push(
+        blankItem({
+          phase: 'fase_iii',
+          procedure,
+          cupsCode: line.cupsCode,
+          toothNumber: line.toothNumber,
+          anatomicalZone: line.anatomicalZone ?? ZONE_GENERAL,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          source: 'rehabilitation_annex',
+        }),
+      )
+    }
   }
 
   return items

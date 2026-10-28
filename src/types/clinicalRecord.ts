@@ -77,6 +77,7 @@ export interface TreatmentPlanItem {
     | 'endodontics_annex'
     | 'oral_surgery_annex'
     | 'periodontics_annex'
+    | 'rehabilitation_annex'
     | 'diagnostico'
   /** Diagnóstico CIE-10 vinculado al importar desde la sección 4 */
   diagnosisCode?: string
@@ -138,7 +139,7 @@ export interface BudgetLineItem {
   diagnosisDescription?: string
   quantity: number
   unitPrice: number
-  source?: 'manual' | 'treatment_plan' | 'endodontics_annex'
+  source?: 'manual' | 'treatment_plan' | 'endodontics_annex' | 'rehabilitation_annex'
 }
 
 export type PaymentMethod =
