@@ -99,9 +99,27 @@ export function amountAppliedToLine(
 
 export function paymentHasProcedureLink(
   payment: Pick<PaymentRecord, 'paymentControlLineId' | 'lineAllocations'>,
+  /** Si se informa, un id de línea borrada ya no cuenta como vínculo (evita abonos fantasma). */
+  knownLineIds?: ReadonlySet<string> | readonly string[],
 ): boolean {
-  if (payment.paymentControlLineId) return true
-  return Boolean(payment.lineAllocations?.some((item) => item.lineId && item.amount > 0))
+  const known =
+    knownLineIds == null
+      ? null
+      : knownLineIds instanceof Set
+        ? knownLineIds
+        : new Set(knownLineIds)
+
+  const lineIsKnown = (lineId: string | undefined) => {
+    if (!lineId) return false
+    return known ? known.has(lineId) : true
+  }
+
+  if (payment.paymentControlLineId) {
+    return lineIsKnown(payment.paymentControlLineId)
+  }
+  return Boolean(
+    payment.lineAllocations?.some((item) => item.amount > 0 && lineIsKnown(item.lineId)),
+  )
 }
 
 /** Historial del procedimiento en el orden en que se registraron los abonos. */

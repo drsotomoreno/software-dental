@@ -11,7 +11,7 @@ import { generateId } from '@/utils/crypto'
 import { formatAnatomicalZone } from '@/utils/treatmentPlanZone'
 import { treatmentPlanItemsForRipsPayload } from '@/utils/treatmentPlanRips'
 import { calcTotalPaid } from '@/utils/paymentControl'
-import { amountAppliedToLine } from '@/utils/paymentAbonos'
+import { amountAppliedToLine, paymentHasProcedureLink } from '@/utils/paymentAbonos'
 
 function namesMatch(left: string, right: string): boolean {
   const a = left.trim().toLowerCase()
@@ -64,6 +64,33 @@ export function paidAmountForLine(lineId: string, payments: PaymentRecord[]): nu
   return payments.reduce((sum, payment) => sum + amountAppliedToLine(payment, lineId), 0)
 }
 
+/**
+ * Abonos sin procedimiento. Con una sola fila de control, descuentan ese
+ * saldo (misma cifra que el pie «Saldo del tratamiento»).
+ */
+export function unlinkedPaidAmount(
+  payments: PaymentRecord[],
+  lines?: PaymentControlLine[],
+): number {
+  const knownLineIds = lines ? new Set(lines.map((line) => line.id)) : undefined
+  return payments.reduce((sum, payment) => {
+    if (paymentHasProcedureLink(payment, knownLineIds)) return sum
+    return sum + Math.max(0, Math.round(payment.amount || 0))
+  }, 0)
+}
+
+/** Saldo visible de un procedimiento, alineado al total del tratamiento si solo hay una fila. */
+export function lineRemainingBalance(
+  line: Pick<PaymentControlLine, 'id' | 'unitPrice' | 'quantity' | 'cupsCode'>,
+  lines: PaymentControlLine[],
+  payments: PaymentRecord[],
+): number {
+  const billable = lineBillablePrice(line)
+  const linkedPaid = paidAmountForLine(line.id, payments)
+  const unlinked = lines.length === 1 ? unlinkedPaidAmount(payments, lines) : 0
+  return Math.max(0, billable - linkedPaid - unlinked)
+}
+
 /** Valor del tratamiento menos los pagos registrados. */
 export function treatmentPaymentBalance(
   lines: PaymentControlLine[],
@@ -109,10 +136,18 @@ export function importBudgetIntoPaymentControl(
   treatmentPlan: TreatmentPlanItem[],
   existing: PaymentControlLine[],
 ): PaymentControlLine[] {
-  const linked = new Set(existing.map((line) => line.budgetItemId).filter(Boolean))
+  const byBudgetId = new Map(
+    existing.filter((line) => line.budgetItemId).map((line) => [line.budgetItemId as string, line]),
+  )
+  const linked = new Set(byBudgetId.keys())
   const imported = budgetItems
     .filter((item) => item.procedure.trim() && !linked.has(item.id))
-    .map((item) => lineFromBudgetItem(item, treatmentPlan))
+    .map((item) => {
+      const line = lineFromBudgetItem(item, treatmentPlan)
+      // Reutilizar id estable si ya existió esta fila (no huérfanos de abonos).
+      const previous = byBudgetId.get(item.id)
+      return previous ? { ...line, id: previous.id } : line
+    })
 
   return imported.length > 0 ? [...existing, ...imported] : existing
 }

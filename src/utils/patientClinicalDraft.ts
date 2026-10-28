@@ -19,6 +19,7 @@ import {
   preserveEvolutionWorkflowStatus,
   shouldPersistClinicalDraft,
 } from '../../shared/clinicalRecordGuard.js'
+import { mergeClinicalPaymentSections } from '../../shared/paymentControlMerge.js'
 import { sortEvolutionNotesChronologically } from './recordIntegrity'
 import { toPatientForeignKey } from './patientId'
 
@@ -137,6 +138,7 @@ export async function savePatientValuationDraft(
     evolutionNotes: existing?.evolutionNotes ?? [],
     valuationDraft: {
       ...normalizedValuation,
+      ...mergeClinicalPaymentSections(existing?.valuationDraft, normalizedValuation),
       informedConsent: keepStoredConsentSignatures(
         existing?.valuationDraft?.informedConsent,
         normalizedValuation.informedConsent,
@@ -170,6 +172,9 @@ export async function savePatientClinicalDraft(
     valuationDraft: existing?.valuationDraft ?? null,
     clinicalDraft: {
       ...normalized,
+      // Abonos legales: el React state de una terminal no puede borrar
+      // pagos que otra terminal ya dejó en IndexedDB.
+      ...mergeClinicalPaymentSections(existing?.clinicalDraft, normalized),
       informedConsent: keepStoredConsentSignatures(
         existing?.clinicalDraft?.informedConsent,
         normalized.informedConsent,

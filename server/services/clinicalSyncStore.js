@@ -8,6 +8,7 @@ import {
 } from './clinicAttachmentStore.js'
 import { readDurableJsonWithMerge, writeDurableJsonWithMerge } from './durableStore.js'
 import { shouldReplaceClinicalDocument } from '../../shared/clinicalRecordGuard.js'
+import { withMergedClinicalPayments } from '../../shared/paymentControlMerge.js'
 import { odontogramRecordHasMarks } from './odontogramMerge.js'
 
 const STORE_FILE = join(config.dataDir, 'clinical-sync.json')
@@ -62,14 +63,46 @@ function shouldReplaceSyncedRecord(prev, next, entityKey) {
   return stamp(next) >= stamp(prev)
 }
 
+function mergeClinicalEntityRecord(prev, next, entityKey) {
+  if (!prev) return next
+  if (entityKey !== 'clinicalRecords' && entityKey !== 'drafts') {
+    return shouldReplaceSyncedRecord(prev, next, entityKey) ? next : prev
+  }
+  if (shouldReplaceSyncedRecord(prev, next, entityKey)) {
+    // El ganador conserva también los abonos del perdedor (unión por id).
+    const mergedPayload = withMergedClinicalPayments(
+      { ...(next.payload || {}), updatedAt: next.updatedAt },
+      prev.payload || {},
+    )
+    const { updatedAt: _ignored, ...payload } = mergedPayload
+    return {
+      ...next,
+      payload: {
+        ...(next.payload || {}),
+        ...payload,
+      },
+    }
+  }
+  const mergedPayload = withMergedClinicalPayments(
+    { ...(prev.payload || {}), updatedAt: prev.updatedAt },
+    next.payload || {},
+  )
+  const { updatedAt: _ignored, ...payload } = mergedPayload
+  return {
+    ...prev,
+    payload: {
+      ...(prev.payload || {}),
+      ...payload,
+    },
+  }
+}
+
 function mergeRecordMaps(left = {}, right = {}, entityKey = '') {
   const out = { ...left }
   for (const [syncId, record] of Object.entries(right)) {
     if (!record || typeof record !== 'object') continue
     const prev = out[syncId]
-    if (shouldReplaceSyncedRecord(prev, record, entityKey)) {
-      out[syncId] = record
-    }
+    out[syncId] = mergeClinicalEntityRecord(prev, record, entityKey)
   }
   return out
 }
@@ -280,8 +313,9 @@ function mergeIncomingMap(target, incoming, clinicId, acceptedKey, accepted) {
     const record = normalizeRecord(raw, clinicId)
     if (!record) continue
     const prev = target[record.syncId]
-    if (shouldReplaceSyncedRecord(prev, record, acceptedKey)) {
-      target[record.syncId] = record
+    const merged = mergeClinicalEntityRecord(prev, record, acceptedKey)
+    if (merged !== prev) {
+      target[record.syncId] = merged
       count += 1
     }
   }

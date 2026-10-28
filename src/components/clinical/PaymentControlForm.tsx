@@ -46,6 +46,7 @@ import {
 import {
   emptyPaymentControlLine,
   lineBillablePrice,
+  lineRemainingBalance,
   paidAmountForLine,
   sumPaymentControlPrices,
   treatmentPaymentBalance,
@@ -418,13 +419,13 @@ export function PaymentControlForm({
   const balance = treatmentPaymentBalance(paymentControlLines, paymentControl)
   const draftLine = paymentControlLines.find((line) => line.id === paymentDraftLineId) ?? null
   const draftRemaining = draftLine
-    ? Math.max(0, lineBillablePrice(draftLine) - paidAmountForLine(draftLine.id, paymentControl))
+    ? lineRemainingBalance(draftLine, paymentControlLines, paymentControl)
     : 0
   const selectedBundle = paymentControlLines
     .filter((line) => selectedLineIds.includes(line.id))
     .map((line) => ({
       line,
-      remaining: Math.max(0, lineBillablePrice(line) - paidAmountForLine(line.id, paymentControl)),
+      remaining: lineRemainingBalance(line, paymentControlLines, paymentControl),
     }))
     .filter((item) => item.remaining > 0 && item.line.procedure.trim())
   const selectedBundleTotal = selectedBundle.reduce((sum, item) => sum + item.remaining, 0)
@@ -432,7 +433,10 @@ export function PaymentControlForm({
     budgetItems.some((item) => item.procedure.trim()) ||
     Boolean(orthodonticsBudget?.active) ||
     Boolean(dentalImplantsBudget?.active)
-  const unlinkedPayments = paymentControl.filter((payment) => !paymentHasProcedureLink(payment))
+  const knownLineIds = new Set(paymentControlLines.map((line) => line.id))
+  const unlinkedPayments = paymentControl.filter(
+    (payment) => !paymentHasProcedureLink(payment, knownLineIds),
+  )
   const pendingAgreements = supplementalPlanItems(paymentControlLines, paymentPlan)
   const orthoAgreements = orthodonticsPlanItems(paymentPlan)
   const orthoDraft = orthoAgreements.find((item) => item.id === orthoDraftId) ?? null
@@ -498,8 +502,15 @@ export function PaymentControlForm({
 
   const removeLine = (id: string) => {
     const line = paymentControlLines.find((item) => item.id === id)
+    if (!line) return
+    if (paidAmountForLine(id, paymentControl) > 0) {
+      setPaymentNotice(
+        'No se puede eliminar un procedimiento con abonos registrados. Es un registro legal; reasigne o conserve la fila.',
+      )
+      return
+    }
     onLinesChange(paymentControlLines.filter((item) => item.id !== id))
-    if (line) onPaymentPlanChange(removePlanItemsForLine(line, paymentPlan))
+    onPaymentPlanChange(removePlanItemsForLine(line, paymentPlan))
   }
 
   const promoteAgreement = (item: PaymentPlanItem) => {
@@ -518,9 +529,7 @@ export function PaymentControlForm({
 
   const registerPayment = async (line: PaymentControlLine, input: PaymentRegistrationInput) => {
     if (disabled || paymentBusy) return
-    const billable = lineBillablePrice(line)
-    const paid = paidAmountForLine(line.id, paymentControl)
-    const remaining = Math.max(0, billable - paid)
+    const remaining = lineRemainingBalance(line, paymentControlLines, paymentControl)
     const amount = Math.round(input.amount)
     if (amount <= 0 || amount > remaining) return
 
@@ -1082,8 +1091,8 @@ export function PaymentControlForm({
             const cupsOpen = openMenu?.id === line.id && openMenu.field === 'cups'
             const billable = lineBillablePrice(line)
             const paid = paidAmountForLine(line.id, paymentControl)
-            const remaining = Math.max(0, billable - paid)
-            const status = procedurePaymentStatus(remaining, paid)
+            const remaining = lineRemainingBalance(line, paymentControlLines, paymentControl)
+            const status = procedurePaymentStatus(remaining, Math.max(paid, billable - remaining))
             const linePayments = paymentControl.filter((payment) => amountAppliedToLine(payment, line.id) > 0)
             const abonoHistory = abonoHistoryForLine(line.id, billable, paymentControl)
             const latestPayment = [...linePayments].reverse().find((payment) => payment.invoices.length > 0)

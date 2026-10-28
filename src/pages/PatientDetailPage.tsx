@@ -87,6 +87,7 @@ import {
   savePatientValuationDraft,
 } from '@/utils/patientClinicalDraft'
 import { isRemoteDraftNewer } from '@/utils/clinicalDraftMerge'
+import { mergeClinicalPaymentSections } from '../../shared/paymentControlMerge.js'
 import {
   mergeLivingChart,
   odontogramAfterPersist,
@@ -423,6 +424,60 @@ export function PatientDetailPage() {
       cancelled = true
     }
   }, [id, patientForeignKey, patient?.id, patient?.treatmentCompleted])
+
+  // Abonos legales: al volver el foco o tras un pull, unir pagos de IndexedDB
+  // al formulario abierto para que dos terminales no muestren saldos distintos.
+  useEffect(() => {
+    if (!patientForeignKey || !clinicalData || isArchiveView) return
+
+    let cancelled = false
+
+    const pullPaymentsIntoForm = async () => {
+      try {
+        const draft = await getPatientClinicalDraft(patientForeignKey)
+        const living = draft?.clinicalDraft ?? draft?.valuationDraft
+        if (!living || cancelled) return
+        setClinicalData((prev) => {
+          if (!prev) return prev
+          const mergedPayments = mergeClinicalPaymentSections(prev, living)
+          const prevKey = JSON.stringify({
+            p: prev.paymentControl,
+            o: prev.orthodonticsPaymentControl,
+            l: prev.paymentControlLines,
+          })
+          const nextKey = JSON.stringify({
+            p: mergedPayments.paymentControl,
+            o: mergedPayments.orthodonticsPaymentControl,
+            l: mergedPayments.paymentControlLines,
+          })
+          if (prevKey === nextKey) return prev
+          return { ...prev, ...mergedPayments }
+        })
+      } catch {
+        // Pull opcional: el próximo autoguardado igual une por id.
+      }
+    }
+
+    const onFocus = () => {
+      void pullPaymentsIntoForm()
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void pullPaymentsIntoForm()
+    }
+
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    const interval = window.setInterval(() => {
+      void pullPaymentsIntoForm()
+    }, 4_000)
+
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(interval)
+    }
+  }, [patientForeignKey, Boolean(clinicalData), isArchiveView])
 
   useEffect(() => {
     if (!patient || !id) return

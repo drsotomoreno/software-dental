@@ -27,6 +27,32 @@ import {
   isSignedClinicalDocument,
   shouldReplaceClinicalDocument,
 } from '../../shared/clinicalRecordGuard.js'
+import { withMergedClinicalPayments } from '../../shared/paymentControlMerge.js'
+
+function paymentFingerprint(form: {
+  paymentControl?: unknown
+  orthodonticsPaymentControl?: unknown
+  paymentControlLines?: unknown
+  clinicalDraft?: {
+    paymentControl?: unknown
+    orthodonticsPaymentControl?: unknown
+    paymentControlLines?: unknown
+  } | null
+  valuationDraft?: {
+    paymentControl?: unknown
+    orthodonticsPaymentControl?: unknown
+    paymentControlLines?: unknown
+  } | null
+} | null | undefined): string {
+  if (!form) return ''
+  return JSON.stringify({
+    p: form.paymentControl ?? form.clinicalDraft?.paymentControl ?? null,
+    o: form.orthodonticsPaymentControl ?? form.clinicalDraft?.orthodonticsPaymentControl ?? null,
+    l: form.paymentControlLines ?? form.clinicalDraft?.paymentControlLines ?? null,
+    vp: form.valuationDraft?.paymentControl ?? null,
+    vo: form.valuationDraft?.orthodonticsPaymentControl ?? null,
+  })
+}
 import {
   clinicalDraftHasSection4,
   odontogramHasMarks,
@@ -150,12 +176,27 @@ async function mergeClinicalRecords(records: ClinicalSyncRecord[]): Promise<bool
     }
 
     if (local?.id != null) {
-      if (!shouldReplaceClinicalDocument(local, { ...remote, payload: next })) continue
+      if (!shouldReplaceClinicalDocument(local, { ...remote, payload: next })) {
+        // Aunque el remoto no reemplace el cuerpo clínico, los abonos se unen por id.
+        const paymentsOnly = withMergedClinicalPayments(local, next)
+        if (paymentFingerprint(paymentsOnly) !== paymentFingerprint(local)) {
+          await db.clinicalRecords.update(local.id, {
+            paymentControl: paymentsOnly.paymentControl,
+            paymentControlLines: paymentsOnly.paymentControlLines,
+            orthodonticsPaymentControl: paymentsOnly.orthodonticsPaymentControl,
+            paymentPlan: paymentsOnly.paymentPlan,
+            pendingSync: true,
+          })
+          changed = true
+        }
+        continue
+      }
+      const merged = withMergedClinicalPayments(next, local)
       const patch = {
-        ...next,
-        informedConsent: next.informedConsent
-          ? keepStoredConsentSignatures(local.informedConsent, next.informedConsent)
-          : (local.informedConsent ?? next.informedConsent),
+        ...merged,
+        informedConsent: merged.informedConsent
+          ? keepStoredConsentSignatures(local.informedConsent, merged.informedConsent)
+          : (local.informedConsent ?? merged.informedConsent),
       }
       delete patch.id
       await db.clinicalRecords.update(local.id, patch)
@@ -302,35 +343,44 @@ async function mergeDrafts(records: ClinicalSyncRecord[]): Promise<boolean> {
         clinicalBodyHasContent(local) ||
         isSignedClinicalDocument(local) ||
         clinicalDraftHasSection4(local)
-      if (localHasHistory && remoteIsEmptyShell) {
+      // Une abonos del remoto aunque el borrador local gane el resto del documento.
+      const paymentsMerged = withMergedClinicalPayments(local, next)
+      if (paymentFingerprint(paymentsMerged) !== paymentFingerprint(local)) {
+        await db.patientClinicalDrafts.put({
+          ...paymentsMerged,
+          updatedAt: new Date().toISOString(),
+        })
+        changed = true
+      } else if (localHasHistory && remoteIsEmptyShell) {
         await db.patientClinicalDrafts.update(patientId, { updatedAt: new Date().toISOString() })
         changed = true
       }
       continue
     }
+    const winner = local ? withMergedClinicalPayments(next, local) : next
     const kept: PatientClinicalDraft = local
       ? {
-          ...next,
-          clinicalDraft: next.clinicalDraft
+          ...winner,
+          clinicalDraft: winner.clinicalDraft
             ? {
-                ...next.clinicalDraft,
+                ...winner.clinicalDraft,
                 informedConsent: keepStoredConsentSignatures(
                   local.clinicalDraft?.informedConsent,
-                  next.clinicalDraft.informedConsent,
+                  winner.clinicalDraft.informedConsent,
                 ),
               }
-            : next.clinicalDraft,
-          valuationDraft: next.valuationDraft
+            : winner.clinicalDraft,
+          valuationDraft: winner.valuationDraft
             ? {
-                ...next.valuationDraft,
+                ...winner.valuationDraft,
                 informedConsent: keepStoredConsentSignatures(
                   local.valuationDraft?.informedConsent,
-                  next.valuationDraft.informedConsent,
+                  winner.valuationDraft.informedConsent,
                 ),
               }
-            : next.valuationDraft,
+            : winner.valuationDraft,
         }
-      : next
+      : winner
     await db.patientClinicalDrafts.put(kept)
     changed = true
   }

@@ -712,7 +712,10 @@ function buildPaymentsSection(data: ClinicalRecordFormData): string {
     )
     .join('')
   const rows = `${lineBoxes}${agreementBoxes}`
-  const unlinkedPayments = data.paymentControl.filter((payment) => !paymentHasProcedureLink(payment))
+  const knownLineIds = new Set(visible.map((line) => line.id))
+  const unlinkedPayments = data.paymentControl.filter(
+    (payment) => !paymentHasProcedureLink(payment, knownLineIds),
+  )
   const unlinkedRows = unlinkedPayments
     .map(
       (payment) =>

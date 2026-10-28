@@ -4,6 +4,8 @@
  * servidor, ni al bajar el snapshot, ni al autoguardar el formulario.
  */
 
+import { paymentControlHasContent } from './paymentControlMerge.js'
+
 function text(value) {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -254,6 +256,7 @@ export function clinicalFormHasContent(form) {
   if (Array.isArray(form.budgetItems) && form.budgetItems.some((item) => text(item?.procedure))) {
     return true
   }
+  if (paymentControlHasContent(form)) return true
   return specializedAnnexesHaveContent(form.specializedAnnexes)
 }
 
@@ -273,6 +276,7 @@ export function clinicalDocumentRichness(record) {
     if (informedConsentHasContent(form.informedConsent)) score += 2
     if (evolutionNotesHaveContent(form.evolutionNotes)) score += 4
     if (specializedAnnexesHaveContent(form.specializedAnnexes)) score += 2
+    if (paymentControlHasContent(form)) score += 5
   }
   return score
 }

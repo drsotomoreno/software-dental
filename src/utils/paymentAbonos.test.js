@@ -5,6 +5,7 @@ import {
   abonoHistoryForLine,
   documentKindFromEmission,
   parseAbonoAmount,
+  paymentHasProcedureLink,
   paymentReceiptActionLabel,
   procedurePaymentStatus,
   remainingAfterAbono,
@@ -106,6 +107,21 @@ test('un comprobante antiguo sin tipo usa la etiqueta genérica', () => {
   assert.equal(paymentReceiptActionLabel(kind), 'Ver Recibo / Factura')
   assert.equal(documentKindFromEmission('factura', 'manual'), 'recibo_interno')
   assert.equal(documentKindFromEmission('factura', 'provider'), 'factura')
+})
+
+test('un abono con línea borrada vuelve a verse como sin procedimiento', () => {
+  const orphan = {
+    id: 'old',
+    paymentControlLineId: 'linea-eliminada',
+    amount: 1_000_000,
+    paymentDate: '2026-08-11',
+    paymentMethod: 'contado',
+    paymentReason: 'abono',
+    invoices: [],
+  }
+  assert.equal(paymentHasProcedureLink(orphan), true)
+  assert.equal(paymentHasProcedureLink(orphan, new Set(['linea-actual'])), false)
+  assert.equal(paymentHasProcedureLink(orphan, new Set(['linea-eliminada'])), true)
 })
 
 test('un mismo recibo abona solo la parte de cada procedimiento', () => {
