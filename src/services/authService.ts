@@ -20,7 +20,7 @@ import {
   mapApiUserToAuthUser,
 } from '@/services/apiAuthService'
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
-import { seatLimitForAccount, planDisplayName } from '../../shared/subscriptionPlans.js'
+import { checkRethusLimit, hasRethusCode, rethusLimitReachedMessage } from '../../shared/subscriptionPlans.js'
 import {
   createClinicMember,
   deleteClinicMember,
@@ -273,12 +273,18 @@ async function requireUserManager(): Promise<
   return { ok: true, actorRole: actor.role ?? 'admin' }
 }
 
-function localSeatError(used: number, max: number | null, planName: string): string | null {
-  if (max == null) return null
-  if (used >= max) {
-    return `Su plan ${planName} permite máximo ${max} colaboradores. Actualmente tiene ${used}. Mejore el plan para agregar más usuarios.`
+function localRethusError(
+  members: UserProfile[],
+  account: Parameters<typeof checkRethusLimit>[0],
+  candidate: { rethusNumber?: string | null },
+): string | null {
+  if (!hasRethusCode(candidate)) return null
+  const current = members.filter((item) => hasRethusCode(item)).length
+  try {
+    return rethusLimitReachedMessage(checkRethusLimit(account, current))
+  } catch (error) {
+    return error instanceof Error ? error.message : 'Plan de suscripción inválido'
   }
-  return null
 }
 
 function staffPhoneDigits(value: string | undefined): string {
@@ -393,7 +399,7 @@ export async function createAppUser(
   if (api.ok) {
     await db.users.put(api.user)
     await seedUserCredentials(api.user.id, password)
-    return { ok: true, user: api.user }
+    return { ok: true, user: api.user, message: api.message }
   }
   if (getStoredApiAuth()?.token) {
     return { ok: false, error: api.error }
@@ -413,13 +419,10 @@ export async function createAppUser(
   const members = clinicId
     ? allUsers.filter((item) => String(item.clinicId || item.id) === String(clinicId))
     : allUsers
-  const maxSeats = seatLimitForAccount(apiAuth?.user ?? {})
-  const seatError = localSeatError(
-    members.length,
-    maxSeats,
-    planDisplayName(apiAuth?.user?.plan, apiAuth?.user?.estado_pago),
-  )
-  if (seatError) return { ok: false, error: seatError }
+  const rethusError = localRethusError(members, apiAuth?.user ?? {}, {
+    rethusNumber: isAuxiliar ? '' : data.rethusNumber,
+  })
+  if (rethusError) return { ok: false, error: rethusError }
 
   const user: UserProfile = {
     id: data.id ?? generateId(),
@@ -448,7 +451,7 @@ export async function createAppUser(
 
   await db.users.add(user)
   await seedUserCredentials(user.id, password)
-  return { ok: true, user }
+  return { ok: true, user, message: undefined }
 }
 
 export async function updateAppUser(
@@ -532,8 +535,27 @@ export async function updateAppUser(
   }
   if (!current) return { ok: false, error: 'Usuario no encontrado.' }
 
+  const nextRethus = nextPatch.rethusNumber !== undefined
+    ? nextPatch.rethusNumber
+    : current.rethusNumber
+  if (!hasRethusCode(current) && hasRethusCode({ rethusNumber: nextRethus })) {
+    const { apiAuth } = currentClinicScope()
+    const rethusError = localRethusError(
+      await localClinicMembers(current),
+      apiAuth?.user ?? {},
+      { rethusNumber: nextRethus },
+    )
+    if (rethusError) return { ok: false, error: rethusError }
+  }
+
   await db.users.update(userId, nextPatch)
   return { ok: true }
+}
+
+async function localClinicMembers(user: UserProfile): Promise<UserProfile[]> {
+  const clinicId = String(user.clinicId || user.id)
+  const all = await db.users.toArray()
+  return all.filter((item) => String(item.clinicId || item.id) === clinicId)
 }
 
 export async function resetAppUserPassword(

@@ -12,6 +12,7 @@ import {
   updateAppUser,
 } from '@/services/authService'
 import { fetchClinicUsers, type ClinicSeatSnapshot } from '@/services/subscriptionService'
+import { snapshotLimitError } from '../../shared/subscriptionPlans.js'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { UserProfile, UserRole } from '@/types/user'
 import {
@@ -97,7 +98,7 @@ export function UsersManagementPage() {
   const [error, setError] = useState('')
 
   const canManage = canManageClinicTeam(currentUser)
-  const seatsExhausted = Boolean(seats && seats.max != null && seats.used >= seats.max)
+  const rethusExhausted = Boolean(seats && snapshotLimitError(seats, false))
 
   const reloadUsers = useCallback(async () => {
     const api = await fetchClinicUsers()
@@ -131,10 +132,11 @@ export function UsersManagementPage() {
       return
     }
     const { password, ...userData } = createForm
-    if (seatsExhausted) {
-      showErr(
-        `Su plan ${seats?.planName ?? 'actual'} permite máximo ${seats?.max} colaboradores. Actualmente tiene ${seats?.used}. Mejore el plan para agregar más usuarios.`,
-      )
+    const assigningRethus =
+      userData.role !== 'recepcion' && String(userData.rethusNumber ?? '').trim() !== ''
+    const limitError = assigningRethus && seats ? snapshotLimitError(seats, false) : null
+    if (limitError) {
+      showErr(limitError)
       return
     }
     const result = await createAppUser(userData, password)
@@ -154,7 +156,7 @@ export function UsersManagementPage() {
     setShowCreate(false)
     setCreateForm(emptyUserForm(sedeDefaults(currentUser)))
     await reloadUsers()
-    showMsg('Usuario creado correctamente.')
+    showMsg(result.message || 'Usuario creado correctamente.')
   }
 
   const openEdit = (u: UserProfile) => {
@@ -189,6 +191,15 @@ export function UsersManagementPage() {
     if (!canManage) {
       showErr(USERS_MANAGE_DENIED)
       return
+    }
+    const hadRethus = String(editingUser.rethusNumber ?? '').trim() !== ''
+    const willHaveRethus = String(editForm.rethusNumber ?? '').trim() !== ''
+    if (!hadRethus && willHaveRethus && seats) {
+      const limitError = snapshotLimitError(seats, false)
+      if (limitError) {
+        showErr(limitError)
+        return
+      }
     }
     const result = await updateAppUser(editingUser.id, {
       ...editForm,
@@ -300,12 +311,6 @@ export function UsersManagementPage() {
             <button
               type="button"
               onClick={() => {
-                if (seatsExhausted) {
-                  showErr(
-                    `Su plan ${seats?.planName ?? 'actual'} permite máximo ${seats?.max} colaboradores. Actualmente tiene ${seats?.used}. Mejore el plan para agregar más usuarios.`,
-                  )
-                  return
-                }
                 setShowCreate(true)
               }}
               className="btn-primary"
@@ -328,19 +333,24 @@ export function UsersManagementPage() {
         {seats && (
           <div
             className={`rounded-lg border px-4 py-3 text-sm ${
-              seatsExhausted
+              rethusExhausted
                 ? 'border-amber-200 bg-amber-50 text-amber-900'
                 : 'border-slate-200 bg-slate-50 text-slate-700'
             }`}
           >
-            {seats.max == null ? (
-              <>Licencias de colaboradores: sin tope en esta cuenta.</>
+            {seats.maxRethus == null && seats.maxReps == null ? (
+              <>Licencias sin tope en esta cuenta.</>
             ) : (
               <>
-                Plan {seats.planName}: {seats.used} de {seats.max} colaboradores.
-                {seatsExhausted
-                  ? ' Alcanzó el máximo de su plan. Mejore la suscripción para agregar más usuarios.'
-                  : ''}
+                <p>
+                  {seats.planName}: profesionales (ReTHUS) {seats.rethusUsed ?? 0}
+                  {seats.maxRethus == null ? '' : ` de ${seats.maxRethus}`}.
+                  {rethusExhausted ? ' Alcanzó el máximo de profesionales.' : ''}
+                </p>
+                <p className="mt-1">
+                  Sedes REPS: {seats.repsUsed ?? 0}
+                  {seats.maxReps == null ? '' : ` de ${seats.maxReps}`}.
+                </p>
               </>
             )}
           </div>

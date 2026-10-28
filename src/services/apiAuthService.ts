@@ -22,6 +22,12 @@ export interface ApiSubscriptionUser {
   estado_pago: 'pendiente' | 'activo' | 'vencido' | 'exento' | 'prueba'
   fecha_vencimiento: string | null
   plan?: string | null
+  /** Tope manual de auxiliares. Solo lo aplica el plan corporativo. */
+  customMaxAssistants?: number | null
+  custom_max_assistants?: number | null
+  /** Tope manual de profesionales ReTHUS. Solo lo aplica el plan corporativo. */
+  customMaxRethus?: number | null
+  custom_max_rethus?: number | null
   documentType?: string
   documentNumber?: string
   rethusNumber?: string
