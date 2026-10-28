@@ -9,7 +9,11 @@ import {
   retainSignedEvolutionBody,
   type EvolutionNote,
 } from '@/types/evolutionNote'
-import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
+import type {
+  ClinicalRecordFormData,
+  DentalImplantsBudget,
+  OrthodonticsBudget,
+} from '@/types/clinicalRecord'
 import type { OdontogramData } from '@/types/odontogram'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import { normalizeAnamnesis } from '@/types/anamnesis'
@@ -22,6 +26,54 @@ import {
 import { mergeClinicalPaymentSections } from '../../shared/paymentControlMerge.js'
 import { sortEvolutionNotesChronologically } from './recordIntegrity'
 import { toPatientForeignKey } from './patientId'
+import {
+  lineSubtotal,
+  normalizeDentalImplantsBudget,
+  normalizeOrthodonticsBudget,
+} from './budget'
+
+/** Suma montos de líneas; no exige `active` (desactivar conserva precios). */
+function orthodonticsMonetaryTotal(budget: OrthodonticsBudget | undefined): number {
+  const normalized = normalizeOrthodonticsBudget(budget)
+  return (
+    lineSubtotal(normalized.initialInstallment) +
+    lineSubtotal(normalized.controls) +
+    lineSubtotal(normalized.retainers)
+  )
+}
+
+function dentalImplantsMonetaryTotal(budget: DentalImplantsBudget | undefined): number {
+  const normalized = normalizeDentalImplantsBudget(budget)
+  return (
+    lineSubtotal(normalized.implantPlacement) + lineSubtotal(normalized.prosthetics)
+  )
+}
+
+/**
+ * Un autoguardado vacío no puede borrar el presupuesto de ortodoncia/implantes
+ * ya capturado (documento legal).
+ */
+function preferSpecialtyBudgets(
+  existing: ClinicalRecordFormData | null | undefined,
+  incoming: ClinicalRecordFormData,
+): Pick<ClinicalRecordFormData, 'orthodonticsBudget' | 'dentalImplantsBudget'> {
+  const nextOrtho = normalizeOrthodonticsBudget(incoming.orthodonticsBudget)
+  const prevOrtho = normalizeOrthodonticsBudget(existing?.orthodonticsBudget)
+  const nextImplants = normalizeDentalImplantsBudget(incoming.dentalImplantsBudget)
+  const prevImplants = normalizeDentalImplantsBudget(existing?.dentalImplantsBudget)
+
+  return {
+    orthodonticsBudget:
+      orthodonticsMonetaryTotal(prevOrtho) > 0 && orthodonticsMonetaryTotal(nextOrtho) === 0
+        ? prevOrtho
+        : nextOrtho,
+    dentalImplantsBudget:
+      dentalImplantsMonetaryTotal(prevImplants) > 0 &&
+      dentalImplantsMonetaryTotal(nextImplants) === 0
+        ? prevImplants
+        : nextImplants,
+  }
+}
 
 function preserveImmutableEvolutionNotes(
   incoming: EvolutionNote[],
@@ -139,6 +191,7 @@ export async function savePatientValuationDraft(
     valuationDraft: {
       ...normalizedValuation,
       ...mergeClinicalPaymentSections(existing?.valuationDraft, normalizedValuation),
+      ...preferSpecialtyBudgets(existing?.valuationDraft, normalizedValuation),
       informedConsent: keepStoredConsentSignatures(
         existing?.valuationDraft?.informedConsent,
         normalizedValuation.informedConsent,
@@ -175,6 +228,7 @@ export async function savePatientClinicalDraft(
       // Abonos legales: el React state de una terminal no puede borrar
       // pagos que otra terminal ya dejó en IndexedDB.
       ...mergeClinicalPaymentSections(existing?.clinicalDraft, normalized),
+      ...preferSpecialtyBudgets(existing?.clinicalDraft, normalized),
       informedConsent: keepStoredConsentSignatures(
         existing?.clinicalDraft?.informedConsent,
         normalized.informedConsent,

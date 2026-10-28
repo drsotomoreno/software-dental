@@ -239,6 +239,20 @@ export function specializedAnnexesHaveContent(annexes) {
   return annexNodeHasContent(annexes, 0)
 }
 
+/** Presupuesto de especialidad con montos o marcado como incluido (documento legal). */
+function specialtyBudgetHasContent(budget) {
+  if (!budget || typeof budget !== 'object') return false
+  if (budget.active === true) return true
+  const lines = [
+    budget.initialInstallment,
+    budget.controls,
+    budget.retainers,
+    budget.implantPlacement,
+    budget.prosthetics,
+  ]
+  return lines.some((line) => line && Number(line.unitPrice) > 0)
+}
+
 /** Contenido clínico real. La cédula del profesional o un formulario vacío no cuentan. */
 export function clinicalFormHasContent(form) {
   if (!form || typeof form !== 'object') return false
@@ -256,6 +270,8 @@ export function clinicalFormHasContent(form) {
   if (Array.isArray(form.budgetItems) && form.budgetItems.some((item) => text(item?.procedure))) {
     return true
   }
+  if (specialtyBudgetHasContent(form.orthodonticsBudget)) return true
+  if (specialtyBudgetHasContent(form.dentalImplantsBudget)) return true
   if (paymentControlHasContent(form)) return true
   return specializedAnnexesHaveContent(form.specializedAnnexes)
 }
@@ -276,6 +292,8 @@ export function clinicalDocumentRichness(record) {
     if (informedConsentHasContent(form.informedConsent)) score += 2
     if (evolutionNotesHaveContent(form.evolutionNotes)) score += 4
     if (specializedAnnexesHaveContent(form.specializedAnnexes)) score += 2
+    if (specialtyBudgetHasContent(form.orthodonticsBudget)) score += 4
+    if (specialtyBudgetHasContent(form.dentalImplantsBudget)) score += 3
     if (paymentControlHasContent(form)) score += 5
   }
   return score

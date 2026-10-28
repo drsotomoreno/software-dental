@@ -1,11 +1,9 @@
 import {
   calculateTotal,
   formatOrthodonticBudgetSummary,
-  type OrthodonticBudgetState,
 } from '@/components/clinical/orthodontics/calculator/types'
 import type {
   ClinicalRecordFormData,
-  OrthodonticsBudget,
   PaymentPlanItem,
   TreatmentPlanItem,
 } from '@/types/clinicalRecord'
@@ -16,7 +14,7 @@ import {
 } from '@/types/orthodonticsAnnex'
 import {
   calcBudgetSummary,
-  createEmptyOrthodonticsBudget,
+  normalizeOrthodonticsBudget,
   ORTHODONTICS_PAYMENT_PLAN_PROCEDURES,
   syncPaymentPlanWithBudget,
 } from './budget'
@@ -25,6 +23,9 @@ import {
   omitOrthodonticsPackageBudgetLines,
   orthodonticsPackageProcedureNames,
 } from './orthodonticsBudgetLines'
+import { mapAnnexBudgetToClinicalBudget } from '../../shared/orthodonticsAnnexBudgetMap.js'
+
+export { mapAnnexBudgetToClinicalBudget }
 
 const SYNC_NOTES_START = '--- Plan de ortodoncia (anexo) ---'
 const SYNC_NOTES_END = '--- Fin plan de ortodoncia ---'
@@ -64,62 +65,6 @@ export function buildOrthodonticsAnnexTreatmentPlanNotes(orthodontics: Orthodont
   if (lines.length === 0) return ''
 
   return `${SYNC_NOTES_START}\n${lines.join('\n')}\n${SYNC_NOTES_END}`
-}
-
-export function mapAnnexBudgetToClinicalBudget(
-  orthodontics: OrthodonticsAnnex,
-): OrthodonticsBudget {
-  const empty = createEmptyOrthodonticsBudget()
-  const annexBudget = orthodontics.orthodonticBudget
-
-  if (!orthodontics.treatmentType || !annexBudget) {
-    return { ...empty, active: false }
-  }
-
-  if (annexBudget.kind === 'standard') {
-    const values = annexBudget.values
-    const hasValues =
-      values.initialPayment > 0 ||
-      values.monthlyControlsCount > 0 ||
-      values.pricePerControl > 0 ||
-      values.retainerPrice > 0
-
-    return {
-      active: hasValues,
-      initialInstallment: { quantity: 1, unitPrice: values.initialPayment },
-      controls: {
-        quantity: values.monthlyControlsCount,
-        unitPrice: values.pricePerControl,
-      },
-      retainers: { quantity: 1, unitPrice: values.retainerPrice },
-    }
-  }
-
-  return mapMultiPhaseAnnexBudgetToClinical(annexBudget)
-}
-
-function mapMultiPhaseAnnexBudgetToClinical(
-  annexBudget: Extract<OrthodonticBudgetState, { kind: 'multi_phase' }>,
-): OrthodonticsBudget {
-  const phases = annexBudget.values.phases
-  const initialTotal = phases.reduce((sum, phase) => sum + phase.initialPayment, 0)
-  const controlsCount = phases.reduce((sum, phase) => sum + phase.monthlyControlsCount, 0)
-  const controlsTotal = phases.reduce(
-    (sum, phase) => sum + phase.monthlyControlsCount * phase.pricePerControl,
-    0,
-  )
-  const hasValues =
-    initialTotal > 0 || controlsTotal > 0 || annexBudget.values.retainerPrice > 0
-
-  return {
-    active: hasValues,
-    initialInstallment: { quantity: 1, unitPrice: initialTotal },
-    controls: {
-      quantity: controlsCount,
-      unitPrice: controlsCount > 0 ? controlsTotal / controlsCount : 0,
-    },
-    retainers: { quantity: 1, unitPrice: annexBudget.values.retainerPrice },
-  }
 }
 
 function syncOrthodonticsTreatmentPlanItem(
@@ -195,7 +140,11 @@ export function syncClinicalDataFromOrthodonticsAnnex(
         .join('\n\n')
     : removeSyncedNotesBlock(data.treatmentPlanNotes ?? '')
 
-  const orthodonticsBudget = mapAnnexBudgetToClinicalBudget(orthodontics)
+  // Documento legal: sin montos en la calculadora del anexo no se borra
+  // el presupuesto clínico ya capturado (sección 8 / control de pagos).
+  const orthodonticsBudget =
+    mapAnnexBudgetToClinicalBudget(orthodontics) ??
+    normalizeOrthodonticsBudget(data.orthodonticsBudget)
   const previousAnnexItems = (data.treatmentPlan ?? []).filter(
     (item) => item.source === 'orthodontics_annex',
   )

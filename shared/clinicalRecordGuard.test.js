@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  clinicalFormHasContent,
   isBlankClinicalShell,
   mergeSignedEvolutionNotes,
   preserveEvolutionWorkflowStatus,
@@ -242,4 +243,43 @@ test('un autoguardado no reabre una evolución ya cerrada para RIPS', () => {
   ])
   assert.equal(preserved[0].workflowStatus, 'CLOSED')
   assert.equal(preserved[0].clinicalNote, 'Nota en borrador')
+})
+
+test('el presupuesto de ortodoncia cuenta como contenido clínico legal', () => {
+  assert.equal(
+    clinicalFormHasContent({
+      orthodonticsBudget: {
+        active: true,
+        initialInstallment: { quantity: 1, unitPrice: 1_500_000 },
+        controls: { quantity: 18, unitPrice: 180_000 },
+        retainers: { quantity: 1, unitPrice: 400_000 },
+      },
+    }),
+    true,
+  )
+  assert.equal(
+    shouldPersistClinicalDraft(null, {
+      orthodonticsBudget: {
+        active: true,
+        initialInstallment: { quantity: 1, unitPrice: 1_500_000 },
+        controls: { quantity: 18, unitPrice: 180_000 },
+        retainers: { quantity: 1, unitPrice: 400_000 },
+      },
+    }),
+    true,
+  )
+  assert.equal(
+    shouldPersistClinicalDraft(
+      {
+        orthodonticsBudget: {
+          active: true,
+          initialInstallment: { quantity: 1, unitPrice: 1_500_000 },
+          controls: { quantity: 18, unitPrice: 180_000 },
+          retainers: { quantity: 1, unitPrice: 400_000 },
+        },
+      },
+      { anamnesis: { chiefComplaint: '' }, diagnoses: [], evolutionNotes: [] },
+    ),
+    false,
+  )
 })

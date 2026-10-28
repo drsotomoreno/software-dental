@@ -98,38 +98,37 @@ export function useClinicalAutoSave(options: {
   }, [patientRouteId, clinicalData, odontogram, enabled])
 
   useEffect(() => {
-    const takePending = () => {
-      if (!pendingRef.current && !timerRef.current) return false
+    const cancelScheduled = () => {
       if (timerRef.current) clearTimeout(timerRef.current)
       timerRef.current = null
       pendingRef.current = false
-      return true
     }
 
-    const flushPending = () => {
-      if (!takePending()) return
+    /** Documento legal: al salir / ocultar siempre persiste el borrador actual. */
+    const flushNow = () => {
+      cancelScheduled()
       void flushAutoSave.current()
     }
 
-    const flushPendingAndWait = async () => {
-      if (!takePending()) return
+    const flushNowAndWait = async () => {
+      cancelScheduled()
       await flushAutoSave.current()
     }
 
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') flushPending()
+      if (document.visibilityState === 'hidden') flushNow()
     }
 
-    registerClinicalDraftFlush(flushPendingAndWait)
-    window.addEventListener('beforeunload', flushPending)
-    window.addEventListener('pagehide', flushPending)
+    registerClinicalDraftFlush(flushNowAndWait)
+    window.addEventListener('beforeunload', flushNow)
+    window.addEventListener('pagehide', flushNow)
     document.addEventListener('visibilitychange', onVisibility)
     return () => {
       registerClinicalDraftFlush(null)
-      window.removeEventListener('beforeunload', flushPending)
-      window.removeEventListener('pagehide', flushPending)
+      window.removeEventListener('beforeunload', flushNow)
+      window.removeEventListener('pagehide', flushNow)
       document.removeEventListener('visibilitychange', onVisibility)
-      flushPending()
+      flushNow()
     }
   }, [])
 
