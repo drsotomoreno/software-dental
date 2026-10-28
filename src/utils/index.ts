@@ -140,6 +140,7 @@ export {
   cufeDeAtenciones,
   evolucionIdDeAtencion,
   explicarFalloCuv,
+  textoFalloDeRed,
   facturasDelPaquete,
   normalizarVinculoRadicacion,
   ripsParaRadicar,

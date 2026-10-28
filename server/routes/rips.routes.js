@@ -106,10 +106,13 @@ router.post('/validate', async (req, res, next) => {
     const result = await submitRipsToMinsalud({ rips, metadatos })
 
     if (!result.success) {
-      return res.status(422).json({
+      const infra = result.code === 'MUV_NETWORK' || result.code === 'MUV_TIMEOUT' || result.code === 'MUV_AUTH' || result.code === 'MUV_CREDENTIALS_MISSING'
+      return res.status(infra ? result.httpStatus || 503 : 422).json({
         success: false,
         approved: false,
         source: result.source,
+        error: result.error,
+        code: result.code,
         localIssues: result.localIssues ?? [],
         ministryErrors: result.ministryErrors ?? [],
       })

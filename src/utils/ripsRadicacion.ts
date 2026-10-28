@@ -97,6 +97,19 @@ export function textoRadicacionExitosa(input: {
     : 'RIPS sin factura radicado en el Ministerio de Salud para registro epidemiológico y estadístico.'
 }
 
+/** Node undici y el navegador nombran así un socket que no llegó a responder. */
+export function textoFalloDeRed(message: string | null | undefined): string {
+  const text = String(message ?? '').trim()
+  if (
+    /^fetch failed$/i.test(text) ||
+    text === 'Failed to fetch' ||
+    text === 'NetworkError when attempting to fetch resource.'
+  ) {
+    return 'No se pudo contactar el MUV. La conexión falló antes de recibir respuesta.'
+  }
+  return text
+}
+
 /**
  * Un fallo sin errores de campo no es un rechazo del Ministerio.
  * La red, la sesión y un 500 traen `error` y la pantalla debe decir eso.
@@ -119,7 +132,7 @@ export function explicarFalloCuv(response: {
       message: 'El Ministerio de Salud rechazó el paquete RIPS. Revise los detalles.',
     }
   }
-  const error = String(response.error ?? '').trim()
+  const error = textoFalloDeRed(response.error)
   return {
     kind: 'infra',
     message:

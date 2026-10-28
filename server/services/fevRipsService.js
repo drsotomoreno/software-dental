@@ -136,6 +136,7 @@ function requestJson(url, { method = 'POST', headers = {}, body } = {}) {
         path: `${target.pathname}${target.search}`,
         method,
         headers: requestHeaders,
+        family: 4,
         rejectUnauthorized: !isLocalHttps(url),
       },
       (response) => {

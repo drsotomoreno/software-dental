@@ -4,6 +4,7 @@ import {
   clasificarRadicacionRips,
   cufeDeAtenciones,
   explicarFalloCuv,
+  textoFalloDeRed,
   ripsParaRadicar,
   textoRadicacionExitosa,
   vinculosDeAtenciones,
@@ -61,6 +62,14 @@ test('lee el vínculo y el CUFE desde la atención', () => {
   ]
   assert.deepEqual(vinculosDeAtenciones(records), ['recibo_interno', 'recibo_interno'])
   assert.equal(cufeDeAtenciones(records, [{ cufe: '  ' }, { cufe: 'CUFE-9' }]), 'CUFE-9')
+})
+
+test('fetch failed no se muestra tal cual', () => {
+  const fallo = explicarFalloCuv({ error: 'fetch failed', localIssues: [], ministryErrors: [] })
+  assert.equal(fallo.kind, 'infra')
+  assert.equal(fallo.message.includes('fetch failed'), false)
+  assert.match(fallo.message, /No se pudo contactar el MUV/)
+  assert.equal(textoFalloDeRed('Failed to fetch').includes('Failed to fetch'), false)
 })
 
 test('un fallo de red no se presenta como rechazo del Ministerio', () => {

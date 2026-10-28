@@ -1,4 +1,5 @@
 import { config, hasMinsaludCredentials } from '../config.js'
+import { describirFalloTransporte } from './sisproMuvService.js'
 
 let cachedToken = null
 let tokenExpiresAt = 0
@@ -33,11 +34,20 @@ export async function getMinsaludAccessToken() {
         scope: 'rips.validar',
       })
 
-  const response = await fetch(tokenUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  })
+  let response
+  try {
+    response = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+  } catch (error) {
+    const fallo = describirFalloTransporte(error)
+    const wrapped = new Error(fallo.message)
+    wrapped.status = fallo.status
+    wrapped.code = fallo.code
+    throw wrapped
+  }
 
   if (!response.ok) {
     const text = await response.text()

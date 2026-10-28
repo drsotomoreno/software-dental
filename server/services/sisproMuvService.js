@@ -5,6 +5,8 @@
  * El login reutiliza el contrato LoginSISPRO (tipoUsuario PIN) de resolveMinsaludSettings.
  */
 
+import http from 'node:http'
+import https from 'node:https'
 import { resolveMinsaludSettings } from './minsaludService.js'
 
 const CARGAR_FEV_PATH = '/api/PaquetesFevRips/CargarFevRips'
@@ -230,46 +232,136 @@ function loginErrors(data) {
   return erroresModelo(data).map((item) => item.message).filter(Boolean)
 }
 
-function envolverTransporte(error) {
-  if (error instanceof MuvInfrastructureError) return error
-  const nombre = error?.name
-  const code = error?.code
-  const agotado = nombre === 'AbortError' || nombre === 'TimeoutError' || code === 'MUV_TIMEOUT' || code === 'ETIMEDOUT' || code === 'ABORT_ERR'
-  return new MuvInfrastructureError(
-    agotado ? 'Tiempo de espera agotado al contactar el MUV.' : 'No se pudo contactar el MUV.',
-    {
-      code: agotado ? 'MUV_TIMEOUT' : 'MUV_NETWORK',
-      status: agotado ? 504 : 503,
-      cause: error,
-    },
-  )
+const CODIGOS_TLS = new Set([
+  'CERT_HAS_EXPIRED',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'EPROTO',
+])
+
+const CODIGOS_RED = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EADDRNOTAVAIL',
+  'UND_ERR_SOCKET',
+])
+
+function causaConCodigo(error) {
+  let actual = error
+  const vistos = new Set()
+  while (actual && typeof actual === 'object' && !vistos.has(actual)) {
+    vistos.add(actual)
+    if (actual.code) return actual
+    actual = actual.cause
+  }
+  return error
 }
 
-async function requestJson(url, { method = 'POST', headers = {}, body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: controller.signal,
-    })
-    const rawText = await response.text()
-    let data = null
-    if (rawText) {
-      try {
-        data = JSON.parse(rawText)
-      } catch {
-        data = { message: rawText.slice(0, 2_000) }
-      }
+/**
+ * Node dice "fetch failed" cuando el socket no llega a responder.
+ * La pantalla muestra la causa (DNS, TLS, rechazo) y no ese texto ni la URL.
+ */
+export function describirFalloTransporte(error) {
+  const nombre = error?.name
+  const propio = error?.code
+  const raiz = causaConCodigo(error)
+  const codigo = String(raiz?.code || propio || '')
+  const agotado =
+    nombre === 'AbortError' ||
+    nombre === 'TimeoutError' ||
+    propio === 'MUV_TIMEOUT' ||
+    codigo === 'MUV_TIMEOUT' ||
+    codigo === 'ETIMEDOUT' ||
+    codigo === 'ABORT_ERR' ||
+    codigo === 'UND_ERR_CONNECT_TIMEOUT' ||
+    codigo === 'UND_ERR_HEADERS_TIMEOUT' ||
+    codigo === 'UND_ERR_BODY_TIMEOUT'
+  if (agotado) {
+    return {
+      code: 'MUV_TIMEOUT',
+      status: 504,
+      message: 'Tiempo de espera agotado al contactar el MUV.',
     }
-    return { response: { status: response.status, ok: response.ok }, data }
-  } catch (error) {
-    throw envolverTransporte(error)
-  } finally {
-    clearTimeout(timer)
   }
+  const detalle = CODIGOS_TLS.has(codigo) ? 'certificado TLS' : CODIGOS_RED.has(codigo) ? codigo : ''
+  return {
+    code: 'MUV_NETWORK',
+    status: 503,
+    message: detalle ? `No se pudo contactar el MUV (${detalle}).` : 'No se pudo contactar el MUV.',
+  }
+}
+
+function envolverTransporte(error) {
+  if (error instanceof MuvInfrastructureError) return error
+  const fallo = describirFalloTransporte(error)
+  return new MuvInfrastructureError(fallo.message, {
+    code: fallo.code,
+    status: fallo.status,
+    cause: error,
+  })
+}
+
+function requestJson(url, { method = 'POST', headers = {}, body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  const target = new URL(url)
+  const payload = body === undefined ? null : JSON.stringify(body)
+  const lib = target.protocol === 'https:' ? https : http
+  const requestHeaders = { Accept: 'application/json', ...headers }
+  if (payload !== null) requestHeaders['Content-Length'] = Buffer.byteLength(payload)
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (fn, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      fn(value)
+    }
+    const req = lib.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port || undefined,
+        path: `${target.pathname}${target.search}`,
+        method,
+        headers: requestHeaders,
+        family: 4,
+      },
+      (response) => {
+        const chunks = []
+        response.on('data', (chunk) => chunks.push(chunk))
+        response.on('end', () => {
+          const rawText = Buffer.concat(chunks).toString('utf8')
+          let data = null
+          if (rawText) {
+            try {
+              data = JSON.parse(rawText)
+            } catch {
+              data = { message: rawText.slice(0, 2_000) }
+            }
+          }
+          finish(resolve, {
+            response: { status: response.statusCode ?? 0, ok: (response.statusCode ?? 0) < 400 },
+            data,
+          })
+        })
+        response.on('error', (error) => finish(reject, error))
+      },
+    )
+    const timer = setTimeout(() => {
+      const error = new Error('Tiempo de espera agotado al contactar el MUV.')
+      error.name = 'TimeoutError'
+      error.code = 'MUV_TIMEOUT'
+      req.destroy(error)
+    }, timeoutMs)
+    req.on('error', (error) => finish(reject, envolverTransporte(error)))
+    if (payload !== null) req.write(payload)
+    req.end()
+  })
 }
 
 export class SisproMuvService {
