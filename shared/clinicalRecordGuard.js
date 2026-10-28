@@ -239,10 +239,9 @@ export function specializedAnnexesHaveContent(annexes) {
   return annexNodeHasContent(annexes, 0)
 }
 
-/** Presupuesto de especialidad con montos o marcado como incluido (documento legal). */
+/** Presupuesto de especialidad con montos reales (un `active` vacío no cuenta). */
 function specialtyBudgetHasContent(budget) {
   if (!budget || typeof budget !== 'object') return false
-  if (budget.active === true) return true
   const lines = [
     budget.initialInstallment,
     budget.controls,
@@ -250,7 +249,11 @@ function specialtyBudgetHasContent(budget) {
     budget.implantPlacement,
     budget.prosthetics,
   ]
-  return lines.some((line) => line && Number(line.unitPrice) > 0)
+  return lines.some(
+    (line) =>
+      line &&
+      Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0) > 0,
+  )
 }
 
 /** Contenido clínico real. La cédula del profesional o un formulario vacío no cuentan. */

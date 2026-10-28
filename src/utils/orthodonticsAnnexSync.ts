@@ -20,7 +20,9 @@ import {
 } from './budget'
 import { generateId } from './crypto'
 import {
+  isOrthodonticsAnnexPlanItem,
   omitOrthodonticsPackageBudgetLines,
+  orthodonticsBudgetHasMonetaryValues,
   orthodonticsPackageProcedureNames,
 } from './orthodonticsBudgetLines'
 import { mapAnnexBudgetToClinicalBudget } from '../../shared/orthodonticsAnnexBudgetMap.js'
@@ -142,13 +144,21 @@ export function syncClinicalDataFromOrthodonticsAnnex(
 
   // Documento legal: sin montos en la calculadora del anexo no se borra
   // el presupuesto clínico ya capturado (sección 8 / control de pagos).
-  const orthodonticsBudget =
+  let orthodonticsBudget =
     mapAnnexBudgetToClinicalBudget(orthodontics) ??
     normalizeOrthodonticsBudget(data.orthodonticsBudget)
   const previousAnnexItems = (data.treatmentPlan ?? []).filter(
     (item) => item.source === 'orthodontics_annex',
   )
   const treatmentPlan = syncOrthodonticsTreatmentPlanItem(data.treatmentPlan ?? [], orthodontics)
+  // Fantasma: active sin montos y sin plan → apagar para que la caja no reaparezca.
+  if (
+    orthodonticsBudget.active &&
+    !orthodonticsBudgetHasMonetaryValues(orthodonticsBudget) &&
+    !treatmentPlan.some(isOrthodonticsAnnexPlanItem)
+  ) {
+    orthodonticsBudget = { ...orthodonticsBudget, active: false }
+  }
   const budgetItems = omitOrthodonticsPackageBudgetLines(
     data.budgetItems ?? [],
     [...treatmentPlan, ...previousAnnexItems],

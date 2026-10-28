@@ -28,16 +28,40 @@ export function isOrthodonticsAnnexPlanItem(
   return item.source === 'orthodontics_annex'
 }
 
+/** Hay montos capturados (no basta `active` vacío / fantasma). */
+export function orthodonticsBudgetHasMonetaryValues(
+  budget:
+    | {
+        initialInstallment?: { quantity?: number; unitPrice?: number } | null
+        controls?: { quantity?: number; unitPrice?: number } | null
+        retainers?: { quantity?: number; unitPrice?: number } | null
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!budget) return false
+  const lines = [budget.initialInstallment, budget.controls, budget.retainers]
+  return lines.some((line) => {
+    if (!line) return false
+    return Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0) > 0
+  })
+}
+
 /**
- * Caja verde de presupuesto de ortodoncia (sección 8): solo si hay plan del anexo
- * o el presupuesto ya está incluido. Sin ambos, no debe mostrarse.
+ * Caja verde de presupuesto de ortodoncia (sección 8):
+ * - plan de ortodoncia del anexo, o
+ * - presupuesto incluido con montos reales.
+ * Un `active: true` sin montos (fantasma) no debe mostrarla.
  */
 export function shouldShowOrthodonticsBudgetSection(
   orthodonticsBudget: { active?: boolean } | null | undefined,
   treatmentPlan: Pick<TreatmentPlanItem, 'source'>[],
 ): boolean {
-  if (orthodonticsBudget?.active) return true
-  return treatmentPlan.some(isOrthodonticsAnnexPlanItem)
+  if (treatmentPlan.some(isOrthodonticsAnnexPlanItem)) return true
+  if (orthodonticsBudget?.active && orthodonticsBudgetHasMonetaryValues(orthodonticsBudget)) {
+    return true
+  }
+  return false
 }
 
 /**

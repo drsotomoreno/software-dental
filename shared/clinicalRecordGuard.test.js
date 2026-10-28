@@ -258,6 +258,17 @@ test('el presupuesto de ortodoncia cuenta como contenido clínico legal', () => 
     true,
   )
   assert.equal(
+    clinicalFormHasContent({
+      orthodonticsBudget: {
+        active: true,
+        initialInstallment: { quantity: 1, unitPrice: 0 },
+        controls: { quantity: 0, unitPrice: 0 },
+        retainers: { quantity: 0, unitPrice: 0 },
+      },
+    }),
+    false,
+  )
+  assert.equal(
     shouldPersistClinicalDraft(null, {
       orthodonticsBudget: {
         active: true,

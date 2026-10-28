@@ -86,9 +86,33 @@ test('no toca el listado si no hay tratamiento de ortodoncia', () => {
 test('oculta la caja de presupuesto si no hay plan ni presupuesto de ortodoncia', () => {
   assert.equal(shouldShowOrthodonticsBudgetSection({ active: false }, []), false)
   assert.equal(shouldShowOrthodonticsBudgetSection(undefined, []), false)
+  // Fantasma: active sin montos no debe mostrar la caja
+  assert.equal(
+    shouldShowOrthodonticsBudgetSection(
+      {
+        active: true,
+        initialInstallment: { quantity: 1, unitPrice: 0 },
+        controls: { quantity: 0, unitPrice: 0 },
+        retainers: { quantity: 0, unitPrice: 0 },
+      },
+      [],
+    ),
+    false,
+  )
 })
 
-test('muestra la caja si el presupuesto está activo o hay plan del anexo', () => {
-  assert.equal(shouldShowOrthodonticsBudgetSection({ active: true }, []), true)
+test('muestra la caja si hay montos reales o plan del anexo', () => {
+  assert.equal(
+    shouldShowOrthodonticsBudgetSection(
+      {
+        active: true,
+        initialInstallment: { quantity: 1, unitPrice: 1_500_000 },
+        controls: { quantity: 12, unitPrice: 150_000 },
+        retainers: { quantity: 1, unitPrice: 0 },
+      },
+      [],
+    ),
+    true,
+  )
   assert.equal(shouldShowOrthodonticsBudgetSection({ active: false }, [planItem]), true)
 })
