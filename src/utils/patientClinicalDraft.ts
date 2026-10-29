@@ -32,6 +32,8 @@ import {
   normalizeDentalImplantsBudget,
   normalizeOrthodonticsBudget,
 } from './budget'
+import { collapseLegacyRehabBudgetVisualLines } from '@/utils/rehabAnnexBudget'
+import { collapseTreatmentPlanByProcedure } from '@/utils/treatmentPlanCollapse'
 
 /** Suma montos de líneas; no exige `active` (desactivar conserva precios). */
 function orthodonticsMonetaryTotal(budget: OrthodonticsBudget | undefined): number {
@@ -91,11 +93,22 @@ function preserveImmutableEvolutionNotes(
 }
 
 function normalizeClinicalDraft(draft: ClinicalRecordFormData): ClinicalRecordFormData {
+  const annexes = normalizeSpecializedAnnexes(draft.specializedAnnexes)
+  const rehab = annexes.rehabilitationAesthetics
   return {
     ...draft,
     anamnesis: normalizeAnamnesis(draft.anamnesis),
     diagnosticChart: normalizeClinicalDiagnosticChart(draft.diagnosticChart),
-    specializedAnnexes: normalizeSpecializedAnnexes(draft.specializedAnnexes),
+    specializedAnnexes: rehab
+      ? {
+          ...annexes,
+          rehabilitationAesthetics: {
+            ...rehab,
+            budget: collapseLegacyRehabBudgetVisualLines(rehab.budget),
+          },
+        }
+      : annexes,
+    treatmentPlan: collapseTreatmentPlanByProcedure(draft.treatmentPlan),
     evolutionNotes: sortEvolutionNotesChronologically(
       corregirFechasSesionClinica(draft.evolutionNotes ?? []),
     ),

@@ -29,6 +29,7 @@ import {
   importDiagnosesToTreatmentPlan,
   previewDiagnosisTreatmentImports,
 } from '@/utils/treatmentPlanDiagnosisImport'
+import { collapseTreatmentPlanByProcedure } from '@/utils/treatmentPlanCollapse'
 import { sumTreatmentPlanPrices } from '@/utils/treatmentPlanPricing'
 import {
   ANATOMICAL_ZONE_PRESETS,
@@ -142,7 +143,10 @@ export function TreatmentPlanForm({
   )
 
   const emit = (plan: TreatmentPlanItem[]) => {
-    onChange({ treatmentPlan: plan, treatmentPlanNotes })
+    onChange({
+      treatmentPlan: collapseTreatmentPlanByProcedure(plan),
+      treatmentPlanNotes,
+    })
   }
 
   const catalogUnitPrice = (cupsCode?: string) =>
@@ -211,7 +215,8 @@ export function TreatmentPlanForm({
   }
 
   const importFromAnnexes = () => {
-    const fresh = previewAnnexTreatmentImports(specializedAnnexes, treatmentPlan)
+    const plan = collapseTreatmentPlanByProcedure(treatmentPlan)
+    const fresh = previewAnnexTreatmentImports(specializedAnnexes, plan)
     if (fresh.length === 0) {
       const stored = previewAnnexTreatmentImports(specializedAnnexes, [])
       showToast(
@@ -219,6 +224,7 @@ export function TreatmentPlanForm({
           ? 'No se encontraron planes de tratamiento en los anexos'
           : 'Los procedimientos de los anexos ya están en el plan de tratamiento',
       )
+      if (plan.length !== treatmentPlan.length) emit(plan)
       return
     }
     const priced = applyAnnexCatalogPrices(fresh, catalogUnitPrice)

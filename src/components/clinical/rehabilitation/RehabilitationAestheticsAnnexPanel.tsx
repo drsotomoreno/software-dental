@@ -10,6 +10,7 @@ import { SPECIALIZED_ANNEX_LABELS } from '@/types/specializedAnnexes'
 import { REHAB_BUDGET_MATERIALS } from '@/constants/rehabilitationRestoration'
 import {
   canImportRehabPlanningBudget,
+  collapseLegacyRehabBudgetVisualLines,
   importRehabPlanningIntoBudget,
 } from '@/utils/rehabAnnexBudget'
 
@@ -17,6 +18,14 @@ interface RehabilitationAestheticsAnnexPanelProps {
   data: RehabilitationAestheticsAnnex | null | undefined
   onChange: (data: RehabilitationAestheticsAnnex) => void
   disabled?: boolean
+}
+
+function budgetHasLegacyVisualLines(
+  raw: RehabilitationAestheticsAnnex | null | undefined,
+): boolean {
+  return Boolean(
+    raw?.budget?.lines?.some((line) => line.importKey?.startsWith('visual:')),
+  )
 }
 
 function rehabAnnexNeedsHeal(
@@ -27,7 +36,8 @@ function rehabAnnexNeedsHeal(
     raw.budget == null ||
     raw.initialFindings == null ||
     raw.dentalWhitening == null ||
-    !Array.isArray(raw.visualTreatmentPlan)
+    !Array.isArray(raw.visualTreatmentPlan) ||
+    budgetHasLegacyVisualLines(raw)
   )
 }
 
@@ -100,11 +110,14 @@ export function RehabilitationAestheticsAnnexPanel({
     [dataProp],
   )
 
-  // Historias/borradores previos al campo `budget` (u otros campos nuevos):
-  // al abrir el anexo se reescribe la forma completa para que no vuelva a fallar.
+  // Historias/borradores previos al campo `budget` (u otros campos nuevos),
+  // y presupuestos legacy con una fila por pieza (`visual:`): sanear al abrir.
   useEffect(() => {
     if (disabled || !rehabAnnexNeedsHeal(dataProp)) return
-    onChange(data)
+    onChange({
+      ...data,
+      budget: collapseLegacyRehabBudgetVisualLines(data.budget),
+    })
   }, [data, dataProp, disabled, onChange])
 
   const update = (patch: Partial<RehabilitationAestheticsAnnex>) =>

@@ -155,6 +155,88 @@ function isPlanningImportKey(key: string | undefined): boolean {
   return IMPORT_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))
 }
 
+/**
+ * Historias antiguas podían tener una fila por pieza (`visual:…`) y otra agrupada
+ * (`summary:…`). Conserva precios del resumen y elimina las filas por pieza.
+ */
+export function collapseLegacyRehabBudgetVisualLines(
+  budget: AnnexProcedureBudget | null | undefined,
+): AnnexProcedureBudget {
+  const safeBudget = normalizeAnnexProcedureBudget(budget)
+  const visualByTreatment = new Map<
+    string,
+    { teeth: string[]; unitPrice: number; procedure: string; cupsCode?: string; material?: string }
+  >()
+  const kept: AnnexProcedureBudgetLine[] = []
+
+  for (const line of safeBudget.lines) {
+    const key = line.importKey ?? ''
+    const visualMatch = key.match(/^visual:(\d{1,2}):(.+)$/)
+    if (!visualMatch) {
+      kept.push(line)
+      continue
+    }
+    const tooth = visualMatch[1]
+    const treatmentId = visualMatch[2]
+    const current = visualByTreatment.get(treatmentId) ?? {
+      teeth: [],
+      unitPrice: 0,
+      procedure: line.procedure,
+      cupsCode: line.cupsCode,
+      material: line.material,
+    }
+    current.teeth.push(tooth)
+    current.unitPrice = Math.max(current.unitPrice, line.unitPrice ?? 0)
+    if (!current.cupsCode && line.cupsCode) current.cupsCode = line.cupsCode
+    if (!current.material && line.material) current.material = line.material
+    if (line.procedure?.trim()) current.procedure = line.procedure.replace(/\s*[—–-]\s*pieza\s+\d{1,2}\s*$/i, '').trim() || current.procedure
+    visualByTreatment.set(treatmentId, current)
+  }
+
+  if (visualByTreatment.size === 0) return safeBudget
+
+  const summaryKeys = new Set(
+    kept.map((line) => line.importKey).filter((key): key is string => Boolean(key?.startsWith('summary:'))),
+  )
+
+  for (const [treatmentId, group] of visualByTreatment) {
+    const summaryKey = `summary:${treatmentId}`
+    const existingSummary = kept.find((line) => line.importKey === summaryKey)
+    if (existingSummary) {
+      const mergedTeeth = sortTeethIds([
+        ...group.teeth,
+        ...(existingSummary.anatomicalZone ?? '')
+          .split(/[,;]+/)
+          .map((part) => part.trim())
+          .filter(Boolean),
+      ])
+      existingSummary.anatomicalZone = mergedTeeth.join(', ')
+      existingSummary.quantity = Math.max(mergedTeeth.length, existingSummary.quantity ?? 1)
+      existingSummary.unitPrice = Math.max(existingSummary.unitPrice ?? 0, group.unitPrice)
+      existingSummary.toothNumber = undefined
+      if (!existingSummary.cupsCode && group.cupsCode) existingSummary.cupsCode = group.cupsCode
+      continue
+    }
+    if (summaryKeys.has(summaryKey)) continue
+    const sorted = sortTeethIds(group.teeth)
+    kept.push(
+      createBlankAnnexProcedureBudgetLine({
+        id: generateId(),
+        procedure: group.procedure || treatmentLabel(treatmentId),
+        cupsCode: group.cupsCode,
+        material: group.material ?? '',
+        anatomicalZone: sorted.join(', '),
+        quantity: sorted.length,
+        unitPrice: group.unitPrice,
+        source: 'import',
+        importKey: summaryKey,
+      }),
+    )
+  }
+
+  return { active: true, lines: kept }
+}
+
 /** Candidatos del Resumen Tratamiento Restaurador (+ aclaramiento si aplica). */
 export function collectRehabPlanningBudgetCandidates(
   annex: RehabilitationAestheticsAnnex,
@@ -179,7 +261,7 @@ export function importRehabPlanningIntoBudget(
   annex: RehabilitationAestheticsAnnex,
   budget: AnnexProcedureBudget | null | undefined,
 ): { budget: AnnexProcedureBudget; added: number; skipped: number } {
-  const safeBudget = normalizeAnnexProcedureBudget(budget)
+  const safeBudget = collapseLegacyRehabBudgetVisualLines(budget)
   const candidates = collectRehabPlanningBudgetCandidates(annex)
   const candidateByKey = new Map(
     candidates

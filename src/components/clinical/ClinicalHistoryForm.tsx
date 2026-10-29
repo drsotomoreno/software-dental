@@ -20,6 +20,8 @@ import {
   addTreatmentPlanItemToBudget,
   calcClinicalBudgetSummaryWithTax,
 } from '@/utils/budget'
+import { collapseLegacyRehabBudgetVisualLines } from '@/utils/rehabAnnexBudget'
+import { collapseTreatmentPlanByProcedure } from '@/utils/treatmentPlanCollapse'
 
 /** Ortodoncia y endodoncia sí se sincronizan al plan/presupuesto.
  *  Rehabilitación estética/aclaramiento solo entra con «Importar desde anexos». */
@@ -166,13 +168,26 @@ export function ClinicalHistoryForm({
   const livingLocked = lockLivingChart
   const [form, setForm] = useState<ClinicalRecordFormData>(() => {
     const emptyForm = createEmptyClinicalForm(professionalLicense)
+    const annexes = normalizeSpecializedAnnexes(
+      initialData?.specializedAnnexes ?? emptyForm.specializedAnnexes,
+    )
+    const rehab = annexes.rehabilitationAesthetics
     const base = {
       ...emptyForm,
       ...initialData,
       anamnesis: normalizeAnamnesis({ ...emptyForm.anamnesis, ...initialData?.anamnesis }),
       diagnosticChart: normalizeClinicalDiagnosticChart(initialData?.diagnosticChart),
-      specializedAnnexes: normalizeSpecializedAnnexes(
-        initialData?.specializedAnnexes ?? emptyForm.specializedAnnexes,
+      specializedAnnexes: rehab
+        ? {
+            ...annexes,
+            rehabilitationAesthetics: {
+              ...rehab,
+              budget: collapseLegacyRehabBudgetVisualLines(rehab.budget),
+            },
+          }
+        : annexes,
+      treatmentPlan: collapseTreatmentPlanByProcedure(
+        initialData?.treatmentPlan ?? emptyForm.treatmentPlan,
       ),
       evolutionNotes: corregirFechasSesionClinica(initialData?.evolutionNotes),
     }
@@ -211,13 +226,26 @@ export function ClinicalHistoryForm({
     loadedPatientIdRef.current = patientId
 
     const emptyForm = createEmptyClinicalForm(professionalLicense)
+    const annexes = normalizeSpecializedAnnexes(
+      initialData?.specializedAnnexes ?? emptyForm.specializedAnnexes,
+    )
+    const rehab = annexes.rehabilitationAesthetics
     const base = {
       ...emptyForm,
       ...initialData,
       anamnesis: normalizeAnamnesis({ ...emptyForm.anamnesis, ...initialData?.anamnesis }),
       diagnosticChart: normalizeClinicalDiagnosticChart(initialData?.diagnosticChart),
-      specializedAnnexes: normalizeSpecializedAnnexes(
-        initialData?.specializedAnnexes ?? emptyForm.specializedAnnexes,
+      specializedAnnexes: rehab
+        ? {
+            ...annexes,
+            rehabilitationAesthetics: {
+              ...rehab,
+              budget: collapseLegacyRehabBudgetVisualLines(rehab.budget),
+            },
+          }
+        : annexes,
+      treatmentPlan: collapseTreatmentPlanByProcedure(
+        initialData.treatmentPlan ?? emptyForm.treatmentPlan,
       ),
       evolutionNotes: corregirFechasSesionClinica(initialData?.evolutionNotes),
     }
@@ -228,10 +256,18 @@ export function ClinicalHistoryForm({
       if (!disabledRef.current) {
         const loadedIds = (initialData.budgetItems ?? []).map((item) => item.id).join('\0')
         const nextIds = synced.budgetItems.map((item) => item.id).join('\0')
-        if (loadedIds !== nextIds) onChangeRef.current(synced)
+        const planHealed =
+          (initialData.treatmentPlan ?? []).length !== synced.treatmentPlan.length
+        if (loadedIds !== nextIds || planHealed) onChangeRef.current(synced)
       }
     } catch {
       setForm(base)
+      if (
+        !disabledRef.current &&
+        (initialData.treatmentPlan ?? []).length !== base.treatmentPlan.length
+      ) {
+        onChangeRef.current(base)
+      }
     }
 
     orthodonticsSyncRef.current = false

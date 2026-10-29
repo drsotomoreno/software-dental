@@ -13,6 +13,8 @@ import type { RehabilitationAestheticsAnnex } from '@/types/rehabilitationAesthe
 import { formatRehabBudgetSummary } from '@/types/rehabilitationAestheticsAnnex'
 import { calcBudgetSummary, syncPaymentPlanWithBudget } from './budget'
 import { generateId } from './crypto'
+import { collapseTreatmentPlanByProcedure } from '@/utils/treatmentPlanCollapse'
+import { collapseLegacyRehabBudgetVisualLines } from '@/utils/rehabAnnexBudget'
 
 const SYNC_NOTES_START = '--- Plan de rehabilitación estética (anexo) ---'
 const SYNC_NOTES_END = '--- Fin plan de rehabilitación estética ---'
@@ -166,8 +168,13 @@ function enrichRehabilitationPaymentPlan(
 export function syncClinicalDataFromRehabilitationAnnex(
   data: ClinicalRecordFormData,
 ): ClinicalRecordFormData {
-  const rehabilitation = data.specializedAnnexes?.rehabilitationAesthetics
-  if (!rehabilitation) return data
+  const rehabilitationRaw = data.specializedAnnexes?.rehabilitationAesthetics
+  if (!rehabilitationRaw) return data
+
+  const rehabilitation = {
+    ...rehabilitationRaw,
+    budget: collapseLegacyRehabBudgetVisualLines(rehabilitationRaw.budget),
+  }
 
   const budgetSummary = data.budget ?? {
     subtotal: 0,
@@ -182,9 +189,8 @@ export function syncClinicalDataFromRehabilitationAnnex(
         .join('\n\n')
     : removeSyncedNotesBlock(data.treatmentPlanNotes ?? '')
 
-  const treatmentPlan = syncRehabilitationTreatmentPlanItems(
-    data.treatmentPlan ?? [],
-    rehabilitation,
+  const treatmentPlan = collapseTreatmentPlanByProcedure(
+    syncRehabilitationTreatmentPlanItems(data.treatmentPlan ?? [], rehabilitation),
   )
   const budgetItems = syncRehabilitationBudgetItems(
     data.budgetItems ?? [],
@@ -207,6 +213,12 @@ export function syncClinicalDataFromRehabilitationAnnex(
 
   return {
     ...data,
+    specializedAnnexes: data.specializedAnnexes
+      ? {
+          ...data.specializedAnnexes,
+          rehabilitationAesthetics: rehabilitation,
+        }
+      : data.specializedAnnexes,
     treatmentPlan,
     treatmentPlanNotes,
     budgetItems,

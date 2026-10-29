@@ -22,13 +22,14 @@ import {
   clinicalDocumentRichness,
   isSignedClinicalDocument,
 } from '../../shared/clinicalRecordGuard.js'
+import { collapseTreatmentPlanByProcedure } from '@/utils/treatmentPlanCollapse'
 
 function normalizeTreatmentPlanItems(
   items: TreatmentPlanItem[] | undefined,
 ): TreatmentPlanItem[] {
   if (!Array.isArray(items)) return []
 
-  return items.map((item) => ({
+  const normalized = items.map((item) => ({
     id: item?.id ?? generateId(),
     phase: item?.phase ?? 'fase_i',
     procedure: item?.procedure ?? '',
@@ -47,6 +48,8 @@ function normalizeTreatmentPlanItems(
     diagnosisCode: item?.diagnosisCode,
     diagnosisDescription: item?.diagnosisDescription,
   }))
+
+  return collapseTreatmentPlanByProcedure(normalized)
 }
 
 export function normalizeClinicalRecordForExport(record: ClinicalRecord): ClinicalRecord {

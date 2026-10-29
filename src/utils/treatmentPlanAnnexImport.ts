@@ -2,6 +2,11 @@ import { calculateTotal } from '@/components/clinical/orthodontics/calculator/ty
 import type { TreatmentPlanItem } from '@/types/clinicalRecord'
 import { formatEndoProcedureLabel } from '@/utils/endoAnnex'
 import { generateId } from '@/utils/crypto'
+import {
+  collapseTreatmentPlanByProcedure,
+  collectTreatmentPlanItemTeeth,
+  treatmentProcedureFamilyKey,
+} from '@/utils/treatmentPlanCollapse'
 import { ZONE_GENERAL, parseAnatomicalZone } from '@/utils/treatmentPlanZone'
 import { DEFAULT_PHASE_PROCEDURES } from '@/types/periodonticsAnnex'
 import type { SpecializedAnnexes } from '@/types/specializedAnnexes'
@@ -34,6 +39,10 @@ function sameProcedure(left: string, right: string): boolean {
   return left.trim().toLowerCase() === right.trim().toLowerCase()
 }
 
+function sameTreatmentFamily(left: string, right: string): boolean {
+  return treatmentProcedureFamilyKey(left) === treatmentProcedureFamilyKey(right)
+}
+
 function alreadyImported(plan: TreatmentPlanItem[], candidate: TreatmentPlanItem): boolean {
   return plan.some((item) => {
     if (candidate.source === 'orthodontics_annex' && item.source === 'orthodontics_annex') {
@@ -48,12 +57,14 @@ function alreadyImported(plan: TreatmentPlanItem[], candidate: TreatmentPlanItem
     }
     if (
       candidate.source === 'rehabilitation_annex' &&
-      item.source === 'rehabilitation_annex' &&
-      sameProcedure(item.procedure, candidate.procedure) &&
-      (item.toothNumber ?? 0) === (candidate.toothNumber ?? 0) &&
-      (item.cupsCode ?? '') === (candidate.cupsCode ?? '')
+      (item.source === 'rehabilitation_annex' || sameTreatmentFamily(item.procedure, candidate.procedure))
     ) {
-      return true
+      if (!sameTreatmentFamily(item.procedure, candidate.procedure)) return false
+      const itemTeeth = collectTreatmentPlanItemTeeth(item)
+      const candidateTeeth = collectTreatmentPlanItemTeeth(candidate)
+      if (itemTeeth.length === 0 && candidateTeeth.length === 0) return true
+      if (candidateTeeth.length === 0) return itemTeeth.length === 0
+      return candidateTeeth.every((tooth) => itemTeeth.includes(tooth))
     }
     if (
       candidate.source &&
@@ -207,9 +218,12 @@ export function importAnnexesToTreatmentPlan(
   plan: TreatmentPlanItem[],
   resolvePrice: (cupsCode?: string) => number = () => 0,
 ): TreatmentPlanItem[] {
+  const collapsedPlan = collapseTreatmentPlanByProcedure(plan)
   const additions = applyAnnexCatalogPrices(
-    previewAnnexTreatmentImports(annexes, plan),
+    previewAnnexTreatmentImports(annexes, collapsedPlan),
     resolvePrice,
   )
-  return additions.length > 0 ? [...plan, ...additions] : plan
+  return collapseTreatmentPlanByProcedure(
+    additions.length > 0 ? [...collapsedPlan, ...additions] : collapsedPlan,
+  )
 }
