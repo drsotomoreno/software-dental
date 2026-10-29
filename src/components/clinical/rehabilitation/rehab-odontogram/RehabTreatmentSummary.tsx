@@ -7,10 +7,8 @@ import {
   REHAB_TREATMENT_OPTIONS,
 } from './constants'
 import {
-  REHAB_CARILLA_RESTORATION_MATERIALS,
-  REHAB_FIXED_RESTORATION_MATERIALS,
+  REHAB_BUDGET_MATERIALS,
   REHAB_FIXED_RESTORATION_TREATMENTS,
-  REHAB_PPR_MATERIALS,
   IMPLANT_FIXED_RESTORATION_MATERIALS,
   createEmptyRestorationSpec,
   type RehabRestorationDetailKey,
@@ -439,7 +437,7 @@ export function RehabTreatmentSummary({
             restorationKey="protesis_parcial_removible"
             restoration={restorationDetails.protesis_parcial_removible}
             showMaterial
-            materialOptions={[...REHAB_PPR_MATERIALS]}
+            materialOptions={[...REHAB_BUDGET_MATERIALS]}
             disabled={disabled}
             onRestorationChange={handleRestorationChange}
             treatmentColor={protesisParcialRemovible.color}
@@ -467,11 +465,7 @@ export function RehabTreatmentSummary({
               restoration={restorationDetails[group.key]}
               showMaterial={group.showMaterial}
               showColor={group.showColor}
-              materialOptions={
-                group.key === 'carilla'
-                  ? [...REHAB_CARILLA_RESTORATION_MATERIALS]
-                  : [...REHAB_FIXED_RESTORATION_MATERIALS]
-              }
+              materialOptions={[...REHAB_BUDGET_MATERIALS]}
               disabled={disabled}
               onRestorationChange={handleRestorationChange}
               treatmentColor={group.color}

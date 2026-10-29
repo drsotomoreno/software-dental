@@ -15,9 +15,21 @@ export const REHAB_QUADRANT_LABELS: Record<RehabQuadrantId, string> = {
   lowerRight: 'Inferior derecho (cuadrante 4)',
 }
 
+/** CUPS 23.3 — restauraciones adhesivas parciales no metálicas (laboratorio o CAD/CAM). */
+export const REHAB_INDIRECT_NON_METAL_RESTORATION_CUPS = {
+  code: '233201',
+  label: 'RESTAURACIÓN DE DIENTES MEDIANTE INCRUSTACIÓN NO METÁLICA',
+} as const
+
 export const REHAB_TREATMENT_OPTIONS: RehabTreatmentOption[] = [
   { id: 'corona_individual', label: 'Corona Individual', color: '#3B82F6' },
-  { id: 'carilla', label: 'Carilla Dental', color: '#EC4899' },
+  {
+    id: 'carilla',
+    label: 'Carilla Dental Indirecta',
+    color: '#EC4899',
+    cupsCode: REHAB_INDIRECT_NON_METAL_RESTORATION_CUPS.code,
+    cupsLabel: REHAB_INDIRECT_NON_METAL_RESTORATION_CUPS.label,
+  },
   { id: 'implante', label: 'Implante Dental', color: '#6B7280' },
   { id: 'pilar_ppf', label: 'Pilar de PPF', color: '#8B5CF6' },
   { id: 'pontico_ppf', label: 'Póntico de PPF', color: '#F97316' },

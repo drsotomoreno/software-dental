@@ -29,7 +29,7 @@ export function getRehabBudgetMaterialLabel(material: string | undefined): strin
   return REHAB_BUDGET_MATERIALS.find((item) => item.id === material)?.label ?? material
 }
 
-/** Mapea materiales del resumen restaurador a la columna del presupuesto. */
+/** Normaliza materiales legacy o del resumen a la lista unificada del presupuesto. */
 export function mapRestorationMaterialToBudgetMaterial(
   material: string | undefined,
 ): RehabBudgetMaterialId | '' {
@@ -37,6 +37,8 @@ export function mapRestorationMaterialToBudgetMaterial(
   if (isRehabBudgetMaterialId(material)) return material
   if (material === 'resina_impresa') return 'material_impresion_3d'
   if (material === 'resina_directa') return 'material_polimerico'
+  if (material === 'acrilico_rigido' || material === 'acrilico_flexible') return 'material_polimerico'
+  if (material === 'aleacion_metalica') return 'metal_ceramica'
   return ''
 }
 
@@ -67,10 +69,8 @@ export type RehabFixedRestorationMaterialId = (typeof REHAB_FIXED_RESTORATION_MA
 export type RehabCarillaExtraMaterialId = (typeof REHAB_CARILLA_EXTRA_MATERIALS)[number]['id']
 export type RehabPprMaterialId = (typeof REHAB_PPR_MATERIALS)[number]['id']
 
-export type RehabRestorationMaterialId =
-  | RehabFixedRestorationMaterialId
-  | RehabCarillaExtraMaterialId
-  | RehabPprMaterialId
+/** Material del resumen/presupuesto de rehabilitación (misma lista unificada). */
+export type RehabRestorationMaterialId = RehabBudgetMaterialId
 
 export type RehabRestorationDetailKey = RehabTreatmentType | 'protesis_parcial_removible'
 
@@ -96,12 +96,6 @@ export interface RehabTreatmentRestorationSpec {
 export type RehabRestorationDetails = Partial<
   Record<RehabRestorationDetailKey, RehabTreatmentRestorationSpec>
 >
-
-const FIXED_MATERIAL_IDS = new Set<string>(REHAB_FIXED_RESTORATION_MATERIALS.map((item) => item.id))
-const CARILLA_EXTRA_MATERIAL_IDS = new Set<string>(
-  REHAB_CARILLA_EXTRA_MATERIALS.map((item) => item.id),
-)
-const PPR_MATERIAL_IDS = new Set<string>(REHAB_PPR_MATERIALS.map((item) => item.id))
 
 export function isRehabRestorationDetailKey(value: unknown): value is RehabRestorationDetailKey {
   return (
@@ -133,13 +127,7 @@ export function formatRehabRestorationColor(value: RehabRestorationColorValue): 
 export function getRehabRestorationMaterialLabel(
   material: RehabRestorationMaterialId | '',
 ): string {
-  if (!material) return ''
-  const fixed = REHAB_FIXED_RESTORATION_MATERIALS.find((item) => item.id === material)
-  if (fixed) return fixed.label
-  const carilla = REHAB_CARILLA_EXTRA_MATERIALS.find((item) => item.id === material)
-  if (carilla) return carilla.label
-  const ppr = REHAB_PPR_MATERIALS.find((item) => item.id === material)
-  return ppr?.label ?? material
+  return getRehabBudgetMaterialLabel(material)
 }
 
 export function createEmptyRestorationSpec(): RehabTreatmentRestorationSpec {
@@ -156,15 +144,7 @@ export function normalizeRestorationDetails(data?: RehabRestorationDetails): Reh
 
     const materialRaw = typeof spec.material === 'string' ? spec.material : ''
     const colorRaw = isRehabRestorationColorValue(spec.restorationColor) ? spec.restorationColor : ''
-
-    let material: RehabRestorationMaterialId | '' = ''
-    if (key === 'protesis_parcial_removible' && PPR_MATERIAL_IDS.has(materialRaw)) {
-      material = materialRaw as RehabPprMaterialId
-    } else if (key === 'carilla' && CARILLA_EXTRA_MATERIAL_IDS.has(materialRaw)) {
-      material = materialRaw as RehabCarillaExtraMaterialId
-    } else if (FIXED_MATERIAL_IDS.has(materialRaw)) {
-      material = materialRaw as RehabFixedRestorationMaterialId
-    }
+    const material = mapRestorationMaterialToBudgetMaterial(materialRaw)
 
     normalized[key] = {
       material,

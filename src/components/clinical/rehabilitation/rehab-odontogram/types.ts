@@ -34,6 +34,10 @@ export interface RehabTreatmentOption {
   id: RehabTreatmentType
   label: string
   color: string
+  /** CUPS oficial asociado al tipo de restauración (si aplica). */
+  cupsCode?: string
+  /** Denominación oficial del procedimiento CUPS. */
+  cupsLabel?: string
 }
 
 export interface RehabTreatmentPlanEntry {

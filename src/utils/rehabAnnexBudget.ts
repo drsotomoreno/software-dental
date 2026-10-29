@@ -104,6 +104,7 @@ function restorativeSummaryCandidates(
     const sorted = sortTeethIds(teeth)
     candidates.push({
       procedure: procedureWithColor(option.label, option.id, annex.restorationDetails),
+      cupsCode: option.cupsCode,
       material: budgetMaterialFromRestoration(option.id, annex.restorationDetails),
       anatomicalZone: sorted.join(', '),
       quantity: sorted.length,
@@ -204,6 +205,7 @@ export function importRehabPlanningIntoBudget(
       syncedImportLines.push({
         ...previous,
         procedure: candidate.procedure,
+        cupsCode: candidate.cupsCode ?? previous.cupsCode,
         anatomicalZone: candidate.anatomicalZone,
         toothNumber: candidate.toothNumber,
         quantity: candidate.quantity,

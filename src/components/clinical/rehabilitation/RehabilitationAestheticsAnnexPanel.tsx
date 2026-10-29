@@ -175,7 +175,7 @@ export function RehabilitationAestheticsAnnexPanel({
 
       <AnnexProcedureBudgetSection
         title="Presupuesto de Rehabilitación Estética y Aclaramiento"
-        description="Tabla resumida según el Resumen Tratamiento Restaurador. Asigne precios, defina el plan de pagos y consulte el total."
+        description="Tabla resumida según el Resumen Tratamiento Restaurador. Asigne precios y consulte el total."
         value={data.budget}
         onChange={(budget) => update({ budget })}
         disabled={disabled}

@@ -30,7 +30,13 @@ interface RehabTreatmentPanelProps {
   selectedEntry?: RehabTreatmentPlanEntry
   protesisTotal?: RehabArchProsthesisPlan | null
   protesisParcialRemovible?: RehabArchProsthesisPlan | null
-  planningOptions: ReadonlyArray<{ id: string; label: string; color: string }>
+  planningOptions: ReadonlyArray<{
+    id: string
+    label: string
+    color: string
+    cupsCode?: string
+    cupsLabel?: string
+  }>
   variant?: RehabOdontogramVariant
   disabled?: boolean
   onApplyTreatment: (treatment: RehabTreatmentType, color: string) => void
@@ -143,7 +149,7 @@ export function RehabTreatmentPanel({
             <Sparkles className="h-4 w-4" aria-hidden />
           </div>
           <div>
-            <h4 className="text-sm font-semibold text-slate-800">Planificación de tratamientos</h4>
+            <h4 className="text-sm font-semibold text-slate-800">Selección de Tipo de Restauración</h4>
             <p className="text-xs text-slate-500">
               {selectedToothId
                 ? `Pieza seleccionada: ${selectedToothId}${isEliminated ? ' (eliminada)' : ''}`
@@ -240,11 +246,16 @@ export function RehabTreatmentPanel({
           const isOptionDisabled =
             disabled || !selectedToothId || (isEliminated && !isAllowedOnEliminated)
 
+          const cupsTitle = option.cupsCode
+            ? `CUPS ${option.cupsCode}${option.cupsLabel ? ` — ${option.cupsLabel}` : ''}`
+            : undefined
+
           return (
             <button
               key={option.id}
               type="button"
               disabled={isOptionDisabled}
+              title={cupsTitle}
               onClick={() => onApplyTreatment(option.id as RehabTreatmentType, option.color)}
               className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-45 ${
                 isActive
@@ -257,7 +268,14 @@ export function RehabTreatmentPanel({
                 className="h-4 w-4 shrink-0 rounded-full border border-white shadow-sm"
                 style={{ backgroundColor: option.color }}
               />
-              <span className="font-medium leading-tight text-slate-700">{option.label}</span>
+              <span className="min-w-0">
+                <span className="block font-medium leading-tight text-slate-700">{option.label}</span>
+                {option.cupsCode ? (
+                  <span className="mt-0.5 block text-[10px] font-medium leading-tight text-slate-500">
+                    CUPS {option.cupsCode}
+                  </span>
+                ) : null}
+              </span>
             </button>
           )
         })}
