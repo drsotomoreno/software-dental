@@ -5,6 +5,41 @@ export const REHAB_FIXED_RESTORATION_MATERIALS = [
   { id: 'zirconio', label: 'Zirconio' },
 ] as const
 
+/** Materiales de la tabla de presupuesto de rehabilitación estética. */
+export const REHAB_BUDGET_MATERIALS = [
+  { id: 'disilicato_litio', label: 'Disilicato de Litio' },
+  { id: 'zirconio', label: 'Zirconio' },
+  { id: 'otra_ceramica', label: 'Otra Cerámica' },
+  { id: 'material_impresion_3d', label: 'Material de Impresión 3D' },
+  { id: 'material_polimerico', label: 'Material Polimérico' },
+  { id: 'metal_ceramica', label: 'Metal+Cerámica' },
+  { id: 'otro', label: 'Otro' },
+] as const
+
+export type RehabBudgetMaterialId = (typeof REHAB_BUDGET_MATERIALS)[number]['id']
+
+const BUDGET_MATERIAL_IDS = new Set<string>(REHAB_BUDGET_MATERIALS.map((item) => item.id))
+
+export function isRehabBudgetMaterialId(value: unknown): value is RehabBudgetMaterialId {
+  return typeof value === 'string' && BUDGET_MATERIAL_IDS.has(value)
+}
+
+export function getRehabBudgetMaterialLabel(material: string | undefined): string {
+  if (!material) return ''
+  return REHAB_BUDGET_MATERIALS.find((item) => item.id === material)?.label ?? material
+}
+
+/** Mapea materiales del resumen restaurador a la columna del presupuesto. */
+export function mapRestorationMaterialToBudgetMaterial(
+  material: string | undefined,
+): RehabBudgetMaterialId | '' {
+  if (!material) return ''
+  if (isRehabBudgetMaterialId(material)) return material
+  if (material === 'resina_impresa') return 'material_impresion_3d'
+  if (material === 'resina_directa') return 'material_polimerico'
+  return ''
+}
+
 /** Materiales adicionales exclusivos de carillas dentales */
 export const REHAB_CARILLA_EXTRA_MATERIALS = [
   { id: 'resina_directa', label: 'Resina Directa' },

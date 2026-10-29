@@ -7,6 +7,7 @@ import { DentalWhiteningSection } from '@/components/clinical/rehabilitation/Den
 import type { RehabilitationAestheticsAnnex } from '@/types/rehabilitationAestheticsAnnex'
 import { normalizeRehabilitationAestheticsAnnex } from '@/types/rehabilitationAestheticsAnnex'
 import { SPECIALIZED_ANNEX_LABELS } from '@/types/specializedAnnexes'
+import { REHAB_BUDGET_MATERIALS } from '@/constants/rehabilitationRestoration'
 import {
   canImportRehabPlanningBudget,
   importRehabPlanningIntoBudget,
@@ -186,6 +187,7 @@ export function RehabilitationAestheticsAnnexPanel({
           return { added: result.added, skipped: result.skipped }
         }}
         emptyHint="Importe el Resumen Tratamiento Restaurador o agregue un procedimiento."
+        materialOptions={REHAB_BUDGET_MATERIALS}
         className="mt-1"
       />
     </div>

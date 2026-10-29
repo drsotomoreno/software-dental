@@ -11,6 +11,11 @@ import { formatCurrency, generateId } from '@/utils'
 import { VoiceDictationButton } from '@/components/voice'
 import { parseDictatedInteger, parseDictatedNumber } from '@/utils/voiceDictation'
 
+export interface AnnexBudgetMaterialOption {
+  id: string
+  label: string
+}
+
 export interface AnnexProcedureBudgetSectionProps {
   title: string
   description?: string
@@ -23,6 +28,8 @@ export interface AnnexProcedureBudgetSectionProps {
   canImport?: boolean
   emptyHint?: string
   className?: string
+  /** Si se define, muestra la columna Material con estas opciones. */
+  materialOptions?: readonly AnnexBudgetMaterialOption[]
 }
 
 function parseNonNegative(raw: string): number {
@@ -42,10 +49,18 @@ export function AnnexProcedureBudgetSection({
   canImport = false,
   emptyHint = 'Importe procedimientos o agregue uno manualmente.',
   className = '',
+  materialOptions,
 }: AnnexProcedureBudgetSectionProps) {
   const value = useMemo(() => normalizeAnnexProcedureBudget(valueProp), [valueProp])
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const [expandedPaymentId, setExpandedPaymentId] = useState<string | null>(null)
+  const showMaterial = Boolean(materialOptions && materialOptions.length > 0)
+  const materialLabelById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const option of materialOptions ?? []) map.set(option.id, option.label)
+    return map
+  }, [materialOptions])
+  const colSpan = (showMaterial ? 7 : 6) + (disabled ? 0 : 1)
   const total = useMemo(
     () =>
       value.active
@@ -164,11 +179,14 @@ export function AnnexProcedureBudgetSection({
         </p>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-rose-200 bg-white shadow-sm">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className={`w-full text-sm ${showMaterial ? 'min-w-[780px]' : 'min-w-[640px]'}`}>
             <thead>
               <tr className="border-b border-rose-100 bg-rose-50/60 text-left text-[11px] uppercase tracking-wide text-rose-900/80">
                 <th className="px-3 py-2.5 font-semibold">Procedimiento</th>
                 <th className="px-3 py-2.5 font-semibold">Zona / piezas</th>
+                {showMaterial ? (
+                  <th className="px-3 py-2.5 font-semibold">Material</th>
+                ) : null}
                 <th className="px-3 py-2.5 font-semibold">Cant.</th>
                 <th className="px-3 py-2.5 font-semibold">Precio unitario</th>
                 <th className="px-3 py-2.5 font-semibold">Subtotal</th>
@@ -225,6 +243,33 @@ export function AnnexProcedureBudgetSection({
                           />
                         )}
                       </td>
+                      {showMaterial ? (
+                        <td className="px-3 py-2">
+                          {disabled ? (
+                            <span className="text-slate-700">
+                              {materialLabelById.get(line.material ?? '') ||
+                                line.material ||
+                                '—'}
+                            </span>
+                          ) : (
+                            <select
+                              value={line.material ?? ''}
+                              onChange={(event) =>
+                                updateLine(line.id, { material: event.target.value })
+                              }
+                              className="input-field min-w-[11rem] text-sm"
+                              aria-label={`Material de ${line.procedure || 'procedimiento'}`}
+                            >
+                              <option value="">Seleccionar…</option>
+                              {(materialOptions ?? []).map((option) => (
+                                <option key={option.id} value={option.id}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </td>
+                      ) : null}
                       <td className="px-3 py-2">
                         {disabled ? (
                           <span className="font-medium text-slate-800">{line.quantity}</span>
@@ -322,7 +367,7 @@ export function AnnexProcedureBudgetSection({
                     {paymentOpen ? (
                       <tr className="bg-slate-50/80">
                         <td
-                          colSpan={disabled ? 6 : 7}
+                          colSpan={colSpan}
                           className="border-t border-rose-50 px-3 py-3"
                         >
                           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">

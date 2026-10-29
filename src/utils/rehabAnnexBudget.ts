@@ -9,7 +9,8 @@ import {
   type RehabDentalWhiteningPlan,
 } from '@/constants/dentalWhitening'
 import {
-  formatRehabRestorationSpecSummary,
+  formatRehabRestorationColor,
+  mapRestorationMaterialToBudgetMaterial,
   type RehabRestorationDetails,
 } from '@/constants/rehabilitationRestoration'
 import {
@@ -33,14 +34,23 @@ function sortTeethIds(teeth: string[]): string[] {
   return teeth.slice().sort((a, b) => Number(a) - Number(b))
 }
 
-function procedureWithRestoration(
+function procedureWithColor(
   baseLabel: string,
   restorationKey: keyof RehabRestorationDetails | undefined,
   restorationDetails: RehabRestorationDetails | undefined,
 ): string {
   if (!restorationKey || !restorationDetails) return baseLabel
-  const specSummary = formatRehabRestorationSpecSummary(restorationDetails[restorationKey])
-  return specSummary ? `${baseLabel} (${specSummary})` : baseLabel
+  const color = restorationDetails[restorationKey]?.restorationColor
+  if (!color) return baseLabel
+  return `${baseLabel} (Color: ${formatRehabRestorationColor(color)})`
+}
+
+function budgetMaterialFromRestoration(
+  restorationKey: keyof RehabRestorationDetails | undefined,
+  restorationDetails: RehabRestorationDetails | undefined,
+): string {
+  if (!restorationKey || !restorationDetails) return ''
+  return mapRestorationMaterialToBudgetMaterial(restorationDetails[restorationKey]?.material)
 }
 
 function prosthesisLine(
@@ -53,7 +63,8 @@ function prosthesisLine(
   const restorationKey =
     kind === 'protesis_parcial_removible' ? 'protesis_parcial_removible' : undefined
   return {
-    procedure: procedureWithRestoration(label, restorationKey, restorationDetails),
+    procedure: procedureWithColor(label, restorationKey, restorationDetails),
+    material: budgetMaterialFromRestoration(restorationKey, restorationDetails),
     anatomicalZone:
       plan.scope === 'superior'
         ? 'Arcada Superior'
@@ -92,11 +103,8 @@ function restorativeSummaryCandidates(
     if (!teeth?.length) continue
     const sorted = sortTeethIds(teeth)
     candidates.push({
-      procedure: procedureWithRestoration(
-        option.label,
-        option.id,
-        annex.restorationDetails,
-      ),
+      procedure: procedureWithColor(option.label, option.id, annex.restorationDetails),
+      material: budgetMaterialFromRestoration(option.id, annex.restorationDetails),
       anatomicalZone: sorted.join(', '),
       quantity: sorted.length,
       unitPrice: 0,
@@ -199,6 +207,7 @@ export function importRehabPlanningIntoBudget(
         anatomicalZone: candidate.anatomicalZone,
         toothNumber: candidate.toothNumber,
         quantity: candidate.quantity,
+        material: previous.material || candidate.material || '',
         source: 'import',
         importKey,
       })

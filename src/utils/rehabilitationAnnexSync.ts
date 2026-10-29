@@ -158,6 +158,11 @@ function enrichRehabilitationPaymentPlan(
   })
 }
 
+/**
+ * Sincronización explícita del anexo de rehabilitación → plan/presupuesto.
+ * No se invoca al editar el anexo: el paso al plan general es solo con
+ * «Importar desde anexos» (`importAnnexesToTreatmentPlan`).
+ */
 export function syncClinicalDataFromRehabilitationAnnex(
   data: ClinicalRecordFormData,
 ): ClinicalRecordFormData {

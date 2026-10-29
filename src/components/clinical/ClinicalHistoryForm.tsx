@@ -7,7 +7,6 @@ import {
   syncClinicalDataFromOdontogram,
   syncClinicalDataFromOrthodonticsAnnex,
   syncClinicalDataFromEndodonticsAnnex,
-  syncClinicalDataFromRehabilitationAnnex,
   assignCieToTooth,
   collectOdontogramCieDiagnoses,
   detachTeethFromDiagnoses,
@@ -22,10 +21,10 @@ import {
   calcClinicalBudgetSummaryWithTax,
 } from '@/utils/budget'
 
+/** Ortodoncia y endodoncia sí se sincronizan al plan/presupuesto.
+ *  Rehabilitación estética/aclaramiento solo entra con «Importar desde anexos». */
 function syncClinicalDataFromAnnexes(data: ClinicalRecordFormData): ClinicalRecordFormData {
-  return syncClinicalDataFromRehabilitationAnnex(
-    syncClinicalDataFromOrthodonticsAnnex(syncClinicalDataFromEndodonticsAnnex(data)),
-  )
+  return syncClinicalDataFromOrthodonticsAnnex(syncClinicalDataFromEndodonticsAnnex(data))
 }
 import type { OdontogramData } from '@/types/odontogram'
 import { createEmptyAnamnesis } from '@/types/anamnesis'

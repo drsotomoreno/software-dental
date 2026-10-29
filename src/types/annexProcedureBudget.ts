@@ -7,6 +7,8 @@ export interface AnnexProcedureBudgetLine {
   cupsCode?: string
   toothNumber?: number
   anatomicalZone?: string
+  /** Material restaurador (p. ej. Disilicato de Litio, Zirconio). */
+  material?: string
   quantity: number
   unitPrice: number
   /** Origen: manual o importado del esquema / plan visual */
@@ -39,6 +41,7 @@ export function createBlankAnnexProcedureBudgetLine(
 ): AnnexProcedureBudgetLine {
   return {
     procedure: '',
+    material: '',
     quantity: 1,
     unitPrice: 0,
     source: 'manual',
@@ -96,6 +99,8 @@ export function normalizeAnnexProcedureBudgetLine(
     typeof data.anatomicalZone === 'string' && data.anatomicalZone.trim()
       ? data.anatomicalZone.trim()
       : undefined
+  const material =
+    typeof data.material === 'string' && data.material.trim() ? data.material.trim() : ''
   const source = data.source === 'import' ? 'import' : data.source === 'manual' ? 'manual' : undefined
   const importKey =
     typeof data.importKey === 'string' && data.importKey.trim() ? data.importKey.trim() : undefined
@@ -106,6 +111,7 @@ export function normalizeAnnexProcedureBudgetLine(
     cupsCode,
     toothNumber,
     anatomicalZone,
+    material,
     quantity: Math.max(0, Math.round(normalizeNonNegative(data.quantity, 1))),
     unitPrice: Math.max(0, Math.round(normalizeNonNegative(data.unitPrice, 0))),
     source,
