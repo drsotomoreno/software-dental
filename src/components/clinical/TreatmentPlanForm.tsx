@@ -23,6 +23,7 @@ import { formatCupsCodeDotted } from '@/services/catalogService'
 import { searchGeneralDentistryCups } from '@/utils/cupsGeneralDentistry'
 import {
   applyAnnexCatalogPrices,
+  mergeAnnexImportsIntoTreatmentPlan,
   previewAnnexTreatmentImports,
 } from '@/utils/treatmentPlanAnnexImport'
 import {
@@ -245,7 +246,8 @@ export function TreatmentPlanForm({
       showToast('Seleccione al menos un procedimiento para importar')
       return
     }
-    emit([...treatmentPlan, ...chosen])
+    // Rehabilitación: solo la caja resumida (no diente a diente); reemplaza legacy «— pieza».
+    emit(mergeAnnexImportsIntoTreatmentPlan(treatmentPlan, chosen))
     setAnnexPickerOpen(false)
   }
 

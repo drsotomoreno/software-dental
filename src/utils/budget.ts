@@ -17,6 +17,7 @@ import {
 } from './cupsBillingRules'
 import { resolveTariffUnitPrice } from './tariffLookup'
 import { formatAnatomicalZone } from './treatmentPlanZone'
+import { extractTeethFromZoneText } from './treatmentPlanCollapse'
 import {
   isOrthodonticsAnnexPlanItem,
   omitOrthodonticsPackageBudgetLines,
@@ -143,20 +144,27 @@ export function treatmentPlanItemToBudgetLine(item: TreatmentPlanItem): BudgetLi
       : catalogPrice
   const zone = formatAnatomicalZone(item)
 
+  const teethInZone = extractTeethFromZoneText(zone || item.anatomicalZone)
+  // Filas agrupadas del plan (varias piezas): conservar cantidad del plan, no forzar 1 por CUPS.
+  const quantity =
+    teethInZone.length > 1
+      ? Math.max(teethInZone.length, item.quantity ?? 1)
+      : normalizeQuantityForCups(item.cupsCode, item.quantity ?? 1)
+
   return {
     id: generateId(),
     treatmentPlanItemId: item.id,
     procedure,
     cupsCode: item.cupsCode,
-    toothNumber: item.toothNumber,
-    fdiQuadrant: item.fdiQuadrant,
+    toothNumber: teethInZone.length > 1 ? undefined : item.toothNumber,
+    fdiQuadrant: teethInZone.length > 1 ? undefined : item.fdiQuadrant,
     arch: item.arch,
     anatomicalZone: zone || undefined,
     diagnosisCode: item.diagnosisCode,
     diagnosisDescription: item.diagnosisDescription,
-    quantity: normalizeQuantityForCups(item.cupsCode, item.quantity ?? 1),
+    quantity,
     unitPrice,
-    source: 'treatment_plan',
+    source: item.source === 'rehabilitation_annex' ? 'rehabilitation_annex' : 'treatment_plan',
   }
 }
 

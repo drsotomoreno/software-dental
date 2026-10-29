@@ -1,16 +1,30 @@
 import { calculateTotal } from '@/components/clinical/orthodontics/calculator/types'
-import type { TreatmentPlanItem } from '@/types/clinicalRecord'
+import type { BudgetLineItem, BudgetSummary, TreatmentPlanItem } from '@/types/clinicalRecord'
 import { formatEndoProcedureLabel } from '@/utils/endoAnnex'
 import { generateId } from '@/utils/crypto'
+import { calcClinicalBudgetSummaryWithTax } from '@/utils/budget'
+import {
+  collectGroupedRehabBudgetLines,
+  isLegacyPerToothRehabBudgetLine,
+  mergeAnnexImportsIntoTreatmentPlan,
+  syncRehabPlanItemsIntoGeneralBudget as syncRehabPlanItemsIntoGeneralBudgetCore,
+} from '@/utils/rehabAnnexClinicalImport'
 import {
   collapseTreatmentPlanByProcedure,
   collectTreatmentPlanItemTeeth,
+  extractTeethFromZoneText,
   treatmentProcedureFamilyKey,
 } from '@/utils/treatmentPlanCollapse'
 import { ZONE_GENERAL, parseAnatomicalZone } from '@/utils/treatmentPlanZone'
 import { DEFAULT_PHASE_PROCEDURES } from '@/types/periodonticsAnnex'
 import type { SpecializedAnnexes } from '@/types/specializedAnnexes'
 import { formatOrthodonticTreatmentPlan } from '@/types/orthodonticsAnnex'
+
+export {
+  collectGroupedRehabBudgetLines,
+  isLegacyPerToothRehabBudgetLine,
+  mergeAnnexImportsIntoTreatmentPlan,
+} from '@/utils/rehabAnnexClinicalImport'
 
 const DEFAULT_TREATMENT_PHASE = 'fase_ii' as const
 /** Homólogo que ya sincroniza el anexo de endodoncia con el plan. */
@@ -19,7 +33,25 @@ const ENDO_CUPS_CODE = '997401'
 function blankItem(
   patch: Partial<TreatmentPlanItem> & Pick<TreatmentPlanItem, 'procedure' | 'source'>,
 ): TreatmentPlanItem {
-  const zone = parseAnatomicalZone(patch.anatomicalZone ?? '')
+  const zoneRaw = patch.anatomicalZone ?? ''
+  const teethInZone = extractTeethFromZoneText(zoneRaw)
+  // Zonas multi-pieza (11, 12, 13…) se conservan tal cual; no forzar toothNumber.
+  if (teethInZone.length > 1) {
+    return {
+      id: generateId(),
+      phase: DEFAULT_TREATMENT_PHASE,
+      quantity: 1,
+      unitPrice: 0,
+      patientApproved: 'pendiente',
+      executionStatus: 'pendiente',
+      ...patch,
+      anatomicalZone: zoneRaw.trim(),
+      toothNumber: undefined,
+      fdiQuadrant: undefined,
+      arch: undefined,
+    }
+  }
+  const zone = parseAnatomicalZone(zoneRaw)
   return {
     id: generateId(),
     phase: DEFAULT_TREATMENT_PHASE,
@@ -170,20 +202,24 @@ function collectAnnexItems(annexes: SpecializedAnnexes | undefined): TreatmentPl
     )
   }
 
+  // Solo la caja resumida del anexo, nunca filas diente a diente.
   const rehabBudget = annexes.rehabilitationAesthetics?.budget
   if (rehabBudget?.active) {
-    for (const line of rehabBudget.lines) {
+    for (const line of collectGroupedRehabBudgetLines(rehabBudget.lines)) {
       const procedure = line.procedure?.trim() ?? ''
       if (!procedure) continue
+      const teeth = extractTeethFromZoneText(line.anatomicalZone)
       items.push(
         blankItem({
+          id: line.id || generateId(),
           phase: 'fase_iii',
           procedure,
           cupsCode: line.cupsCode,
-          toothNumber: line.toothNumber,
+          toothNumber: teeth.length === 1 ? teeth[0] : undefined,
           anatomicalZone: line.anatomicalZone ?? ZONE_GENERAL,
-          quantity: line.quantity,
+          quantity: Math.max(1, line.quantity || teeth.length || 1),
           unitPrice: line.unitPrice,
+          notes: line.importKey ? `importKey:${line.importKey}` : undefined,
           source: 'rehabilitation_annex',
         }),
       )
@@ -223,7 +259,17 @@ export function importAnnexesToTreatmentPlan(
     previewAnnexTreatmentImports(annexes, collapsedPlan),
     resolvePrice,
   )
-  return collapseTreatmentPlanByProcedure(
-    additions.length > 0 ? [...collapsedPlan, ...additions] : collapsedPlan,
+  return mergeAnnexImportsIntoTreatmentPlan(collapsedPlan, additions)
+}
+
+export function syncRehabPlanItemsIntoGeneralBudget(
+  treatmentPlan: TreatmentPlanItem[],
+  budgetItems: BudgetLineItem[],
+  discount = 0,
+  orthodonticsBudget?: Parameters<typeof calcClinicalBudgetSummaryWithTax>[2],
+  dentalImplantsBudget?: Parameters<typeof calcClinicalBudgetSummaryWithTax>[3],
+): { budgetItems: BudgetLineItem[]; budget: BudgetSummary } {
+  return syncRehabPlanItemsIntoGeneralBudgetCore(treatmentPlan, budgetItems, (items) =>
+    calcClinicalBudgetSummaryWithTax(items, discount, orthodonticsBudget, dentalImplantsBudget),
   )
 }
