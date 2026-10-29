@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import type { ClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import type { Cie10Diagnosis, TreatmentPlanItem } from '@/types/clinicalRecord'
 import type { SpecializedAnnexes } from '@/types/specializedAnnexes'
-import { COMMON_CIE10_CODES } from '@/constants/dental'
+import { COMMON_CIE10_CODES, COMMON_DENTAL_PROCEDURES } from '@/constants/dental'
 import {
   CLINICAL_HISTORY_SECTION_NUMBERS,
   CLINICAL_SECTION_TITLE_CLASS,
@@ -186,10 +186,13 @@ export function TreatmentPlanForm({
 
   const cupsOptions = useMemo(
     () =>
-      searchGeneralDentistryCups(
-        cupsQuery,
-        (prices ?? []).map((price) => ({ procedure: price.procedure, cupsCode: price.cupsCode })),
-      ),
+      searchGeneralDentistryCups(cupsQuery, [
+        ...COMMON_DENTAL_PROCEDURES.map((item) => ({
+          procedure: item.procedure,
+          cupsCode: item.cupsCode,
+        })),
+        ...(prices ?? []).map((price) => ({ procedure: price.procedure, cupsCode: price.cupsCode })),
+      ]),
     [cupsQuery, prices],
   )
 

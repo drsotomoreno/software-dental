@@ -336,6 +336,13 @@ export const ODONTOLOGY_INLAY_RESTORATION_CUPS_ITEMS: CatalogImportPayload['item
     specialty: 'odontologia',
     chapter: '23',
   },
+  {
+    code: '233201',
+    description:
+      'Restauración de dientes mediante incrustación no metálica — carillas dentales indirectas, inlays, onlays y overlays (cerámica o resina)',
+    specialty: 'odontologia',
+    chapter: '23',
+  },
 ]
 
 /** Coronas, prótesis fija/removible y totales — categoría 23.4 (Res. 2706/2025) */

@@ -21,7 +21,7 @@ import {
   CLINICAL_SECTION_TITLE_CLASS,
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
-import { COMMON_CIE10_CODES } from '@/constants/dental'
+import { COMMON_CIE10_CODES, COMMON_DENTAL_PROCEDURES } from '@/constants/dental'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCatalogSearch } from '@/hooks/useCatalogSearch'
 import { useTariffSync } from '@/modules/tariff/useTariffSync'
@@ -402,10 +402,13 @@ export function PaymentControlForm({
 
   const cupsOptions = useMemo(
     () =>
-      searchGeneralDentistryCups(
-        cupsQuery,
-        (prices ?? []).map((price) => ({ procedure: price.procedure, cupsCode: price.cupsCode })),
-      ),
+      searchGeneralDentistryCups(cupsQuery, [
+        ...COMMON_DENTAL_PROCEDURES.map((item) => ({
+          procedure: item.procedure,
+          cupsCode: item.cupsCode,
+        })),
+        ...(prices ?? []).map((price) => ({ procedure: price.procedure, cupsCode: price.cupsCode })),
+      ]),
     [cupsQuery, prices],
   )
 

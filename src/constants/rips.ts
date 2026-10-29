@@ -66,6 +66,8 @@ export const OPERATIVE_RESTORATION_CUPS = {
   reconstruccionSod: '232403',
   incrustacionMetalica: '233100',
   incrustacionNoMetalica: '233200',
+  /** Carillas / inlays / onlays / overlays no metálicos (laboratorio o CAD/CAM). */
+  carillaDentalIndirecta: '233201',
 } as const
 
 /** Coronas y prótesis — capítulo 23.4 (Res. 2706/2025) */

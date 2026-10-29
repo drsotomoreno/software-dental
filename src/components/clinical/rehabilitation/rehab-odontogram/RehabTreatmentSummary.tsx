@@ -256,6 +256,7 @@ interface TreatmentSummaryRowProps {
   treatmentColor: string
   treatmentLabel: string
   treatmentDetail: string
+  cupsCode?: string
   dashedDot?: boolean
 }
 
@@ -270,6 +271,7 @@ function TreatmentSummaryRow({
   treatmentColor,
   treatmentLabel,
   treatmentDetail,
+  cupsCode,
   dashedDot = false,
 }: TreatmentSummaryRowProps) {
   const spec = restoration ?? createEmptyRestorationSpec()
@@ -284,7 +286,7 @@ function TreatmentSummaryRow({
       <SummaryPill
         color={treatmentColor}
         label={treatmentLabel}
-        detail={treatmentDetail}
+        detail={cupsCode ? `${treatmentDetail} · CUPS ${cupsCode}` : treatmentDetail}
         dashedDot={dashedDot}
       />
       {showMaterial && restorationKey && (
@@ -383,6 +385,7 @@ export function RehabTreatmentSummary({
         color: group.color ?? option.color,
         label: option.label,
         detail: `${detail}${suffix}`,
+        cupsCode: option.cupsCode,
         showMaterial: !isImplantsVariant && REHAB_FIXED_RESTORATION_TREATMENTS.includes(option.id),
         showColor: !isImplantsVariant && REHAB_FIXED_RESTORATION_TREATMENTS.includes(option.id),
       }
@@ -471,6 +474,7 @@ export function RehabTreatmentSummary({
               treatmentColor={group.color}
               treatmentLabel={group.label}
               treatmentDetail={group.detail}
+              cupsCode={group.cupsCode}
             />
           ))}
         {eliminatedOnly.length > 0 && (

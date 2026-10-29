@@ -302,6 +302,11 @@ export const COMMON_DENTAL_PROCEDURES: {
     defaultPhase: 'fase_iii',
   },
   {
+    procedure: 'Carilla Dental Indirecta',
+    cupsCode: '233201',
+    defaultPhase: 'fase_iii',
+  },
+  {
     procedure: 'Corona individual / funda SOD',
     cupsCode: '234000',
     defaultPhase: 'fase_iii',

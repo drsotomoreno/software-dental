@@ -25,6 +25,7 @@ import {
   type RehabilitationAestheticsAnnex,
 } from '@/types/rehabilitationAestheticsAnnex'
 import { generateId } from '@/utils/crypto'
+import { resolveTariffUnitPrice } from '@/utils/tariffLookup'
 
 function treatmentLabel(tratamiento: string): string {
   return REHAB_TREATMENT_OPTIONS.find((option) => option.id === tratamiento)?.label ?? tratamiento
@@ -282,15 +283,19 @@ export function importRehabPlanningIntoBudget(
 
   for (const [importKey, candidate] of candidateByKey) {
     const previous = previousImportByKey.get(importKey)
+    const cupsCode = candidate.cupsCode ?? previous?.cupsCode
+    const tariffPrice = cupsCode ? resolveTariffUnitPrice(cupsCode) : 0
     if (previous) {
       skipped += 1
+      const keepPrice = previous.unitPrice ?? 0
       syncedImportLines.push({
         ...previous,
         procedure: candidate.procedure,
-        cupsCode: candidate.cupsCode ?? previous.cupsCode,
+        cupsCode,
         anatomicalZone: candidate.anatomicalZone,
         toothNumber: candidate.toothNumber,
         quantity: candidate.quantity,
+        unitPrice: keepPrice > 0 ? keepPrice : tariffPrice,
         material: previous.material || candidate.material || '',
         source: 'import',
         importKey,
@@ -301,6 +306,8 @@ export function importRehabPlanningIntoBudget(
     syncedImportLines.push(
       createBlankAnnexProcedureBudgetLine({
         ...candidate,
+        cupsCode,
+        unitPrice: candidate.unitPrice > 0 ? candidate.unitPrice : tariffPrice,
         id: generateId(),
       }),
     )

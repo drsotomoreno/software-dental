@@ -204,15 +204,22 @@ export function AnnexProcedureBudgetSection({
                           ) : null}
                         </p>
                       ) : (
-                        <input
-                          type="text"
-                          value={line.procedure}
-                          onChange={(event) =>
-                            updateLine(line.id, { procedure: event.target.value })
-                          }
-                          placeholder="Nombre del procedimiento"
-                          className="input-field min-w-[10rem] text-sm"
-                        />
+                        <div className="min-w-[10rem]">
+                          <input
+                            type="text"
+                            value={line.procedure}
+                            onChange={(event) =>
+                              updateLine(line.id, { procedure: event.target.value })
+                            }
+                            placeholder="Nombre del procedimiento"
+                            className="input-field w-full text-sm"
+                          />
+                          {line.cupsCode ? (
+                            <span className="mt-0.5 block text-[11px] font-normal text-slate-500">
+                              CUPS {line.cupsCode}
+                            </span>
+                          ) : null}
+                        </div>
                       )}
                     </td>
                     <td className="px-3 py-2">

@@ -18,7 +18,8 @@ export const REHAB_QUADRANT_LABELS: Record<RehabQuadrantId, string> = {
 /** CUPS 23.3 — restauraciones adhesivas parciales no metálicas (laboratorio o CAD/CAM). */
 export const REHAB_INDIRECT_NON_METAL_RESTORATION_CUPS = {
   code: '233201',
-  label: 'RESTAURACIÓN DE DIENTES MEDIANTE INCRUSTACIÓN NO METÁLICA',
+  label:
+    'Restauración de dientes mediante incrustación no metálica — carillas dentales indirectas, inlays, onlays y overlays (cerámica o resina)',
 } as const
 
 export const REHAB_TREATMENT_OPTIONS: RehabTreatmentOption[] = [
