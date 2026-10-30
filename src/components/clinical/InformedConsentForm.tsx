@@ -10,6 +10,7 @@ import {
   CONSENT_MENU_OPTIONS,
   getConsentLabel,
   getConsentTemplate,
+  getConsentTexts,
   type ConsentTemplateId,
 } from '@/constants/consentTemplates'
 import {
@@ -18,6 +19,7 @@ import {
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
 import { DigitalSignatureCanvas } from '@/components/signature'
+import { KioskRemoteTrigger } from '@/components/kiosk/KioskRemoteTrigger'
 import { findLedgerConsentSignatures } from '@/services/signatureService'
 import type { SignatureCaptureResult } from '@/types/signature'
 import { listPatientClinicalRecords } from '@/utils/clinicalRecordSnapshot'
@@ -210,6 +212,13 @@ export function InformedConsentForm({
     if (activeConsentId === id) setActiveConsentId(next[0] ?? null)
   }
 
+  const activeTemplate = activeConsentId ? getConsentTemplate(activeConsentId) : null
+  const consentDocumentId = `${patientId || 'patient'}:${activeConsentId || selectedIds.join(',') || 'consent'}`
+  const consentContent =
+    activeTemplate?.text ||
+    (selectedIds.length > 0 ? getConsentTexts(selectedIds) : '') ||
+    ''
+
   return (
     <section className="card">
       <h3 className={`mb-2 ${CLINICAL_SECTION_TITLE_CLASS}`}>
@@ -218,6 +227,31 @@ export function InformedConsentForm({
           'Consentimiento Informado y Firmas',
         )}
       </h3>
+
+      {!disabled && patientId && (activeConsentId || selectedIds.length > 0) && (
+        <div className="mb-4">
+          <KioskRemoteTrigger
+            type="CONSENT"
+            documentId={consentDocumentId}
+            patientId={patientId}
+            dataToSign={{
+              title: activeTemplate?.label || getConsentLabel(activeConsentId || selectedIds[0]),
+              contentText: consentContent,
+              formData: {
+                selectedConsentIds: selectedIds,
+                activeConsentId,
+              },
+            }}
+            onSigned={({ signatureBase64 }) => {
+              update({
+                patientSignatureDataUrl: signatureBase64,
+                textAccepted: true,
+                signedAt: new Date().toISOString(),
+              })
+            }}
+          />
+        </div>
+      )}
 
       {signedStatusReady && signedLabels.length === 0 ? (
         <div

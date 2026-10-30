@@ -3,6 +3,7 @@
  * Ejecutar: npm run server  →  http://localhost:3000
  */
 import { existsSync } from 'node:fs'
+import { createServer } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
@@ -14,6 +15,8 @@ import ripsRoutes from './server/routes/rips.routes.js'
 import invoicesRoutes from './server/routes/invoices.routes.js'
 import authRoutes from './server/routes/auth.routes.js'
 import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
+import kioskRoutes from './server/routes/kiosk.routes.js'
+import { attachKioskSocket } from './server/socket/kioskSocket.js'
 import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
 import { startMonthlyRipsCron } from './server/jobs/monthlyRipsCron.js'
@@ -62,6 +65,7 @@ app.use('/api/health', healthRoutes)
 app.use('/api/rips', ripsRoutes)
 app.use('/api/invoices', invoicesRoutes)
 app.use('/api/sync', clinicalSyncRoutes)
+app.use('/api/v1/kiosk', kioskRoutes)
 app.use('/api', authRoutes)
 
 const distDir = path.join(__dirname, 'dist')
@@ -172,7 +176,10 @@ async function bootAfterListen() {
 // Abrir el puerto antes de PostgreSQL. Si la base no responde, Render
 // igual tiene un proceso escuchando y deja de devolver 502.
 const port = Number(process.env.PORT) || config.port || 3000
-const httpServer = app.listen(port, '0.0.0.0', () => {
+const httpServer = createServer(app)
+attachKioskSocket(httpServer)
+
+httpServer.listen(port, '0.0.0.0', () => {
   console.log(`[RIPS API] App y API en http://0.0.0.0:${port}`)
   console.log(`[config] DATABASE_URL=${DATABASE_URL.replace(/:([^:@/]+)@/, ':***@')}`)
   console.log(`[Auth] SuperAdmin exento: ${config.superAdmin.email}`)

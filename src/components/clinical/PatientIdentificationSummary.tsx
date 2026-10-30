@@ -3,6 +3,7 @@ import { PATIENT_PHASE_LABELS, normalizePatientPhase, isValuatedOnlyPatient, isC
 import { differenceInYears } from 'date-fns'
 import { REGIME_TYPES } from '@/constants/dental'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
+import { KioskRemoteTrigger } from '@/components/kiosk/KioskRemoteTrigger'
 import { PatientRegistrationSection } from './PatientRegistrationSection'
 import { ExternalHistoryRdaPanel } from './ExternalHistoryRdaPanel'
 
@@ -65,6 +66,26 @@ export function PatientIdentificationSummary({
   if (canEdit && form && onChange) {
     return (
       <div className="space-y-3">
+        {!disabled && (
+          <KioskRemoteTrigger
+            type="INTAKE"
+            documentId={patient.id || patient.syncId || 'intake'}
+            patientId={patient.id || patient.syncId || ''}
+            dataToSign={{
+              title: 'Registro de paciente',
+              contentText: 'Complete datos básicos, anamnesis y firme en la tableta.',
+              formData: {
+                datosBasicos: {
+                  firstName: form.firstName || '',
+                  lastName: form.lastName || '',
+                  documentType: form.documentType || 'CC',
+                  documentNumber: form.documentNumber || '',
+                  phone: form.phone || '',
+                },
+              },
+            }}
+          />
+        )}
         <PatientRegistrationSection
           value={form}
           onChange={onChange}

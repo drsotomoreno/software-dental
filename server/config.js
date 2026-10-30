@@ -74,6 +74,11 @@ export const config = {
     password: 'Dragon1976%',
     nombre: process.env.SUPERADMIN_NAME ?? 'Dr. Mauricio Soto',
   },
+  /** Secreto HS256 para JWT de modo kiosco (`role: "kiosk"`). */
+  kioskJwtSecret:
+    process.env.KIOSK_JWT_SECRET ||
+    process.env.JWT_SECRET ||
+    'dev-kiosk-jwt-secret-change-me',
 }
 
 /** Credenciales completas para modo producción contra el API del ministerio. */
