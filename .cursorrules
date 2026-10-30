@@ -1,0 +1,71 @@
+# mihistoriadental.com — Reglas de contexto para la IA
+# Arquitectura Normativa · Historia Clínica Odontológica (Colombia)
+
+Este proyecto es software de historias clínicas odontológicas adaptado a la
+normatividad colombiana (Resolución 1995 de 1999, Ley 527, RIPS, Habeas Data).
+Toda generación o modificación de código relacionado con firmas, evoluciones,
+consentimientos, autorizaciones o planes de tratamiento DEBE respetar las
+reglas de este archivo. En caso de conflicto con una solicitud del usuario,
+priorizar la normatividad aquí descrita y advertir explícitamente.
+
+---
+
+## REGLAS ESTRICTAS DE FIRMAS CLÍNICAS (COLOMBIA)
+
+Marco de referencia: Resolución 1995 de 1999 (Historia Clínica) y principios
+de autoría, integridad y trazabilidad del registro clínico.
+
+### 1. EVOLUCIONES CLÍNICAS
+- Las notas de evolución son de **autoría exclusiva del profesional**.
+- **NUNCA** deben incluir un campo para la firma del paciente.
+- Solo se requiere la firma digital/electrónica del odontólogo tratante con:
+  - Registro **ReTHUS**
+  - **Timestamp** (fecha y hora de firma)
+- UI, formularios, APIs y modelos de datos de evolución: no exponer, persistir
+  ni sugerir `patientSignature`, firma de acudiente u homólogos.
+
+### 2. FIRMA EXCLUSIVA DEL PACIENTE / ACUDIENTE
+Documentos que exigen únicamente firma del paciente (o de su acudiente /
+representante legal cuando aplique):
+- Autorización de tratamiento de datos (**Habeas Data**)
+- Desistimientos de tratamiento
+- Constancias de retiro
+
+No exigir firma del odontólogo en estos actos salvo que otra norma o
+requisito explícito del producto lo indique por separado.
+
+### 3. FIRMA CONJUNTA (ODONTÓLOGO + PACIENTE)
+Documentos que exigen **ambas** firmas (profesional + paciente/acudiente):
+- Consentimientos informados (procedimientos, radiología, ortodoncia, etc.)
+- Planes de Tratamiento / Presupuestos
+
+El sistema no debe permitir cerrar, guardar como firmado ni marcar como
+válido un documento de este tipo si falta alguna de las dos firmas.
+
+### 4. PACIENTES MENORES DE EDAD (< 18 años)
+- **NINGÚN** paciente menor de 18 años puede firmar legalmente.
+- El sistema **DEBE** exigir siempre la firma del acudiente / representante
+  legal.
+- Capturar de forma obligatoria:
+  - **Nombre** del adulto responsable
+  - **Cédula** del adulto responsable
+- En UI y validaciones: si `edad < 18` (o fecha de nacimiento implica menor),
+  sustituir/bloquear el rol “firma del paciente” por “firma del acudiente /
+  representante legal” con los campos de identificación anteriores.
+
+---
+
+## Directrices de implementación para la IA
+
+1. Al crear o editar pantallas, schemas, DTOs o endpoints de firmas, clasificar
+   el documento en una de las categorías 1–3 y aplicar solo el conjunto de
+   firmas permitido.
+2. No “unificar” firmas en un solo componente genérico que pida paciente +
+   profesional en evoluciones.
+3. Validar mayoría de edad antes de habilitar firma del paciente; en menores,
+   forzar flujo de acudiente con nombre y cédula.
+4. Toda firma electrónica del profesional en evoluciones debe asociar ReTHUS
+   y timestamp inmutable al momento del cierre/firma.
+5. Si una solicitud pediría violar estas reglas (p. ej. “agregar firma del
+   paciente a la evolución”), rechazar el cambio normativo, explicar el
+   motivo y proponer la alternativa correcta.

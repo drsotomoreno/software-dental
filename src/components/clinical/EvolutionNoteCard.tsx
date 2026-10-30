@@ -71,52 +71,48 @@ function EvolutionNoteSignature({
 }) {
   if (readOnly) {
     return (
-      <div className="grid gap-4 md:grid-cols-2">
-        <FirmaRegistrada titulo="Firma del paciente" src={note.patientSignatureDataUrl} />
-        <FirmaRegistrada titulo="Firma del odontólogo" src={note.professionalSignatureDataUrl} />
+      <div className="space-y-3">
+        <FirmaRegistrada titulo="Firma del odontólogo tratante" src={note.professionalSignatureDataUrl} />
+        <dl className="grid gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 sm:grid-cols-2">
+          <div>
+            <dt className="font-medium text-slate-500">ReTHUS / documento</dt>
+            <dd className="mt-0.5 font-mono text-slate-800">
+              {note.professionalLicense?.trim() || '—'}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-slate-500">Timestamp de cierre (UTC)</dt>
+            <dd className="mt-0.5 font-mono text-slate-800">
+              {note.signedAt ? formatDate(note.signedAt) : '—'}
+            </dd>
+          </div>
+        </dl>
       </div>
     )
   }
 
   return (
     <div className="space-y-2">
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="min-w-0 [&_canvas]:!h-36 [&_canvas]:max-w-full [&_canvas]:!w-full">
-          <DigitalSignatureCanvas
-            title="Firma del paciente"
-            ariaLabel="Área de firma del paciente"
-            showDetails={false}
-            onSignatureChange={(result) =>
-              onChange({
-                patientSignatureDataUrl: result?.dataUrl,
-                patientSignatureMeta: result?.metadata,
-              })
-            }
-            disabled={disabled}
-            width={480}
-            height={144}
-          />
-        </div>
-        <div className="min-w-0 [&_canvas]:!h-36 [&_canvas]:max-w-full [&_canvas]:!w-full">
-          <DigitalSignatureCanvas
-            title="Firma del odontólogo"
-            ariaLabel="Área de firma del odontólogo"
-            showDetails={false}
-            onSignatureChange={(result) =>
-              onChange({
-                professionalSignatureDataUrl: result?.dataUrl,
-                professionalSignatureMeta: result?.metadata,
-              })
-            }
-            disabled={disabled}
-            width={480}
-            height={144}
-          />
-        </div>
+      <div className="min-w-0 max-w-xl [&_canvas]:!h-36 [&_canvas]:max-w-full [&_canvas]:!w-full">
+        <DigitalSignatureCanvas
+          title="Firma del odontólogo tratante"
+          ariaLabel="Área de firma del odontólogo tratante"
+          showDetails={false}
+          value={note.professionalSignatureDataUrl}
+          onSignatureChange={(result) =>
+            onChange({
+              professionalSignatureDataUrl: result?.dataUrl,
+              professionalSignatureMeta: result?.metadata,
+            })
+          }
+          disabled={disabled}
+          width={480}
+          height={144}
+        />
       </div>
       <p className="text-xs text-slate-500">
-        El paciente y el odontólogo firman en la nota. Después de grabarla, las dos firmas quedan
-        fijas con el contenido clínico.
+        Autoría exclusiva del profesional (Res. 1995/1999). Al grabar se sella el timestamp UTC y el
+        hash SHA-256; no se solicita firma del paciente en evoluciones.
       </p>
     </div>
   )
@@ -363,8 +359,8 @@ export function EvolutionNoteCard({
                 {showClinicalNoteForm && (
                   <div className="rounded-lg border border-violet-100 bg-white/80 p-3 text-xs text-violet-900">
                     {ripsMode === 'mixed'
-                      ? 'Algunos procedimientos no requieren CUPS para RIPS. Deben firmar el paciente y el odontólogo antes de grabar la nota.'
-                      : 'Este servicio no requiere código CUPS para RIPS. Deben firmar el paciente y el odontólogo; no se generarán advertencias de radicación.'}
+                      ? 'Algunos procedimientos no requieren CUPS para RIPS. Debe firmar el odontólogo tratante (ReTHUS) antes de grabar la nota.'
+                      : 'Este servicio no requiere código CUPS para RIPS. Debe firmar el odontólogo tratante; no se generarán advertencias de radicación.'}
                   </div>
                 )}
 
@@ -466,31 +462,34 @@ export function EvolutionNoteCard({
                     className="input-field resize-y"
                   />
                 </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="label-field">Profesional tratante</label>
-                    <input
-                      disabled={clinicalLocked}
-                      value={note.professionalName}
-                      onChange={(event) => onChange({ professionalName: event.target.value })}
-                      className="input-field"
-                    />
-                  </div>
-                  <div>
-                    <label className="label-field">Número de Documento (Cédula / ReTHUS)</label>
-                    <input
-                      disabled={clinicalLocked}
-                      value={note.professionalLicense}
-                      onChange={(event) => onChange({ professionalLicense: event.target.value })}
-                      className="input-field"
-                    />
-                  </div>
-                </div>
                   </>
                 )}
               </>
             )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="label-field">
+                  Profesional tratante <span className="text-red-500">*</span>
+                </label>
+                <input
+                  disabled={clinicalLocked}
+                  value={note.professionalName}
+                  onChange={(event) => onChange({ professionalName: event.target.value })}
+                  className="input-field"
+                />
+              </div>
+              <div>
+                <label className="label-field">
+                  Número de Documento (Cédula / ReTHUS) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  disabled={clinicalLocked}
+                  value={note.professionalLicense}
+                  onChange={(event) => onChange({ professionalLicense: event.target.value })}
+                  className="input-field"
+                />
+              </div>
+            </div>
             <EvolutionNoteSignature
               note={note}
               readOnly={readOnly}

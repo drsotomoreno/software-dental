@@ -69,6 +69,10 @@ import {
   validateClinicalRecordDraft,
 } from '@/utils'
 import { getFirstBlockingClinicalBudgetIssue } from '@/utils/clinicalRipsValidation'
+import {
+  esMenorDeEdad,
+  guardianAuthorizationComplete,
+} from '@/utils/patientMinorAge'
 import { sortEvolutionNotesChronologically, verifyClinicalRecordIntegrity } from '@/utils/recordIntegrity'
 import {
   ensureEvolutionNoteOutboxCreate,
@@ -969,7 +973,7 @@ export function PatientDetailPage() {
 
   const validateClinical = (): boolean => {
 
-    if (!clinicalData) return false
+    if (!clinicalData || !patient) return false
 
     const ripsLocationIssue = getFirstBlockingClinicalBudgetIssue(clinicalData.budgetItems)
     if (ripsLocationIssue) {
@@ -977,44 +981,52 @@ export function PatientDetailPage() {
       return false
     }
 
-    if (!clinicalData.informedConsent.selectedConsentIds?.length) {
+    const menor = esMenorDeEdad(patient.birthDate)
+    const consent = clinicalData.informedConsent
+    const planAuth = clinicalData.treatmentPlanAuthorization
 
+    if (!consent.selectedConsentIds?.length) {
       setMessage('Debe seleccionar al menos un consentimiento informado según el procedimiento.')
-
       return false
-
     }
 
-    if (!clinicalData.informedConsent.textAccepted) {
-
-      setMessage('El paciente debe aceptar el consentimiento informado.')
-
+    if (!consent.textAccepted) {
+      setMessage(
+        menor
+          ? 'El representante legal debe aceptar el consentimiento informado.'
+          : 'El paciente debe aceptar el consentimiento informado.',
+      )
       return false
-
     }
 
-    if (!clinicalData.informedConsent.patientSignatureDataUrl) {
-
-      setMessage('La firma del paciente es obligatoria.')
-
+    if (
+      !guardianAuthorizationComplete(menor, consent.guardianName, consent.guardianDocument)
+    ) {
+      setMessage(
+        'El paciente es menor de edad: indique nombre y documento del acudiente / representante legal en el consentimiento.',
+      )
       return false
-
     }
 
-    if (!clinicalData.informedConsent.professionalSignatureDataUrl) {
+    if (!consent.patientSignatureDataUrl) {
+      setMessage(
+        menor
+          ? 'La firma del representante legal es obligatoria en el consentimiento.'
+          : 'La firma del paciente es obligatoria.',
+      )
+      return false
+    }
 
+    if (!consent.professionalSignatureDataUrl) {
       setMessage('La firma del profesional es obligatoria.')
-
       return false
-
     }
 
     const patientSigError = validateSignatureCapture(
-      clinicalData.informedConsent.patientSignatureDataUrl &&
-        clinicalData.informedConsent.patientSignatureMeta
+      consent.patientSignatureDataUrl && consent.patientSignatureMeta
         ? {
-            dataUrl: clinicalData.informedConsent.patientSignatureDataUrl,
-            metadata: clinicalData.informedConsent.patientSignatureMeta,
+            dataUrl: consent.patientSignatureDataUrl,
+            metadata: consent.patientSignatureMeta,
           }
         : null,
     )
@@ -1024,17 +1036,49 @@ export function PatientDetailPage() {
     }
 
     const professionalSigError = validateSignatureCapture(
-      clinicalData.informedConsent.professionalSignatureDataUrl &&
-        clinicalData.informedConsent.professionalSignatureMeta
+      consent.professionalSignatureDataUrl && consent.professionalSignatureMeta
         ? {
-            dataUrl: clinicalData.informedConsent.professionalSignatureDataUrl,
-            metadata: clinicalData.informedConsent.professionalSignatureMeta,
+            dataUrl: consent.professionalSignatureDataUrl,
+            metadata: consent.professionalSignatureMeta,
           }
         : null,
     )
     if (professionalSigError) {
       setMessage(professionalSigError)
       return false
+    }
+
+    if (planAuth) {
+      if (
+        !guardianAuthorizationComplete(menor, planAuth.guardianName, planAuth.guardianDocument)
+      ) {
+        setMessage(
+          'El paciente es menor de edad: indique nombre y documento del acudiente en la autorización del plan / presupuesto.',
+        )
+        return false
+      }
+      if (planAuth.textAccepted || planAuth.patientSignatureDataUrl || planAuth.professionalSignatureDataUrl) {
+        if (!planAuth.textAccepted) {
+          setMessage(
+            menor
+              ? 'El representante legal debe aceptar el plan de tratamiento / presupuesto.'
+              : 'El paciente debe aceptar el plan de tratamiento / presupuesto.',
+          )
+          return false
+        }
+        if (!planAuth.patientSignatureDataUrl) {
+          setMessage(
+            menor
+              ? 'La firma del representante legal es obligatoria en el plan / presupuesto.'
+              : 'La firma del paciente es obligatoria en el plan / presupuesto.',
+          )
+          return false
+        }
+        if (!planAuth.professionalSignatureDataUrl) {
+          setMessage('La firma del odontólogo es obligatoria en el plan / presupuesto.')
+          return false
+        }
+      }
     }
 
     return true
@@ -1277,6 +1321,8 @@ export function PatientDetailPage() {
 
         informedConsent: normalizedClinicalData.informedConsent,
 
+        treatmentPlanAuthorization: normalizedClinicalData.treatmentPlanAuthorization ?? null,
+
       }
 
 
@@ -1335,6 +1381,14 @@ export function PatientDetailPage() {
           signedAt: now,
 
         },
+
+        treatmentPlanAuthorization: normalizedClinicalData.treatmentPlanAuthorization
+          ? {
+              ...normalizedClinicalData.treatmentPlanAuthorization,
+              signedAt:
+                normalizedClinicalData.treatmentPlanAuthorization.signedAt?.trim() || now,
+            }
+          : null,
 
         contentHash,
 

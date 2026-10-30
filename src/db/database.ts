@@ -49,6 +49,7 @@ import {
   backfillDraftEvolutionNotes,
   backfillEvolutionNotesRipsMetadata,
 } from '@/types/evolutionNoteRips'
+import { stripEvolutionNotesPatientSignatures } from '@/types/evolutionNote'
 import { CREDIT_NOTE_IMMUTABILITY_MESSAGE } from '@/types/creditNote'
 import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
@@ -772,6 +773,53 @@ export class DentalDatabase extends Dexie {
     // v31 — cola local RIPS (outbox). No migra filas: la tabla nace vacía.
     this.version(31).stores({
       rips_queue: '++id, &evolutionId, patientId, type, status, [status+type], updatedAt',
+    })
+
+    // v32 — Res. 1995/1999: evoluciones sin firma del paciente (autoría exclusiva del odontólogo).
+    this.version(32).upgrade(async (tx) => {
+      const stripNotes = (notes: unknown) =>
+        Array.isArray(notes)
+          ? stripEvolutionNotesPatientSignatures(
+              notes as Array<Record<string, unknown>>,
+            )
+          : notes
+
+      const stripNestedDraft = (draft: unknown) => {
+        if (!draft || typeof draft !== 'object') return draft
+        const current = draft as { evolutionNotes?: unknown }
+        if (!Array.isArray(current.evolutionNotes)) return draft
+        const evolutionNotes = stripNotes(current.evolutionNotes)
+        if (evolutionNotes === current.evolutionNotes) return draft
+        return { ...current, evolutionNotes }
+      }
+
+      const records = await tx.table('clinicalRecords').toArray()
+      for (const record of records) {
+        if (!record?.id) continue
+        const evolutionNotes = stripNotes(record.evolutionNotes)
+        if (evolutionNotes === record.evolutionNotes) continue
+        await tx.table('clinicalRecords').update(record.id, { evolutionNotes })
+      }
+
+      const drafts = await tx.table('patientClinicalDrafts').toArray()
+      for (const draft of drafts) {
+        if (!draft?.patientId) continue
+        const evolutionNotes = stripNotes(draft.evolutionNotes)
+        const valuationDraft = stripNestedDraft(draft.valuationDraft)
+        const clinicalDraft = stripNestedDraft(draft.clinicalDraft)
+        if (
+          evolutionNotes === draft.evolutionNotes &&
+          valuationDraft === draft.valuationDraft &&
+          clinicalDraft === draft.clinicalDraft
+        ) {
+          continue
+        }
+        await tx.table('patientClinicalDrafts').update(draft.patientId, {
+          evolutionNotes,
+          valuationDraft,
+          clinicalDraft,
+        })
+      }
     })
   }
 }

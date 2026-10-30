@@ -32,16 +32,70 @@ function evolutionNoteIsSigned(note) {
 }
 
 /**
+ * Res. 1995/1999: la evolución es de autoría exclusiva del profesional.
+ * Elimina firmas de paciente legadas del folio (no aplica a consentimientos).
+ */
+export function stripEvolutionPatientSignature(note) {
+  if (!note || typeof note !== 'object') return note
+  if (!('patientSignatureDataUrl' in note) && !('patientSignatureMeta' in note)) return note
+  const next = { ...note }
+  delete next.patientSignatureDataUrl
+  delete next.patientSignatureMeta
+  return next
+}
+
+export function stripEvolutionNotesPatientSignatures(notes) {
+  if (!Array.isArray(notes)) return notes
+  let changed = false
+  const next = notes.map((note) => {
+    const cleaned = stripEvolutionPatientSignature(note)
+    if (cleaned !== note) changed = true
+    return cleaned
+  })
+  return changed ? next : notes
+}
+
+/** Limpia firmas de paciente en payloads clínicos / borradores del sync. */
+export function stripClinicalPayloadEvolutionPatientSignatures(payload) {
+  if (!payload || typeof payload !== 'object') return payload
+  let changed = false
+  const next = { ...payload }
+
+  if (Array.isArray(next.evolutionNotes)) {
+    const evolutionNotes = stripEvolutionNotesPatientSignatures(next.evolutionNotes)
+    if (evolutionNotes !== next.evolutionNotes) {
+      next.evolutionNotes = evolutionNotes
+      changed = true
+    }
+  }
+
+  for (const key of ['clinicalDraft', 'valuationDraft']) {
+    const draft = next[key]
+    if (!draft || typeof draft !== 'object' || !Array.isArray(draft.evolutionNotes)) continue
+    const evolutionNotes = stripEvolutionNotesPatientSignatures(draft.evolutionNotes)
+    if (evolutionNotes === draft.evolutionNotes) continue
+    next[key] = { ...draft, evolutionNotes }
+    changed = true
+  }
+
+  return changed ? next : payload
+}
+
+/**
  * Une las notas. Un formulario vacío no borra las que ya existen, y una nota
  * firmada conserva su cuerpo (la metadata RIPS sí puede actualizarse).
  */
 export function mergeSignedEvolutionNotes(baseNotes, incomingNotes) {
-  if (!evolutionNotesHaveContent(incomingNotes)) {
-    return Array.isArray(baseNotes) ? baseNotes : incomingNotes
+  const cleanedIncoming = stripEvolutionNotesPatientSignatures(incomingNotes)
+  const cleanedBase = stripEvolutionNotesPatientSignatures(baseNotes)
+  if (!evolutionNotesHaveContent(cleanedIncoming)) {
+    return Array.isArray(cleanedBase) ? cleanedBase : cleanedIncoming
   }
-  if (!Array.isArray(baseNotes) || baseNotes.length === 0) return incomingNotes
-  const merged = new Map(baseNotes.filter((note) => note && note.id).map((note) => [note.id, note]))
-  for (const note of incomingNotes) {
+  if (!Array.isArray(cleanedBase) || cleanedBase.length === 0) return cleanedIncoming
+  const merged = new Map(
+    cleanedBase.filter((note) => note && note.id).map((note) => [note.id, note]),
+  )
+  for (const note of cleanedIncoming) {
     if (!note || !note.id) continue
     const previous = merged.get(note.id)
     if (!previous) {
@@ -57,7 +111,7 @@ export function mergeSignedEvolutionNotes(baseNotes, incomingNotes) {
     if (note.workflowStatus !== undefined) kept.workflowStatus = note.workflowStatus
     merged.set(note.id, kept)
   }
-  return preserveEvolutionWorkflowStatus(baseNotes, [...merged.values()])
+  return preserveEvolutionWorkflowStatus(cleanedBase, [...merged.values()])
 }
 
 /**

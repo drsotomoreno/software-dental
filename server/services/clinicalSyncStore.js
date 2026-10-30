@@ -7,7 +7,10 @@ import {
   writeAttachmentBytes,
 } from './clinicAttachmentStore.js'
 import { readDurableJsonWithMerge, writeDurableJsonWithMerge } from './durableStore.js'
-import { shouldReplaceClinicalDocument } from '../../shared/clinicalRecordGuard.js'
+import {
+  shouldReplaceClinicalDocument,
+  stripClinicalPayloadEvolutionPatientSignatures,
+} from '../../shared/clinicalRecordGuard.js'
 import { withMergedClinicalPayments } from '../../shared/paymentControlMerge.js'
 import { odontogramRecordHasMarks } from './odontogramMerge.js'
 
@@ -174,12 +177,13 @@ function normalizeRecord(raw, clinicId) {
     raw.payload && typeof raw.payload === 'object' && !Array.isArray(raw.payload) ? raw.payload : raw
   const syncId = String(raw.syncId ?? payloadSource.syncId ?? payloadSource.id ?? '').trim()
   if (!syncId) return null
-  const payload =
+  const payloadRaw =
     raw.payload && typeof raw.payload === 'object' && !Array.isArray(raw.payload)
       ? { ...raw.payload }
       : { ...raw }
-  delete payload.dataBase64
-  delete payload.data
+  delete payloadRaw.dataBase64
+  delete payloadRaw.data
+  const payload = stripClinicalPayloadEvolutionPatientSignatures(payloadRaw)
   const updatedAt = String(raw.updatedAt || payload.updatedAt || payload.createdAt || new Date().toISOString())
   const deletedAt = raw.deletedAt || payload.deletedAt || null
   const now = new Date().toISOString()

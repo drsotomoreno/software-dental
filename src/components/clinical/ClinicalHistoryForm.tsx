@@ -99,6 +99,10 @@ import type { InformedConsent } from '@/types/consent'
 import type { UserProfile } from '@/types/user'
 import type { SignatureCaptureResult } from '@/types/signature'
 import { createEmptyConsent } from '@/types/consent'
+import {
+  createEmptyTreatmentPlanAuthorization,
+  type TreatmentPlanAuthorization,
+} from '@/types/treatmentPlanAuthorization'
 import { clinicalFormHasContent } from '../../../shared/clinicalRecordGuard.js'
 import { AnamnesisForm } from './AnamnesisForm'
 import { StomatologicalExamForm } from './StomatologicalExamForm'
@@ -107,6 +111,7 @@ import { EvolutionNotesForm } from './EvolutionNotesForm'
 import { InformedConsentForm } from './InformedConsentForm'
 import { TreatingDentistSignatureSection } from './TreatingDentistSignatureSection'
 import { TreatmentPlanForm } from './TreatmentPlanForm'
+import { TreatmentPlanAuthorizationForm } from './TreatmentPlanAuthorizationForm'
 import { BudgetForm } from './BudgetForm'
 import { PaymentControlForm } from './PaymentControlForm'
 import { Odontogram } from '@/components/odontogram'
@@ -178,6 +183,7 @@ export function createEmptyClinicalForm(
     orthodonticsPaymentControl: [],
     evolutionNotes: [],
     informedConsent: createEmptyConsent(professionalLicense, professionalRegistry),
+    treatmentPlanAuthorization: createEmptyTreatmentPlanAuthorization(professionalLicense),
   }
 }
 
@@ -610,6 +616,18 @@ export function ClinicalHistoryForm({
         disabled={livingLocked}
         onChange={(patch) => update(patch)}
       />
+
+      <TreatmentPlanAuthorizationForm
+        data={
+          form.treatmentPlanAuthorization ??
+          createEmptyTreatmentPlanAuthorization(professionalLicense)
+        }
+        patientBirthDate={patientBirthDate}
+        disabled={livingLocked}
+        onChange={(treatmentPlanAuthorization: TreatmentPlanAuthorization) =>
+          update({ treatmentPlanAuthorization })
+        }
+      />
         </div>
       )}
 
@@ -663,6 +681,7 @@ export function ClinicalHistoryForm({
         onChange={(informedConsent: InformedConsent) => update({ informedConsent })}
         disabled={snapshotLocked}
         patientId={patientId}
+        patientBirthDate={patientBirthDate}
       />
         </div>
       )}

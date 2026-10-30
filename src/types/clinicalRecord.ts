@@ -3,6 +3,7 @@ import type { StomatologicalExam } from './stomatologicalExam'
 import type { SpecializedAnnexes } from './specializedAnnexes'
 import type { EvolutionNote } from './evolutionNote'
 import type { InformedConsent } from './consent'
+import type { TreatmentPlanAuthorization } from './treatmentPlanAuthorization'
 import type { ValuationConsentMetadata } from './valuationConsent'
 import type { OdontogramData } from './odontogram'
 import type { ClinicalDiagnosticChart } from './clinicalDiagnosticChart'
@@ -358,6 +359,11 @@ export interface ClinicalRecord {
   evolutionNotes: EvolutionNote[]
   /** Sección 10: Consentimiento informado */
   informedConsent: InformedConsent
+  /**
+   * Autorización conjunta del plan de tratamiento / presupuesto
+   * (paciente o representante legal + odontólogo).
+   */
+  treatmentPlanAuthorization?: TreatmentPlanAuthorization | null
   /** Consentimiento de valoración rápida */
   valuationConsent?: ValuationConsentMetadata | null
   odontogramSnapshotId?: string
@@ -421,6 +427,11 @@ export interface ClinicalRecordFormData {
   orthodonticsPaymentControl: OrthodonticsPaymentRecord[]
   evolutionNotes: EvolutionNote[]
   informedConsent: InformedConsent
+  /**
+   * Autorización conjunta del plan de tratamiento / presupuesto
+   * (paciente o representante legal + odontólogo).
+   */
+  treatmentPlanAuthorization?: TreatmentPlanAuthorization | null
   /** Consentimiento de valoración rápida (sesión inicial) */
   valuationConsent?: ValuationConsentMetadata | null
 }

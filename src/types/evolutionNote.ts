@@ -103,11 +103,9 @@ export interface EvolutionNote {
   /** Nota de evolución narrativa del profesional tratante (voz o teclado). */
   clinicalNote?: string
   cupsCode?: string | null
+  /** Firma digital/electrónica exclusiva del odontólogo tratante (Res. 1995/1999). */
   professionalSignatureDataUrl?: string
   professionalSignatureMeta?: SignatureCaptureMetadata
-  /** Firma del paciente en la misma nota de evolución. Entra al hash clínico. */
-  patientSignatureDataUrl?: string
-  patientSignatureMeta?: SignatureCaptureMetadata
   /**
    * Costo de la atención. Si es 0 y `isBillable` es false, genera RIPS (con CUPS) pero no FEV DIAN.
    */
@@ -180,6 +178,37 @@ export function isEvolutionNoteMutable(
   note: Pick<EvolutionNote, 'isLocked' | 'signedAt' | 'contentHash'>,
 ): boolean {
   return !isEvolutionNoteImmutable(note)
+}
+
+/**
+ * Las evoluciones son de autoría exclusiva del profesional (Res. 1995/1999).
+ * Elimina cualquier rastro legado de firma del paciente en el folio.
+ */
+export function stripEvolutionPatientSignature<T extends Record<string, unknown>>(
+  note: T,
+): T {
+  if (!note || typeof note !== 'object') return note
+  if (!('patientSignatureDataUrl' in note) && !('patientSignatureMeta' in note)) {
+    return note
+  }
+  const next = { ...note }
+  delete next.patientSignatureDataUrl
+  delete next.patientSignatureMeta
+  return next
+}
+
+export function stripEvolutionNotesPatientSignatures<T extends Record<string, unknown>>(
+  notes: readonly T[] | null | undefined,
+): T[] {
+  const list = notes ?? []
+  let changed = false
+  const next = list.map((note) => {
+    const cleaned = stripEvolutionPatientSignature(note)
+    if (cleaned !== note) changed = true
+    return cleaned
+  })
+  if (!changed) return Array.isArray(notes) ? (notes as T[]) : []
+  return next
 }
 
 /**

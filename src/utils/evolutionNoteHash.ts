@@ -32,8 +32,6 @@ export function buildEvolutionNoteHashPayload(note: EvolutionNote) {
     cupsCode: note.cupsCode ?? null,
     professionalSignatureDataUrl: note.professionalSignatureDataUrl ?? null,
     professionalSignatureMeta: note.professionalSignatureMeta ?? null,
-    patientSignatureDataUrl: note.patientSignatureDataUrl ?? null,
-    patientSignatureMeta: note.patientSignatureMeta ?? null,
     cost: note.cost ?? null,
     isBillable: note.isBillable ?? null,
   }

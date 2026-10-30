@@ -141,11 +141,8 @@ test('el hash clínico ignora la metadata aunque cambie el CUV o el recibo', () 
   assert.equal('ripsMetadata' in basePayload, false)
   assert.equal('pagoId' in basePayload, false)
   assert.equal(serializeForHash(basePayload), serializeForHash(updatedPayload))
-  const conFirmaPaciente = buildEvolutionNoteHashPayload({
-    ...base,
-    patientSignatureDataUrl: 'data:image/png;base64,paciente',
-  })
-  assert.notEqual(serializeForHash(basePayload), serializeForHash(conFirmaPaciente))
+  assert.equal('patientSignatureDataUrl' in basePayload, false)
+  assert.equal('patientSignatureMeta' in basePayload, false)
   assert.equal(omitEvolutionNoteRipsMetadata(updated).ripsMetadata, undefined)
   assert.equal(omitEvolutionNoteRipsMetadata(updated).clinicalNote, 'Se obtura 16 oclusal.')
 })

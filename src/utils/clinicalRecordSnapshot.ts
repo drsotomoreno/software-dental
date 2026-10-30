@@ -8,6 +8,7 @@ import type {
 import { normalizePaymentControlLines } from '@/utils/paymentControlLines'
 import { normalizeAnamnesis } from '@/types/anamnesis'
 import { normalizeConsent } from '@/types/consent'
+import { normalizeTreatmentPlanAuthorization } from '@/types/treatmentPlanAuthorization'
 import { normalizeSpecializedAnnexes } from '@/types/specializedAnnexes'
 import {
   createEmptyStomatologicalExam,
@@ -88,6 +89,9 @@ export function normalizeClinicalRecordForExport(record: ClinicalRecord): Clinic
       Array.isArray(record.evolutionNotes) ? record.evolutionNotes : [],
     ),
     informedConsent: normalizeConsent(record.informedConsent),
+    treatmentPlanAuthorization: normalizeTreatmentPlanAuthorization(
+      record.treatmentPlanAuthorization,
+    ),
   })
 }
 
@@ -131,6 +135,10 @@ export function clinicalRecordToFormData(
     informedConsent: normalizeConsent(
       record.informedConsent,
       professionalLicense,
+      professionalLicense,
+    ),
+    treatmentPlanAuthorization: normalizeTreatmentPlanAuthorization(
+      record.treatmentPlanAuthorization,
       professionalLicense,
     ),
     valuationConsent: record.valuationConsent ?? null,

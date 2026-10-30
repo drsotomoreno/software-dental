@@ -9,25 +9,23 @@ export interface EvolutionNoteValidationIssue {
   message: string
 }
 
-function validarFirma(
+function validarFirmaOdontologo(
   noteId: string,
   dataUrl: string | undefined,
   strokeCount: number | undefined,
-  field: string,
-  quien: string,
 ): EvolutionNoteValidationIssue | null {
   if (!dataUrl) {
     return {
       noteId,
-      field,
-      message: `La firma del ${quien} es obligatoria.`,
+      field: 'professionalSignatureDataUrl',
+      message: 'La firma digital del odontólogo tratante es obligatoria para cerrar la evolución.',
     }
   }
   if ((strokeCount ?? 0) < MIN_SIGNATURE_STROKES) {
     return {
       noteId,
-      field,
-      message: `La firma del ${quien} no es válida.`,
+      field: 'professionalSignatureDataUrl',
+      message: 'La firma digital del odontólogo no es válida.',
     }
   }
   return null
@@ -40,6 +38,10 @@ export function isEvolutionNoteExemptFromRips(
   return isNonRipsEvolutionNote(note)
 }
 
+/**
+ * Cierre de evolución: únicamente firma del odontólogo + ID profesional + ReTHUS.
+ * No exige ni admite firma del paciente (Res. 1995/1999).
+ */
 export function validateEvolutionNote(note: EvolutionNote): EvolutionNoteValidationIssue[] {
   const issues: EvolutionNoteValidationIssue[] = []
 
@@ -58,21 +60,26 @@ export function validateEvolutionNote(note: EvolutionNote): EvolutionNoteValidat
         message: 'El contenido de la aclaratoria es obligatorio.',
       })
     }
-    if (!note.professionalSignatureDataUrl) {
+    if (!note.authorUserId?.trim()) {
       issues.push({
         noteId: note.id,
-        field: 'professionalSignatureDataUrl',
-        message: 'La firma digital es obligatoria para la nota aclaratoria.',
-      })
-    } else if (
-      (note.professionalSignatureMeta?.strokeCount ?? 0) < MIN_SIGNATURE_STROKES
-    ) {
-      issues.push({
-        noteId: note.id,
-        field: 'professionalSignatureDataUrl',
-        message: 'La firma digital no es válida.',
+        field: 'authorUserId',
+        message: 'El ID del profesional tratante es obligatorio.',
       })
     }
+    if (!note.professionalLicense?.trim()) {
+      issues.push({
+        noteId: note.id,
+        field: 'professionalLicense',
+        message: 'El código ReTHUS / documento del odontólogo es obligatorio.',
+      })
+    }
+    const firmaAddendum = validarFirmaOdontologo(
+      note.id,
+      note.professionalSignatureDataUrl,
+      note.professionalSignatureMeta?.strokeCount,
+    )
+    if (firmaAddendum) issues.push(firmaAddendum)
     return issues
   }
 
@@ -102,21 +109,35 @@ export function validateEvolutionNote(note: EvolutionNote): EvolutionNoteValidat
     issues.push({ noteId: note.id, field: issue.field, message: issue.message })
   }
 
-  const firmaPaciente = validarFirma(
-    note.id,
-    note.patientSignatureDataUrl,
-    note.patientSignatureMeta?.strokeCount,
-    'patientSignatureDataUrl',
-    'paciente',
-  )
-  const firmaOdontologo = validarFirma(
+  if (!note.authorUserId?.trim()) {
+    issues.push({
+      noteId: note.id,
+      field: 'authorUserId',
+      message: 'El ID del profesional tratante es obligatorio para firmar la evolución.',
+    })
+  }
+
+  if (!note.professionalLicense?.trim()) {
+    issues.push({
+      noteId: note.id,
+      field: 'professionalLicense',
+      message: 'El código ReTHUS / documento del odontólogo es obligatorio.',
+    })
+  }
+
+  if (!note.professionalName?.trim()) {
+    issues.push({
+      noteId: note.id,
+      field: 'professionalName',
+      message: 'El nombre del profesional tratante es obligatorio.',
+    })
+  }
+
+  const firmaOdontologo = validarFirmaOdontologo(
     note.id,
     note.professionalSignatureDataUrl,
     note.professionalSignatureMeta?.strokeCount,
-    'professionalSignatureDataUrl',
-    'odontólogo',
   )
-  if (firmaPaciente) issues.push(firmaPaciente)
   if (firmaOdontologo) issues.push(firmaOdontologo)
 
   if (ripsMode === 'non_rips') {

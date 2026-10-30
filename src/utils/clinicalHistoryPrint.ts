@@ -837,18 +837,24 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
         ? `${serviceLabel}<div style="margin-top:0.35rem">${diagnosisHtml}</div>`
         : serviceLabel
 
-      const firmaDe = (src: string | undefined, alt: string) =>
-        src
-          ? `<img src="${src}" alt="${alt}" style="max-height:64px;max-width:140px" />`
-          : '<div style="height:48px;border-bottom:1px solid #94a3b8"></div>'
+      const firmaOdontologo = note.professionalSignatureDataUrl
+        ? `<img src="${note.professionalSignatureDataUrl}" alt="Firma del odontólogo" style="max-height:64px;max-width:140px" />`
+        : '<div style="height:48px;border-bottom:1px solid #94a3b8"></div>'
+      const rethusYSello = [
+        note.professionalLicense?.trim()
+          ? `ReTHUS: ${escapeHtml(note.professionalLicense.trim())}`
+          : '',
+        note.signedAt ? `UTC: ${escapeHtml(note.signedAt)}` : '',
+      ]
+        .filter(Boolean)
+        .join('<br>')
 
       return `<tr>
           <td>${escapeHtml(etiquetaFechaHoraSesion(note.date || note.createdAt))}</td>
           <td>${procedureCell}</td>
           <td>${noteOrRx}</td>
-          <td>${escapeHtml(note.professionalName)}</td>
-          <td>${firmaDe(note.patientSignatureDataUrl, 'Firma del paciente')}</td>
-          <td>${firmaDe(note.professionalSignatureDataUrl, 'Firma del odontólogo')}</td>
+          <td>${escapeHtml(note.professionalName)}${rethusYSello ? `<div style="margin-top:0.25rem;font-size:0.75rem;color:#64748b">${rethusYSello}</div>` : ''}</td>
+          <td>${firmaOdontologo}</td>
         </tr>`
     })
     .join('')
@@ -859,7 +865,7 @@ function buildEvolutionSection(data: ClinicalRecordFormData): string {
       ${
         rows
           ? `<table>
-        <thead><tr><th>Fecha</th><th>Procedimiento</th><th>Nota de evolución / Prescripciones</th><th>Profesional</th><th>Firma del paciente</th><th>Firma del odontólogo</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Procedimiento</th><th>Nota de evolución / Prescripciones</th><th>Profesional / ReTHUS</th><th>Firma del odontólogo</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`
           : '<p>Sin notas de evolución.</p>'

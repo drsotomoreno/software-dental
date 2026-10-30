@@ -4,6 +4,7 @@ import type { InformedConsent } from '@/types/consent'
 import {
   keepStoredConsentSignatures,
   restoreMissingConsentSignatures,
+  signedConsentTemplateIds,
   type StoredConsentSignatures,
 } from '@/types/consent'
 import {
@@ -19,10 +20,18 @@ import {
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
 import { DigitalSignatureCanvas } from '@/components/signature'
+import {
+  MinorPatientAuthorizationFields,
+  patientOrGuardianSignatureHeading,
+} from '@/components/clinical/MinorPatientAuthorizationFields'
 import { KioskRemoteTrigger } from '@/components/kiosk/KioskRemoteTrigger'
 import { findLedgerConsentSignatures } from '@/services/signatureService'
 import type { SignatureCaptureResult } from '@/types/signature'
 import { listPatientClinicalRecords } from '@/utils/clinicalRecordSnapshot'
+import {
+  esMenorDeEdad,
+  guardianAuthorizationComplete,
+} from '@/utils/patientMinorAge'
 
 const NO_CONSENT_IDS: ConsentTemplateId[] = []
 
@@ -32,37 +41,14 @@ interface InformedConsentFormProps {
   disabled?: boolean
   /** Paciente de la historia clínica actual (Dexie). */
   patientId?: string
-}
-
-function isSignedInformedConsent(
-  consent: InformedConsent | null | undefined,
-): consent is InformedConsent {
-  if (!consent?.selectedConsentIds?.length) return false
-  if (consent.signedAt?.trim()) return true
-  return Boolean(
-    consent.textAccepted &&
-      consent.patientSignatureDataUrl &&
-      consent.professionalSignatureDataUrl,
-  )
+  /** Fecha de nacimiento del paciente (`birthDate` / fechaNacimiento). */
+  patientBirthDate?: string
 }
 
 function signedConsentLabels(
-  consents: Array<InformedConsent | null | undefined>,
+  consents: Array<Partial<InformedConsent> | null | undefined>,
 ): string[] {
-  const labels: string[] = []
-  const seen = new Set<string>()
-
-  for (const consent of consents) {
-    if (!isSignedInformedConsent(consent)) continue
-    for (const id of consent.selectedConsentIds) {
-      const label = getConsentLabel(id)
-      if (seen.has(label)) continue
-      seen.add(label)
-      labels.push(label)
-    }
-  }
-
-  return labels
+  return signedConsentTemplateIds(consents).map((id) => getConsentLabel(id))
 }
 
 export function InformedConsentForm({
@@ -70,6 +56,7 @@ export function InformedConsentForm({
   onChange,
   disabled = false,
   patientId = '',
+  patientBirthDate = '',
 }: InformedConsentFormProps) {
   const [activeConsentId, setActiveConsentId] = useState<ConsentTemplateId | null>(null)
   const [pickerValue, setPickerValue] = useState('')
@@ -77,6 +64,14 @@ export function InformedConsentForm({
   const onChangeRef = useRef(onChange)
   dataRef.current = data
   onChangeRef.current = onChange
+
+  const esMenor = useMemo(() => esMenorDeEdad(patientBirthDate), [patientBirthDate])
+  const patientSignatureLabel = patientOrGuardianSignatureHeading(esMenor)
+  const guardianOk = guardianAuthorizationComplete(
+    esMenor,
+    data.guardianName,
+    data.guardianDocument,
+  )
 
   const selectedIds = data.selectedConsentIds ?? NO_CONSENT_IDS
   const selectedKey = selectedIds.join('|')
@@ -90,6 +85,7 @@ export function InformedConsentForm({
       ),
     )
     let stored: StoredConsentSignatures | null = null
+    const mergedConsents: Array<Partial<InformedConsent> | null> = []
     for (const record of ordered) {
       let ledger: StoredConsentSignatures | null = null
       try {
@@ -97,16 +93,29 @@ export function InformedConsentForm({
       } catch {
         ledger = null
       }
-      const merged = keepStoredConsentSignatures(ledger, record.informedConsent ?? ledger ?? null)
+      const bodyIds = record.informedConsent?.selectedConsentIds ?? []
+      const ledgerIds = (ledger?.selectedConsentIds ?? []) as ConsentTemplateId[]
+      const merged = keepStoredConsentSignatures(
+        ledger,
+        {
+          ...(record.informedConsent ?? {}),
+          // Si el cuerpo perdió firmas/fecha pero el ledger o el cierre las tienen,
+          // el listado de la sección 10 debe seguir reconociendo el consentimiento.
+          signedAt: record.informedConsent?.signedAt ?? record.signedAt ?? ledger?.signedAt,
+          selectedConsentIds: bodyIds.length > 0 ? bodyIds : ledgerIds,
+        } as InformedConsent,
+      )
+      mergedConsents.push(merged && typeof merged === 'object' ? merged : record.informedConsent)
       if (!merged || typeof merged !== 'object') continue
-      const candidate = merged as StoredConsentSignatures
+      const candidate = merged as StoredConsentSignatures & Partial<InformedConsent>
       if (!candidate.patientSignatureDataUrl && !candidate.professionalSignatureDataUrl) continue
-      const ids = candidate.selectedConsentIds ?? []
+      const ids = (candidate.selectedConsentIds ?? []) as ConsentTemplateId[]
       const overlapsSelection =
         selectedIds.length === 0 ||
         ids.length === 0 ||
-        ids.some((id) => selectedIds.includes(id as ConsentTemplateId))
+        ids.some((id) => selectedIds.includes(id))
       if (!overlapsSelection) continue
+      if (stored) continue
       stored = {
         selectedConsentIds: ids,
         patientSignatureDataUrl: candidate.patientSignatureDataUrl,
@@ -114,11 +123,12 @@ export function InformedConsentForm({
         professionalSignatureDataUrl: candidate.professionalSignatureDataUrl,
         professionalSignatureMeta: candidate.professionalSignatureMeta,
         signedAt: candidate.signedAt ?? record.signedAt,
+        textAccepted: candidate.textAccepted === true || record.informedConsent?.textAccepted === true,
       }
-      break
     }
     return {
-      labels: signedConsentLabels(ordered.map((record) => record.informedConsent)),
+      // Incluye firmas reconstruidas desde el ledger, no solo el JSON del registro.
+      labels: signedConsentLabels(mergedConsents),
       stored,
     }
   }, [patientId, selectedKey])
@@ -139,12 +149,17 @@ export function InformedConsentForm({
     if (!stored) return
     const current = dataRef.current
     const restored = restoreMissingConsentSignatures(current, stored)
+    const sameIds =
+      (restored.selectedConsentIds ?? []).join('|') ===
+      (current.selectedConsentIds ?? []).join('|')
     if (
       restored.patientSignatureDataUrl === current.patientSignatureDataUrl &&
       restored.professionalSignatureDataUrl === current.professionalSignatureDataUrl &&
       restored.patientSignatureMeta === current.patientSignatureMeta &&
       restored.professionalSignatureMeta === current.professionalSignatureMeta &&
-      restored.signedAt === current.signedAt
+      restored.signedAt === current.signedAt &&
+      restored.textAccepted === current.textAccepted &&
+      sameIds
     ) {
       return
     }
@@ -182,16 +197,21 @@ export function InformedConsentForm({
     result: SignatureCaptureResult | null,
   ) => {
     if (!result?.dataUrl) return
+    if (field === 'patient' && !guardianOk) return
+    const signedAt = data.signedAt?.trim() || new Date().toISOString()
     if (field === 'patient') {
       update({
         patientSignatureDataUrl: result.dataUrl,
         patientSignatureMeta: result.metadata,
+        signedAt,
+        textAccepted: true,
       })
       return
     }
     update({
       professionalSignatureDataUrl: result.dataUrl,
       professionalSignatureMeta: result.metadata,
+      signedAt,
     })
   }
 
@@ -228,7 +248,7 @@ export function InformedConsentForm({
         )}
       </h3>
 
-      {!disabled && patientId && (activeConsentId || selectedIds.length > 0) && (
+      {!disabled && patientId && guardianOk && (activeConsentId || selectedIds.length > 0) && (
         <div className="mb-4">
           <KioskRemoteTrigger
             type="CONSENT"
@@ -240,9 +260,13 @@ export function InformedConsentForm({
               formData: {
                 selectedConsentIds: selectedIds,
                 activeConsentId,
+                guardianName: data.guardianName ?? '',
+                guardianDocument: data.guardianDocument ?? '',
+                esMenorDeEdad: esMenor,
               },
             }}
             onSigned={({ signatureBase64 }) => {
+              if (!guardianOk) return
               update({
                 patientSignatureDataUrl: signatureBase64,
                 textAccepted: true,
@@ -251,6 +275,11 @@ export function InformedConsentForm({
             }}
           />
         </div>
+      )}
+      {!disabled && patientId && esMenor && !guardianOk && (activeConsentId || selectedIds.length > 0) && (
+        <p className="mb-4 text-xs text-amber-700">
+          Complete los datos del acudiente antes de enviar el consentimiento a la tableta.
+        </p>
       )}
 
       {signedStatusReady && signedLabels.length === 0 ? (
@@ -355,22 +384,39 @@ export function InformedConsentForm({
           className="mt-0.5 rounded border-slate-300 text-dental-600 focus:ring-dental-500"
         />
         <span className="text-sm text-slate-700">
-          El paciente ha leído y acepta el(los) consentimiento(s) informado(s) seleccionado(s){' '}
+          {esMenor
+            ? 'El representante legal ha leído y acepta el(los) consentimiento(s) informado(s) seleccionado(s) '
+            : 'El paciente ha leído y acepta el(los) consentimiento(s) informado(s) seleccionado(s) '}
           <span className="text-red-500">*</span>
         </span>
       </label>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
-          <h4 className="mb-2 text-sm font-semibold text-slate-700">Firma del paciente</h4>
+          <MinorPatientAuthorizationFields
+            esMenorDeEdad={esMenor}
+            guardianName={data.guardianName ?? ''}
+            guardianDocument={data.guardianDocument ?? ''}
+            disabled={disabled}
+            idPrefix="consent-guardian"
+            onGuardianNameChange={(guardianName) => update({ guardianName })}
+            onGuardianDocumentChange={(guardianDocument) => update({ guardianDocument })}
+          />
           <DigitalSignatureCanvas
+            title={patientSignatureLabel}
             value={data.patientSignatureDataUrl}
             onSignatureChange={(result) => applySignature('patient', result)}
-            disabled={disabled}
+            disabled={disabled || !guardianOk}
             width={400}
             height={150}
-            ariaLabel="Firma del paciente"
+            ariaLabel={patientSignatureLabel}
+            showDetails={false}
           />
+          {esMenor && !guardianOk && !disabled && (
+            <p className="mt-2 text-xs text-amber-700">
+              Complete nombre y documento del acudiente para habilitar la firma y el guardado.
+            </p>
+          )}
         </div>
 
         <div>

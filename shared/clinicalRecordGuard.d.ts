@@ -1,5 +1,8 @@
 export function unwrapClinicalPayload(record: unknown): Record<string, unknown>
 export function evolutionNotesHaveContent(notes: unknown): boolean
+export function stripEvolutionPatientSignature<T>(note: T): T
+export function stripEvolutionNotesPatientSignatures<T>(notes: T): T
+export function stripClinicalPayloadEvolutionPatientSignatures<T>(payload: T): T
 export function mergeSignedEvolutionNotes(baseNotes: unknown, incomingNotes: unknown): unknown
 export function preserveEvolutionWorkflowStatus(existing: unknown, incoming: unknown): unknown
 export function anamnesisHasContent(anamnesis: unknown): boolean

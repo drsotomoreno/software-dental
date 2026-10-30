@@ -78,16 +78,23 @@ export async function findLedgerConsentSignatures(
     const professional = newestFirst.find(
       (row) => row.recordType === 'clinical_record' && row.signatureDataUrl,
     )
-    if (!patient?.signatureDataUrl && !professional?.signatureDataUrl) continue
+    const patientDataUrl =
+      patient?.signatureDataUrl || record.informedConsent?.patientSignatureDataUrl
+    const professionalDataUrl =
+      professional?.signatureDataUrl ||
+      record.informedConsent?.professionalSignatureDataUrl
+    if (!patientDataUrl && !professionalDataUrl) continue
     return {
       selectedConsentIds: record.informedConsent?.selectedConsentIds,
-      patientSignatureDataUrl: patient?.signatureDataUrl,
+      patientSignatureDataUrl: patientDataUrl,
       patientSignatureMeta:
         record.informedConsent?.patientSignatureMeta ?? signatureMetadataFromRow(patient),
-      professionalSignatureDataUrl: professional?.signatureDataUrl,
+      professionalSignatureDataUrl: professionalDataUrl,
       professionalSignatureMeta:
-        record.informedConsent?.professionalSignatureMeta ?? signatureMetadataFromRow(professional),
-      signedAt: record.informedConsent?.signedAt ?? record.signedAt,
+        record.informedConsent?.professionalSignatureMeta ??
+        signatureMetadataFromRow(professional),
+      signedAt: record.informedConsent?.signedAt ?? record.signedAt ?? patient?.signedAt,
+      textAccepted: record.informedConsent?.textAccepted === true,
     }
   }
   return null

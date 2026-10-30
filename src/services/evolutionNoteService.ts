@@ -3,6 +3,7 @@ import type { EvolutionNote, EvolutionNotePatch } from '@/types/evolutionNote'
 import {
   EVOLUTION_NOTE_IMMUTABILITY_MESSAGE,
   isEvolutionNoteImmutable,
+  stripEvolutionPatientSignature,
 } from '@/types/evolutionNote'
 import {
   applyEvolutionNotePatch,
@@ -68,18 +69,21 @@ export async function computeEvolutionAddendumContentHash(
   return computeContentHash(serializeForHash(buildEvolutionAddendumHashPayload(addendum)))
 }
 
-/** Marca la nota como grabada/firmada con timestamp UTC y hash SHA-256. */
+/** Marca la nota como grabada/firmada con timestamp UTC inmutable y hash SHA-256. */
 export async function finalizeEvolutionNote(
   note: EvolutionNote,
   signedAtUtc = new Date().toISOString(),
 ): Promise<EvolutionNote> {
-  const prepared = omitBlankEvolutionDiagnoses(note)
+  const prepared = omitBlankEvolutionDiagnoses(
+    stripEvolutionPatientSignature(note as EvolutionNote & Record<string, unknown>) as EvolutionNote,
+  )
   const contentHash = await computeEvolutionNoteContentHash(prepared)
   return {
     ...prepared,
     signedAt: signedAtUtc,
     contentHash,
     isLocked: true,
+    workflowStatus: 'CLOSED',
   }
 }
 

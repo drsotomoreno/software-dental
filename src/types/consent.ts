@@ -13,6 +13,10 @@ export interface InformedConsent {
   professionalLicense: string
   /** Conservado por compatibilidad de historias firmadas; se iguala a la cédula. */
   professionalRegistry: string
+  /** Nombre del acudiente / representante legal (obligatorio si el paciente es menor de 18). */
+  guardianName?: string
+  /** Documento del acudiente / representante legal (obligatorio si el paciente es menor de 18). */
+  guardianDocument?: string
   signedAt?: string
 }
 
@@ -39,7 +43,9 @@ export function normalizeConsent(
   const selectedConsentIds =
     data.selectedConsentIds && data.selectedConsentIds.length > 0
       ? data.selectedConsentIds
-      : data.textAccepted
+      : data.textAccepted ||
+          Boolean(consentText(data.signedAt)) ||
+          Boolean(consentText(data.patientSignatureDataUrl))
         ? (['general_odonto'] as ConsentTemplateId[])
         : []
 
@@ -57,6 +63,47 @@ function consentText(value: unknown): string {
 function asConsentRecord(value: unknown): Partial<InformedConsent> | null {
   if (!value || typeof value !== 'object') return null
   return value as Partial<InformedConsent>
+}
+
+/**
+ * Un consentimiento cuenta como firmado si identifica el procedimiento y hay
+ * evidencia de firma del paciente (fecha o imagen). No exige textAccepted:
+ * un borrador puede haber desmarcado el checkbox sin borrar la firma guardada.
+ */
+export function isSignedInformedConsent(
+  consent: Partial<InformedConsent> | null | undefined,
+): boolean {
+  if (!consent) return false
+  const ids =
+    consent.selectedConsentIds && consent.selectedConsentIds.length > 0
+      ? consent.selectedConsentIds
+      : normalizeConsent(consent).selectedConsentIds
+  if (!ids.length) return false
+  if (consentText(consent.signedAt)) return true
+  return Boolean(consentText(consent.patientSignatureDataUrl))
+}
+
+/** IDs de procedimientos con consentimiento firmado (sin duplicados, orden de aparición). */
+export function signedConsentTemplateIds(
+  consents: Array<Partial<InformedConsent> | null | undefined>,
+): ConsentTemplateId[] {
+  const ids: ConsentTemplateId[] = []
+  const seen = new Set<string>()
+
+  for (const consent of consents) {
+    if (!isSignedInformedConsent(consent)) continue
+    const selected =
+      consent?.selectedConsentIds && consent.selectedConsentIds.length > 0
+        ? consent.selectedConsentIds
+        : normalizeConsent(consent ?? undefined).selectedConsentIds
+    for (const id of selected) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      ids.push(id)
+    }
+  }
+
+  return ids
 }
 
 /**
@@ -81,8 +128,24 @@ export function keepStoredConsentSignatures<T>(previous: unknown, next: T): T {
     Boolean(consentText(incoming.professionalSignatureDataUrl))
   const keepSignedAt =
     stillHasSignature && !consentText(incoming.signedAt) && consentText(stored.signedAt)
+  const keepTextAccepted =
+    stillHasSignature && incoming.textAccepted !== true && stored.textAccepted === true
+  const incomingIds = Array.isArray(incoming.selectedConsentIds)
+    ? incoming.selectedConsentIds
+    : []
+  const storedIds = Array.isArray(stored.selectedConsentIds) ? stored.selectedConsentIds : []
+  const keepSelectedIds =
+    stillHasSignature && incomingIds.length === 0 && storedIds.length > 0
 
-  if (!keepPatient && !keepProfessional && !keepSignedAt) return next
+  if (
+    !keepPatient &&
+    !keepProfessional &&
+    !keepSignedAt &&
+    !keepTextAccepted &&
+    !keepSelectedIds
+  ) {
+    return next
+  }
 
   return {
     ...incoming,
@@ -99,6 +162,8 @@ export function keepStoredConsentSignatures<T>(previous: unknown, next: T): T {
         }
       : {}),
     ...(keepSignedAt ? { signedAt: stored.signedAt } : {}),
+    ...(keepTextAccepted ? { textAccepted: true } : {}),
+    ...(keepSelectedIds ? { selectedConsentIds: storedIds } : {}),
   } as T
 }
 
@@ -109,6 +174,7 @@ export interface StoredConsentSignatures {
   professionalSignatureDataUrl?: string
   professionalSignatureMeta?: SignatureCaptureMetadata
   signedAt?: string
+  textAccepted?: boolean
 }
 
 /** Devuelve las firmas al consentimiento abierto si el guardado aún las tiene. */
@@ -118,8 +184,15 @@ export function restoreMissingConsentSignatures(
 ): InformedConsent {
   if (!stored) return current
   const currentIds = current.selectedConsentIds ?? []
-  if (currentIds.length === 0) return current
   const storedIds = stored.selectedConsentIds ?? []
+  // Si el formulario quedó sin procedimiento pero el guardado sí lo tiene firmado,
+  // recupera IDs + firmas para no mostrar la falsa alerta de "sin consentimientos".
+  if (currentIds.length === 0) {
+    if (storedIds.length === 0 && !consentText(stored.patientSignatureDataUrl) && !consentText(stored.signedAt)) {
+      return current
+    }
+    return keepStoredConsentSignatures(stored, current)
+  }
   const overlaps =
     storedIds.length === 0 || storedIds.some((id) => currentIds.includes(id as ConsentTemplateId))
   if (!overlaps) return current

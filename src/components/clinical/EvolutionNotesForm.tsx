@@ -26,7 +26,6 @@ import { EvolutionNoteRipsMetadataError } from '@/types/evolutionNoteRips'
 import { RipsShieldModal } from '@/components/rips/RipsShieldModal'
 import { evaluateEvolutionRipsShield } from '@/utils/ripsShieldValidation'
 import type { RipsShieldMismatch } from '@/types/consultationCheckout'
-import { KioskRemoteTrigger } from '@/components/kiosk/KioskRemoteTrigger'
 import { EvolutionNoteCard } from './EvolutionNoteCard'
 import type { PacienteRipsIdentidad } from '@/utils/evolutionRipsPayload'
 
@@ -149,7 +148,19 @@ export function EvolutionNotesForm({
     }
 
     try {
-      const signed = await persistSignedEvolutionNoteCreate(patientId, note)
+      const readyToSign: EvolutionNote = {
+        ...note,
+        authorUserId: note.authorUserId?.trim() || authorUserId || undefined,
+        authorEmail: note.authorEmail?.trim() || authorEmail || undefined,
+        professionalName: note.professionalName?.trim() || professionalName,
+        professionalLicense: note.professionalLicense?.trim() || professionalLicense,
+      }
+      const identityIssues = validateEvolutionNote(readyToSign)
+      if (identityIssues.length > 0) {
+        showBlocked(identityIssues[0]?.message ?? 'Complete la identidad del odontólogo antes de firmar.')
+        return
+      }
+      const signed = await persistSignedEvolutionNoteCreate(patientId, readyToSign)
       onChange(notes.map((item) => (item.id === id ? signed : item)))
       if (user) {
         await logAuditEvent({
@@ -213,19 +224,6 @@ export function EvolutionNotesForm({
     ordinal += 1
   }
 
-  const draftForTablet = [...notes]
-    .reverse()
-    .find((note) => !isEvolutionNoteImmutable(note))
-  const evolutionTabletText = draftForTablet
-    ? [
-        draftForTablet.procedure?.trim() && `Procedimiento: ${draftForTablet.procedure.trim()}`,
-        draftForTablet.clinicalNote?.trim() && `Nota: ${draftForTablet.clinicalNote.trim()}`,
-        draftForTablet.prescriptions?.trim() && `Prescripciones: ${draftForTablet.prescriptions.trim()}`,
-      ]
-        .filter(Boolean)
-        .join('\n\n')
-    : ''
-
   return (
     <section className="card">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -238,8 +236,9 @@ export function EvolutionNotesForm({
           </h3>
           <p className="mt-1 text-xs text-slate-500">
             Cada procedimiento lleva, en el mismo bloque, la zona o el diente y el diagnóstico.
-            Mientras la evolución esté abierta puede eliminar el procedimiento. Cuando se cierra,
-            la nota no se edita ni se borra (Res. 1995/1999): use «Nota aclaratoria».
+            Autoría exclusiva del odontólogo (firma + ReTHUS + timestamp). Mientras la evolución
+            esté abierta puede eliminar el procedimiento. Cuando se cierra, la nota no se edita ni
+            se borra (Res. 1995/1999): use «Nota aclaratoria».
           </p>
         </div>
         {canAddNote && (
@@ -248,24 +247,6 @@ export function EvolutionNotesForm({
           </button>
         )}
       </div>
-
-      {!disabled && patientId && draftForTablet && (
-        <div className="mb-4">
-          <KioskRemoteTrigger
-            type="EVOLUTION"
-            documentId={draftForTablet.id}
-            patientId={patientId}
-            dataToSign={{
-              title: draftForTablet.procedure?.trim() || 'Nota de evolución',
-              contentText: evolutionTabletText || 'Revise la nota de evolución y firme en la tableta.',
-              formData: { noteId: draftForTablet.id },
-            }}
-            onSigned={({ signatureBase64 }) => {
-              updateNote(draftForTablet.id, { patientSignatureDataUrl: signatureBase64 })
-            }}
-          />
-        </div>
-      )}
 
       {blockedMessage && (
         <div
