@@ -118,25 +118,25 @@ export function PatientListPage() {
               <table className="w-full text-left text-sm">
                 <thead className="border-b border-slate-200 bg-slate-50">
                   <tr>
-                    <th className="px-4 py-3 font-medium text-slate-600">Documento</th>
-                    <th className="px-4 py-3 font-medium text-slate-600">Nombre</th>
-                    <th className="px-4 py-3 font-medium text-slate-600">Teléfono</th>
-                    <th className="px-4 py-3 font-medium text-slate-600">EPS</th>
-                    <th className="px-4 py-3 font-medium text-slate-600">Acciones</th>
+                    <th className="px-4 py-2.5 font-medium text-slate-600">Documento</th>
+                    <th className="px-4 py-2.5 font-medium text-slate-600">Nombre</th>
+                    <th className="px-4 py-2.5 font-medium text-slate-600">Teléfono</th>
+                    <th className="px-4 py-2.5 font-medium text-slate-600">EPS</th>
+                    <th className="px-4 py-2.5 font-medium text-slate-600">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredPatients.map((p) => (
                     <tr key={p.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 font-mono text-xs">
+                      <td className="px-4 py-2.5 font-mono text-xs">
                         {p.documentType} {p.documentNumber}
                       </td>
-                      <td className="px-4 py-3 font-medium">
+                      <td className="px-4 py-2.5 font-medium">
                         {p.firstName} {p.lastName}
                       </td>
-                      <td className="px-4 py-3">{p.phone}</td>
-                      <td className="px-4 py-3">{p.insurer ?? '—'}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2.5">{p.phone}</td>
+                      <td className="px-4 py-2.5">{p.insurer ?? '—'}</td>
+                      <td className="px-4 py-2.5">
                         <Link
                           to={`/pacientes/${p.id}`}
                           state={{ resetHistoryView: true }}

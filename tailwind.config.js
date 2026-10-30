@@ -31,6 +31,17 @@ export default {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
       },
+      // Escala tipográfica +4px (+0.25rem) respecto a Tailwind por defecto
+      fontSize: {
+        xs: ['1rem', { lineHeight: '1.5rem' }], // 12px -> 16px
+        sm: ['1.125rem', { lineHeight: '1.75rem' }], // 14px -> 18px
+        base: ['1.25rem', { lineHeight: '1.75rem' }], // 16px -> 20px
+        lg: ['1.375rem', { lineHeight: '2rem' }], // 18px -> 22px
+        xl: ['1.5rem', { lineHeight: '2rem' }], // 20px -> 24px
+        '2xl': ['1.75rem', { lineHeight: '2.25rem' }], // 24px -> 28px
+        '3xl': ['2.125rem', { lineHeight: '2.5rem' }], // 30px -> 34px
+        '4xl': ['2.5rem', { lineHeight: '2.75rem' }], // 36px -> 40px
+      },
     },
   },
   plugins: [],

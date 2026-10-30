@@ -87,31 +87,31 @@ export function ValuatedPatientsPage() {
           <table className="w-full text-left text-sm">
             <thead className="border-b border-amber-100 bg-amber-50">
               <tr>
-                <th className="px-4 py-3 font-medium text-slate-600">Documento</th>
-                <th className="px-4 py-3 font-medium text-slate-600">Nombre</th>
-                <th className="px-4 py-3 font-medium text-slate-600">Teléfono</th>
-                <th className="px-4 py-3 font-medium text-slate-600">EPS</th>
-                <th className="px-4 py-3 font-medium text-slate-600">Estado</th>
-                <th className="px-4 py-3 font-medium text-slate-600">Acciones</th>
+                <th className="px-4 py-2.5 font-medium text-slate-600">Documento</th>
+                <th className="px-4 py-2.5 font-medium text-slate-600">Nombre</th>
+                <th className="px-4 py-2.5 font-medium text-slate-600">Teléfono</th>
+                <th className="px-4 py-2.5 font-medium text-slate-600">EPS</th>
+                <th className="px-4 py-2.5 font-medium text-slate-600">Estado</th>
+                <th className="px-4 py-2.5 font-medium text-slate-600">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredPatients.map((patient) => (
                 <tr key={patient.id} className="hover:bg-amber-50/40">
-                  <td className="px-4 py-3 font-mono text-xs">
+                  <td className="px-4 py-2.5 font-mono text-xs">
                     {patient.documentType} {patient.documentNumber}
                   </td>
-                  <td className="px-4 py-3 font-medium">
+                  <td className="px-4 py-2.5 font-medium">
                     {patient.firstName} {patient.lastName}
                   </td>
-                  <td className="px-4 py-3">{patient.phone}</td>
-                  <td className="px-4 py-3">{patient.insurer ?? '—'}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-2.5">{patient.phone}</td>
+                  <td className="px-4 py-2.5">{patient.insurer ?? '—'}</td>
+                  <td className="px-4 py-2.5">
                     <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900">
                       Solo valoración
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-2.5">
                     <Link
                       to={`/pacientes/${patient.id}`}
                       state={{ resetHistoryView: true }}

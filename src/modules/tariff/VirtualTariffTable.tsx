@@ -57,7 +57,7 @@ export function VirtualTariffTable({
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <div className="grid grid-cols-[120px_minmax(0,1fr)_140px_120px_110px] gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+      <div className="grid grid-cols-[120px_minmax(0,1fr)_140px_120px_110px] gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
         <span>Código</span>
         <span>Descripción</span>
         <span>Categoría</span>

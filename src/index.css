@@ -3,8 +3,22 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
   body {
     @apply bg-slate-50 text-slate-900 antialiased;
+  }
+
+  /* Números alineados (tabular) en tablas */
+  table,
+  td,
+  th {
+    font-variant-numeric: tabular-nums;
   }
 }
 

@@ -52,8 +52,8 @@ function ImplantBudgetRow({
 
   return (
     <tr className="group transition-colors hover:bg-teal-50/40 dark:hover:bg-teal-950/30">
-      <td className="py-3 pl-1 font-medium text-slate-800 dark:text-slate-100">{config.label}</td>
-      <td className="px-2 py-3">
+      <td className="py-2 pl-1 font-medium text-slate-800 dark:text-slate-100">{config.label}</td>
+      <td className="px-2 py-2">
         {disabled ? (
           <span className="font-semibold text-slate-700 dark:text-slate-200">{line.quantity}</span>
         ) : (
@@ -81,7 +81,7 @@ function ImplantBudgetRow({
           </div>
         )}
       </td>
-      <td className="px-2 py-3">
+      <td className="px-2 py-2">
         {disabled ? (
           <span className="font-medium text-slate-600 dark:text-slate-300">
             {formatCurrency(line.unitPrice)}
@@ -111,7 +111,7 @@ function ImplantBudgetRow({
           </div>
         )}
       </td>
-      <td className="px-2 py-3 text-right font-bold text-slate-800 dark:text-slate-100">
+      <td className="px-2 py-2 text-right font-bold text-slate-800 dark:text-slate-100">
         {formatCurrency(rowSubtotal)}
       </td>
     </tr>
