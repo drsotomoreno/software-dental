@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { normalizeCupsCode } from '@/services/catalogService'
 import { useTariffStore } from '@/store/useTariffStore'
 import type { BudgetItem } from '@/types/pricing'
@@ -27,6 +27,8 @@ interface BudgetModuleProps {
   onImportFromTreatmentPlan?: () => void
   canImportFromTreatmentPlan?: boolean
   importNotice?: string | null
+  /** Acciones adicionales junto a «Tratamiento en blanco» / importar. */
+  toolbarExtraActions?: ReactNode
 }
 
 export function BudgetModule({
@@ -41,6 +43,7 @@ export function BudgetModule({
   onImportFromTreatmentPlan,
   canImportFromTreatmentPlan = false,
   importNotice = null,
+  toolbarExtraActions = null,
 }: BudgetModuleProps) {
   const tariffMap = useTariffStore((state) => state.tariffMap)
   const [procedureSearch, setProcedureSearch] = useState('')
@@ -140,10 +143,11 @@ export function BudgetModule({
     <div>
       {!disabled && showToolbar && (
         <div className="mb-4 space-y-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/40">
-          <div>
+          <div className="flex flex-wrap gap-2">
             <button type="button" onClick={addBlankItem} className="btn-secondary text-xs">
               + Tratamiento en blanco
             </button>
+            {toolbarExtraActions}
           </div>
 
           {onImportFromTreatmentPlan && (

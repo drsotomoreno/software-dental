@@ -10,6 +10,8 @@ export interface OrthodonticCalculatorProps {
   value: OrthodonticBudgetState | null
   onChange: (value: OrthodonticBudgetState | null) => void
   disabled?: boolean
+  /** Separador superior cuando el plan va encima en la misma caja. */
+  showDivider?: boolean
 }
 
 function parseNonNegativeNumber(raw: string): number {
@@ -51,6 +53,7 @@ export default function OrthodonticCalculator({
   value,
   onChange,
   disabled = false,
+  showDivider = true,
 }: OrthodonticCalculatorProps) {
   const {
     config,
@@ -70,7 +73,7 @@ export default function OrthodonticCalculator({
   }
 
   return (
-    <div className="space-y-4 border-t border-slate-200 pt-4">
+    <div className={`space-y-4 ${showDivider ? 'border-t border-slate-200 pt-4' : ''}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="text-xs text-slate-500">{config.name}</p>
         <div className="rounded-lg bg-dental-50 px-3 py-2 text-right">

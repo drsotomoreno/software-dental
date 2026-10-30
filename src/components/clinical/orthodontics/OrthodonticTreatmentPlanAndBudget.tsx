@@ -9,6 +9,8 @@ import type {
   OrthodonticTreatmentType,
 } from '@/types/orthodonticsAnnex'
 
+export type OrthodonticTreatmentPlanAndBudgetMode = 'full' | 'plan' | 'budget'
+
 export interface OrthodonticTreatmentPlanAndBudgetProps {
   treatmentType: OrthodonticTreatmentType
   conventionalBracketType: ConventionalBracketType
@@ -27,6 +29,14 @@ export interface OrthodonticTreatmentPlanAndBudgetProps {
   }) => void
   onBudgetChange: (value: OrthodonticBudgetState | null) => void
   disabled?: boolean
+  /** full: anexo. plan: sección 7. budget: sección 8. */
+  mode?: OrthodonticTreatmentPlanAndBudgetMode
+}
+
+const TITLES: Record<OrthodonticTreatmentPlanAndBudgetMode, string> = {
+  full: 'Plan de Tratamiento y Presupuesto de Ortodoncia',
+  plan: 'Plan de Tratamiento de Ortodoncia',
+  budget: 'Presupuesto y Plan de Pago de Ortodoncia',
 }
 
 export default function OrthodonticTreatmentPlanAndBudget({
@@ -40,38 +50,47 @@ export default function OrthodonticTreatmentPlanAndBudget({
   onTreatmentPlanChange,
   onBudgetChange,
   disabled = false,
+  mode = 'full',
 }: OrthodonticTreatmentPlanAndBudgetProps) {
+  // En sección 8 el calculador necesita el tipo de tratamiento: si aún no hay, se muestra el plan.
+  const showPlan =
+    mode === 'full' || mode === 'plan' || (mode === 'budget' && !treatmentType)
+  const showBudget = mode === 'full' || mode === 'budget'
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 sm:col-span-2">
-      <h5 className="mb-3 text-sm font-semibold text-slate-800">
-        Plan de Tratamiento y Presupuesto de Ortodoncia
-      </h5>
+      <h5 className="mb-3 text-sm font-semibold text-slate-800">{TITLES[mode]}</h5>
 
       <div className="space-y-6">
-        <OrthodonticTreatmentPlanInput
-          treatmentType={treatmentType}
-          conventionalBracketType={conventionalBracketType}
-          alignerTreatmentMode={alignerTreatmentMode}
-          alignerPhaseCount={alignerPhaseCount}
-          maxillaryOrthopedicsAppliance={maxillaryOrthopedicsAppliance}
-          treatmentDurationMonths={treatmentDurationMonths}
-          onTreatmentPlanChange={onTreatmentPlanChange}
-          disabled={disabled}
-        />
+        {showPlan ? (
+          <OrthodonticTreatmentPlanInput
+            treatmentType={treatmentType}
+            conventionalBracketType={conventionalBracketType}
+            alignerTreatmentMode={alignerTreatmentMode}
+            alignerPhaseCount={alignerPhaseCount}
+            maxillaryOrthopedicsAppliance={maxillaryOrthopedicsAppliance}
+            treatmentDurationMonths={treatmentDurationMonths}
+            onTreatmentPlanChange={onTreatmentPlanChange}
+            disabled={disabled}
+          />
+        ) : null}
 
-        <OrthodonticCalculator
-          plan={{
-            treatmentType,
-            conventionalBracketType,
-            alignerTreatmentMode,
-            alignerPhaseCount,
-            maxillaryOrthopedicsAppliance,
-            treatmentDurationMonths,
-          }}
-          value={orthodonticBudget}
-          onChange={onBudgetChange}
-          disabled={disabled}
-        />
+        {showBudget ? (
+          <OrthodonticCalculator
+            plan={{
+              treatmentType,
+              conventionalBracketType,
+              alignerTreatmentMode,
+              alignerPhaseCount,
+              maxillaryOrthopedicsAppliance,
+              treatmentDurationMonths,
+            }}
+            value={orthodonticBudget}
+            onChange={onBudgetChange}
+            disabled={disabled}
+            showDivider={showPlan}
+          />
+        ) : null}
       </div>
     </div>
   )

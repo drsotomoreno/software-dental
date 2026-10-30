@@ -4,8 +4,9 @@ import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import type { ClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import type { Cie10Diagnosis, TreatmentPlanItem } from '@/types/clinicalRecord'
-import type { SpecializedAnnexes } from '@/types/specializedAnnexes'
+import type { OrthodonticsAnnex, SpecializedAnnexes } from '@/types/specializedAnnexes'
 import { COMMON_CIE10_CODES, COMMON_DENTAL_PROCEDURES } from '@/constants/dental'
+import { OrthodonticTreatmentPlanAndBudget } from './orthodontics'
 import {
   CLINICAL_HISTORY_SECTION_NUMBERS,
   CLINICAL_SECTION_TITLE_CLASS,
@@ -50,6 +51,7 @@ interface TreatmentPlanFormProps {
   disabled?: boolean
   onChange: (patch: { treatmentPlan: TreatmentPlanItem[]; treatmentPlanNotes?: string }) => void
   onMoveToBudget?: (itemId: string) => void
+  onOrthodonticsAnnexChange?: (patch: Partial<OrthodonticsAnnex>) => void
 }
 
 const DEFAULT_TREATMENT_PHASE = 'fase_ii' as const
@@ -123,6 +125,7 @@ export function TreatmentPlanForm({
   specializedAnnexes,
   disabled = false,
   onChange,
+  onOrthodonticsAnnexChange,
 }: TreatmentPlanFormProps) {
   const [openMenu, setOpenMenu] = useState<{ id: string; field: 'cie' | 'cups'; query: string } | null>(
     null,
@@ -130,7 +133,11 @@ export function TreatmentPlanForm({
   const [annexPickerOpen, setAnnexPickerOpen] = useState(false)
   const [annexChoices, setAnnexChoices] = useState<TreatmentPlanItem[]>([])
   const [selectedAnnexIds, setSelectedAnnexIds] = useState<string[]>([])
+  const [showOrthodonticPlan, setShowOrthodonticPlan] = useState(false)
   const { toastMessage, showToast, clearToast } = useToast()
+  const orthodontics = specializedAnnexes?.orthodontics
+  const orthodonticPlanVisible =
+    showOrthodonticPlan || Boolean(orthodontics?.treatmentType)
   const cieQuery = openMenu?.field === 'cie' ? openMenu.query : ''
   const cupsQuery = openMenu?.field === 'cups' ? openMenu.query : ''
   const cieCatalog = useCatalogSearch('cie10', cieQuery, 20)
@@ -292,11 +299,38 @@ export function TreatmentPlanForm({
           <button type="button" onClick={importFromAnnexes} className="btn-secondary text-xs">
             Importar desde anexos
           </button>
+          {onOrthodonticsAnnexChange && !orthodonticPlanVisible ? (
+            <button
+              type="button"
+              onClick={() => setShowOrthodonticPlan(true)}
+              className="btn-secondary text-xs"
+            >
+              + Plan de Tratamiento de Ortodoncia
+            </button>
+          ) : null}
           <button type="button" onClick={addTreatmentItem} className="btn-primary text-xs">
             Agregar Nuevo Procedimiento
           </button>
         </div>
       )}
+
+      {orthodonticPlanVisible && orthodontics && onOrthodonticsAnnexChange ? (
+        <div className="mb-4">
+          <OrthodonticTreatmentPlanAndBudget
+            mode="plan"
+            treatmentType={orthodontics.treatmentType}
+            conventionalBracketType={orthodontics.conventionalBracketType}
+            alignerTreatmentMode={orthodontics.alignerTreatmentMode}
+            alignerPhaseCount={orthodontics.alignerPhaseCount}
+            maxillaryOrthopedicsAppliance={orthodontics.maxillaryOrthopedicsAppliance}
+            treatmentDurationMonths={orthodontics.treatmentDurationMonths}
+            orthodonticBudget={orthodontics.orthodonticBudget}
+            onTreatmentPlanChange={(patch) => onOrthodonticsAnnexChange(patch)}
+            onBudgetChange={(orthodonticBudget) => onOrthodonticsAnnexChange({ orthodonticBudget })}
+            disabled={disabled}
+          />
+        </div>
+      ) : null}
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] border-collapse text-sm">
