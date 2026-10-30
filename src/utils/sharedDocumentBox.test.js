@@ -7,6 +7,7 @@ import {
   prepareSharedDocument,
   sharedEntryFromOrthodontics,
   sharedEntryFromSection,
+  shouldOfferOrthodonticsSharedCharges,
 } from './sharedDocumentBox.ts'
 
 function line(id, procedure, unitPrice, cupsCode) {
@@ -164,6 +165,7 @@ const orthoBudget = {
 }
 
 test('la caja ofrece pagar de contado, la cuota inicial, un control y los retenedores', () => {
+  assert.equal(shouldOfferOrthodonticsSharedCharges(orthoBudget), true)
   const options = orthodonticsSelectionOptions({ budget: orthoBudget, payments: [] })
   assert.deepEqual(
     options.map((item) => item.label),
@@ -183,10 +185,40 @@ test('la caja ofrece pagar de contado, la cuota inicial, un control y los retene
   assert.equal(options.every((item) => item.available), true)
 })
 
-test('sin presupuesto de ortodoncia los cuatro ítems siguen disponibles para indicar el valor', () => {
-  const options = orthodonticsSelectionOptions({ budget: { ...orthoBudget, active: false } })
-  assert.equal(options.length, 4)
-  assert.equal(options.every((item) => item.available && item.cap == null), true)
+test('sin presupuesto de ortodoncia no ofrece cobros ni acepta agregar ortodoncia', () => {
+  assert.equal(shouldOfferOrthodonticsSharedCharges({ ...orthoBudget, active: false }), false)
+  assert.equal(shouldOfferOrthodonticsSharedCharges(undefined), false)
+  assert.equal(
+    shouldOfferOrthodonticsSharedCharges({
+      active: true,
+      initialInstallment: { quantity: 1, unitPrice: 0 },
+      controls: { quantity: 0, unitPrice: 0 },
+      retainers: { quantity: 0, unitPrice: 0 },
+    }),
+    false,
+  )
+  assert.deepEqual(orthodonticsSelectionOptions({ budget: { ...orthoBudget, active: false } }), [])
+  assert.deepEqual(orthodonticsSelectionOptions({ budget: undefined }), [])
+
+  const prepared = prepareSharedDocument({
+    entries: [
+      {
+        id: 'ortho-ghost',
+        origin: 'orthodontics',
+        orthodonticsKind: 'cuota_inicial',
+        procedure: 'Pagar la cuota inicial',
+        amount: 100000,
+      },
+      { ...emptyManualSharedEntry(), procedure: 'Resina', amount: 80000 },
+    ],
+    documentKind: 'recibo_interno',
+    lines: [],
+    payments: [],
+    orthodontics: { budget: { ...orthoBudget, active: false }, payments: [] },
+  })
+  assert.equal(prepared.ok, false)
+  if (prepared.ok) return
+  assert.match(prepared.message, /no tiene presupuesto de ortodoncia/)
 })
 
 test('un control ya pagado sugiere el siguiente y el contado no se mezcla con la cuota', () => {

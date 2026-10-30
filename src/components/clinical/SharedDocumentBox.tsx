@@ -169,8 +169,9 @@ export function SharedDocumentBox({
         </h4>
         <p className="mt-1 text-xs text-slate-500">
           Elija el tipo de comprobante. Todos los procedimientos de esta caja salen con el mismo
-          número. Puede importarlos desde esta sección, incluir un cobro de ortodoncia o
-          agregarlos manualmente.
+          número. Puede importarlos desde esta sección
+          {orthoOptions.length > 0 ? ', incluir un cobro de ortodoncia' : ''} o agregarlos
+          manualmente.
         </p>
       </header>
 
@@ -242,39 +243,38 @@ export function SharedDocumentBox({
         </button>
       </div>
 
-      <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
-          Ortodoncia
-        </p>
-        <ul className="space-y-1">
-          {orthoOptions.map((option) => (
-            <li key={option.kind}>
-              <button
-                type="button"
-                disabled={disabled || busy || !option.available}
-                onClick={() => importOrthodontics(option.kind)}
-                className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left text-sm hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate font-medium text-slate-800">{option.label}</span>
-                  {option.available && option.kind === 'control' && option.controlNumber ? (
-                    <span className="text-[11px] text-slate-500">Control #{option.controlNumber}</span>
-                  ) : null}
-                  {option.available && option.cap == null ? (
-                    <span className="block text-[11px] text-slate-500">Indique el valor al agregarlo</span>
-                  ) : null}
-                  {!option.available && option.unavailableReason ? (
-                    <span className="block text-[11px] text-slate-500">{option.unavailableReason}</span>
-                  ) : null}
-                </span>
-                <span className="shrink-0 text-xs font-semibold tabular-nums text-emerald-800">
-                  {option.cap == null ? 'Agregar' : option.available ? formatCurrency(option.remaining) : '—'}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
+      {orthoOptions.length > 0 && (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
+            Ortodoncia
+          </p>
+          <ul className="space-y-1">
+            {orthoOptions.map((option) => (
+              <li key={option.kind}>
+                <button
+                  type="button"
+                  disabled={disabled || busy || !option.available}
+                  onClick={() => importOrthodontics(option.kind)}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left text-sm hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-slate-800">{option.label}</span>
+                    {option.available && option.kind === 'control' && option.controlNumber ? (
+                      <span className="text-[11px] text-slate-500">Control #{option.controlNumber}</span>
+                    ) : null}
+                    {!option.available && option.unavailableReason ? (
+                      <span className="block text-[11px] text-slate-500">{option.unavailableReason}</span>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 text-xs font-semibold tabular-nums text-emerald-800">
+                    {option.available ? formatCurrency(option.remaining) : '—'}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {importOpen && (
         <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">

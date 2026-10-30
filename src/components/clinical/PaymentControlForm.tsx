@@ -1082,7 +1082,8 @@ export function PaymentControlForm({
       <p className="mb-4 text-xs text-slate-500">
         Para cada procedimiento defina la forma de pago y registre abonos parciales. Al final de
         esta sección puede reunir varios procedimientos en un mismo número de FEV o de recibo de
-        caja interno, importándolos de aquí, incluyendo ortodoncia o agregándolos manualmente.
+        caja interno, importándolos de aquí o agregándolos manualmente. Si el paciente tiene
+        presupuesto de ortodoncia, también puede incluir esos cobros en el mismo número.
       </p>
 
       {!disabled && (

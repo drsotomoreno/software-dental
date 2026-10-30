@@ -9,6 +9,7 @@ import type {
   PaymentPlanItem,
   PaymentRecord,
 } from '../types/clinicalRecord.ts'
+import { orthodonticsBudgetHasMonetaryValues } from './orthodonticsBudgetLines.ts'
 import { amountAppliedToLine } from './paymentAbonos.ts'
 import { formatCurrency, generateId } from './crypto.ts'
 import {
@@ -160,6 +161,16 @@ function budgetIsActive(budget?: OrthodonticsBudget | null): budget is Orthodont
   return Boolean(budget?.active)
 }
 
+/**
+ * La caja compartida solo ofrece cobros de ortodoncia cuando hay presupuesto
+ * activo con montos reales. Un `active` vacío / fantasma no debe mostrarlos.
+ */
+export function shouldOfferOrthodonticsSharedCharges(
+  budget?: OrthodonticsBudget | null,
+): budget is OrthodonticsBudget {
+  return budgetIsActive(budget) && orthodonticsBudgetHasMonetaryValues(budget)
+}
+
 export function orthodonticsTreatmentBalance(
   budget: OrthodonticsBudget | null | undefined,
   payments: OrthodonticsPaymentRecord[] = [],
@@ -219,16 +230,18 @@ const CONTADO_BLOCKED =
   'Quite la cuota, el control o los retenedores para pagar el tratamiento de contado.'
 const CONCEPT_BLOCKED = 'El pago de contado ya cubre el tratamiento.'
 
-/** Los cuatro cobros de ortodoncia, con saldo cuando el presupuesto está activo. */
+/** Los cuatro cobros de ortodoncia cuando el paciente tiene presupuesto activo. */
 export function orthodonticsSelectionOptions(input: {
   budget?: OrthodonticsBudget | null
   payments?: OrthodonticsPaymentRecord[]
   takenKinds?: OrthodonticsSharedKind[]
   reservedAmount?: number
 }): OrthodonticsSharedOption[] {
+  const budget = input.budget
+  if (!shouldOfferOrthodonticsSharedCharges(budget)) return []
+
   const payments = input.payments ?? []
   const taken = new Set(input.takenKinds ?? [])
-  const budget = input.budget
   const reserved = Math.max(0, Math.round(input.reservedAmount ?? 0))
   const global = orthodonticsTreatmentBalance(budget, payments)
   const room = global == null ? null : Math.max(0, global - reserved)
@@ -237,8 +250,7 @@ export function orthodonticsSelectionOptions(input: {
 
   return ORTHODONTICS_SHARED_ORDER.filter((kind) => !taken.has(kind)).map((kind) => {
     const cupsCode = kind === 'control' ? ORTHODONTICS_MECHANICAL_CONTROL_CUPS : undefined
-    const controlNumber =
-      kind === 'control' ? (budgetIsActive(budget) ? suggestControlNumber(budget, payments) : 1) : undefined
+    const controlNumber = kind === 'control' ? suggestControlNumber(budget, payments) : undefined
     const cap = orthodonticsKindCap(kind, budget, payments)
     const exclusiveBlock = kind === 'pago_unico' ? blocksContado : blocksConcepts
     const exclusiveReason = kind === 'pago_unico' ? CONTADO_BLOCKED : CONCEPT_BLOCKED
@@ -250,8 +262,8 @@ export function orthodonticsSelectionOptions(input: {
         cupsCode,
         remaining: 0,
         cap: null,
-        available: !exclusiveBlock,
-        unavailableReason: exclusiveBlock ? exclusiveReason : undefined,
+        available: false,
+        unavailableReason: exclusiveBlock ? exclusiveReason : 'Sin presupuesto de ortodoncia',
         controlNumber,
       }
     }
@@ -389,6 +401,13 @@ export function prepareSharedDocument(input: {
     if (entry.origin === 'orthodontics') {
       const kind = entry.orthodonticsKind
       const label = kind ? ORTHODONTICS_SHARED_LABELS[kind] : 'Ortodoncia'
+      if (!shouldOfferOrthodonticsSharedCharges(orthoBudget)) {
+        return {
+          ok: false,
+          message:
+            'Este paciente no tiene presupuesto de ortodoncia. Quite el cobro de ortodoncia del comprobante.',
+        }
+      }
       if (!kind) {
         return { ok: false, message: 'Hay un cobro de ortodoncia incompleto. Quítelo y vuelva a elegirlo.' }
       }
@@ -400,7 +419,13 @@ export function prepareSharedDocument(input: {
         return { ok: false, message: `Indique un valor mayor que cero para «${label}».` }
       }
       const cap = orthodonticsKindCap(kind, orthoBudget, orthoPayments)
-      if (cap != null && amount > cap) {
+      if (cap == null) {
+        return {
+          ok: false,
+          message: `No hay saldo de ortodoncia para «${label}».`,
+        }
+      }
+      if (amount > cap) {
         return {
           ok: false,
           message: `El valor de «${label}» supera el saldo de ortodoncia (${formatCurrency(cap)}).`,
