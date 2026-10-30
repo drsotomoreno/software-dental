@@ -172,6 +172,7 @@ export function RapidValuationForm({
           budgetItems={form.budgetItems}
           orthodonticsBudget={form.orthodonticsBudget}
           dentalImplantsBudget={form.dentalImplantsBudget}
+          dentalImplantsAnnex={form.specializedAnnexes?.dentalImplants}
           budget={form.budget}
           treatmentPlan={form.treatmentPlan}
           disabled={disabled}

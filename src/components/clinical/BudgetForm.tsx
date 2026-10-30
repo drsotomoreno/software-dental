@@ -16,6 +16,8 @@ import type {
 
 } from '@/types/clinicalRecord'
 
+import type { DentalImplantsAnnex } from '@/types/specializedAnnexes'
+
 import { DEFAULT_IVA_RATE } from '@/types/pricing'
 
 import {
@@ -68,8 +70,7 @@ import {
   omitOrthodonticsPackageBudgetLines,
   shouldShowOrthodonticsBudgetSection,
 } from '@/utils/orthodonticsBudgetLines'
-
-
+import { shouldShowDentalImplantsBudgetSection } from '@/utils/dentalImplantsBudgetLines'
 
 interface BudgetFormProps {
 
@@ -78,6 +79,8 @@ interface BudgetFormProps {
   orthodonticsBudget?: OrthodonticsBudget
 
   dentalImplantsBudget?: DentalImplantsBudget
+
+  dentalImplantsAnnex?: DentalImplantsAnnex | null
 
   budget: BudgetSummary
 
@@ -146,6 +149,8 @@ export function BudgetForm({
   orthodonticsBudget: orthodonticsBudgetProp,
 
   dentalImplantsBudget: dentalImplantsBudgetProp,
+
+  dentalImplantsAnnex = null,
 
   budget,
 
@@ -373,12 +378,17 @@ export function BudgetForm({
 
 
 
-  const hasSpecialtyBudget = orthodonticsBudget.active || dentalImplantsBudget.active
-
   const showOrthodonticsBudget = shouldShowOrthodonticsBudgetSection(
     orthodonticsBudget,
     treatmentPlan,
   )
+  const showDentalImplantsBudget = shouldShowDentalImplantsBudgetSection(
+    dentalImplantsBudget,
+    dentalImplantsAnnex,
+  )
+  const hasSpecialtyBudget =
+    (showOrthodonticsBudget && orthodonticsBudget.active) ||
+    (showDentalImplantsBudget && dentalImplantsBudget.active)
 
   return (
 
@@ -420,11 +430,13 @@ export function BudgetForm({
         />
       )}
 
-      <DentalImplantsBudgetSection
-        dentalImplantsBudget={dentalImplantsBudget}
-        disabled={disabled}
-        onChange={emitImplants}
-      />
+      {showDentalImplantsBudget && (
+        <DentalImplantsBudgetSection
+          dentalImplantsBudget={dentalImplantsBudget}
+          disabled={disabled}
+          onChange={emitImplants}
+        />
+      )}
 
 
 

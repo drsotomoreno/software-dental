@@ -171,7 +171,7 @@ export function OrthodonticsBudgetSection({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-100 pb-3 dark:border-emerald-900/60">
         <div>
           <h3 className="text-lg font-bold text-emerald-950 dark:text-emerald-100">
-            Presupuesto De Ortodoncia
+            Presupuesto de ortodoncia
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Cuota inicial, controles y retenedores con su valor unitario.
