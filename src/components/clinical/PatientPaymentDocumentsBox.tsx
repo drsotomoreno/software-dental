@@ -90,7 +90,7 @@ export function PatientPaymentDocumentsBox({
   return (
     <article className="mt-6 rounded-xl border border-dental-200 bg-white p-4 shadow-sm print:hidden">
       <header className="mb-4">
-        <h3 className="text-xl font-bold text-dental-800">Comprobantes del paciente</h3>
+        <h3 className="text-xl font-bold text-dental-800">Comprobantes de Pagos del Paciente</h3>
         <h4 className="mt-1 text-sm font-semibold text-slate-900">
           Visualizar o imprimir todos los pagos
         </h4>
