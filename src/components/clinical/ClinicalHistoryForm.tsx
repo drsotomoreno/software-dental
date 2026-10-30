@@ -604,6 +604,15 @@ export function ClinicalHistoryForm({
           })
         }}
         onMoveToBudget={moveTreatmentPlanItemToBudget}
+        onOrthodonticsAnnexChange={(patch) => {
+          const annexes = form.specializedAnnexes
+          update({
+            specializedAnnexes: {
+              ...annexes,
+              orthodontics: { ...annexes.orthodontics, ...patch },
+            },
+          })
+        }}
       />
 
       <BudgetForm
@@ -611,10 +620,20 @@ export function ClinicalHistoryForm({
         orthodonticsBudget={form.orthodonticsBudget}
         dentalImplantsBudget={form.dentalImplantsBudget}
         dentalImplantsAnnex={form.specializedAnnexes.dentalImplants}
+        orthodonticsAnnex={form.specializedAnnexes.orthodontics}
         budget={form.budget}
         treatmentPlan={form.treatmentPlan}
         disabled={livingLocked}
         onChange={(patch) => update(patch)}
+        onOrthodonticsAnnexChange={(patch) => {
+          const annexes = form.specializedAnnexes
+          update({
+            specializedAnnexes: {
+              ...annexes,
+              orthodontics: { ...annexes.orthodontics, ...patch },
+            },
+          })
+        }}
       />
 
       <TreatmentPlanAuthorizationForm
