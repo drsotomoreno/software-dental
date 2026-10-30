@@ -112,6 +112,10 @@ import {
   PaymentRegistrationModal,
   type PaymentRegistrationInput,
 } from './PaymentRegistrationModal'
+import {
+  PatientPaymentDocumentsBox,
+  type PatientPaymentDocumentEntry,
+} from './PatientPaymentDocumentsBox'
 import { SharedDocumentBox } from './SharedDocumentBox'
 
 interface PaymentControlFormProps {
@@ -1040,6 +1044,36 @@ export function PaymentControlForm({
     })
   }
 
+  const openPatientPaymentDocument = async (entry: PatientPaymentDocumentEntry) => {
+    const invoiceNumber = entry.invoice.invoiceNumber?.trim()
+    if (invoiceNumber) {
+      const electronic = await db.electronicInvoices.where('invoiceNumber').equals(invoiceNumber).first()
+      if (electronic) {
+        const linkedPatient = patientId
+          ? (await db.patients.get(patientId)) ||
+            (/^\d+$/.test(patientId) ? await db.patients.get(Number(patientId)) : undefined)
+          : undefined
+        setInvoiceView({
+          kind: 'electronic',
+          invoice: electronic,
+          patient: linkedPatient ?? null,
+          professional: user,
+        })
+        return
+      }
+    }
+
+    setInvoiceView({
+      kind: 'payment',
+      invoice: entry.invoice,
+      patientName,
+      patientDocument,
+      paymentReason: entry.paymentReason,
+      paymentMethodLabel: PAYMENT_METHOD_LABELS[entry.paymentMethod],
+      treatingDentistName: entry.treatingDentistName,
+    })
+  }
+
   return (
     <section className="card">
       <h3 className={`mb-2 ${CLINICAL_SECTION_TITLE_CLASS}`}>
@@ -1642,6 +1676,14 @@ export function PaymentControlForm({
           onRegister={registerSharedDocument}
         />
       )}
+
+      <PatientPaymentDocumentsBox
+        payments={paymentControl}
+        orthodonticsPayments={orthodonticsPaymentControl}
+        onOpenDocument={(entry) => {
+          void openPatientPaymentDocument(entry)
+        }}
+      />
 
       {paymentNotice && <p className="mt-3 text-sm text-dental-800">{paymentNotice}</p>}
       {creditNoteMessage && (
