@@ -1469,25 +1469,6 @@ export function PaymentControlForm({
           })
         )}
 
-        {unlinkedPayments.length > 0 && (
-          <article className="rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm">
-            <h4 className="mb-3 text-sm font-semibold text-slate-900">Abonos sin procedimiento</h4>
-            <ul className="space-y-2">
-              {unlinkedPayments.map((payment) => (
-                <li
-                  key={payment.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                >
-                  <span className="text-slate-700">{payment.paymentReason || 'Pago'}</span>
-                  <span className="font-semibold tabular-nums text-slate-900">
-                    {formatCurrency(payment.amount)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </article>
-        )}
-
         <div className="flex flex-wrap justify-end gap-6 rounded-xl border border-slate-300 bg-white px-4 py-3">
           <div className="text-right">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Valor total</p>
