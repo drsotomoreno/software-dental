@@ -7,4 +7,5 @@ export { default as OrthodonticCalculator } from './calculator/OrthodonticCalcul
 export { useOrthodonticCalc, calculateTotal, formatOrthodonticBudgetSummary } from './calculator'
 export type { OrthodonticBudgetState, TreatmentConfig } from './calculator/types'
 export { default as OrthodonticTreatmentPlanInput } from './OrthodonticTreatmentPlanInput'
+export { default as OrthodonticTreatmentPlanAndBudget } from './OrthodonticTreatmentPlanAndBudget'
 export { default as OverbiteInput } from './OverbiteInput'

@@ -21,7 +21,7 @@ import { ImplantBoneClassificationSection } from '@/components/clinical/implants
 import { ImplantMedicalAnamnesisSection } from '@/components/clinical/implants/ImplantMedicalAnamnesisSection'
 import { ImplantPeriodontalAssessmentSection } from '@/components/clinical/implants/ImplantPeriodontalAssessmentSection'
 import { OralSurgeryAnnexSection } from '@/components/clinical/oral-surgery'
-import { CrowdingSpacingInput, FacialProfileInput, MalocclusionAssessmentInput, MidlineDeviationInput, OrthodonticCalculator, OrthodonticTreatmentPlanInput } from './orthodontics'
+import { CrowdingSpacingInput, FacialProfileInput, MalocclusionAssessmentInput, MidlineDeviationInput, OrthodonticTreatmentPlanAndBudget } from './orthodontics'
 import { EndoAnnexForm } from './endodontics'
 
 interface SpecializedAnnexesFormProps {
@@ -213,27 +213,16 @@ export function SpecializedAnnexesForm({
             />
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <OrthodonticTreatmentPlanInput
+            <OrthodonticTreatmentPlanAndBudget
               treatmentType={data.orthodontics.treatmentType}
               conventionalBracketType={data.orthodontics.conventionalBracketType}
               alignerTreatmentMode={data.orthodontics.alignerTreatmentMode}
               alignerPhaseCount={data.orthodontics.alignerPhaseCount}
               maxillaryOrthopedicsAppliance={data.orthodontics.maxillaryOrthopedicsAppliance}
               treatmentDurationMonths={data.orthodontics.treatmentDurationMonths}
+              orthodonticBudget={data.orthodontics.orthodonticBudget}
               onTreatmentPlanChange={(patch) => updateOrthodontics(patch)}
-              disabled={disabled}
-            />
-            <OrthodonticCalculator
-              plan={{
-                treatmentType: data.orthodontics.treatmentType,
-                conventionalBracketType: data.orthodontics.conventionalBracketType,
-                alignerTreatmentMode: data.orthodontics.alignerTreatmentMode,
-                alignerPhaseCount: data.orthodontics.alignerPhaseCount,
-                maxillaryOrthopedicsAppliance: data.orthodontics.maxillaryOrthopedicsAppliance,
-                treatmentDurationMonths: data.orthodontics.treatmentDurationMonths,
-              }}
-              value={data.orthodontics.orthodonticBudget}
-              onChange={(orthodonticBudget) => updateOrthodontics({ orthodonticBudget })}
+              onBudgetChange={(orthodonticBudget) => updateOrthodontics({ orthodonticBudget })}
               disabled={disabled}
             />
             <div className="sm:col-span-2">

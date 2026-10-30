@@ -46,26 +46,6 @@ function NumberField({ id, label, value, disabled = false, onChange }: NumberFie
   )
 }
 
-function PlanDerivedField({
-  label,
-  value,
-  emptyLabel = 'Defina este valor en el plan de tratamiento',
-}: {
-  label: string
-  value: number
-  emptyLabel?: string
-}) {
-  return (
-    <div className="min-w-0">
-      <p className="label-field">{label}</p>
-      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-        {value > 0 ? value : emptyLabel}
-      </div>
-      <p className="mt-1 text-xs text-slate-500">Tomado automáticamente del plan de tratamiento</p>
-    </div>
-  )
-}
-
 export default function OrthodonticCalculator({
   plan,
   value,
@@ -76,8 +56,6 @@ export default function OrthodonticCalculator({
     config,
     value: budget,
     total,
-    installmentCount,
-    phaseCount,
     updateStandardField,
     updatePhaseField,
     updateRetainerPrice,
@@ -85,21 +63,16 @@ export default function OrthodonticCalculator({
 
   if (!config) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-4 text-sm text-slate-500">
-        Seleccione primero un tipo de tratamiento en el plan para habilitar el presupuesto.
+      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/80 px-3 py-3 text-sm text-slate-500">
+        Seleccione un tipo de tratamiento para habilitar el presupuesto y plan de pago.
       </div>
     )
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 sm:col-span-2">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h5 className="text-sm font-semibold text-slate-800">
-            Presupuesto y Plan de Pago de Ortodoncia
-          </h5>
-          <p className="mt-1 text-xs text-slate-500">{config.name}</p>
-        </div>
+    <div className="space-y-4 border-t border-slate-200 pt-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="text-xs text-slate-500">{config.name}</p>
         <div className="rounded-lg bg-dental-50 px-3 py-2 text-right">
           <p className="text-[11px] font-medium uppercase tracking-wide text-dental-700">
             Total estimado
@@ -118,10 +91,6 @@ export default function OrthodonticCalculator({
             value={budget.values.initialPayment}
             disabled={disabled}
             onChange={(initialPayment) => updateStandardField('initialPayment', initialPayment)}
-          />
-          <PlanDerivedField
-            label="Número de cuotas"
-            value={installmentCount}
           />
           <NumberField
             id="ortho-budget-control-price"
@@ -142,18 +111,6 @@ export default function OrthodonticCalculator({
 
       {budget?.kind === 'multi_phase' ? (
         <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <PlanDerivedField
-              label="Número de fases"
-              value={phaseCount}
-              emptyLabel="Seleccione el número de fases en el plan de tratamiento"
-            />
-            <PlanDerivedField
-              label="Número de cuotas por fase"
-              value={installmentCount}
-            />
-          </div>
-
           {budget.values.phases.map((phase, phaseIndex) => (
             <div
               key={`phase-${phaseIndex}`}
