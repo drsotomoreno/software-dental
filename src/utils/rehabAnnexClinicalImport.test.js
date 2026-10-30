@@ -158,6 +158,74 @@ test('sincroniza el plan agrupado al presupuesto y quita filas diente a diente',
   assert.equal(carilla.source, 'rehabilitation_annex')
 })
 
+test('conserva procedimiento y CUPS editados en presupuesto §8 al resincronizar', () => {
+  const result = syncRehabPlanItemsIntoGeneralBudget(
+    [
+      {
+        id: 'plan-pilar',
+        phase: 'fase_iii',
+        procedure: 'Pilar de PPF',
+        anatomicalZone: '11, 12, 13',
+        quantity: 3,
+        unitPrice: 0,
+        patientApproved: 'pendiente',
+        executionStatus: 'pendiente',
+        source: 'rehabilitation_annex',
+      },
+      {
+        id: 'plan-pontico',
+        phase: 'fase_iii',
+        procedure: 'Póntico de PPF',
+        anatomicalZone: '21, 22, 23',
+        quantity: 3,
+        unitPrice: 0,
+        patientApproved: 'pendiente',
+        executionStatus: 'pendiente',
+        source: 'rehabilitation_annex',
+      },
+    ],
+    [
+      {
+        id: 'budget-pilar',
+        treatmentPlanItemId: 'plan-pilar',
+        procedure: 'Corona metal cerámica',
+        cupsCode: '997207',
+        anatomicalZone: '11, 12, 13',
+        quantity: 3,
+        unitPrice: 450_000,
+        source: 'rehabilitation_annex',
+      },
+      {
+        id: 'budget-pontico',
+        treatmentPlanItemId: 'plan-pontico',
+        procedure: 'Póntico de PPF',
+        cupsCode: '233101',
+        anatomicalZone: '21, 22, 23',
+        quantity: 3,
+        unitPrice: 0,
+        source: 'rehabilitation_annex',
+      },
+    ],
+    (items) => ({
+      subtotal: items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0),
+      discount: 0,
+      total: items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0),
+      currency: 'COP',
+    }),
+  )
+
+  assert.equal(result.budgetItems.length, 2)
+  const pilar = result.budgetItems.find((item) => item.treatmentPlanItemId === 'plan-pilar')
+  const pontico = result.budgetItems.find((item) => item.treatmentPlanItemId === 'plan-pontico')
+  assert.ok(pilar)
+  assert.ok(pontico)
+  assert.equal(pilar.procedure, 'Corona metal cerámica')
+  assert.equal(pilar.cupsCode, '997207')
+  assert.equal(pilar.unitPrice, 450_000)
+  assert.equal(pontico.procedure, 'Póntico de PPF')
+  assert.equal(pontico.cupsCode, '233101')
+})
+
 test('al importar rehab reemplaza las filas — pieza por la caja resumida', () => {
   const plan = [
     {

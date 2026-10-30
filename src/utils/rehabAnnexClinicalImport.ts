@@ -104,9 +104,43 @@ function isRehabPlanItem(item: Pick<TreatmentPlanItem, 'procedure' | 'source'>):
   return treatmentProcedureFamilyKey(item.procedure ?? '').startsWith('rehab:')
 }
 
+function sameZone(left?: string, right?: string): boolean {
+  return (left ?? '').trim().toLowerCase() === (right ?? '').trim().toLowerCase()
+}
+
+/**
+ * Busca la fila del presupuesto §8 ya vinculada a un ítem del plan de rehab.
+ * Prioriza `treatmentPlanItemId` para conservar ediciones de procedimiento/CUPS
+ * aunque el usuario haya cambiado el nombre (y con ello la familia).
+ */
+function findExistingRehabBudgetLine(
+  item: TreatmentPlanItem,
+  candidates: BudgetLineItem[],
+  usedIds: Set<string>,
+): BudgetLineItem | undefined {
+  const byPlanId = candidates.find(
+    (line) =>
+      !usedIds.has(line.id) &&
+      (line.treatmentPlanItemId === item.id || line.id === item.id),
+  )
+  if (byPlanId) return byPlanId
+
+  const family = treatmentProcedureFamilyKey(item.procedure)
+  return candidates.find((line) => {
+    if (usedIds.has(line.id)) return false
+    if (treatmentProcedureFamilyKey(line.procedure ?? '') !== family) return false
+    if (line.anatomicalZone || item.anatomicalZone) {
+      return sameZone(line.anatomicalZone, item.anatomicalZone)
+    }
+    return true
+  })
+}
+
 /**
  * Copia al presupuesto general (§8) las filas agrupadas de rehabilitación del plan.
  * Quita duplicados legacy diente-a-diente y cualquier línea de la misma familia.
+ * Conserva procedimiento, CUPS y precio ya editados en §8 (el plan solo aporta
+ * la selección inicial / zona / cantidad).
  */
 export function syncRehabPlanItemsIntoGeneralBudget(
   treatmentPlan: TreatmentPlanItem[],
@@ -120,31 +154,45 @@ export function syncRehabPlanItemsIntoGeneralBudget(
     rehabPlanItems.map((item) => treatmentProcedureFamilyKey(item.procedure)),
   )
 
-  const withoutRehab = budgetItems.filter((item) => {
-    if (item.source === 'rehabilitation_annex') return false
+  const existingRehabCandidates = budgetItems.filter((item) => {
+    if (item.source === 'rehabilitation_annex') return true
     const family = treatmentProcedureFamilyKey(item.procedure ?? '')
-    if (rehabFamilies.has(family)) return false
+    if (rehabFamilies.has(family)) return true
     if (LEGACY_PIEZA_PROCEDURE_RE.test(item.procedure ?? '') && family.startsWith('rehab:')) {
-      return false
+      return true
     }
-    return true
+    return false
   })
 
-  const rehabLines: BudgetLineItem[] = rehabPlanItems.map((item) => ({
-    id: item.id,
-    treatmentPlanItemId: item.id,
-    procedure: item.procedure,
-    cupsCode: item.cupsCode,
-    toothNumber: item.toothNumber,
-    fdiQuadrant: item.fdiQuadrant,
-    arch: item.arch,
-    anatomicalZone: item.anatomicalZone,
-    diagnosisCode: item.diagnosisCode,
-    diagnosisDescription: item.diagnosisDescription,
-    quantity: Math.max(1, item.quantity ?? 1),
-    unitPrice: Math.max(0, Math.round(item.unitPrice ?? 0)),
-    source: 'rehabilitation_annex' as const,
-  }))
+  const withoutRehab = budgetItems.filter(
+    (item) => !existingRehabCandidates.some((rehab) => rehab.id === item.id),
+  )
+
+  const usedExistingIds = new Set<string>()
+  const rehabLines: BudgetLineItem[] = rehabPlanItems.map((item) => {
+    const existing = findExistingRehabBudgetLine(item, existingRehabCandidates, usedExistingIds)
+    if (existing) usedExistingIds.add(existing.id)
+
+    const planPrice = Math.max(0, Math.round(item.unitPrice ?? 0))
+    const existingPrice = Math.max(0, Math.round(existing?.unitPrice ?? 0))
+
+    return {
+      id: existing?.id ?? item.id,
+      treatmentPlanItemId: item.id,
+      // Edición libre en §8: no pisar nombre ni CUPS ya capturados en presupuesto.
+      procedure: (existing?.procedure ?? '').trim() || item.procedure,
+      cupsCode: (existing?.cupsCode ?? '').trim() || item.cupsCode,
+      toothNumber: item.toothNumber,
+      fdiQuadrant: item.fdiQuadrant,
+      arch: item.arch,
+      anatomicalZone: item.anatomicalZone,
+      diagnosisCode: item.diagnosisCode ?? existing?.diagnosisCode,
+      diagnosisDescription: item.diagnosisDescription ?? existing?.diagnosisDescription,
+      quantity: Math.max(1, item.quantity ?? existing?.quantity ?? 1),
+      unitPrice: existingPrice > 0 ? existingPrice : planPrice,
+      source: 'rehabilitation_annex' as const,
+    }
+  })
 
   const nextItems = [...withoutRehab, ...rehabLines]
   return {

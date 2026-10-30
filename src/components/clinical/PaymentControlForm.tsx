@@ -1661,8 +1661,58 @@ export function PaymentControlForm({
       <PatientPaymentDocumentsBox
         payments={paymentControl}
         orthodonticsPayments={orthodonticsPaymentControl}
+        paymentControlLines={paymentControlLines}
+        disabled={disabled}
         onOpenDocument={(entry) => {
           void openPatientPaymentDocument(entry)
+        }}
+        onAssociatePayment={(paymentId, lineId) => {
+          const line = paymentControlLines.find((item) => item.id === lineId)
+          const payment = paymentControl.find((item) => item.id === paymentId)
+          if (!line || !payment) return
+          const remainingBefore = lineRemainingBalance(line, paymentControlLines, paymentControl)
+          const amount = Math.max(0, Math.round(payment.amount || 0))
+          const remainingBalance = remainingAfterAbono(remainingBefore, amount)
+          const agreement = planItemForLine(line, paymentPlan)
+          onChange(
+            paymentControl.map((item) =>
+              item.id === paymentId
+                ? {
+                    ...item,
+                    paymentControlLineId: line.id,
+                    paymentPlanItemId: agreement?.id ?? item.paymentPlanItemId,
+                    cupsCode: line.cupsCode ?? item.cupsCode,
+                    paymentReason:
+                      line.procedure.trim() || agreement?.procedure || item.paymentReason || 'Procedimiento',
+                    remainingBalance,
+                    lineAllocations: undefined,
+                  }
+                : item,
+            ),
+          )
+          setPaymentNotice(
+            `Pago de ${formatCurrency(amount)} asociado a «${line.procedure.trim() || 'Procedimiento'}».`,
+          )
+        }}
+        onSavePaymentNote={(paymentId, note) => {
+          const trimmed = note.trim()
+          if (!trimmed) return
+          onChange(
+            paymentControl.map((item) => {
+              if (item.id !== paymentId) return item
+              const currentReason = item.paymentReason?.trim() ?? ''
+              const genericReason =
+                !currentReason ||
+                currentReason.toLowerCase() === 'abono' ||
+                currentReason.toLowerCase() === 'pago'
+              return {
+                ...item,
+                notes: trimmed,
+                paymentReason: genericReason ? trimmed : currentReason,
+              }
+            }),
+          )
+          setPaymentNotice('Descripción del comprobante guardada.')
         }}
       />
 
