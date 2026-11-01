@@ -27,7 +27,7 @@ interface BudgetModuleProps {
   onImportFromTreatmentPlan?: () => void
   canImportFromTreatmentPlan?: boolean
   importNotice?: string | null
-  /** Acciones adicionales junto a «Tratamiento en blanco» / importar. */
+  /** Acciones adicionales junto a «Agregar Procedimiento» / importar. */
   toolbarExtraActions?: ReactNode
 }
 
@@ -145,7 +145,7 @@ export function BudgetModule({
         <div className="mb-4 space-y-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/40">
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={addBlankItem} className="btn-secondary text-xs">
-              + Tratamiento en blanco
+              Agregar Procedimiento
             </button>
             {toolbarExtraActions}
           </div>
