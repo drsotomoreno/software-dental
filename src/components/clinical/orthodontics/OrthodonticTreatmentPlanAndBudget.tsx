@@ -29,7 +29,7 @@ export interface OrthodonticTreatmentPlanAndBudgetProps {
   }) => void
   onBudgetChange: (value: OrthodonticBudgetState | null) => void
   disabled?: boolean
-  /** full: anexo. plan: sección 7. budget: sección 8. */
+  /** full: anexo. plan: sección 7. budget: solo calculadora (legacy). */
   mode?: OrthodonticTreatmentPlanAndBudgetMode
 }
 
