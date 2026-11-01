@@ -69,3 +69,18 @@ válido un documento de este tipo si falta alguna de las dos firmas.
 5. Si una solicitud pediría violar estas reglas (p. ej. “agregar firma del
    paciente a la evolución”), rechazar el cambio normativo, explicar el
    motivo y proponer la alternativa correcta.
+
+---
+
+## SECCIÓN 8 — PRESUPUESTO DE ORTODONCIA (NO ELIMINAR)
+
+- Debe existir el botón **«Añadir Presupuesto de Ortodoncia»** en la toolbar
+  de la sección 8 (`BudgetModule` / `BudgetForm`).
+- Al pulsarlo se muestra el mismo bloque del anexo:
+  `OrthodonticTreatmentPlanAndBudget` (título *Plan de Tratamiento y
+  Presupuesto de Ortodoncia*), sincronizado con `specializedAnnexes.orthodontics`.
+- **NO** eliminar ese botón ni ese bloque por considerarlo “duplicado” de la
+  caja verde `OrthodonticsBudgetSection`. La caja verde es el presupuesto
+  clínico sincronizado; el bloque del anexo es el editor de plan/calculadora.
+- Si ambos están visibles, ocultar la caja verde mientras el bloque del anexo
+  esté abierto; no borrar el botón del producto.

@@ -16,7 +16,7 @@ import type {
 
 } from '@/types/clinicalRecord'
 
-import type { DentalImplantsAnnex } from '@/types/specializedAnnexes'
+import type { DentalImplantsAnnex, OrthodonticsAnnex } from '@/types/specializedAnnexes'
 
 import { DEFAULT_IVA_RATE } from '@/types/pricing'
 
@@ -62,6 +62,8 @@ import { OrthodonticsBudgetSection } from './OrthodonticsBudgetSection'
 
 import { DentalImplantsBudgetSection } from './DentalImplantsBudgetSection'
 
+import { OrthodonticTreatmentPlanAndBudget } from './orthodontics'
+
 import { FieldVoiceHeader } from '@/components/voice'
 
 import { parseDictatedInteger } from '@/utils/voiceDictation'
@@ -82,6 +84,8 @@ interface BudgetFormProps {
 
   dentalImplantsAnnex?: DentalImplantsAnnex | null
 
+  orthodonticsAnnex?: OrthodonticsAnnex | null
+
   budget: BudgetSummary
 
   treatmentPlan: TreatmentPlanItem[]
@@ -99,6 +103,8 @@ interface BudgetFormProps {
     budget: BudgetSummary
 
   }) => void
+
+  onOrthodonticsAnnexChange?: (patch: Partial<OrthodonticsAnnex>) => void
 
 }
 
@@ -152,6 +158,8 @@ export function BudgetForm({
 
   dentalImplantsAnnex = null,
 
+  orthodonticsAnnex = null,
+
   budget,
 
   treatmentPlan,
@@ -159,6 +167,8 @@ export function BudgetForm({
   disabled = false,
 
   onChange,
+
+  onOrthodonticsAnnexChange,
 
 }: BudgetFormProps) {
 
@@ -171,6 +181,13 @@ export function BudgetForm({
   useTariffSync(user?.id)
 
   const [importNotice, setImportNotice] = useState<string | null>(null)
+
+  const [showOrthodonticBudget, setShowOrthodonticBudget] = useState(false)
+
+  const orthodonticBudgetVisible =
+    showOrthodonticBudget ||
+    Boolean(orthodonticsAnnex?.treatmentType) ||
+    Boolean(orthodonticsAnnex?.orthodonticBudget)
 
   const clinicalBudgetItems = useMemo(
     () => omitOrthodonticsPackageBudgetLines(budgetItems, treatmentPlan),
@@ -417,10 +434,34 @@ export function BudgetForm({
           onImportFromTreatmentPlan={importFromTreatmentPlan}
           importNotice={importNotice}
           hideSummary
+          onAddOrthodonticsBudget={
+            onOrthodonticsAnnexChange && !disabled && !orthodonticBudgetVisible
+              ? () => setShowOrthodonticBudget(true)
+              : undefined
+          }
         />
       )}
 
-      {showOrthodonticsBudget && (
+      {orthodonticBudgetVisible && orthodonticsAnnex && onOrthodonticsAnnexChange ? (
+        <div id="clinical-orthodontics-budget-box" className="mb-6">
+          <OrthodonticTreatmentPlanAndBudget
+            mode="full"
+            treatmentType={orthodonticsAnnex.treatmentType}
+            conventionalBracketType={orthodonticsAnnex.conventionalBracketType}
+            alignerTreatmentMode={orthodonticsAnnex.alignerTreatmentMode}
+            alignerPhaseCount={orthodonticsAnnex.alignerPhaseCount}
+            maxillaryOrthopedicsAppliance={orthodonticsAnnex.maxillaryOrthopedicsAppliance}
+            treatmentDurationMonths={orthodonticsAnnex.treatmentDurationMonths}
+            orthodonticBudget={orthodonticsAnnex.orthodonticBudget}
+            onTreatmentPlanChange={(patch) => onOrthodonticsAnnexChange(patch)}
+            onBudgetChange={(orthodonticBudget) => onOrthodonticsAnnexChange({ orthodonticBudget })}
+            disabled={disabled}
+          />
+        </div>
+      ) : null}
+
+      {/* Caja verde solo si no está la del anexo (evita editar pago inicial/cuotas dos veces). */}
+      {showOrthodonticsBudget && !orthodonticBudgetVisible && (
         <OrthodonticsBudgetSection
           orthodonticsBudget={orthodonticsBudget}
           disabled={disabled}
