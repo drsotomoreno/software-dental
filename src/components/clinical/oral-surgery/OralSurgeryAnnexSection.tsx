@@ -111,6 +111,8 @@ export function OralSurgeryAnnexSection({
   variant = 'standalone',
 }: OralSurgeryAnnexSectionProps) {
   const isImplantsVariant = variant === 'implants'
+  const categoryTitle = (n: number, label: string) =>
+    isImplantsVariant ? label : `${n}. ${label}`
 
   const content = (
     <>
@@ -118,7 +120,7 @@ export function OralSurgeryAnnexSection({
 
       <div className="space-y-5 p-4">
         <CategoryBlock
-          title="1. Trastornos de la coagulación y fármacos antitrombóticos"
+          title={categoryTitle(1, 'Trastornos de la coagulación y fármacos antitrombóticos')}
           description="Enfermedades hemorrágicas y medicación que altera la hemostasia."
         >
           <p className="mt-3 text-[11px] font-medium text-slate-600">Enfermedades</p>
@@ -140,7 +142,7 @@ export function OralSurgeryAnnexSection({
         </CategoryBlock>
 
         <CategoryBlock
-          title="2. Riesgo de osteonecrosis de los maxilares (MRONJ)"
+          title={categoryTitle(2, 'Riesgo de osteonecrosis de los maxilares (MRONJ)')}
           description="Indicaciones oncológicas / metabólicas y antirresortivos o antiangiogénicos."
         >
           <p className="mt-3 text-[11px] font-medium text-slate-600">Enfermedades / indicaciones</p>
@@ -162,7 +164,7 @@ export function OralSurgeryAnnexSection({
         </CategoryBlock>
 
         <CategoryBlock
-          title="3. Patologías cardiovasculares y riesgo hemodinámico"
+          title={categoryTitle(3, 'Patologías cardiovasculares y riesgo hemodinámico')}
           description="Condiciones que comprometen la estabilidad cardiovascular perioperatoria."
         >
           <CheckboxGroup
@@ -175,7 +177,7 @@ export function OralSurgeryAnnexSection({
         </CategoryBlock>
 
         <CategoryBlock
-          title="4. Alteraciones endocrinas y metabolismo"
+          title={categoryTitle(4, 'Alteraciones endocrinas y metabolismo')}
           description="Diabetes, insuficiencia suprarrenal y corticosteroides sistémicos crónicos."
         >
           <p className="mt-3 text-[11px] font-medium text-slate-600">Enfermedades</p>
@@ -197,7 +199,7 @@ export function OralSurgeryAnnexSection({
         </CategoryBlock>
 
         <CategoryBlock
-          title="5. Inmunosupresión y enfermedades infecciosas"
+          title={categoryTitle(5, 'Inmunosupresión y enfermedades infecciosas')}
           description="VIH avanzado, trasplante, discrasias y terapias inmunosupresoras."
         >
           <p className="mt-3 text-[11px] font-medium text-slate-600">Enfermedades</p>
@@ -223,7 +225,7 @@ export function OralSurgeryAnnexSection({
         </CategoryBlock>
 
         <CategoryBlock
-          title="6. Alergias e hipersensibilidades críticas"
+          title={categoryTitle(6, 'Alergias e hipersensibilidades críticas')}
           description="Antibióticos, anestésicos locales y analgésicos de uso frecuente."
         >
           <CheckboxGroup
@@ -236,7 +238,7 @@ export function OralSurgeryAnnexSection({
         </CategoryBlock>
 
         <CategoryBlock
-          title="7. Factores anatómicos e infecciosos locales"
+          title={categoryTitle(7, 'Factores anatómicos e infecciosos locales')}
           description="Contraindicaciones temporales o absolutas de cirugía oral en la zona afectada."
         >
           <CheckboxGroup
