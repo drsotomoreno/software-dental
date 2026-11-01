@@ -7,6 +7,9 @@ import { enviarRipsMensuales, getMonthlyRipsJobStatus } from '../services/monthl
 const TZ = 'America/Bogota'
 const HOUR = 2
 const MINUTE = 0
+/** setTimeout solo acepta int32 firmado; delays mayores se truncan a 1 ms. */
+const MAX_TIMEOUT_MS = 2_147_483_647
+const RECHECK_MS = 12 * 60 * 60 * 1000
 let timer = null
 
 export function getBogotaParts(date = new Date()) {
@@ -80,10 +83,17 @@ async function runJob(reason) {
 
 function armTimer() {
   if (timer) clearTimeout(timer)
-  const wait = msUntilNextMonthlyRun()
   const next = nextMonthlyRunDate()
+  const fullWait = msUntilNextMonthlyRun()
+  // Si falta más de ~24.8 días, rearmamos antes sin ejecutar el job.
+  const wait = Math.min(fullWait, MAX_TIMEOUT_MS, RECHECK_MS)
   console.log(`[RIPS mensual] Próxima ejecución ${next.toISOString()} (cron 0 2 1 * * ${TZ})`)
   timer = setTimeout(() => {
+    const remaining = nextMonthlyRunDate().getTime() - Date.now()
+    if (remaining > 60_000) {
+      armTimer()
+      return
+    }
     void runJob('cron').finally(() => armTimer())
   }, wait)
   if (typeof timer.unref === 'function') timer.unref()
