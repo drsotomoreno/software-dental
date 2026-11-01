@@ -29,6 +29,8 @@ interface BudgetModuleProps {
   importNotice?: string | null
   /** Acciones adicionales junto a «Agregar Procedimiento» / importar. */
   toolbarExtraActions?: ReactNode
+  /** Muestra el botón para insertar el presupuesto de ortodoncia del anexo. */
+  onAddOrthodonticsBudget?: () => void
 }
 
 export function BudgetModule({
@@ -44,6 +46,7 @@ export function BudgetModule({
   canImportFromTreatmentPlan = false,
   importNotice = null,
   toolbarExtraActions = null,
+  onAddOrthodonticsBudget,
 }: BudgetModuleProps) {
   const tariffMap = useTariffStore((state) => state.tariffMap)
   const [procedureSearch, setProcedureSearch] = useState('')
@@ -149,6 +152,18 @@ export function BudgetModule({
             </button>
             {toolbarExtraActions}
           </div>
+
+          {onAddOrthodonticsBudget ? (
+            <div>
+              <button
+                type="button"
+                onClick={onAddOrthodonticsBudget}
+                className="btn-secondary text-xs"
+              >
+                Añadir Presupuesto de Ortodoncia
+              </button>
+            </div>
+          ) : null}
 
           {onImportFromTreatmentPlan && (
             <div>

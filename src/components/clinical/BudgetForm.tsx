@@ -436,22 +436,16 @@ export function BudgetForm({
           onImportFromTreatmentPlan={importFromTreatmentPlan}
           importNotice={importNotice}
           hideSummary
-          toolbarExtraActions={
-            onOrthodonticsAnnexChange && !disabled && !orthodonticBudgetVisible ? (
-              <button
-                type="button"
-                onClick={() => setShowOrthodonticBudget(true)}
-                className="btn-secondary text-xs"
-              >
-                Añadir Presupuesto de Ortodoncia
-              </button>
-            ) : null
+          onAddOrthodonticsBudget={
+            onOrthodonticsAnnexChange && !disabled && !orthodonticBudgetVisible
+              ? () => setShowOrthodonticBudget(true)
+              : undefined
           }
         />
       )}
 
       {orthodonticBudgetVisible && orthodonticsAnnex && onOrthodonticsAnnexChange ? (
-        <div className="mb-6">
+        <div id="clinical-orthodontics-budget-box" className="mb-6">
           <OrthodonticTreatmentPlanAndBudget
             mode="full"
             treatmentType={orthodonticsAnnex.treatmentType}
