@@ -10,11 +10,7 @@ import {
   esMenorDeEdad,
   guardianAuthorizationComplete,
 } from '@/utils/patientMinorAge'
-import {
-  CLINICAL_HISTORY_SECTION_NUMBERS,
-  CLINICAL_SECTION_TITLE_CLASS,
-  clinicalSectionTitle,
-} from '@/constants/clinicalHistorySections'
+import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 
 interface TreatmentPlanAuthorizationFormProps {
   data: TreatmentPlanAuthorization
@@ -67,10 +63,7 @@ export function TreatmentPlanAuthorizationForm({
   return (
     <section className="card">
       <h3 className={`mb-2 ${CLINICAL_SECTION_TITLE_CLASS}`}>
-        {clinicalSectionTitle(
-          CLINICAL_HISTORY_SECTION_NUMBERS.tratamiento,
-          'Autorización del Plan de Tratamiento / Presupuesto',
-        )}
+        Autorización del Plan de Tratamiento / Presupuesto
       </h3>
       <p className="mb-4 text-xs text-slate-500">
         Firma conjunta del odontólogo y del paciente (o representante legal si es menor de 18).
