@@ -443,7 +443,7 @@ export function BudgetForm({
                 onClick={() => setShowOrthodonticBudget(true)}
                 className="btn-secondary text-xs"
               >
-                + Presupuesto de ortodoncia
+                Añadir Presupuesto de Ortodoncia
               </button>
             ) : null
           }
@@ -453,7 +453,7 @@ export function BudgetForm({
       {orthodonticBudgetVisible && orthodonticsAnnex && onOrthodonticsAnnexChange ? (
         <div className="mb-6">
           <OrthodonticTreatmentPlanAndBudget
-            mode="budget"
+            mode="full"
             treatmentType={orthodonticsAnnex.treatmentType}
             conventionalBracketType={orthodonticsAnnex.conventionalBracketType}
             alignerTreatmentMode={orthodonticsAnnex.alignerTreatmentMode}
