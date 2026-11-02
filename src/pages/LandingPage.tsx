@@ -84,17 +84,25 @@ export function LandingPage() {
                 Recupera tu tiempo clínico. Dicta la atención, gestiona todo 100% en la nube y
                 exporta los RIPS sin reescribir datos.
               </p>
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-start">
+              <div className="mt-8 flex flex-col gap-3">
                 <div>
-                  <Link to="/login" className="btn-primary px-6 py-3 text-center text-base">
-                    Iniciar Prueba de 7 Días
+                  <Link
+                    to="/login"
+                    className="btn-primary h-auto w-full max-w-xl whitespace-normal px-5 py-4 text-left text-sm font-semibold leading-relaxed sm:text-base"
+                  >
+                    Quiero mi software de Historia Dental cumpliendo toda la normatividad vigente con
+                    RIPS automáticos, Dictado por Voz, Mensajes de WhatsApp, Sin depender del
+                    Internet y con Facturación Electrónica. Todo por $50.000 al mes.
                   </Link>
-                  <p className="mt-2 max-w-sm text-xs leading-relaxed text-gray-500">
+                  <p className="mt-2 max-w-xl text-xs leading-relaxed text-gray-500">
                     Requiere validación con número ReTHUS real. Incluye habilitación de dictado por
                     voz por paciente.
                   </p>
                 </div>
-                <a href="#planes" className="btn-secondary px-6 py-3 text-center text-base">
+                <a
+                  href="#planes"
+                  className="btn-secondary w-fit px-6 py-3 text-center text-base"
+                >
                   Ver Planes
                 </a>
               </div>
