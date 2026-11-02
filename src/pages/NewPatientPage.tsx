@@ -234,7 +234,12 @@ export function NewPatientPage() {
         {error && (
           <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         )}
+      </div>
 
+      {/* Visible de inmediato: cotización ágil sin pasar por diagnósticos. */}
+      <PresupuestoRapido patient={form} />
+
+      <div className="mt-8 print:hidden">
         {clinicalData && (
           <RapidValuationForm
             patientData={form}
@@ -268,8 +273,6 @@ export function NewPatientPage() {
           </div>
         )}
       </div>
-
-      <PresupuestoRapido patient={form} />
 
       <div className="sticky bottom-4 mt-6 flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg print:hidden">
         <button

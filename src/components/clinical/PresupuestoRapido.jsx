@@ -124,12 +124,12 @@ export function PresupuestoRapido({ patient = null }) {
   }
 
   return (
-    <section className="presupuesto-rapido mt-8 rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section className="presupuesto-rapido rounded-xl border-2 border-teal-300 bg-white shadow-md ring-1 ring-teal-100">
       {/* UI interactiva — oculta al imprimir */}
       <div className="space-y-5 p-5 print:hidden sm:p-6">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">Presupuesto Rápido</h2>
-          <p className="mt-1 text-sm text-slate-500">
+        <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3">
+          <h2 className="text-lg font-bold text-teal-950">Presupuesto Rápido</h2>
+          <p className="mt-1 text-sm text-teal-800">
             Cotice al instante sin diagnósticos previos. Elija una categoría, digite el valor y
             agregue.
           </p>
