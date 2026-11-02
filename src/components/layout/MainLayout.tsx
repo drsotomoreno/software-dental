@@ -11,20 +11,22 @@ export function MainLayout() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <TopNavbar />
-      {isTrialLimited && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-950">
-          Prueba de 7 días: 1 paciente y 1 nota de voz por casilla.{' '}
-          <Link to="/welcome-trial" className="font-semibold underline">
-            Ver planes
-          </Link>
-        </div>
-      )}
-      <BackupReminderBanner />
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">
+      <div className="print:hidden">
+        <TopNavbar />
+        {isTrialLimited && (
+          <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-950">
+            Prueba de 7 días: 1 paciente y 1 nota de voz por casilla.{' '}
+            <Link to="/welcome-trial" className="font-semibold underline">
+              Ver planes
+            </Link>
+          </div>
+        )}
+        <BackupReminderBanner />
+      </div>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 print:max-w-none print:p-0">
         <Outlet />
       </main>
-      <footer className="border-t border-slate-200 bg-white py-3 text-center text-xs text-slate-500">
+      <footer className="border-t border-slate-200 bg-white py-3 text-center text-xs text-slate-500 print:hidden">
         {APP_NAME} — RIPS · Ley 527 · FHIR R4
       </footer>
     </div>

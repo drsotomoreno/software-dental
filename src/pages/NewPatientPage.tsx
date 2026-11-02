@@ -9,7 +9,11 @@ import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
 import type { OdontogramData } from '@/types/odontogram'
 import type { ValuationConsentMetadata } from '@/types/valuationConsent'
 import { ALL_TEETH_NUMBERS } from '@/constants/dental'
-import { RapidValuationForm, createEmptyClinicalForm } from '@/components/clinical'
+import {
+  RapidValuationForm,
+  PresupuestoRapido,
+  createEmptyClinicalForm,
+} from '@/components/clinical'
 import { createDefaultOdontogram } from '@/types/odontogram'
 import { useToast } from '@/hooks/useToast'
 import { Toast } from '@/components/ui/Toast'
@@ -220,49 +224,54 @@ export function NewPatientPage() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <h1 className="mb-2 text-2xl font-bold text-slate-900">Nuevo Paciente</h1>
-      <p className="mb-6 text-sm text-slate-500">
-        Complete en un solo formulario los datos del paciente y la valoración rápida antes de abrir
-        la historia clínica detallada.
-      </p>
+      <div className="print:hidden">
+        <h1 className="mb-2 text-2xl font-bold text-slate-900">Nuevo Paciente</h1>
+        <p className="mb-6 text-sm text-slate-500">
+          Complete en un solo formulario los datos del paciente y la valoración rápida antes de abrir
+          la historia clínica detallada.
+        </p>
 
-      {error && (
-        <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-      )}
+        {error && (
+          <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        )}
 
-      {clinicalData && (
-        <RapidValuationForm
-          patientData={form}
-          onPatientDataChange={(data) => {
-            setForm(data)
-            resetValuationProgress()
-          }}
-          initialData={clinicalData}
-          onChange={(data) => {
-            setClinicalData(data)
-            resetValuationProgress()
-          }}
-          consentAccepted={consentAccepted}
-          onConsentAcceptedChange={(accepted) => {
-            setConsentAccepted(accepted)
-            if (!accepted) {
-              setBudgetAccepted(false)
-              setConsentMetadata(null)
-            }
-          }}
-          consentRecordedAt={consentMetadata?.consentimientoTimestamp ?? null}
-          onAcceptTreatment={handleAcceptTreatment}
-          disabled={false}
-        />
-      )}
+        {clinicalData && (
+          <RapidValuationForm
+            patientData={form}
+            onPatientDataChange={(data) => {
+              setForm(data)
+              resetValuationProgress()
+            }}
+            initialData={clinicalData}
+            onChange={(data) => {
+              setClinicalData(data)
+              resetValuationProgress()
+            }}
+            consentAccepted={consentAccepted}
+            onConsentAcceptedChange={(accepted) => {
+              setConsentAccepted(accepted)
+              if (!accepted) {
+                setBudgetAccepted(false)
+                setConsentMetadata(null)
+              }
+            }}
+            consentRecordedAt={consentMetadata?.consentimientoTimestamp ?? null}
+            onAcceptTreatment={handleAcceptTreatment}
+            disabled={false}
+          />
+        )}
 
-      {budgetAccepted && consentMetadata && (
-        <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900">
-          Consentimiento y presupuesto aceptados. Puede pasar a la historia completa cuando lo desee.
-        </div>
-      )}
+        {budgetAccepted && consentMetadata && (
+          <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900">
+            Consentimiento y presupuesto aceptados. Puede pasar a la historia completa cuando lo
+            desee.
+          </div>
+        )}
+      </div>
 
-      <div className="sticky bottom-4 mt-6 flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
+      <PresupuestoRapido patient={form} />
+
+      <div className="sticky bottom-4 mt-6 flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg print:hidden">
         <button
           type="button"
           onClick={handleSubmitWithHistory}

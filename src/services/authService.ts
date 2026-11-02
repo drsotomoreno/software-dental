@@ -301,10 +301,7 @@ function sanitizeAssignableRole(
 ): { ok: true; role: UserRole } | { ok: false; error: string } {
   const requested = normalizeRole(role)
   if (requested === 'superadmin') {
-    if (actorRole !== 'superadmin') {
-      return { ok: false, error: 'Solo el superadministrador puede asignar ese rol.' }
-    }
-    return { ok: true, role: 'superadmin' }
+    return { ok: false, error: 'El rol de superadministrador no es asignable.' }
   }
   if (!ASSIGNABLE_ROLES.includes(requested)) {
     return { ok: false, error: 'El rol indicado no está permitido.' }

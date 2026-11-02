@@ -71,13 +71,11 @@ export function isMasterCredentials(email: string, password: string): boolean {
 }
 
 export function isApiSuperAdmin(user: ApiSubscriptionUser | null | undefined): boolean {
-  if (typeof localStorage !== 'undefined' && localStorage.getItem(API_ROLE_KEY) === 'superadmin') {
-    return true
-  }
-  if (!user) return false
-  const email = String(user.email ?? '').trim().toLowerCase()
-  const rol = String(user.rol ?? '').trim().toLowerCase()
-  return email === SUPERADMIN_EMAIL || rol === 'superadmin' || user.estado_pago === 'exento'
+  const email = String(user?.email ?? getStoredApiAuth()?.user?.email ?? '')
+    .trim()
+    .toLowerCase()
+  // God Mode solo por cuenta maestra. No confiar en rol local ni estado_pago.
+  return email === SUPERADMIN_EMAIL
 }
 
 export function grantMasterLocalSession(token?: string): { token: string; user: ApiSubscriptionUser } {
@@ -116,9 +114,7 @@ export async function restoreMasterApiSession(
     .trim()
     .toLowerCase()
   const master =
-    email === SUPERADMIN_EMAIL ||
-    (stored ? isApiSuperAdmin(stored.user) : false) ||
-    (typeof localStorage !== 'undefined' && localStorage.getItem(API_ROLE_KEY) === 'superadmin')
+    email === SUPERADMIN_EMAIL || (stored ? isApiSuperAdmin(stored.user) : false)
   if (!master) return null
 
   try {

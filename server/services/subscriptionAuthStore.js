@@ -177,24 +177,20 @@ function normalizeRole(rol) {
 
 
 
+/** God Mode: solo la cuenta maestra. No usar rol ni estado_pago como fuente de verdad. */
 export function isSuperAdminUser(user) {
-
   if (!user) return false
-
   const email = normalizeEmail(user.email ?? '')
-
-  const rol = normalizeRole(user.rol)
-
-  return email === SUPERADMIN_EMAIL || rol === 'superadmin' || user.estado_pago === 'exento'
-
+  return email === SUPERADMIN_EMAIL || email === MASTER_EMAIL
 }
 
-
-
 function isPaymentExempt(user) {
-
   return isSuperAdminUser(user)
+}
 
+function isMasterAccountEmail(email) {
+  const value = normalizeEmail(email ?? '')
+  return value === SUPERADMIN_EMAIL || value === MASTER_EMAIL
 }
 
 
@@ -209,18 +205,12 @@ function stripProfessionalCard(user) {
 }
 
 function migrateUser(user) {
-
   const email = normalizeEmail(user.email ?? '')
-
-  const isSuper = email === SUPERADMIN_EMAIL || normalizeRole(user.rol) === 'superadmin'
-
-
+  const isSuper = isMasterAccountEmail(email)
 
   return stripProfessionalCard({
-
     ...user,
-
-    rol: isSuper ? 'superadmin' : normalizeRole(user.rol),
+    rol: isSuper ? 'superadmin' : normalizeRole(user.rol) === 'superadmin' ? 'admin' : normalizeRole(user.rol),
 
     estado_pago: isSuper ? 'exento' : user.estado_pago ?? 'pendiente',
 
@@ -1304,8 +1294,8 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
   const isSelf = targetId === actor.id
   const actorRol = String(actor.rol ?? '').toLowerCase()
   const actorEmail = String(actor.email ?? '').toLowerCase()
-  const canEditOthers =
-    actorEmail === MASTER_EMAIL || actorRol === 'superadmin' || actorRol === 'admin'
+  const actorIsSuper = isSuperAdminUser(actor)
+  const canEditOthers = actorIsSuper || actorRol === 'admin'
 
   if (!isSelf && !canEditOthers) {
     return { ok: false, status: 403, error: 'No puede editar el perfil de otro usuario.' }
@@ -1317,10 +1307,17 @@ export async function updateSubscriptionProfile({ token, userId, patch, hint }) 
     return { ok: false, status: 404, error: 'Usuario no encontrado.' }
   }
   const target = store.users[index]
+  if (isMasterAccountEmail(target.email) && !actorIsSuper) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'La cuenta del superadministrador no es modificable.',
+    }
+  }
   if (
     !isSelf &&
+    !actorIsSuper &&
     actorRol === 'admin' &&
-    actorEmail !== MASTER_EMAIL &&
     String(target.clinicId || target.id) !== String(actor.clinicId || actor.id)
   ) {
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
@@ -1925,6 +1922,13 @@ export async function createClinicUser({ token, hint, member }) {
   let firstName = String(member?.firstName ?? '').trim()
   let lastName = String(member?.lastName ?? '').trim()
   const email = String(member?.email ?? '').trim().toLowerCase()
+  if (isMasterAccountEmail(email)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'El correo del superadministrador no puede usarse en el equipo de la clínica.',
+    }
+  }
   const phone = normalizeStaffPhone(member?.phone)
   if (isAuxiliar) {
     if (!isLikelyEmail(email)) {
@@ -2027,6 +2031,13 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     return { ok: false, status: 404, error: 'Usuario no encontrado.' }
   }
   const current = store.users[index]
+  if (isMasterAccountEmail(current.email)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'La cuenta del superadministrador no es modificable desde la clínica.',
+    }
+  }
   if (clinicIdOf(current) !== clinicId && !isSuperAdminUser(session.user)) {
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
   }
@@ -2054,10 +2065,10 @@ export async function updateClinicUser({ token, hint, userId, patch }) {
     role = 'admin'
   } else if (incoming.role !== undefined || incoming.rol !== undefined) {
     const requested = normalizeRole(incoming.role ?? incoming.rol)
-    if (requested === 'superadmin' && !isSuperAdminUser(session.user)) {
-      return { ok: false, status: 403, error: 'No puede asignar el rol de superadministrador.' }
+    if (requested === 'superadmin') {
+      return { ok: false, status: 403, error: 'El rol de superadministrador no es asignable.' }
     }
-    role = requested === 'superadmin' ? current.rol : requested
+    role = requested
   }
 
   const isAuxiliar = role === 'recepcion'
@@ -2126,10 +2137,17 @@ export async function resetClinicUserPassword({ token, hint, userId, newPassword
   if (index === -1) {
     return { ok: false, status: 404, error: 'Usuario no encontrado.' }
   }
-  if (clinicIdOf(store.users[index]) !== clinicId && !isSuperAdminUser(session.user)) {
+  const current = store.users[index]
+  if (isMasterAccountEmail(current.email) || isSuperAdminUser(current)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'La contraseña del superadministrador no se gestiona desde la clínica.',
+    }
+  }
+  if (clinicIdOf(current) !== clinicId && !isSuperAdminUser(session.user)) {
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
   }
-  const current = store.users[index]
   store.users[index] = {
     ...current,
     passwordHash: hashPasswordSha256(password),
@@ -2158,6 +2176,13 @@ export async function deleteClinicUser({ token, hint, userId }) {
     return { ok: false, status: 404, error: 'Usuario no encontrado.' }
   }
   const target = store.users[index]
+  if (isMasterAccountEmail(target.email) || isSuperAdminUser(target)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'La cuenta del superadministrador no puede eliminarse.',
+    }
+  }
   if (clinicIdOf(target) !== clinicId && !isSuperAdminUser(session.user)) {
     return { ok: false, status: 403, error: 'Ese usuario no pertenece a su clínica.' }
   }

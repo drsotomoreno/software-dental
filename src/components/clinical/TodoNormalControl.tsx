@@ -8,6 +8,8 @@ interface ClinicalChipCheckboxProps {
 interface TodoNormalButtonProps {
   onClick: () => void
   disabled?: boolean
+  /** Texto del botón. Por defecto: «Todo Normal». */
+  label?: string
 }
 
 function ClinicalChipCheckbox({
@@ -30,7 +32,11 @@ function ClinicalChipCheckbox({
   )
 }
 
-export function TodoNormalButton({ onClick, disabled = false }: TodoNormalButtonProps) {
+export function TodoNormalButton({
+  onClick,
+  disabled = false,
+  label = 'Todo Normal',
+}: TodoNormalButtonProps) {
   return (
     <button
       type="button"
@@ -38,7 +44,7 @@ export function TodoNormalButton({ onClick, disabled = false }: TodoNormalButton
       onClick={onClick}
       className="clinical-todo-normal"
     >
-      Todo Normal
+      {label}
     </button>
   )
 }

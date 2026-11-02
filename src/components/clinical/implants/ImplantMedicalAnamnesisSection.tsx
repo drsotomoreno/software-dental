@@ -1,3 +1,4 @@
+import { TodoNormalButton } from '@/components/clinical/TodoNormalControl'
 import { FDI_QUADRANT_ORDER } from '@/constants/implantPlanning'
 import type { ImplantFdiQuadrant } from '@/constants/implantPlanning'
 import {
@@ -6,11 +7,17 @@ import {
   IMPLANT_SMOKING_STATUS_OPTIONS,
   IMPLANT_SYSTEMIC_RISK_CONDITION_OPTIONS,
   IMPLANT_TOXIC_HABIT_OPTIONS,
+  createEmptyImplantMedicalAnamnesis,
+  createEmptyLocalPathologies,
+  createEmptyRadiotherapyHistory,
+  createEmptyToxicHabits,
   type ImplantCriticalMedicationId,
   type ImplantLocalPathologyId,
   type ImplantMedicalAnamnesis,
   type ImplantSystemicRiskConditionId,
 } from '@/types/implantMedicalAnamnesis'
+
+const NO_REPORTA_TODO_NORMAL_LABEL = 'No Reporta / Todo Normal'
 
 interface ImplantMedicalAnamnesisSectionProps {
   value: ImplantMedicalAnamnesis
@@ -85,11 +92,75 @@ function toggleLocalPathologyQuadrant(
   }
 }
 
+function SubsectionHeader({
+  title,
+  description,
+  disabled,
+  onMarkNormal,
+}: {
+  title: string
+  description?: string
+  disabled: boolean
+  onMarkNormal: () => void
+}) {
+  return (
+    <div className="mb-1">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h4>
+        {!disabled && (
+          <TodoNormalButton label={NO_REPORTA_TODO_NORMAL_LABEL} onClick={onMarkNormal} />
+        )}
+      </div>
+      {description ? <p className="mt-1 text-[11px] text-slate-500">{description}</p> : null}
+    </div>
+  )
+}
+
 export function ImplantMedicalAnamnesisSection({
   value,
   onChange,
   disabled = false,
 }: ImplantMedicalAnamnesisSectionProps) {
+  const markRadiotherapyNormal = () => {
+    onChange({
+      ...value,
+      radiotherapyHistory: createEmptyRadiotherapyHistory(),
+    })
+  }
+
+  const markLocalPathologiesNormal = () => {
+    onChange({
+      ...value,
+      localPathologies: createEmptyLocalPathologies(),
+    })
+  }
+
+  const markSmokingAndToxicHabitsNormal = () => {
+    onChange({
+      ...value,
+      smokingAssessment: {
+        status: 'non_smoker',
+        cessationTime: '',
+        packYears: '',
+      },
+      toxicHabits: createEmptyToxicHabits(),
+    })
+  }
+
+  const markSystemicConditionsNormal = () => {
+    onChange({
+      ...value,
+      systemicRiskConditions: createEmptyImplantMedicalAnamnesis().systemicRiskConditions,
+    })
+  }
+
+  const markCriticalMedicationsNormal = () => {
+    onChange({
+      ...value,
+      criticalMedications: createEmptyImplantMedicalAnamnesis().criticalMedications,
+    })
+  }
+
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <header className="border-b border-slate-200 bg-slate-50 px-4 py-3">
@@ -104,12 +175,12 @@ export function ImplantMedicalAnamnesisSection({
 
       <div className="space-y-5 p-4">
         <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Antecedentes de radioterapia
-          </h4>
-          <p className="mt-1 text-[11px] text-slate-500">
-            Región de cabeza y cuello. Riesgo elevado de osteorradionecrosis.
-          </p>
+          <SubsectionHeader
+            title="Antecedentes de radioterapia"
+            description="Región de cabeza y cuello. Riesgo elevado de osteorradionecrosis."
+            disabled={disabled}
+            onMarkNormal={markRadiotherapyNormal}
+          />
 
           <div className="mt-3 flex flex-wrap gap-2">
             {[
@@ -216,12 +287,12 @@ export function ImplantMedicalAnamnesisSection({
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Patologías locales ocultas y focos infecciosos
-          </h4>
-          <p className="mt-1 text-[11px] text-slate-500">
-            Marque los hallazgos presentes e indique el cuadrante afectado.
-          </p>
+          <SubsectionHeader
+            title="Patologías locales ocultas y focos infecciosos"
+            description="Marque los hallazgos presentes e indique el cuadrante afectado."
+            disabled={disabled}
+            onMarkNormal={markLocalPathologiesNormal}
+          />
 
           <ul className="mt-3 space-y-3">
             {IMPLANT_LOCAL_PATHOLOGY_OPTIONS.map((option) => {
@@ -277,12 +348,12 @@ export function ImplantMedicalAnamnesisSection({
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Antecedentes de tabaquismo y hábitos tóxicos
-          </h4>
-          <p className="mt-1 text-[11px] text-slate-500">
-            Evalúe el hábito tabáquico y sustancias que puedan afectar la osteointegración.
-          </p>
+          <SubsectionHeader
+            title="Antecedentes de tabaquismo y hábitos tóxicos"
+            description="Evalúe el hábito tabáquico y sustancias que puedan afectar la osteointegración."
+            disabled={disabled}
+            onMarkNormal={markSmokingAndToxicHabitsNormal}
+          />
 
           <div className="mt-3 space-y-2">
             {IMPLANT_SMOKING_STATUS_OPTIONS.map((option) => {
@@ -413,9 +484,11 @@ export function ImplantMedicalAnamnesisSection({
         </div>
 
         <div>
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Condiciones sistémicas de riesgo
-          </h4>
+          <SubsectionHeader
+            title="Condiciones sistémicas de riesgo"
+            disabled={disabled}
+            onMarkNormal={markSystemicConditionsNormal}
+          />
           <ul className="mt-2 space-y-2">
             {IMPLANT_SYSTEMIC_RISK_CONDITION_OPTIONS.map((option) => (
               <li key={option.id}>
@@ -437,9 +510,11 @@ export function ImplantMedicalAnamnesisSection({
         </div>
 
         <div>
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Medicaciones críticas
-          </h4>
+          <SubsectionHeader
+            title="Medicaciones críticas"
+            disabled={disabled}
+            onMarkNormal={markCriticalMedicationsNormal}
+          />
           <ul className="mt-2 space-y-2">
             {IMPLANT_CRITICAL_MEDICATION_OPTIONS.map((option) => (
               <li key={option.id}>
