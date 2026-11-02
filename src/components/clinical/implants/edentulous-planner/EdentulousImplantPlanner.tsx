@@ -18,7 +18,7 @@ import {
 } from './archGeometry'
 import { ImplantClinicalRiskAlert } from '@/components/clinical/implants/ImplantClinicalRiskAlert'
 import { ImplantPlanningQuadrantAlert } from './ImplantPlanningQuadrantAlert'
-import { EdentulousArchArtwork } from './EdentulousArchArtwork'
+import { EDENTULOUS_ARCH_IMAGE_URL, EdentulousArchArtwork } from './EdentulousArchArtwork'
 import { BoneClassificationSelectors } from './BoneClassificationSelectors'
 import { ImplantMarker } from './ImplantMarker'
 import { ImplantPlannerSummary } from './ImplantPlannerSummary'
@@ -257,28 +257,36 @@ export function EdentulousImplantPlanner({
 
       <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <div className="relative overflow-hidden rounded-xl bg-white">
-          <svg
-            ref={svgRef}
-            viewBox={`0 0 ${PLANNER_VIEWBOX.width} ${PLANNER_VIEWBOX.height}`}
-            className="block h-auto w-full touch-none select-none"
-            role="img"
-            aria-label="Esquema de arcos edéntulos para planificación de implantes"
-          >
-            <rect width={PLANNER_VIEWBOX.width} height={PLANNER_VIEWBOX.height} fill="#ffffff" />
+          <div className="relative w-full">
+            <img
+              src={EDENTULOUS_ARCH_IMAGE_URL}
+              alt="Esquema de arcos edéntulos: cuadrantes Q1–Q4"
+              width={PLANNER_VIEWBOX.width}
+              height={PLANNER_VIEWBOX.height}
+              className="pointer-events-none block h-auto w-full select-none"
+              draggable={false}
+            />
+            <svg
+              ref={svgRef}
+              viewBox={`0 0 ${PLANNER_VIEWBOX.width} ${PLANNER_VIEWBOX.height}`}
+              className="absolute inset-0 h-full w-full touch-none select-none"
+              role="img"
+              aria-label="Capa interactiva para colocar implantes sobre arcos edéntulos"
+            >
+              <EdentulousArchArtwork disabled={disabled} onCanvasClick={placeImplantAt} />
 
-            <EdentulousArchArtwork disabled={disabled} onCanvasClick={placeImplantAt} />
-
-            {plan.implants.map((implant) => (
-              <ImplantMarker
-                key={implant.id}
-                implant={implant}
-                selected={selectedId === implant.id}
-                disabled={disabled}
-                onSelect={setSelectedId}
-                onPointerDown={handleMarkerPointerDown}
-              />
-            ))}
-          </svg>
+              {plan.implants.map((implant) => (
+                <ImplantMarker
+                  key={implant.id}
+                  implant={implant}
+                  selected={selectedId === implant.id}
+                  disabled={disabled}
+                  onSelect={setSelectedId}
+                  onPointerDown={handleMarkerPointerDown}
+                />
+              ))}
+            </svg>
+          </div>
 
           {!disabled && (
             <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-1 rounded-full border border-slate-200 bg-white/90 px-2 py-1 text-[10px] text-slate-500 shadow-sm">
