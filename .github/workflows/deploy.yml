@@ -111,6 +111,8 @@ jobs:
               git fetch origin main
               git reset --hard origin/main
               npm install
+              # EC2 t3.small suele OOM en vite build sin subir el heap de Node.
+              export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=3072}"
               npm run build
               echo "Bundle:"
               grep -o 'assets/index-[^"]*' dist/index.html || true
