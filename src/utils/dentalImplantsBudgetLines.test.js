@@ -38,8 +38,28 @@ test('muestra la caja si hay montos reales o plan del anexo', () => {
     shouldShowDentalImplantsBudgetSection(
       { active: false },
       {
-        implantPlacementPlan: {
-          implants: [{ id: '1', quadrant: 1, arch: 'upper', x: 0, y: 0 }],
+        unifiedImplantPlan: {
+          maxilarSuperior: {
+            estado: 'dentado',
+            rehabilitacionGlobal: '',
+            implantes: [],
+            tratamientos: [
+              {
+                id: '1',
+                piezaFDI: 16,
+                tipo: 'implante_unitario',
+                faseQuirurgica: { marcaManual: '', medida: '' },
+                faseProtesica: { tipoPilar: '', marcaPilarManual: '', material: '' },
+              },
+            ],
+          },
+          mandibula: {
+            estado: 'dentado',
+            rehabilitacionGlobal: '',
+            implantes: [],
+            tratamientos: [],
+          },
+          preciosReferencia: { implante: 1, pilar: 1, corona: 1 },
         },
       },
     ),

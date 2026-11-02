@@ -1,3 +1,2 @@
-export { EdentulousImplantPlanner } from './EdentulousImplantPlanner'
-export { EdentulousRehabilitationSelector } from './EdentulousRehabilitationSelector'
-export { EdentulousPlanningFinalSummary } from './EdentulousPlanningFinalSummary'
+export { BoneClassificationPanel } from './BoneClassificationPanel'
+export { BoneClassificationSelectors } from './BoneClassificationSelectors'

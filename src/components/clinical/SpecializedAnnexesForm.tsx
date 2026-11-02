@@ -15,11 +15,10 @@ import {
 } from '@/constants/clinicalHistorySections'
 import { PeriodonticsAnnexPanel } from './periodontics'
 import { RehabilitationAestheticsAnnexPanel } from './rehabilitation'
-import { RehabOdontogram } from '@/components/clinical/rehabilitation/rehab-odontogram'
-import { EdentulousImplantPlanner } from '@/components/clinical/implants/edentulous-planner'
 import { ImplantBoneClassificationSection } from '@/components/clinical/implants/ImplantBoneClassificationSection'
 import { ImplantMedicalAnamnesisSection } from '@/components/clinical/implants/ImplantMedicalAnamnesisSection'
 import { ImplantPeriodontalAssessmentSection } from '@/components/clinical/implants/ImplantPeriodontalAssessmentSection'
+import { UnifiedImplantPlanner } from '@/components/clinical/implants/unified-planner'
 import { OralSurgeryAnnexSection } from '@/components/clinical/oral-surgery'
 import { CrowdingSpacingInput, FacialProfileInput, MalocclusionAssessmentInput, MidlineDeviationInput, OrthodonticTreatmentPlanAndBudget } from './orthodontics'
 import { EndoAnnexForm } from './endodontics'
@@ -284,42 +283,16 @@ export function SpecializedAnnexesForm({
             />
 
             <ImplantBoneClassificationSection
-                value={data.dentalImplants.implantPlacementPlan.quadrantBoneClassification}
-                onChange={(quadrantBoneClassification) =>
-                  updateDentalImplants({
-                    implantPlacementPlan: {
-                      ...data.dentalImplants.implantPlacementPlan,
-                      quadrantBoneClassification,
-                    },
-                  })
-                }
-                disabled={disabled}
-            />
-
-            <EdentulousImplantPlanner
-              value={data.dentalImplants.implantPlacementPlan}
-              onChange={(implantPlacementPlan) => updateDentalImplants({ implantPlacementPlan })}
-              medicalAnamnesis={data.dentalImplants.medicalAnamnesis}
-              surgicalRiskAssessment={data.dentalImplants.surgicalRiskAssessment}
-              periodontalAssessment={data.dentalImplants.periodontalAssessment}
+              value={data.dentalImplants.quadrantBoneClassification}
+              onChange={(quadrantBoneClassification) =>
+                updateDentalImplants({ quadrantBoneClassification })
+              }
               disabled={disabled}
             />
 
-            <RehabOdontogram
-              variant="implants"
-              value={data.dentalImplants.visualTreatmentPlan}
-              protesisTotal={data.dentalImplants.protesisTotal}
-              protesisParcialRemovible={data.dentalImplants.protesisParcialRemovible}
-              onChange={(visualTreatmentPlan) => updateDentalImplants({ visualTreatmentPlan })}
-              onProtesisTotalChange={(protesisTotal) => updateDentalImplants({ protesisTotal })}
-              onProtesisParcialRemovibleChange={(protesisParcialRemovible) =>
-                updateDentalImplants({ protesisParcialRemovible })
-              }
-              restorationDetails={data.dentalImplants.restorationDetails}
-              onRestorationDetailsChange={(restorationDetails) =>
-                updateDentalImplants({ restorationDetails })
-              }
-              title="Esquema de Planificacion de Implantes en Arcos Dentados"
+            <UnifiedImplantPlanner
+              value={data.dentalImplants.unifiedImplantPlan}
+              onChange={(unifiedImplantPlan) => updateDentalImplants({ unifiedImplantPlan })}
               disabled={disabled}
             />
 

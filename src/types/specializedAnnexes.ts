@@ -26,15 +26,25 @@ import type { OrthodonticBudgetState } from '@/components/clinical/orthodontics/
 import type { RehabilitationAestheticsAnnex, RehabPlanningSchema } from '@/types/rehabilitationAestheticsAnnex'
 import {
   createEmptyRehabilitationAestheticsAnnex,
-  createEmptyRehabPlanningSchema,
   normalizeRehabilitationAestheticsAnnex,
   normalizeRehabPlanningSchema,
 } from '@/types/rehabilitationAestheticsAnnex'
 import {
-  createEmptyEdentulousImplantPlan,
   normalizeEdentulousImplantPlan,
   type EdentulousImplantPlan,
 } from '@/types/dentalImplantsPlanning'
+import {
+  createEmptyQuadrantBoneClassification,
+  normalizeQuadrantBoneClassification,
+  type QuadrantBoneClassification,
+} from '@/constants/boneClassification'
+import {
+  createEmptyUnifiedImplantPlan,
+  normalizeUnifiedImplantPlan,
+  unifiedImplantPlanHasContent,
+  type UnifiedImplantPlan,
+  createEmptyUnifiedTreatment,
+} from '@/types/unifiedImplantPlan'
 import {
   createEmptyImplantMedicalAnamnesis,
   normalizeImplantMedicalAnamnesis,
@@ -57,6 +67,7 @@ import { createEmptyEndoAnnexData, normalizeEndoAnnexData } from '@/utils/endoAn
 export type { PeriodonticsAnnex } from '@/types/periodonticsAnnex'
 export type { RehabilitationAestheticsAnnex, RehabPlanningSchema } from '@/types/rehabilitationAestheticsAnnex'
 export type { EdentulousImplantPlan, PlacedImplant } from '@/types/dentalImplantsPlanning'
+export type { UnifiedImplantPlan } from '@/types/unifiedImplantPlan'
 export type { ImplantMedicalAnamnesis } from '@/types/implantMedicalAnamnesis'
 export type { ImplantPeriodontalAssessment } from '@/types/implantPeriodontalAssessment'
 export type { OralSurgeryAnnex } from '@/types/oralSurgeryAnnex'
@@ -106,12 +117,22 @@ export interface DentalImplantsAnnex {
   /** Evaluación periodontal y gingival pre-implante */
   periodontalAssessment: ImplantPeriodontalAssessment
   notes: string
-  visualTreatmentPlan: RehabPlanningSchema['visualTreatmentPlan']
-  protesisTotal: RehabPlanningSchema['protesisTotal']
-  protesisParcialRemovible: RehabPlanningSchema['protesisParcialRemovible']
-  restorationDetails: RehabPlanningSchema['restorationDetails']
-  /** Planificación interactiva sobre arcos edéntulos */
-  implantPlacementPlan: EdentulousImplantPlan
+  /** Clasificación ósea Lekholm y Zarb por cuadrante FDI */
+  quadrantBoneClassification: QuadrantBoneClassification
+  /** Planificador unificado dentado / edéntulo (offline-first / IndexedDB) */
+  unifiedImplantPlan: UnifiedImplantPlan
+  /**
+   * @deprecated Migrado a `unifiedImplantPlan`. Se conserva en normalización para lecturas legacy.
+   */
+  visualTreatmentPlan?: RehabPlanningSchema['visualTreatmentPlan']
+  /** @deprecated Migrado a `unifiedImplantPlan`. */
+  protesisTotal?: RehabPlanningSchema['protesisTotal']
+  /** @deprecated Migrado a `unifiedImplantPlan`. */
+  protesisParcialRemovible?: RehabPlanningSchema['protesisParcialRemovible']
+  /** @deprecated Migrado a `unifiedImplantPlan`. */
+  restorationDetails?: RehabPlanningSchema['restorationDetails']
+  /** @deprecated Migrado a `unifiedImplantPlan` + `quadrantBoneClassification`. */
+  implantPlacementPlan?: EdentulousImplantPlan
 }
 
 export type EndodonticsAnnex = EndoAnnexData
@@ -159,8 +180,8 @@ function createEmptyDentalImplantsAnnex(): DentalImplantsAnnex {
     surgicalRiskAssessment: createEmptyOralSurgeryAnnex(),
     periodontalAssessment: createEmptyImplantPeriodontalAssessment(),
     notes: '',
-    ...createEmptyRehabPlanningSchema(),
-    implantPlacementPlan: createEmptyEdentulousImplantPlan(),
+    quadrantBoneClassification: createEmptyQuadrantBoneClassification(),
+    unifiedImplantPlan: createEmptyUnifiedImplantPlan(),
   }
 }
 
@@ -173,12 +194,83 @@ function hasRehabPlanningContent(planning: RehabPlanningSchema): boolean {
   )
 }
 
+/** Migra plan visual dentado legacy → tratamientos FDI del plan unificado. */
+function migrateLegacyVisualPlanToUnified(
+  planning: RehabPlanningSchema,
+): UnifiedImplantPlan {
+  const plan = createEmptyUnifiedImplantPlan()
+  const upper = new Set([11, 12, 13, 14, 15, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28])
+
+  for (const entry of planning.visualTreatmentPlan) {
+    if (!entry.tratamiento || (entry.tratamiento !== 'implante' && entry.tratamiento !== 'pontico_ppf')) {
+      continue
+    }
+    const fdi = Number(entry.dienteId)
+    if (!Number.isFinite(fdi)) continue
+
+    const treatment = createEmptyUnifiedTreatment({
+      piezaFDI: fdi,
+      tipo: entry.tratamiento === 'pontico_ppf' ? 'pontico' : 'implante_unitario',
+      faseQuirurgica: {
+        marcaManual: '',
+        medida: entry.implantSize ?? '',
+      },
+    })
+
+    if (upper.has(fdi)) {
+      plan.maxilarSuperior.tratamientos.push(treatment)
+    } else {
+      plan.mandibula.tratamientos.push(treatment)
+    }
+  }
+
+  return plan
+}
+
+/** Migra marcadores edéntulos legacy → slots de reborde del plan unificado. */
+function migrateLegacyEdentulousPlanToUnified(
+  legacy: EdentulousImplantPlan,
+  base: UnifiedImplantPlan,
+): UnifiedImplantPlan {
+  const next = normalizeUnifiedImplantPlan(base)
+  const upper = legacy.implants.filter((item) => item.arch === 'upper')
+  const lower = legacy.implants.filter((item) => item.arch === 'lower')
+
+  if (upper.length > 0) {
+    next.maxilarSuperior.estado = 'edentulo'
+    next.maxilarSuperior.implantes = upper.map((item, index) =>
+      createEmptyUnifiedTreatment({
+        id: item.id,
+        posicionReborde: index,
+        tipo: 'implante_unitario',
+        faseQuirurgica: { marcaManual: '', medida: item.size },
+      }),
+    )
+  }
+
+  if (lower.length > 0) {
+    next.mandibula.estado = 'edentulo'
+    next.mandibula.implantes = lower.map((item, index) =>
+      createEmptyUnifiedTreatment({
+        id: item.id,
+        posicionReborde: index,
+        tipo: 'implante_unitario',
+        faseQuirurgica: { marcaManual: '', medida: item.size },
+      }),
+    )
+  }
+
+  return next
+}
+
 function normalizeDentalImplantsAnnex(
   data?: Partial<DentalImplantsAnnex>,
   legacyRehabPlanning?: Partial<RehabPlanningSchema>,
   standaloneOralSurgery?: Partial<OralSurgeryAnnex>,
 ): DentalImplantsAnnex {
   const empty = createEmptyDentalImplantsAnnex()
+  const legacyPlacement = normalizeEdentulousImplantPlan(data?.implantPlacementPlan)
+
   const planning = normalizeRehabPlanningSchema({
     visualTreatmentPlan: data?.visualTreatmentPlan,
     protesisTotal: data?.protesisTotal,
@@ -191,6 +283,23 @@ function normalizeDentalImplantsAnnex(
       ? normalizeRehabPlanningSchema(legacyRehabPlanning)
       : planning
 
+  let unifiedImplantPlan = normalizeUnifiedImplantPlan(data?.unifiedImplantPlan)
+  if (!unifiedImplantPlanHasContent(unifiedImplantPlan)) {
+    if (hasRehabPlanningContent(migratedPlanning)) {
+      unifiedImplantPlan = migrateLegacyVisualPlanToUnified(migratedPlanning)
+    }
+    if (legacyPlacement.implants.length > 0) {
+      unifiedImplantPlan = migrateLegacyEdentulousPlanToUnified(
+        legacyPlacement,
+        unifiedImplantPlan,
+      )
+    }
+  }
+
+  const quadrantBoneClassification = normalizeQuadrantBoneClassification(
+    data?.quadrantBoneClassification ?? legacyPlacement.quadrantBoneClassification,
+  )
+
   return {
     medicalAnamnesis: normalizeImplantMedicalAnamnesis(data?.medicalAnamnesis),
     surgicalRiskAssessment: resolveImplantSurgicalRiskAssessment(
@@ -199,8 +308,8 @@ function normalizeDentalImplantsAnnex(
     ),
     periodontalAssessment: normalizeImplantPeriodontalAssessment(data?.periodontalAssessment),
     notes: data?.notes ?? empty.notes,
-    ...migratedPlanning,
-    implantPlacementPlan: normalizeEdentulousImplantPlan(data?.implantPlacementPlan),
+    quadrantBoneClassification,
+    unifiedImplantPlan,
   }
 }
 

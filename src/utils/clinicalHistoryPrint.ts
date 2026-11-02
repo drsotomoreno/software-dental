@@ -33,12 +33,12 @@ import { getEvolutionCatalogServices } from '@/utils/evolutionCatalogServices'
 import { formatAssociatedItemLabel } from '@/utils/evolutionNoteAssociation'
 import { paymentHasProcedureLink } from '@/utils/paymentAbonos'
 import {
-  formatDentalImplantPlanningSummaryLines,
   formatRehabBudgetSummary,
   formatRehabMidlineDeviation,
   formatRehabPlanningSummaryLines,
 } from '@/types/rehabilitationAestheticsAnnex'
-import { formatEdentulousImplantPlanSummary } from '@/types/dentalImplantsPlanning'
+import { formatUnifiedImplantPlanSummary } from '@/types/unifiedImplantPlan'
+import { formatQuadrantBoneClassificationMapSummary } from '@/types/dentalImplantsPlanning'
 import { formatImplantMedicalAnamnesisSummary } from '@/types/implantMedicalAnamnesis'
 import { formatImplantPeriodontalAssessmentSummary } from '@/types/implantPeriodontalAssessment'
 import { formatOralSurgeryAnnexSummary } from '@/types/oralSurgeryAnnex'
@@ -500,8 +500,8 @@ function buildAnnexesSection(data: ClinicalRecordFormData): string {
     formatImplantMedicalAnamnesisSummary(implants.medicalAnamnesis),
     formatOralSurgeryAnnexSummary(implants.surgicalRiskAssessment),
     formatImplantPeriodontalAssessmentSummary(implants.periodontalAssessment),
-    formatEdentulousImplantPlanSummary(implants.implantPlacementPlan),
-    ...formatDentalImplantPlanningSummaryLines(implants),
+    formatQuadrantBoneClassificationMapSummary(implants.quadrantBoneClassification),
+    formatUnifiedImplantPlanSummary(implants.unifiedImplantPlan),
     implants.notes,
   ]
     .filter((value) => value?.trim())

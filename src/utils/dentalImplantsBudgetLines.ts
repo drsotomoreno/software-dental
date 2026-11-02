@@ -13,11 +13,28 @@ export function dentalImplantsBudgetHasMonetaryValues(
   })
 }
 
+function unifiedPlanHasPlannedItems(
+  plan: DentalImplantsAnnex['unifiedImplantPlan'] | null | undefined,
+): boolean {
+  if (!plan) return false
+  for (const arch of [plan.maxilarSuperior, plan.mandibula]) {
+    if (!arch) continue
+    if (typeof arch.rehabilitacionGlobal === 'string' && arch.rehabilitacionGlobal.trim()) {
+      return true
+    }
+    const active = arch.estado === 'edentulo' ? arch.implantes : arch.tratamientos
+    if (Array.isArray(active) && active.length > 0) return true
+  }
+  return false
+}
+
 /** El anexo de implantes ya tiene procedimientos planeados. */
 export function dentalImplantsAnnexHasPlannedProcedures(
   annex: DentalImplantsAnnex | null | undefined,
 ): boolean {
   if (!annex) return false
+  if (unifiedPlanHasPlannedItems(annex.unifiedImplantPlan)) return true
+  // Compatibilidad con historias clínicas previas al planificador unificado
   if ((annex.implantPlacementPlan?.implants?.length ?? 0) > 0) return true
   if ((annex.visualTreatmentPlan?.length ?? 0) > 0) return true
   if (annex.protesisTotal || annex.protesisParcialRemovible) return true

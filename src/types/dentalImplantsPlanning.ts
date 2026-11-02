@@ -142,14 +142,20 @@ function formatBoneAssessmentSummary(boneType: LekholmZarbBoneType | '', ridgeCl
   return parts.length > 0 ? parts.join(' · ') : ''
 }
 
-export function formatQuadrantBoneClassificationSummary(plan: EdentulousImplantPlan): string {
+export function formatQuadrantBoneClassificationMapSummary(
+  classification: QuadrantBoneClassification,
+): string {
   const lines = FDI_QUADRANT_ORDER.map((quadrant) => {
-    const assessment = plan.quadrantBoneClassification[quadrant]
+    const assessment = classification[quadrant]
     const summary = formatBoneAssessmentSummary(assessment.lekholmZarb, assessment.ridgeClass)
     return summary ? `${quadrant}: ${summary}` : ''
   }).filter(Boolean)
 
   return lines.length > 0 ? `Clasificación ósea: ${lines.join(' · ')}` : ''
+}
+
+export function formatQuadrantBoneClassificationSummary(plan: EdentulousImplantPlan): string {
+  return formatQuadrantBoneClassificationMapSummary(plan.quadrantBoneClassification)
 }
 
 export function formatEdentulousImplantPlanSummary(plan: EdentulousImplantPlan): string {
