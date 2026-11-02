@@ -121,9 +121,9 @@ const TOP_NAV_ITEMS: TopNavItem[] = [
     row: 2,
   },
   {
-    label: 'Suscripciones',
-    to: '/admin/usuarios',
-    permission: 'audit.read',
+    label: 'Usuarios registrados',
+    to: '/admin/usuarios-registrados',
+    permission: 'admin.registered_users',
     row: 2,
   },
 ]
@@ -151,9 +151,11 @@ export function TopNavbar() {
 
   const navigate = useNavigate()
 
-  const { user, logout, can } = useAuth()
+  const { user, logout, can, hasRole } = useAuth()
 
   const location = useLocation()
+
+  const isSuperAdmin = hasRole('superadmin')
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -177,7 +179,10 @@ export function TopNavbar() {
     navigate('/login')
   }
 
-  const visibleItems = TOP_NAV_ITEMS.filter((item) => can(item.permission))
+  const visibleItems = TOP_NAV_ITEMS.filter((item) => {
+    if (item.permission === 'admin.registered_users') return isSuperAdmin
+    return can(item.permission)
+  })
   const primaryRow = visibleItems.filter((item) => item.row === 1)
   const secondaryRow = visibleItems.filter((item) => item.row === 2)
 
@@ -297,6 +302,16 @@ export function TopNavbar() {
                     className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
                   >
                     Gestión de Usuarios
+                  </NavLink>
+                )}
+
+                {isSuperAdmin && (
+                  <NavLink
+                    to="/admin/usuarios-registrados"
+                    onClick={() => setMenuOpen(false)}
+                    className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    Usuarios registrados
                   </NavLink>
                 )}
 

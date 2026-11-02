@@ -1743,8 +1743,10 @@ export async function listAllSubscriptionUsers() {
   const store = await loadStore()
   return store.users.map((user) => {
     const refreshed = refreshPaymentStatus(user)
+    const safe = sanitizeUser(refreshed)
     return {
-      ...sanitizeUser(refreshed),
+      ...safe,
+      planName: planDisplayName(safe.plan, safe.estado_pago),
       trialStartedAt: refreshed.trialStartedAt ?? null,
       trialUsedAt: refreshed.trialUsedAt ?? null,
       emailVerifiedAt: refreshed.emailVerifiedAt ?? null,

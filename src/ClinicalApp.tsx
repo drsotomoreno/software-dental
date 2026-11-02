@@ -29,6 +29,7 @@ import {
   InvoicesAccountsPage,
   WelcomeTrialPage,
   AdminSubscriptionUsersPage,
+  RegisteredUsersAdminPage,
 } from '@/pages'
 import { seedDemoData } from '@/db/database'
 import { hydrateBillingSettingsFromIndexedDb } from '@/services/billingModalityService'
@@ -106,6 +107,9 @@ export default function ClinicalApp() {
               <Route path="catalogos" element={<CatalogManagementPage />} />
             </Route>
             <Route path="admin/usuarios" element={<AdminSubscriptionUsersPage />} />
+            <Route element={<PermissionRoute permission="admin.registered_users" />}>
+              <Route path="admin/usuarios-registrados" element={<RegisteredUsersAdminPage />} />
+            </Route>
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

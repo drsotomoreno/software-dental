@@ -19,6 +19,7 @@ export type Permission =
   | 'profile.edit'
   | 'audit.read'
   | 'users.manage'
+  | 'admin.registered_users'
 
 /** Roles canónicos del sistema (API y RBAC). */
 export type CanonicalRole = 'superadmin' | 'admin' | 'odontologo' | 'recepcion'
@@ -41,6 +42,7 @@ const ROLE_PERMISSIONS: Record<CanonicalRole, Permission[]> = {
     'profile.edit',
     'audit.read',
     'users.manage',
+    'admin.registered_users',
     'backups.manage',
     'catalogs.manage',
   ],

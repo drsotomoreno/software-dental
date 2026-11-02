@@ -301,6 +301,29 @@ export function mapClinicMemberToProfile(
   }
 }
 
+export type RegisteredSubscriptionUser = ApiSubscriptionUser & {
+  planName?: string
+  trialStartedAt?: string | null
+  trialUsedAt?: string | null
+  emailVerifiedAt?: string | null
+}
+
+/** Listado global de cuentas. Solo responde si la sesión es superadmin. */
+export async function fetchRegisteredUsers() {
+  const { response, payload } = await authFetch('/api/admin/users')
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      status: response.status,
+      error: String(payload.error || 'No se pudo listar los usuarios registrados.'),
+    }
+  }
+  const users = Array.isArray(payload.users)
+    ? (payload.users as RegisteredSubscriptionUser[])
+    : []
+  return { ok: true as const, users }
+}
+
 export async function fetchClinicUsers() {
   const { response, payload } = await authFetch('/api/clinic/users')
   if (!response.ok) {
