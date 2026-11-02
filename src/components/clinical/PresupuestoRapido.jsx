@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { AlignVerticalJustifyCenter, Plus, Printer, Sparkles, Trash2, Bone } from 'lucide-react'
 
 const CLINIC_NAME = 'Clínica Dental Dr. Mauricio Soto'
@@ -52,12 +52,14 @@ function buildDocumentLabel(patient) {
 
 /**
  * Presupuesto ágil sin diagnósticos previos.
- * Pensado para la vista de Nuevo Paciente.
+ * Pensado para la vista de Nuevo Paciente (sustituye visualmente la sección 8).
  */
-export function PresupuestoRapido({ patient = null }) {
+export function PresupuestoRapido({ patient = null, onItemsChange }) {
   const conceptoId = useId()
   const valorId = useId()
   const valorRef = useRef(null)
+  const onItemsChangeRef = useRef(onItemsChange)
+  onItemsChangeRef.current = onItemsChange
 
   const [concepto, setConcepto] = useState('')
   const [valor, setValor] = useState('')
@@ -69,6 +71,10 @@ export function PresupuestoRapido({ patient = null }) {
   const patientName = buildPatientLabel(patient)
   const patientDocument = buildDocumentLabel(patient)
   const emissionDate = new Date().toLocaleDateString('es-CO')
+
+  useEffect(() => {
+    onItemsChangeRef.current?.(items)
+  }, [items])
 
   const selectCategory = (category) => {
     setActiveCategory(category.id)

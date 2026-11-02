@@ -9,11 +9,7 @@ import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
 import type { OdontogramData } from '@/types/odontogram'
 import type { ValuationConsentMetadata } from '@/types/valuationConsent'
 import { ALL_TEETH_NUMBERS } from '@/constants/dental'
-import {
-  RapidValuationForm,
-  PresupuestoRapido,
-  createEmptyClinicalForm,
-} from '@/components/clinical'
+import { RapidValuationForm, createEmptyClinicalForm } from '@/components/clinical'
 import { createDefaultOdontogram } from '@/types/odontogram'
 import { useToast } from '@/hooks/useToast'
 import { Toast } from '@/components/ui/Toast'
@@ -236,43 +232,39 @@ export function NewPatientPage() {
         )}
       </div>
 
-      {/* Visible de inmediato: cotización ágil sin pasar por diagnósticos. */}
-      <PresupuestoRapido patient={form} />
+      {clinicalData && (
+        <RapidValuationForm
+          patientData={form}
+          onPatientDataChange={(data) => {
+            setForm(data)
+            resetValuationProgress()
+          }}
+          initialData={clinicalData}
+          onChange={(data) => {
+            setClinicalData(data)
+            resetValuationProgress()
+          }}
+          consentAccepted={consentAccepted}
+          onConsentAcceptedChange={(accepted) => {
+            setConsentAccepted(accepted)
+            if (!accepted) {
+              setBudgetAccepted(false)
+              setConsentMetadata(null)
+            }
+          }}
+          consentRecordedAt={consentMetadata?.consentimientoTimestamp ?? null}
+          onAcceptTreatment={handleAcceptTreatment}
+          disabled={false}
+          replaceBudgetWithQuick
+        />
+      )}
 
-      <div className="mt-8 print:hidden">
-        {clinicalData && (
-          <RapidValuationForm
-            patientData={form}
-            onPatientDataChange={(data) => {
-              setForm(data)
-              resetValuationProgress()
-            }}
-            initialData={clinicalData}
-            onChange={(data) => {
-              setClinicalData(data)
-              resetValuationProgress()
-            }}
-            consentAccepted={consentAccepted}
-            onConsentAcceptedChange={(accepted) => {
-              setConsentAccepted(accepted)
-              if (!accepted) {
-                setBudgetAccepted(false)
-                setConsentMetadata(null)
-              }
-            }}
-            consentRecordedAt={consentMetadata?.consentimientoTimestamp ?? null}
-            onAcceptTreatment={handleAcceptTreatment}
-            disabled={false}
-          />
-        )}
-
-        {budgetAccepted && consentMetadata && (
-          <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900">
-            Consentimiento y presupuesto aceptados. Puede pasar a la historia completa cuando lo
-            desee.
-          </div>
-        )}
-      </div>
+      {budgetAccepted && consentMetadata && (
+        <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900 print:hidden">
+          Consentimiento y presupuesto aceptados. Puede pasar a la historia completa cuando lo
+          desee.
+        </div>
+      )}
 
       <div className="sticky bottom-4 mt-6 flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg print:hidden">
         <button

@@ -10,7 +10,9 @@ import { PatientRegistrationSection } from './PatientRegistrationSection'
 import { ConsentimientoValoracionSection } from './ConsentimientoValoracionSection'
 import { TreatmentPlanForm } from './TreatmentPlanForm'
 import { BudgetForm } from './BudgetForm'
+import { PresupuestoRapido } from './PresupuestoRapido'
 import type { OdontogramData } from '@/types/odontogram'
+import type { BudgetLineItem } from '@/types/clinicalRecord'
 
 interface RapidValuationFormProps {
   patientData?: PatientFormData
@@ -25,6 +27,8 @@ interface RapidValuationFormProps {
   consentRecordedAt?: string | null
   acceptingTreatment?: boolean
   disabled?: boolean
+  /** Nuevo Paciente: oculta la sección 8 (BudgetForm) y muestra Presupuesto Rápido. */
+  replaceBudgetWithQuick?: boolean
 }
 
 export function RapidValuationForm({
@@ -39,6 +43,7 @@ export function RapidValuationForm({
   consentRecordedAt = null,
   acceptingTreatment = false,
   disabled = false,
+  replaceBudgetWithQuick = false,
 }: RapidValuationFormProps) {
   const [form, setForm] = useState<ClinicalRecordFormData>(() => ({
     ...createEmptyClinicalForm(),
@@ -91,122 +96,160 @@ export function RapidValuationForm({
     })
   }
 
+  const syncQuickBudgetItems = (
+    items: Array<{ id: string; concepto: string; valor: number }>,
+  ) => {
+    const budgetItems: BudgetLineItem[] = items.map((item) => ({
+      id: item.id,
+      procedure: item.concepto,
+      quantity: 1,
+      unitPrice: item.valor,
+      source: 'manual',
+    }))
+    update({
+      budgetItems,
+      budget: calcClinicalBudgetSummaryWithTax(
+        budgetItems,
+        form.budget.discount,
+        form.orthodonticsBudget,
+        form.dentalImplantsBudget,
+      ),
+    })
+  }
+
   return (
     <div className="clinical-history-shell clinical-history space-y-6">
-      <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-        <strong>Valoración rápida.</strong> Registre los datos de identificación (incluido municipio
-        DANE), motivo de consulta, alertas, diagnóstico y presupuesto en un solo flujo.
-      </div>
-
-      {patientData && onPatientDataChange && (
-        <div className="space-y-3">
-          <PatientRegistrationSection
-            value={patientData}
-            onChange={onPatientDataChange}
-            disabled={disabled}
-            sectionTitle="Datos de Identificación del Paciente"
-            patientRecord={patient}
-            canRequestExternalHistory={!disabled}
-          />
+      <div className="print:hidden space-y-6">
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          <strong>Valoración rápida.</strong> Registre los datos de identificación (incluido
+          municipio DANE), motivo de consulta, alertas, diagnóstico y presupuesto en un solo flujo.
         </div>
-      )}
 
-      <ChiefComplaintSection
-        data={form.anamnesis}
-        onChange={(anamnesis) => update({ anamnesis })}
-        disabled={disabled}
-      />
-
-      <VitalAlertsSection
-        anamnesis={form.anamnesis}
-        exam={form.stomatologicalExam}
-        onAnamnesisChange={(anamnesis) => update({ anamnesis })}
-        onExamChange={(stomatologicalExam) => update({ stomatologicalExam })}
-        disabled={disabled}
-      />
-
-      <Cie10DiagnosisSearchSection
-        diagnoses={form.diagnoses}
-        enableToothSelection
-        onAddDiagnosis={(code, description, affectedTeeth, anatomicalScope) => {
-          if (form.diagnoses.some((item) => item.code === code)) return
-          update({
-            diagnoses: [
-              ...form.diagnoses,
-              {
-                code,
-                description,
-                type: form.diagnoses.length === 0 ? 'principal' : 'relacionado',
-                certainty: 'impresion',
-                source: 'manual',
-                affectedTeeth,
-                anatomicalScope,
-              },
-            ],
-          })
-        }}
-        onUpdateDiagnosis={updateDiagnosis}
-        onRemoveDiagnosis={(code) =>
-          update({ diagnoses: form.diagnoses.filter((item) => item.code !== code) })
-        }
-        disabled={disabled}
-      />
-
-      <div id="clinical-section-tratamiento" className="space-y-6">
-        <TreatmentPlanForm
-          treatmentPlan={form.treatmentPlan}
-          treatmentPlanNotes={form.treatmentPlanNotes}
-          diagnoses={form.diagnoses}
-          diagnosticChart={form.diagnosticChart}
-          specializedAnnexes={form.specializedAnnexes}
-          affectedTeeth={[...new Set(form.diagnoses.flatMap((d) => d.affectedTeeth ?? []))].sort(
-            (a, b) => a - b,
-          )}
-          budgetLinkedItemIds={budgetLinkedPlanItemIds}
-          disabled={disabled}
-          onChange={(patch) => update(patch)}
-          onMoveToBudget={moveTreatmentPlanItemToBudget}
-        />
-
-        <BudgetForm
-          budgetItems={form.budgetItems}
-          orthodonticsBudget={form.orthodonticsBudget}
-          dentalImplantsBudget={form.dentalImplantsBudget}
-          dentalImplantsAnnex={form.specializedAnnexes?.dentalImplants}
-          budget={form.budget}
-          treatmentPlan={form.treatmentPlan}
-          disabled={disabled}
-          onChange={(patch) => update(patch)}
-        />
-
-        <ConsentimientoValoracionSection
-          accepted={consentAccepted}
-          onAcceptedChange={onConsentAcceptedChange}
-          disabled={disabled || Boolean(consentRecordedAt)}
-          recordedAt={consentRecordedAt}
-        />
-
-        {!disabled && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dental-200 bg-dental-50/50 p-4">
-            <p className="text-sm text-slate-700">
-              Al aceptar el presupuesto, el paciente pasa a fase de tratamiento y se habilitan
-              odontograma, anexos y evolución.
-            </p>
-            <button
-              type="button"
-              onClick={onAcceptTreatment}
-              disabled={acceptingTreatment || !consentAccepted}
-              title={
-                !consentAccepted
-                  ? 'Debe aceptar el consentimiento de valoración'
-                  : undefined
-              }
-              className="btn-primary whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {acceptingTreatment ? 'Procesando...' : 'Aceptar Presupuesto'}
-            </button>
+        {patientData && onPatientDataChange && (
+          <div className="space-y-3">
+            <PatientRegistrationSection
+              value={patientData}
+              onChange={onPatientDataChange}
+              disabled={disabled}
+              sectionTitle="Datos de Identificación del Paciente"
+              patientRecord={patient}
+              canRequestExternalHistory={!disabled}
+            />
           </div>
         )}
+
+        <ChiefComplaintSection
+          data={form.anamnesis}
+          onChange={(anamnesis) => update({ anamnesis })}
+          disabled={disabled}
+        />
+
+        <VitalAlertsSection
+          anamnesis={form.anamnesis}
+          exam={form.stomatologicalExam}
+          onAnamnesisChange={(anamnesis) => update({ anamnesis })}
+          onExamChange={(stomatologicalExam) => update({ stomatologicalExam })}
+          disabled={disabled}
+        />
+
+        <Cie10DiagnosisSearchSection
+          diagnoses={form.diagnoses}
+          enableToothSelection
+          onAddDiagnosis={(code, description, affectedTeeth, anatomicalScope) => {
+            if (form.diagnoses.some((item) => item.code === code)) return
+            update({
+              diagnoses: [
+                ...form.diagnoses,
+                {
+                  code,
+                  description,
+                  type: form.diagnoses.length === 0 ? 'principal' : 'relacionado',
+                  certainty: 'impresion',
+                  source: 'manual',
+                  affectedTeeth,
+                  anatomicalScope,
+                },
+              ],
+            })
+          }}
+          onUpdateDiagnosis={updateDiagnosis}
+          onRemoveDiagnosis={(code) =>
+            update({ diagnoses: form.diagnoses.filter((item) => item.code !== code) })
+          }
+          disabled={disabled}
+        />
+      </div>
+
+      <div id="clinical-section-tratamiento" className="space-y-6">
+        <div className="print:hidden">
+          <TreatmentPlanForm
+            treatmentPlan={form.treatmentPlan}
+            treatmentPlanNotes={form.treatmentPlanNotes}
+            diagnoses={form.diagnoses}
+            diagnosticChart={form.diagnosticChart}
+            specializedAnnexes={form.specializedAnnexes}
+            affectedTeeth={[...new Set(form.diagnoses.flatMap((d) => d.affectedTeeth ?? []))].sort(
+              (a, b) => a - b,
+            )}
+            budgetLinkedItemIds={budgetLinkedPlanItemIds}
+            disabled={disabled}
+            onChange={(patch) => update(patch)}
+            onMoveToBudget={replaceBudgetWithQuick ? undefined : moveTreatmentPlanItemToBudget}
+          />
+        </div>
+
+        {replaceBudgetWithQuick ? (
+          <div id="clinical-section-presupuesto">
+            <PresupuestoRapido
+              patient={patientData ?? null}
+              onItemsChange={syncQuickBudgetItems}
+            />
+          </div>
+        ) : (
+          <div className="print:hidden">
+            <BudgetForm
+              budgetItems={form.budgetItems}
+              orthodonticsBudget={form.orthodonticsBudget}
+              dentalImplantsBudget={form.dentalImplantsBudget}
+              dentalImplantsAnnex={form.specializedAnnexes?.dentalImplants}
+              budget={form.budget}
+              treatmentPlan={form.treatmentPlan}
+              disabled={disabled}
+              onChange={(patch) => update(patch)}
+            />
+          </div>
+        )}
+
+        <div className="print:hidden space-y-6">
+          <ConsentimientoValoracionSection
+            accepted={consentAccepted}
+            onAcceptedChange={onConsentAcceptedChange}
+            disabled={disabled || Boolean(consentRecordedAt)}
+            recordedAt={consentRecordedAt}
+          />
+
+          {!disabled && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dental-200 bg-dental-50/50 p-4">
+              <p className="text-sm text-slate-700">
+                Al aceptar el presupuesto, el paciente pasa a fase de tratamiento y se habilitan
+                odontograma, anexos y evolución.
+              </p>
+              <button
+                type="button"
+                onClick={onAcceptTreatment}
+                disabled={acceptingTreatment || !consentAccepted}
+                title={
+                  !consentAccepted
+                    ? 'Debe aceptar el consentimiento de valoración'
+                    : undefined
+                }
+                className="btn-primary whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {acceptingTreatment ? 'Procesando...' : 'Aceptar Presupuesto'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
