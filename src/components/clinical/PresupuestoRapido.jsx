@@ -217,6 +217,9 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
   const showImplantPanel = activeCategory === 'implantes'
   const showSimpleForm = activeCategory === 'estetica'
   const selectedModality = ORTHO_MODALITIES.find((item) => item.id === orthoModality) ?? null
+  const selectedImplantOptions = IMPLANT_OPTIONS.filter(
+    (option) => implantDrafts[option.id]?.enabled,
+  )
 
   useEffect(() => {
     onItemsChangeRef.current?.(items)
@@ -559,69 +562,66 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
         ) : null}
 
         {showImplantPanel ? (
-          <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
+          <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
             <div>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-emerald-800">
-                Ítems de implantes
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-800">
+                Tipo de tratamiento de implantes
               </p>
-              <p className="text-sm text-emerald-900">
-                Active cada rubro, elija dientes cuando aplique y asigne el valor. Todo es editable.
-              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {IMPLANT_OPTIONS.map((option) => {
+                  const isSelected = Boolean(implantDrafts[option.id]?.enabled)
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => toggleImplantOption(option.id)}
+                      className={`rounded-lg border-2 px-3 py-3 text-left text-sm font-semibold transition ${
+                        isSelected
+                          ? 'border-emerald-500 bg-white text-emerald-950 ring-2 ring-emerald-300'
+                          : 'border-emerald-200 bg-white/80 text-emerald-900 hover:border-emerald-400 hover:bg-white'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
-            <div className="space-y-3">
-              {IMPLANT_OPTIONS.map((option) => {
-                const draft = implantDrafts[option.id]
-                const lineTotal = implantLineTotal(option, draft)
-                return (
-                  <div
-                    key={option.id}
-                    className={`rounded-xl border-2 bg-white p-4 transition ${
-                      draft.enabled
-                        ? 'border-emerald-400 shadow-sm'
-                        : 'border-emerald-100 opacity-95'
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <label className="flex cursor-pointer items-start gap-3">
-                        <input
-                          type="checkbox"
-                          checked={draft.enabled}
-                          onChange={() => toggleImplantOption(option.id)}
-                          className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                        />
-                        <span>
-                          <span className="block text-sm font-semibold text-slate-900">
-                            {option.label}
-                          </span>
-                          {option.needsTeeth ? (
-                            <span className="text-xs text-slate-500">
-                              Requiere selección de pieza(s) FDI
-                            </span>
-                          ) : (
-                            <span className="text-xs text-slate-500">Arcada completa</span>
-                          )}
-                        </span>
-                      </label>
-                      <div className="text-right">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          Subtotal
-                        </p>
-                        <p className="text-sm font-bold tabular-nums text-emerald-900">
-                          {lineTotal > 0 ? formatCOP(lineTotal) : '—'}
-                        </p>
-                      </div>
-                    </div>
+            {selectedImplantOptions.length > 0 ? (
+              <div className="space-y-3 rounded-lg border border-emerald-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-800">
+                  Tratamientos seleccionados
+                  <span className="ml-2 text-xs font-normal text-slate-500">
+                    Elija dientes cuando aplique y asigne el valor
+                  </span>
+                </p>
 
-                    {draft.enabled ? (
-                      <div className="mt-3 space-y-3">
+                <div className="space-y-4">
+                  {selectedImplantOptions.map((option) => {
+                    const draft = implantDrafts[option.id]
+                    const lineTotal = implantLineTotal(option, draft)
+                    return (
+                      <div
+                        key={option.id}
+                        className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <p className="text-sm font-semibold text-slate-900">{option.label}</p>
+                          <p className="text-sm font-bold tabular-nums text-emerald-900">
+                            {lineTotal > 0 ? formatCOP(lineTotal) : '—'}
+                          </p>
+                        </div>
+
                         {option.needsTeeth ? (
                           <ToothChipPicker
                             selectedTeeth={draft.teeth}
                             onChange={(teeth) => updateImplantDraft(option.id, { teeth })}
                             accentClass="border-emerald-500 bg-emerald-100 text-emerald-900"
                           />
-                        ) : null}
+                        ) : (
+                          <p className="text-xs text-slate-500">Arcada completa · un solo valor</p>
+                        )}
 
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
                           <div>
@@ -638,38 +638,42 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
                                 updateImplantDraft(option.id, { unitPrice: event.target.value })
                               }
                               placeholder="0"
-                              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                              className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
                             />
                           </div>
                           {option.needsTeeth ? (
-                            <p className="pb-2 text-xs text-slate-500">
+                            <p className="pb-1 text-xs text-slate-500">
                               Cantidad: <strong>{draft.teeth.length}</strong>
                             </p>
                           ) : null}
                         </div>
                       </div>
-                    ) : null}
-                  </div>
-                )
-              })}
-            </div>
+                    )
+                  })}
+                </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="rounded-lg border border-emerald-200 bg-white px-4 py-2 text-emerald-950">
-                <span className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                  Subtotal implantes
-                </span>
-                <p className="text-xl font-bold tabular-nums">{formatCOP(implantDraftTotal)}</p>
+                <div className="flex flex-col gap-3 border-t border-slate-200 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-emerald-950">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                      Subtotal implantes
+                    </span>
+                    <p className="text-xl font-bold tabular-nums">{formatCOP(implantDraftTotal)}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addImplantPackage}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
+                    Agregar implantes
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={addImplantPackage}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-              >
-                <Plus className="h-4 w-4" aria-hidden />
-                Agregar implantes
-              </button>
-            </div>
+            ) : (
+              <p className="text-sm text-emerald-800">
+                Seleccione uno o más tratamientos para asignar dientes y valores.
+              </p>
+            )}
           </div>
         ) : null}
 
