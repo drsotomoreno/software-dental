@@ -1,7 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { AlignVerticalJustifyCenter, Plus, Printer, Sparkles, Trash2, Bone } from 'lucide-react'
+import { UPPER_LEFT, UPPER_RIGHT, LOWER_LEFT, LOWER_RIGHT } from '@/constants/dental'
 
 const CLINIC_NAME = 'Clínica Dental Dr. Mauricio Soto'
+
+const FDI_UPPER = [...UPPER_RIGHT, ...UPPER_LEFT]
+const FDI_LOWER = [...LOWER_RIGHT, ...LOWER_LEFT]
 
 const QUICK_CATEGORIES = [
   {
@@ -37,9 +41,35 @@ const ORTHO_MODALITIES = [
 ]
 
 const ORTHO_COST_ROWS = [
-  { key: 'cuota_inicial', label: 'Cuota inicial', defaultQuantity: 1 },
-  { key: 'controles', label: 'Controles', defaultQuantity: 1 },
-  { key: 'retenedores', label: 'Retenedores', defaultQuantity: 1 },
+  { key: 'cuota_inicial', label: 'Cuota inicial' },
+  { key: 'controles', label: 'Controles' },
+  { key: 'retenedores', label: 'Retenedores' },
+]
+
+const IMPLANT_OPTIONS = [
+  { id: 'implante', label: 'Implante', needsTeeth: true },
+  { id: 'corona_sobre_implante', label: 'Corona sobre implante', needsTeeth: true },
+  { id: 'pontico_sobre_implantes', label: 'Póntico sobre implantes', needsTeeth: true },
+  {
+    id: 'protesis_total_superior_fija',
+    label: 'Prótesis total superior fija sobre implantes',
+    needsTeeth: false,
+  },
+  {
+    id: 'protesis_total_inferior_fija',
+    label: 'Prótesis total inferior fija sobre implantes',
+    needsTeeth: false,
+  },
+  {
+    id: 'protesis_superior_removible',
+    label: 'Prótesis superior removible sobre implantes',
+    needsTeeth: false,
+  },
+  {
+    id: 'protesis_inferior_removible',
+    label: 'Prótesis inferior removible sobre implantes',
+    needsTeeth: false,
+  },
 ]
 
 function emptyOrthoCosts() {
@@ -48,6 +78,15 @@ function emptyOrthoCosts() {
     controles: { quantity: 1, unitPrice: '' },
     retenedores: { quantity: 1, unitPrice: '' },
   }
+}
+
+function emptyImplantDrafts() {
+  return Object.fromEntries(
+    IMPLANT_OPTIONS.map((option) => [
+      option.id,
+      { enabled: false, teeth: [], unitPrice: '' },
+    ]),
+  )
 }
 
 function formatCOP(value) {
@@ -86,6 +125,66 @@ function newItemId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+function sortTeeth(teeth) {
+  return [...teeth].sort((a, b) => a - b)
+}
+
+function implantLineTotal(option, draft) {
+  if (!draft?.enabled) return 0
+  const unitPrice = parseMoney(draft.unitPrice)
+  if (!Number.isFinite(unitPrice) || unitPrice <= 0) return 0
+  const quantity = option.needsTeeth ? draft.teeth.length : 1
+  if (quantity <= 0) return 0
+  return quantity * unitPrice
+}
+
+function ToothChipPicker({ selectedTeeth, onChange, accentClass }) {
+  const selected = new Set(selectedTeeth)
+
+  const toggle = (fdi) => {
+    const next = new Set(selected)
+    if (next.has(fdi)) next.delete(fdi)
+    else next.add(fdi)
+    onChange(sortTeeth([...next]))
+  }
+
+  const renderRow = (teeth) => (
+    <div className="flex flex-wrap gap-1">
+      {teeth.map((fdi) => {
+        const isOn = selected.has(fdi)
+        return (
+          <button
+            key={fdi}
+            type="button"
+            onClick={() => toggle(fdi)}
+            aria-pressed={isOn}
+            className={`min-w-[2.25rem] rounded-md border px-2 py-1 text-xs font-semibold transition ${
+              isOn
+                ? accentClass
+                : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50'
+            }`}
+          >
+            {fdi}
+          </button>
+        )
+      })}
+    </div>
+  )
+
+  return (
+    <div className="space-y-2 rounded-lg border border-emerald-100 bg-emerald-50/40 p-3">
+      <p className="text-xs font-semibold text-emerald-900">Piezas FDI</p>
+      {renderRow(FDI_UPPER)}
+      {renderRow(FDI_LOWER)}
+      <p className="text-xs text-emerald-800">
+        {selectedTeeth.length > 0
+          ? `Seleccionadas: ${sortTeeth(selectedTeeth).join(', ')}`
+          : 'Seleccione uno o más dientes'}
+      </p>
+    </div>
+  )
+}
+
 /**
  * Presupuesto ágil sin diagnósticos previos.
  * Pensado para la vista de Nuevo Paciente (sustituye visualmente la sección 8).
@@ -102,15 +201,21 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
   const [activeCategory, setActiveCategory] = useState(null)
   const [orthoModality, setOrthoModality] = useState(null)
   const [orthoCosts, setOrthoCosts] = useState(emptyOrthoCosts)
+  const [implantDrafts, setImplantDrafts] = useState(emptyImplantDrafts)
   const [items, setItems] = useState([])
   const [formError, setFormError] = useState('')
 
-  const total = items.reduce((sum, item) => sum + item.valor, 0)
+  const total = items.reduce((sum, item) => sum + (Number(item.valor) || 0), 0)
+  const implantDraftTotal = IMPLANT_OPTIONS.reduce(
+    (sum, option) => sum + implantLineTotal(option, implantDrafts[option.id]),
+    0,
+  )
   const patientName = buildPatientLabel(patient)
   const patientDocument = buildDocumentLabel(patient)
   const emissionDate = new Date().toLocaleDateString('es-CO')
   const showOrthoPanel = activeCategory === 'ortodoncia'
-  const showSimpleForm = activeCategory === 'implantes' || activeCategory === 'estetica'
+  const showImplantPanel = activeCategory === 'implantes'
+  const showSimpleForm = activeCategory === 'estetica'
   const selectedModality = ORTHO_MODALITIES.find((item) => item.id === orthoModality) ?? null
 
   useEffect(() => {
@@ -120,23 +225,19 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
   const selectCategory = (category) => {
     setFormError('')
     setActiveCategory(category.id)
-
-    if (category.id === 'ortodoncia') {
-      setConcepto('')
-      setValor('')
-      setOrthoModality(null)
-      setOrthoCosts(emptyOrthoCosts())
-      return
-    }
-
+    setConcepto('')
+    setValor('')
     setOrthoModality(null)
     setOrthoCosts(emptyOrthoCosts())
-    setConcepto(category.concepto)
-    setValor('')
-    requestAnimationFrame(() => {
-      valorRef.current?.focus()
-      valorRef.current?.select()
-    })
+    setImplantDrafts(emptyImplantDrafts())
+
+    if (category.id === 'estetica') {
+      setConcepto(category.concepto)
+      requestAnimationFrame(() => {
+        valorRef.current?.focus()
+        valorRef.current?.select()
+      })
+    }
   }
 
   const selectOrthoModality = (modality) => {
@@ -149,6 +250,30 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
       ...prev,
       [key]: { ...prev[key], ...patch },
     }))
+  }
+
+  const updateImplantDraft = (id, patch) => {
+    setImplantDrafts((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], ...patch },
+    }))
+  }
+
+  const toggleImplantOption = (id) => {
+    setImplantDrafts((prev) => {
+      const current = prev[id]
+      const enabled = !current.enabled
+      return {
+        ...prev,
+        [id]: {
+          ...current,
+          enabled,
+          teeth: enabled ? current.teeth : [],
+          unitPrice: enabled ? current.unitPrice : '',
+        },
+      }
+    })
+    setFormError('')
   }
 
   const addItem = () => {
@@ -212,6 +337,65 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     setFormError('')
   }
 
+  const addImplantPackage = () => {
+    const lines = []
+
+    for (const option of IMPLANT_OPTIONS) {
+      const draft = implantDrafts[option.id]
+      if (!draft.enabled) continue
+
+      const unitPrice = parseMoney(draft.unitPrice)
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+        setFormError(`Asigne un valor a «${option.label}».`)
+        return
+      }
+
+      if (option.needsTeeth) {
+        if (draft.teeth.length === 0) {
+          setFormError(`Seleccione al menos un diente para «${option.label}».`)
+          return
+        }
+        for (const tooth of sortTeeth(draft.teeth)) {
+          lines.push({
+            id: newItemId(),
+            concepto: `${option.label} — diente ${tooth}`,
+            valor: unitPrice,
+          })
+        }
+      } else {
+        lines.push({
+          id: newItemId(),
+          concepto: option.label,
+          valor: unitPrice,
+        })
+      }
+    }
+
+    if (lines.length === 0) {
+      setFormError('Active al menos un ítem de implantes y asigne su valor.')
+      return
+    }
+
+    setItems((prev) => [...prev, ...lines])
+    setImplantDrafts(emptyImplantDrafts())
+    setActiveCategory(null)
+    setFormError('')
+  }
+
+  const updateItem = (id, patch) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item
+        const next = { ...item, ...patch }
+        if (patch.valor !== undefined) {
+          const parsed = parseMoney(patch.valor)
+          next.valor = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+        }
+        return next
+      }),
+    )
+  }
+
   const removeItem = (id) => {
     setItems((prev) => prev.filter((item) => item.id !== id))
   }
@@ -229,13 +413,12 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
 
   return (
     <section className="presupuesto-rapido rounded-xl border-2 border-teal-300 bg-white shadow-md ring-1 ring-teal-100">
-      {/* UI interactiva — oculta al imprimir */}
       <div className="space-y-5 p-5 print:hidden sm:p-6">
         <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3">
           <h2 className="text-lg font-bold text-teal-950">Presupuesto Rápido</h2>
           <p className="mt-1 text-sm text-teal-800">
-            Cotice al instante sin diagnósticos previos. En ortodoncia elija modalidad y asigne
-            valores a cuota inicial, controles y retenedores.
+            Cotice al instante sin diagnósticos previos. Ortodoncia e implantes incluyen rubros
+            editables; el total se recalcula solo.
           </p>
         </div>
 
@@ -375,6 +558,121 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
           </div>
         ) : null}
 
+        {showImplantPanel ? (
+          <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
+            <div>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-emerald-800">
+                Ítems de implantes
+              </p>
+              <p className="text-sm text-emerald-900">
+                Active cada rubro, elija dientes cuando aplique y asigne el valor. Todo es editable.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              {IMPLANT_OPTIONS.map((option) => {
+                const draft = implantDrafts[option.id]
+                const lineTotal = implantLineTotal(option, draft)
+                return (
+                  <div
+                    key={option.id}
+                    className={`rounded-xl border-2 bg-white p-4 transition ${
+                      draft.enabled
+                        ? 'border-emerald-400 shadow-sm'
+                        : 'border-emerald-100 opacity-95'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <label className="flex cursor-pointer items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={draft.enabled}
+                          onChange={() => toggleImplantOption(option.id)}
+                          className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span>
+                          <span className="block text-sm font-semibold text-slate-900">
+                            {option.label}
+                          </span>
+                          {option.needsTeeth ? (
+                            <span className="text-xs text-slate-500">
+                              Requiere selección de pieza(s) FDI
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-500">Arcada completa</span>
+                          )}
+                        </span>
+                      </label>
+                      <div className="text-right">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Subtotal
+                        </p>
+                        <p className="text-sm font-bold tabular-nums text-emerald-900">
+                          {lineTotal > 0 ? formatCOP(lineTotal) : '—'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {draft.enabled ? (
+                      <div className="mt-3 space-y-3">
+                        {option.needsTeeth ? (
+                          <ToothChipPicker
+                            selectedTeeth={draft.teeth}
+                            onChange={(teeth) => updateImplantDraft(option.id, { teeth })}
+                            accentClass="border-emerald-500 bg-emerald-100 text-emerald-900"
+                          />
+                        ) : null}
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                          <div>
+                            <label className="mb-1 block text-xs font-semibold text-slate-600">
+                              {option.needsTeeth ? 'Valor por diente ($)' : 'Valor ($)'}
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1000"
+                              inputMode="numeric"
+                              value={draft.unitPrice}
+                              onChange={(event) =>
+                                updateImplantDraft(option.id, { unitPrice: event.target.value })
+                              }
+                              placeholder="0"
+                              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                            />
+                          </div>
+                          {option.needsTeeth ? (
+                            <p className="pb-2 text-xs text-slate-500">
+                              Cantidad: <strong>{draft.teeth.length}</strong>
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="rounded-lg border border-emerald-200 bg-white px-4 py-2 text-emerald-950">
+                <span className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                  Subtotal implantes
+                </span>
+                <p className="text-xl font-bold tabular-nums">{formatCOP(implantDraftTotal)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={addImplantPackage}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+              >
+                <Plus className="h-4 w-4" aria-hidden />
+                Agregar implantes
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {showSimpleForm ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
             <div>
@@ -389,7 +687,7 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
                 type="text"
                 value={concepto}
                 onChange={(event) => setConcepto(event.target.value)}
-                placeholder="Ej. Implantes"
+                placeholder="Ej. Diseño de sonrisa"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
               />
             </div>
@@ -431,7 +729,7 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
             <thead className="bg-slate-900 text-white">
               <tr>
                 <th className="px-4 py-3 font-semibold">Concepto</th>
-                <th className="px-4 py-3 text-right font-semibold">Valor</th>
+                <th className="w-40 px-4 py-3 text-right font-semibold">Valor</th>
                 <th className="w-14 px-3 py-3 text-center font-semibold">
                   <span className="sr-only">Eliminar</span>
                 </th>
@@ -447,11 +745,30 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
               ) : (
                 items.map((item) => (
                   <tr key={item.id} className="bg-white">
-                    <td className="px-4 py-3 font-medium text-slate-900">{item.concepto}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-slate-700">
-                      {formatCOP(item.valor)}
+                    <td className="px-4 py-2">
+                      <input
+                        type="text"
+                        value={item.concepto}
+                        onChange={(event) =>
+                          updateItem(item.id, { concepto: event.target.value })
+                        }
+                        className="w-full rounded-md border border-transparent bg-transparent px-2 py-1.5 font-medium text-slate-900 outline-none hover:border-slate-200 focus:border-teal-500 focus:bg-white focus:ring-2 focus:ring-teal-200"
+                        aria-label="Editar concepto"
+                      />
                     </td>
-                    <td className="px-3 py-3 text-center">
+                    <td className="px-4 py-2 text-right">
+                      <input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        inputMode="numeric"
+                        value={item.valor}
+                        onChange={(event) => updateItem(item.id, { valor: event.target.value })}
+                        className="w-full rounded-md border border-transparent bg-transparent px-2 py-1.5 text-right tabular-nums text-slate-700 outline-none hover:border-slate-200 focus:border-teal-500 focus:bg-white focus:ring-2 focus:ring-teal-200"
+                        aria-label="Editar valor"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-center">
                       <button
                         type="button"
                         onClick={() => removeItem(item.id)}
@@ -488,7 +805,6 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
         </div>
       </div>
 
-      {/* Documento de impresión — solo visible en @media print */}
       <div className="hidden print:block print:bg-white print:p-0 print:text-black">
         <header className="mb-8 border-b-2 border-slate-900 pb-4">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">
