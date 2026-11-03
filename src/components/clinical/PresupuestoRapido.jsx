@@ -29,12 +29,44 @@ const QUICK_CATEGORIES = [
   },
 ]
 
+const ORTHO_MODALITIES = [
+  { id: 'brackets_metalicos', label: 'Ortodoncia con Brackets Metálicos' },
+  { id: 'brackets_esteticos', label: 'Ortodoncia con Brackets Estéticos' },
+  { id: 'alineadores', label: 'Ortodoncia con Alineadores' },
+  { id: 'ortopedia_maxilar', label: 'Ortopedia Maxilar' },
+]
+
+const ORTHO_COST_ROWS = [
+  { key: 'cuota_inicial', label: 'Cuota inicial', defaultQuantity: 1 },
+  { key: 'controles', label: 'Controles', defaultQuantity: 1 },
+  { key: 'retenedores', label: 'Retenedores', defaultQuantity: 1 },
+]
+
+function emptyOrthoCosts() {
+  return {
+    cuota_inicial: { quantity: 1, unitPrice: '' },
+    controles: { quantity: 1, unitPrice: '' },
+    retenedores: { quantity: 1, unitPrice: '' },
+  }
+}
+
 function formatCOP(value) {
   return new Intl.NumberFormat('es-CO', {
     style: 'currency',
     currency: 'COP',
     maximumFractionDigits: 0,
   }).format(Number.isFinite(value) ? value : 0)
+}
+
+function parseMoney(value) {
+  const parsed = Number(String(value).replace(/\./g, '').replace(',', '.'))
+  return Number.isFinite(parsed) ? parsed : NaN
+}
+
+function parseQuantity(value) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 0
+  return Math.max(0, Math.floor(parsed))
 }
 
 function buildPatientLabel(patient) {
@@ -48,6 +80,10 @@ function buildDocumentLabel(patient) {
   const type = patient.documentType?.trim() || 'Doc'
   const number = patient.documentNumber?.trim()
   return number ? `${type} ${number}` : '—'
+}
+
+function newItemId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 /**
@@ -64,6 +100,8 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
   const [concepto, setConcepto] = useState('')
   const [valor, setValor] = useState('')
   const [activeCategory, setActiveCategory] = useState(null)
+  const [orthoModality, setOrthoModality] = useState(null)
+  const [orthoCosts, setOrthoCosts] = useState(emptyOrthoCosts)
   const [items, setItems] = useState([])
   const [formError, setFormError] = useState('')
 
@@ -71,24 +109,51 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
   const patientName = buildPatientLabel(patient)
   const patientDocument = buildDocumentLabel(patient)
   const emissionDate = new Date().toLocaleDateString('es-CO')
+  const showOrthoPanel = activeCategory === 'ortodoncia'
+  const showSimpleForm = activeCategory === 'implantes' || activeCategory === 'estetica'
+  const selectedModality = ORTHO_MODALITIES.find((item) => item.id === orthoModality) ?? null
 
   useEffect(() => {
     onItemsChangeRef.current?.(items)
   }, [items])
 
   const selectCategory = (category) => {
-    setActiveCategory(category.id)
-    setConcepto(category.concepto)
     setFormError('')
+    setActiveCategory(category.id)
+
+    if (category.id === 'ortodoncia') {
+      setConcepto('')
+      setValor('')
+      setOrthoModality(null)
+      setOrthoCosts(emptyOrthoCosts())
+      return
+    }
+
+    setOrthoModality(null)
+    setOrthoCosts(emptyOrthoCosts())
+    setConcepto(category.concepto)
+    setValor('')
     requestAnimationFrame(() => {
       valorRef.current?.focus()
       valorRef.current?.select()
     })
   }
 
+  const selectOrthoModality = (modality) => {
+    setOrthoModality(modality.id)
+    setFormError('')
+  }
+
+  const updateOrthoCost = (key, patch) => {
+    setOrthoCosts((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], ...patch },
+    }))
+  }
+
   const addItem = () => {
     const trimmedConcepto = concepto.trim()
-    const parsedValor = Number(String(valor).replace(/\./g, '').replace(',', '.'))
+    const parsedValor = parseMoney(valor)
 
     if (!trimmedConcepto) {
       setFormError('Indique el concepto del ítem.')
@@ -103,13 +168,46 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     setItems((prev) => [
       ...prev,
       {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: newItemId(),
         concepto: trimmedConcepto,
         valor: parsedValor,
       },
     ])
     setConcepto('')
     setValor('')
+    setActiveCategory(null)
+    setFormError('')
+  }
+
+  const addOrthoPackage = () => {
+    if (!selectedModality) {
+      setFormError('Seleccione el tipo de ortodoncia.')
+      return
+    }
+
+    const lines = []
+    for (const row of ORTHO_COST_ROWS) {
+      const cost = orthoCosts[row.key]
+      const quantity = parseQuantity(cost.quantity)
+      const unitPrice = parseMoney(cost.unitPrice)
+      if (!quantity || !Number.isFinite(unitPrice) || unitPrice <= 0) continue
+      const lineTotal = quantity * unitPrice
+      const qtyLabel = quantity > 1 ? ` × ${quantity}` : ''
+      lines.push({
+        id: newItemId(),
+        concepto: `${selectedModality.label} — ${row.label}${qtyLabel}`,
+        valor: lineTotal,
+      })
+    }
+
+    if (lines.length === 0) {
+      setFormError('Asigne valor a cuota inicial, controles y/o retenedores.')
+      return
+    }
+
+    setItems((prev) => [...prev, ...lines])
+    setOrthoCosts(emptyOrthoCosts())
+    setOrthoModality(null)
     setActiveCategory(null)
     setFormError('')
   }
@@ -136,8 +234,8 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
         <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3">
           <h2 className="text-lg font-bold text-teal-950">Presupuesto Rápido</h2>
           <p className="mt-1 text-sm text-teal-800">
-            Cotice al instante sin diagnósticos previos. Elija una categoría, digite el valor y
-            agregue.
+            Cotice al instante sin diagnósticos previos. En ortodoncia elija modalidad y asigne
+            valores a cuota inicial, controles y retenedores.
           </p>
         </div>
 
@@ -161,47 +259,168 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
           })}
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
-          <div>
-            <label htmlFor={conceptoId} className="mb-1 block text-xs font-semibold text-slate-600">
-              Concepto
-            </label>
-            <input
-              id={conceptoId}
-              type="text"
-              value={concepto}
-              onChange={(event) => setConcepto(event.target.value)}
-              placeholder="Ej. Ortodoncia"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
-            />
+        {showOrthoPanel ? (
+          <div className="space-y-4 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-sky-800">
+                Tipo de ortodoncia
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {ORTHO_MODALITIES.map((modality) => {
+                  const isSelected = orthoModality === modality.id
+                  return (
+                    <button
+                      key={modality.id}
+                      type="button"
+                      onClick={() => selectOrthoModality(modality)}
+                      className={`rounded-lg border-2 px-3 py-3 text-left text-sm font-semibold transition ${
+                        isSelected
+                          ? 'border-sky-500 bg-white text-sky-950 ring-2 ring-sky-300'
+                          : 'border-sky-200 bg-white/80 text-sky-900 hover:border-sky-400 hover:bg-white'
+                      }`}
+                    >
+                      {modality.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {selectedModality ? (
+              <div className="space-y-3 rounded-lg border border-sky-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-800">
+                  {selectedModality.label}
+                  <span className="ml-2 text-xs font-normal text-slate-500">
+                    Asigne cantidad y valor a cada rubro
+                  </span>
+                </p>
+
+                <div className="overflow-hidden rounded-lg border border-slate-200">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-100 text-slate-700">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">Rubro</th>
+                        <th className="w-24 px-3 py-2 font-semibold">Cant.</th>
+                        <th className="w-36 px-3 py-2 font-semibold">Valor unit. ($)</th>
+                        <th className="w-32 px-3 py-2 text-right font-semibold">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {ORTHO_COST_ROWS.map((row) => {
+                        const cost = orthoCosts[row.key]
+                        const quantity = parseQuantity(cost.quantity)
+                        const unitPrice = parseMoney(cost.unitPrice)
+                        const subtotal =
+                          quantity > 0 && Number.isFinite(unitPrice) && unitPrice > 0
+                            ? quantity * unitPrice
+                            : 0
+                        return (
+                          <tr key={row.key}>
+                            <td className="px-3 py-2.5 font-medium text-slate-900">{row.label}</td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                inputMode="numeric"
+                                aria-label={`Cantidad de ${row.label}`}
+                                value={cost.quantity}
+                                onChange={(event) =>
+                                  updateOrthoCost(row.key, { quantity: event.target.value })
+                                }
+                                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="1000"
+                                inputMode="numeric"
+                                aria-label={`Valor de ${row.label}`}
+                                value={cost.unitPrice}
+                                onChange={(event) =>
+                                  updateOrthoCost(row.key, { unitPrice: event.target.value })
+                                }
+                                placeholder="0"
+                                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                              />
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums text-slate-700">
+                              {subtotal > 0 ? formatCOP(subtotal) : '—'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={addOrthoPackage}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-sky-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
+                    Agregar ortodoncia
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-sky-800">
+                Seleccione una modalidad para cargar cuota inicial, controles y retenedores.
+              </p>
+            )}
           </div>
-          <div>
-            <label htmlFor={valorId} className="mb-1 block text-xs font-semibold text-slate-600">
-              Valor ($)
-            </label>
-            <input
-              id={valorId}
-              ref={valorRef}
-              type="number"
-              min="0"
-              step="1000"
-              inputMode="numeric"
-              value={valor}
-              onChange={(event) => setValor(event.target.value)}
-              onKeyDown={handleValorKeyDown}
-              placeholder="0"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
-            />
+        ) : null}
+
+        {showSimpleForm ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
+            <div>
+              <label
+                htmlFor={conceptoId}
+                className="mb-1 block text-xs font-semibold text-slate-600"
+              >
+                Concepto
+              </label>
+              <input
+                id={conceptoId}
+                type="text"
+                value={concepto}
+                onChange={(event) => setConcepto(event.target.value)}
+                placeholder="Ej. Implantes"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
+              />
+            </div>
+            <div>
+              <label htmlFor={valorId} className="mb-1 block text-xs font-semibold text-slate-600">
+                Valor ($)
+              </label>
+              <input
+                id={valorId}
+                ref={valorRef}
+                type="number"
+                min="0"
+                step="1000"
+                inputMode="numeric"
+                value={valor}
+                onChange={(event) => setValor(event.target.value)}
+                onKeyDown={handleValorKeyDown}
+                placeholder="0"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={addItem}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
+            >
+              <Plus className="h-4 w-4" aria-hidden />
+              Agregar
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={addItem}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
-          >
-            <Plus className="h-4 w-4" aria-hidden />
-            Agregar
-          </button>
-        </div>
+        ) : null}
 
         {formError ? (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>
@@ -222,7 +441,7 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
               {items.length === 0 ? (
                 <tr>
                   <td colSpan={3} className="px-4 py-8 text-center text-slate-400">
-                    Aún no hay ítems. Use los botones rápidos o escriba un concepto.
+                    Aún no hay ítems. Use los botones rápidos para cotizar.
                   </td>
                 </tr>
               ) : (
