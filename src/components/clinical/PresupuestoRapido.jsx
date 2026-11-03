@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AlignVerticalJustifyCenter, Plus, Printer, Sparkles, Trash2, Bone } from 'lucide-react'
 import { UPPER_LEFT, UPPER_RIGHT, LOWER_LEFT, LOWER_RIGHT } from '@/constants/dental'
 
@@ -72,6 +72,30 @@ const IMPLANT_OPTIONS = [
   },
 ]
 
+const AESTHETIC_PROCEDURES = [
+  { id: 'carilla', label: 'Carilla', needsTeeth: true },
+  { id: 'corona', label: 'Corona', needsTeeth: true },
+  { id: 'pontico_ppf', label: 'Póntico de PPF', needsTeeth: true },
+  { id: 'pilar_ppf', label: 'Pilar de PPF', needsTeeth: true },
+  { id: 'incrustacion', label: 'Incrustación', needsTeeth: true },
+  { id: 'protesis_total_superior', label: 'Prótesis total superior', needsTeeth: false },
+  { id: 'protesis_total_inferior', label: 'Prótesis total inferior', needsTeeth: false },
+  { id: 'protesis_parcial_superior', label: 'Prótesis parcial superior', needsTeeth: true },
+  { id: 'protesis_parcial_inferior', label: 'Prótesis parcial inferior', needsTeeth: true },
+]
+
+const AESTHETIC_MATERIALS = [
+  { id: 'resina', label: 'Resina' },
+  { id: 'resina_3d', label: 'Resina 3D' },
+  { id: 'disilicato_litio', label: 'Disilicato de Litio' },
+  { id: 'zirconia', label: 'Zirconia' },
+  { id: 'metal_ceramica', label: 'Metal+Cerámica' },
+  { id: 'acrilico_rigido', label: 'Acrílico Rígido' },
+  { id: 'acrilico_flexible', label: 'Acrílico Flexible' },
+  { id: 'metal_acrilico', label: 'Metal+Acrílico' },
+  { id: 'otro', label: 'Otro' },
+]
+
 function emptyOrthoCosts() {
   return {
     cuota_inicial: { quantity: 1, unitPrice: '' },
@@ -85,6 +109,15 @@ function emptyImplantDrafts() {
     IMPLANT_OPTIONS.map((option) => [
       option.id,
       { enabled: false, teeth: [], unitPrice: '' },
+    ]),
+  )
+}
+
+function emptyAestheticDrafts() {
+  return Object.fromEntries(
+    AESTHETIC_PROCEDURES.map((option) => [
+      option.id,
+      { enabled: false, teeth: [], material: '', materialOther: '', unitPrice: '' },
     ]),
   )
 }
@@ -138,7 +171,26 @@ function implantLineTotal(option, draft) {
   return quantity * unitPrice
 }
 
-function ToothChipPicker({ selectedTeeth, onChange, accentClass }) {
+function aestheticLineTotal(option, draft) {
+  return implantLineTotal(option, draft)
+}
+
+function resolveAestheticMaterialLabel(draft) {
+  if (!draft?.material) return ''
+  if (draft.material === 'otro') {
+    return String(draft.materialOther || '').trim() || 'Otro'
+  }
+  return AESTHETIC_MATERIALS.find((item) => item.id === draft.material)?.label ?? draft.material
+}
+
+function ToothChipPicker({
+  selectedTeeth,
+  onChange,
+  accentClass,
+  panelClass = 'border-emerald-100 bg-emerald-50/40',
+  titleClass = 'text-emerald-900',
+  hintClass = 'text-emerald-800',
+}) {
   const selected = new Set(selectedTeeth)
 
   const toggle = (fdi) => {
@@ -172,11 +224,11 @@ function ToothChipPicker({ selectedTeeth, onChange, accentClass }) {
   )
 
   return (
-    <div className="space-y-2 rounded-lg border border-emerald-100 bg-emerald-50/40 p-3">
-      <p className="text-xs font-semibold text-emerald-900">Piezas FDI</p>
+    <div className={`space-y-2 rounded-lg border p-3 ${panelClass}`}>
+      <p className={`text-xs font-semibold ${titleClass}`}>Piezas FDI</p>
       {renderRow(FDI_UPPER)}
       {renderRow(FDI_LOWER)}
-      <p className="text-xs text-emerald-800">
+      <p className={`text-xs ${hintClass}`}>
         {selectedTeeth.length > 0
           ? `Seleccionadas: ${sortTeeth(selectedTeeth).join(', ')}`
           : 'Seleccione uno o más dientes'}
@@ -190,18 +242,14 @@ function ToothChipPicker({ selectedTeeth, onChange, accentClass }) {
  * Pensado para la vista de Nuevo Paciente (sustituye visualmente la sección 8).
  */
 export function PresupuestoRapido({ patient = null, onItemsChange }) {
-  const conceptoId = useId()
-  const valorId = useId()
-  const valorRef = useRef(null)
   const onItemsChangeRef = useRef(onItemsChange)
   onItemsChangeRef.current = onItemsChange
 
-  const [concepto, setConcepto] = useState('')
-  const [valor, setValor] = useState('')
   const [activeCategory, setActiveCategory] = useState(null)
   const [orthoModality, setOrthoModality] = useState(null)
   const [orthoCosts, setOrthoCosts] = useState(emptyOrthoCosts)
   const [implantDrafts, setImplantDrafts] = useState(emptyImplantDrafts)
+  const [aestheticDrafts, setAestheticDrafts] = useState(emptyAestheticDrafts)
   const [items, setItems] = useState([])
   const [formError, setFormError] = useState('')
 
@@ -210,15 +258,22 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     (sum, option) => sum + implantLineTotal(option, implantDrafts[option.id]),
     0,
   )
+  const aestheticDraftTotal = AESTHETIC_PROCEDURES.reduce(
+    (sum, option) => sum + aestheticLineTotal(option, aestheticDrafts[option.id]),
+    0,
+  )
   const patientName = buildPatientLabel(patient)
   const patientDocument = buildDocumentLabel(patient)
   const emissionDate = new Date().toLocaleDateString('es-CO')
   const showOrthoPanel = activeCategory === 'ortodoncia'
   const showImplantPanel = activeCategory === 'implantes'
-  const showSimpleForm = activeCategory === 'estetica'
+  const showAestheticPanel = activeCategory === 'estetica'
   const selectedModality = ORTHO_MODALITIES.find((item) => item.id === orthoModality) ?? null
   const selectedImplantOptions = IMPLANT_OPTIONS.filter(
     (option) => implantDrafts[option.id]?.enabled,
+  )
+  const selectedAestheticOptions = AESTHETIC_PROCEDURES.filter(
+    (option) => aestheticDrafts[option.id]?.enabled,
   )
 
   useEffect(() => {
@@ -228,19 +283,10 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
   const selectCategory = (category) => {
     setFormError('')
     setActiveCategory(category.id)
-    setConcepto('')
-    setValor('')
     setOrthoModality(null)
     setOrthoCosts(emptyOrthoCosts())
     setImplantDrafts(emptyImplantDrafts())
-
-    if (category.id === 'estetica') {
-      setConcepto(category.concepto)
-      requestAnimationFrame(() => {
-        valorRef.current?.focus()
-        valorRef.current?.select()
-      })
-    }
+    setAestheticDrafts(emptyAestheticDrafts())
   }
 
   const selectOrthoModality = (modality) => {
@@ -279,31 +325,29 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     setFormError('')
   }
 
-  const addItem = () => {
-    const trimmedConcepto = concepto.trim()
-    const parsedValor = parseMoney(valor)
-
-    if (!trimmedConcepto) {
-      setFormError('Indique el concepto del ítem.')
-      return
-    }
-    if (!Number.isFinite(parsedValor) || parsedValor <= 0) {
-      setFormError('Ingrese un valor mayor a cero.')
-      valorRef.current?.focus()
-      return
-    }
-
-    setItems((prev) => [
+  const updateAestheticDraft = (id, patch) => {
+    setAestheticDrafts((prev) => ({
       ...prev,
-      {
-        id: newItemId(),
-        concepto: trimmedConcepto,
-        valor: parsedValor,
-      },
-    ])
-    setConcepto('')
-    setValor('')
-    setActiveCategory(null)
+      [id]: { ...prev[id], ...patch },
+    }))
+  }
+
+  const toggleAestheticOption = (id) => {
+    setAestheticDrafts((prev) => {
+      const current = prev[id]
+      const enabled = !current.enabled
+      return {
+        ...prev,
+        [id]: {
+          ...current,
+          enabled,
+          teeth: enabled ? current.teeth : [],
+          material: enabled ? current.material : '',
+          materialOther: enabled ? current.materialOther : '',
+          unitPrice: enabled ? current.unitPrice : '',
+        },
+      }
+    })
     setFormError('')
   }
 
@@ -385,6 +429,61 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     setFormError('')
   }
 
+  const addAestheticPackage = () => {
+    const lines = []
+
+    for (const option of AESTHETIC_PROCEDURES) {
+      const draft = aestheticDrafts[option.id]
+      if (!draft.enabled) continue
+
+      if (!draft.material) {
+        setFormError(`Seleccione el material de «${option.label}».`)
+        return
+      }
+      if (draft.material === 'otro' && !String(draft.materialOther || '').trim()) {
+        setFormError(`Indique el material «Otro» de «${option.label}».`)
+        return
+      }
+
+      const materialLabel = resolveAestheticMaterialLabel(draft)
+      const unitPrice = parseMoney(draft.unitPrice)
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+        setFormError(`Asigne un valor a «${option.label}».`)
+        return
+      }
+
+      if (option.needsTeeth) {
+        if (draft.teeth.length === 0) {
+          setFormError(`Seleccione al menos un diente para «${option.label}».`)
+          return
+        }
+        for (const tooth of sortTeeth(draft.teeth)) {
+          lines.push({
+            id: newItemId(),
+            concepto: `${option.label} (${materialLabel}) — diente ${tooth}`,
+            valor: unitPrice,
+          })
+        }
+      } else {
+        lines.push({
+          id: newItemId(),
+          concepto: `${option.label} (${materialLabel})`,
+          valor: unitPrice,
+        })
+      }
+    }
+
+    if (lines.length === 0) {
+      setFormError('Seleccione al menos un procedimiento de restauración / estética.')
+      return
+    }
+
+    setItems((prev) => [...prev, ...lines])
+    setAestheticDrafts(emptyAestheticDrafts())
+    setActiveCategory(null)
+    setFormError('')
+  }
+
   const updateItem = (id, patch) => {
     setItems((prev) =>
       prev.map((item) => {
@@ -407,21 +506,14 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     window.print()
   }
 
-  const handleValorKeyDown = (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      addItem()
-    }
-  }
-
   return (
     <section className="presupuesto-rapido rounded-xl border-2 border-teal-300 bg-white shadow-md ring-1 ring-teal-100">
       <div className="space-y-5 p-5 print:hidden sm:p-6">
         <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3">
           <h2 className="text-lg font-bold text-teal-950">Presupuesto Rápido</h2>
           <p className="mt-1 text-sm text-teal-800">
-            Cotice al instante sin diagnósticos previos. Ortodoncia e implantes incluyen rubros
-            editables; el total se recalcula solo.
+            Cotice al instante sin diagnósticos previos. Ortodoncia, implantes y restauración /
+            estética despliegan solo los tratamientos seleccionados.
           </p>
         </div>
 
@@ -677,50 +769,170 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
           </div>
         ) : null}
 
-        {showSimpleForm ? (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
+        {showAestheticPanel ? (
+          <div className="space-y-4 rounded-xl border border-violet-200 bg-violet-50/60 p-4">
             <div>
-              <label
-                htmlFor={conceptoId}
-                className="mb-1 block text-xs font-semibold text-slate-600"
-              >
-                Concepto
-              </label>
-              <input
-                id={conceptoId}
-                type="text"
-                value={concepto}
-                onChange={(event) => setConcepto(event.target.value)}
-                placeholder="Ej. Diseño de sonrisa"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
-              />
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-800">
+                Procedimiento de restauración / estética
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {AESTHETIC_PROCEDURES.map((option) => {
+                  const isSelected = Boolean(aestheticDrafts[option.id]?.enabled)
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => toggleAestheticOption(option.id)}
+                      className={`rounded-lg border-2 px-3 py-3 text-left text-sm font-semibold transition ${
+                        isSelected
+                          ? 'border-violet-500 bg-white text-violet-950 ring-2 ring-violet-300'
+                          : 'border-violet-200 bg-white/80 text-violet-900 hover:border-violet-400 hover:bg-white'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
-            <div>
-              <label htmlFor={valorId} className="mb-1 block text-xs font-semibold text-slate-600">
-                Valor ($)
-              </label>
-              <input
-                id={valorId}
-                ref={valorRef}
-                type="number"
-                min="0"
-                step="1000"
-                inputMode="numeric"
-                value={valor}
-                onChange={(event) => setValor(event.target.value)}
-                onKeyDown={handleValorKeyDown}
-                placeholder="0"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={addItem}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
-            >
-              <Plus className="h-4 w-4" aria-hidden />
-              Agregar
-            </button>
+
+            {selectedAestheticOptions.length > 0 ? (
+              <div className="space-y-3 rounded-lg border border-violet-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-800">
+                  Procedimientos seleccionados
+                  <span className="ml-2 text-xs font-normal text-slate-500">
+                    Material, dientes y valor
+                  </span>
+                </p>
+
+                <div className="space-y-4">
+                  {selectedAestheticOptions.map((option) => {
+                    const draft = aestheticDrafts[option.id]
+                    const lineTotal = aestheticLineTotal(option, draft)
+                    return (
+                      <div
+                        key={option.id}
+                        className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <p className="text-sm font-semibold text-slate-900">{option.label}</p>
+                          <p className="text-sm font-bold tabular-nums text-violet-900">
+                            {lineTotal > 0 ? formatCOP(lineTotal) : '—'}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Material
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {AESTHETIC_MATERIALS.map((material) => {
+                              const isOn = draft.material === material.id
+                              return (
+                                <button
+                                  key={material.id}
+                                  type="button"
+                                  onClick={() =>
+                                    updateAestheticDraft(option.id, {
+                                      material: material.id,
+                                      materialOther:
+                                        material.id === 'otro' ? draft.materialOther : '',
+                                    })
+                                  }
+                                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                                    isOn
+                                      ? 'border-violet-500 bg-violet-100 text-violet-950'
+                                      : 'border-slate-300 bg-white text-slate-600 hover:border-violet-300'
+                                  }`}
+                                >
+                                  {material.label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          {draft.material === 'otro' ? (
+                            <input
+                              type="text"
+                              value={draft.materialOther}
+                              onChange={(event) =>
+                                updateAestheticDraft(option.id, {
+                                  materialOther: event.target.value,
+                                })
+                              }
+                              placeholder="Especifique el material"
+                              className="mt-2 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200"
+                            />
+                          ) : null}
+                        </div>
+
+                        {option.needsTeeth ? (
+                          <ToothChipPicker
+                            selectedTeeth={draft.teeth}
+                            onChange={(teeth) => updateAestheticDraft(option.id, { teeth })}
+                            accentClass="border-violet-500 bg-violet-100 text-violet-900"
+                            panelClass="border-violet-100 bg-violet-50/40"
+                            titleClass="text-violet-900"
+                            hintClass="text-violet-800"
+                          />
+                        ) : (
+                          <p className="text-xs text-slate-500">Arcada completa · un solo valor</p>
+                        )}
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                          <div>
+                            <label className="mb-1 block text-xs font-semibold text-slate-600">
+                              {option.needsTeeth ? 'Valor por diente ($)' : 'Valor ($)'}
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1000"
+                              inputMode="numeric"
+                              value={draft.unitPrice}
+                              onChange={(event) =>
+                                updateAestheticDraft(option.id, {
+                                  unitPrice: event.target.value,
+                                })
+                              }
+                              placeholder="0"
+                              className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200"
+                            />
+                          </div>
+                          {option.needsTeeth ? (
+                            <p className="pb-1 text-xs text-slate-500">
+                              Cantidad: <strong>{draft.teeth.length}</strong>
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="flex flex-col gap-3 border-t border-slate-200 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-violet-950">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-violet-700">
+                      Subtotal estética
+                    </span>
+                    <p className="text-xl font-bold tabular-nums">
+                      {formatCOP(aestheticDraftTotal)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addAestheticPackage}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
+                    Agregar estética
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-violet-800">
+                Seleccione uno o más procedimientos para asignar material, dientes y valores.
+              </p>
+            )}
           </div>
         ) : null}
 
