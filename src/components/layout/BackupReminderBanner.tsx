@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   dismissBackupReminder,
@@ -48,33 +47,35 @@ export function BackupReminderBanner() {
       aria-live="polite"
       className="pointer-events-none fixed bottom-4 right-4 z-[70] w-[min(22rem,calc(100vw-2rem))] print:hidden"
     >
-      <div className="pointer-events-auto rounded-2xl border border-amber-200/90 bg-white p-4 shadow-lg shadow-slate-900/10 ring-1 ring-amber-100">
-        <div className="flex items-start gap-3">
-          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-700">
-            <AlertTriangle className="h-4 w-4" strokeWidth={2.25} aria-hidden />
+      <div className="backup-toast-enter pointer-events-auto rounded-2xl border border-amber-200/90 bg-white p-3.5 shadow-lg shadow-slate-900/10 ring-1 ring-amber-100">
+        <div className="flex items-start gap-2.5">
+          <span className="select-none text-base leading-none" aria-hidden>
+            ⚠️
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-slate-900">
+            <p className="text-[13px] font-semibold leading-snug text-slate-900">
               Recordatorio de copia de seguridad
             </p>
-            <p className="mt-1 text-xs leading-relaxed text-slate-600">
+            <p className="mt-1 text-[12px] leading-relaxed text-slate-600">
               {REMINDER_COPY[reason]}
             </p>
-            <p className="mt-1 text-xs text-slate-500">Último respaldo: {lastBackup}</p>
+            <p className="mt-1 text-[11px] leading-snug text-slate-500">
+              Último respaldo: {lastBackup}
+            </p>
           </div>
         </div>
 
-        <div className="mt-3 flex items-center justify-end gap-2">
+        <div className="mt-2.5 flex items-center justify-end gap-1.5">
           <button
             type="button"
             onClick={() => dismissBackupReminder()}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+            className="rounded-lg px-2.5 py-1 text-[12px] font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
           >
             Más tarde
           </button>
           <Link
             to="/respaldos"
-            className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-700"
+            className="rounded-lg bg-amber-600 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-amber-700"
           >
             Descargar copia
           </Link>
