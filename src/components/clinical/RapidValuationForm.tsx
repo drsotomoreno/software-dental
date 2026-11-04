@@ -140,16 +140,6 @@ export function RapidValuationForm({
         )}
       </div>
 
-      {/* En Nuevo Paciente el presupuesto rápido va arriba para que Ortodoncia / Implantes / Estética se vean de inmediato. */}
-      {replaceBudgetWithQuick ? (
-        <div id="clinical-section-presupuesto">
-          <PresupuestoRapido
-            patient={patientData ?? null}
-            onItemsChange={syncQuickBudgetItems}
-          />
-        </div>
-      ) : null}
-
       <div className="print:hidden space-y-6">
         <ChiefComplaintSection
           data={form.anamnesis}
@@ -192,6 +182,16 @@ export function RapidValuationForm({
           disabled={disabled}
         />
       </div>
+
+      {/* Nuevo Paciente: Presupuesto Rápido después de la sección 4 (diagnóstico). */}
+      {replaceBudgetWithQuick ? (
+        <div id="clinical-section-presupuesto">
+          <PresupuestoRapido
+            patient={patientData ?? null}
+            onItemsChange={syncQuickBudgetItems}
+          />
+        </div>
+      ) : null}
 
       <div id="clinical-section-tratamiento" className="space-y-6">
         <div className="print:hidden">
