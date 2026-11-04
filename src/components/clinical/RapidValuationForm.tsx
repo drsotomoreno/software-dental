@@ -21,7 +21,8 @@ interface RapidValuationFormProps {
   initialData?: Partial<ClinicalRecordFormData>
   odontogram?: OdontogramData | null
   onChange: (data: ClinicalRecordFormData) => void
-  onAcceptTreatment: () => void
+  /** Si se omite (p. ej. Nuevo Paciente), no se muestra la caja «Aceptar Presupuesto». */
+  onAcceptTreatment?: () => void
   consentAccepted?: boolean
   onConsentAcceptedChange?: (accepted: boolean) => void
   consentRecordedAt?: string | null
@@ -137,7 +138,19 @@ export function RapidValuationForm({
             />
           </div>
         )}
+      </div>
 
+      {/* En Nuevo Paciente el presupuesto rápido va arriba para que Ortodoncia / Implantes / Estética se vean de inmediato. */}
+      {replaceBudgetWithQuick ? (
+        <div id="clinical-section-presupuesto">
+          <PresupuestoRapido
+            patient={patientData ?? null}
+            onItemsChange={syncQuickBudgetItems}
+          />
+        </div>
+      ) : null}
+
+      <div className="print:hidden space-y-6">
         <ChiefComplaintSection
           data={form.anamnesis}
           onChange={(anamnesis) => update({ anamnesis })}
@@ -198,14 +211,7 @@ export function RapidValuationForm({
           />
         </div>
 
-        {replaceBudgetWithQuick ? (
-          <div id="clinical-section-presupuesto">
-            <PresupuestoRapido
-              patient={patientData ?? null}
-              onItemsChange={syncQuickBudgetItems}
-            />
-          </div>
-        ) : (
+        {!replaceBudgetWithQuick ? (
           <div className="print:hidden">
             <BudgetForm
               budgetItems={form.budgetItems}
@@ -218,7 +224,7 @@ export function RapidValuationForm({
               onChange={(patch) => update(patch)}
             />
           </div>
-        )}
+        ) : null}
 
         <div className="print:hidden space-y-6">
           <ConsentimientoValoracionSection
@@ -228,7 +234,7 @@ export function RapidValuationForm({
             recordedAt={consentRecordedAt}
           />
 
-          {!disabled && (
+          {!disabled && onAcceptTreatment && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dental-200 bg-dental-50/50 p-4">
               <p className="text-sm text-slate-700">
                 Al aceptar el presupuesto, el paciente pasa a fase de tratamiento y se habilitan
