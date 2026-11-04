@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlignVerticalJustifyCenter, MessageCircle, Plus, Printer, Smile, Trash2 } from 'lucide-react'
+import {
+  AlignVerticalJustifyCenter,
+  ListPlus,
+  MessageCircle,
+  Plus,
+  Printer,
+  Smile,
+  Trash2,
+} from 'lucide-react'
 import { UPPER_LEFT, UPPER_RIGHT, LOWER_LEFT, LOWER_RIGHT } from '@/constants/dental'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -63,6 +71,36 @@ const QUICK_CATEGORIES = [
     accent:
       'border-violet-300 bg-violet-50 text-violet-900 hover:bg-violet-100 focus-visible:ring-violet-400',
   },
+  {
+    id: 'otro',
+    label: 'Agregar otro Procedimiento',
+    concepto: 'Otro procedimiento',
+    icon: ListPlus,
+    accent:
+      'border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100 focus-visible:ring-amber-400',
+  },
+]
+
+const OTHER_PROCEDURES = [
+  { id: 'profilaxis_dental', label: 'Profilaxis Dental' },
+  { id: 'detartraje_profundo', label: 'Detartraje Profundo' },
+  { id: 'fluorizacion', label: 'Fluorización' },
+  { id: 'resina_fotocurado', label: 'Resina de Fotocurado' },
+  { id: 'ionomero_vidrio', label: 'Ionomero de Vidrio' },
+  { id: 'endodoncia', label: 'Endodoncia' },
+  { id: 'exodoncia_simple', label: 'Exodoncia Simple' },
+  { id: 'exodoncia_quirurgica', label: 'Exodoncia Quirúrgica' },
+  { id: 'exodoncia_supernumerario', label: 'Exodoncia Supernumerario' },
+  { id: 'cirugia_gingival', label: 'Cirugía Gingival' },
+  { id: 'aclaramiento_dental', label: 'Aclaramiento Dental' },
+  { id: 'manual', label: 'Crear procedimiento manual…' },
+]
+
+const ANATOMICAL_SCOPE_OPTIONS = [
+  { id: 'teeth', label: 'Diente(s)' },
+  { id: 'maxilar_superior', label: 'Maxilar superior' },
+  { id: 'maxilar_inferior', label: 'Maxilar inferior' },
+  { id: 'denticion', label: 'Toda la dentición' },
 ]
 
 const ORTHO_MODALITIES = [
@@ -152,6 +190,45 @@ function emptyAestheticDrafts() {
       { enabled: false, teeth: [], material: '', materialOther: '', unitPrice: '' },
     ]),
   )
+}
+
+function emptyOtherDraft() {
+  return {
+    procedureId: '',
+    customName: '',
+    scope: 'teeth',
+    teeth: [],
+    unitPrice: '',
+  }
+}
+
+function resolveOtherProcedureLabel(draft) {
+  if (!draft?.procedureId) return ''
+  if (draft.procedureId === 'manual') {
+    return String(draft.customName || '').trim()
+  }
+  return OTHER_PROCEDURES.find((item) => item.id === draft.procedureId)?.label ?? ''
+}
+
+function resolveScopeLabel(draft) {
+  if (!draft) return ''
+  if (draft.scope === 'teeth') {
+    if (!draft.teeth?.length) return ''
+    return draft.teeth.length === 1
+      ? `diente ${draft.teeth[0]}`
+      : `dientes ${sortTeeth(draft.teeth).join(', ')}`
+  }
+  return ANATOMICAL_SCOPE_OPTIONS.find((item) => item.id === draft.scope)?.label ?? draft.scope
+}
+
+function otherDraftTotal(draft) {
+  const unitPrice = parseMoney(draft?.unitPrice)
+  if (!Number.isFinite(unitPrice) || unitPrice <= 0) return 0
+  if (draft.scope === 'teeth') {
+    if (!draft.teeth?.length) return 0
+    return draft.teeth.length * unitPrice
+  }
+  return unitPrice
 }
 
 function formatCOP(value) {
@@ -283,6 +360,7 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
   const [orthoCosts, setOrthoCosts] = useState(emptyOrthoCosts)
   const [implantDrafts, setImplantDrafts] = useState(emptyImplantDrafts)
   const [aestheticDrafts, setAestheticDrafts] = useState(emptyAestheticDrafts)
+  const [otherDraft, setOtherDraft] = useState(emptyOtherDraft)
   const [items, setItems] = useState([])
   const [formError, setFormError] = useState('')
 
@@ -295,6 +373,7 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     (sum, option) => sum + aestheticLineTotal(option, aestheticDrafts[option.id]),
     0,
   )
+  const otherSubtotal = otherDraftTotal(otherDraft)
   const patientName = buildPatientLabel(patient)
   const patientDocument = buildDocumentLabel(patient)
   const accountHolderName = resolveAccountHolderTitle(user)
@@ -304,6 +383,7 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
   const showOrthoPanel = activeCategory === 'ortodoncia'
   const showImplantPanel = activeCategory === 'implantes'
   const showAestheticPanel = activeCategory === 'estetica'
+  const showOtherPanel = activeCategory === 'otro'
   const selectedModality = ORTHO_MODALITIES.find((item) => item.id === orthoModality) ?? null
   const selectedImplantOptions = IMPLANT_OPTIONS.filter(
     (option) => implantDrafts[option.id]?.enabled,
@@ -311,6 +391,7 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
   const selectedAestheticOptions = AESTHETIC_PROCEDURES.filter(
     (option) => aestheticDrafts[option.id]?.enabled,
   )
+  const otherProcedureLabel = resolveOtherProcedureLabel(otherDraft)
 
   useEffect(() => {
     onItemsChangeRef.current?.(items)
@@ -323,6 +404,7 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     setOrthoCosts(emptyOrthoCosts())
     setImplantDrafts(emptyImplantDrafts())
     setAestheticDrafts(emptyAestheticDrafts())
+    setOtherDraft(emptyOtherDraft())
   }
 
   const selectOrthoModality = (modality) => {
@@ -520,6 +602,59 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     setFormError('')
   }
 
+  const updateOtherDraft = (patch) => {
+    setOtherDraft((prev) => ({ ...prev, ...patch }))
+  }
+
+  const addOtherProcedure = () => {
+    const label = resolveOtherProcedureLabel(otherDraft)
+    if (!otherDraft.procedureId) {
+      setFormError('Seleccione un procedimiento en el menú.')
+      return
+    }
+    if (otherDraft.procedureId === 'manual' && !label) {
+      setFormError('Escriba el nombre del procedimiento manual.')
+      return
+    }
+
+    const unitPrice = parseMoney(otherDraft.unitPrice)
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      setFormError('Asigne un valor al procedimiento.')
+      return
+    }
+
+    const lines = []
+    if (otherDraft.scope === 'teeth') {
+      if (!otherDraft.teeth.length) {
+        setFormError('Seleccione al menos un diente o elija un maxilar.')
+        return
+      }
+      for (const tooth of sortTeeth(otherDraft.teeth)) {
+        lines.push({
+          id: newItemId(),
+          concepto: `${label} — diente ${tooth}`,
+          valor: unitPrice,
+        })
+      }
+    } else {
+      const scopeLabel = resolveScopeLabel(otherDraft)
+      if (!scopeLabel) {
+        setFormError('Seleccione diente(s) o maxilar.')
+        return
+      }
+      lines.push({
+        id: newItemId(),
+        concepto: `${label} — ${scopeLabel}`,
+        valor: unitPrice,
+      })
+    }
+
+    setItems((prev) => [...prev, ...lines])
+    setOtherDraft(emptyOtherDraft())
+    setActiveCategory(null)
+    setFormError('')
+  }
+
   const updateItem = (id, patch) => {
     setItems((prev) =>
       prev.map((item) => {
@@ -566,12 +701,12 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
         <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3">
           <h2 className="text-lg font-bold text-teal-950">Presupuesto Rápido</h2>
           <p className="mt-1 text-sm text-teal-800">
-            Cotice al instante sin diagnósticos previos. Ortodoncia, implantes y restauración /
-            estética despliegan solo los tratamientos seleccionados.
+            Cotice al instante sin diagnósticos previos. Ortodoncia, implantes, restauración /
+            estética u otro procedimiento despliegan solo lo seleccionado.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {QUICK_CATEGORIES.map((category) => {
             const Icon = category.icon
             const isActive = activeCategory === category.id
@@ -985,6 +1120,149 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
             ) : (
               <p className="text-sm text-violet-800">
                 Seleccione uno o más procedimientos para asignar material, dientes y valores.
+              </p>
+            )}
+          </div>
+        ) : null}
+
+        {showOtherPanel ? (
+          <div className="space-y-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900">
+                Otro procedimiento
+              </p>
+              <label className="mb-1 block text-xs font-semibold text-slate-600" htmlFor="otro-proc">
+                Seleccione en el menú
+              </label>
+              <select
+                id="otro-proc"
+                value={otherDraft.procedureId}
+                onChange={(event) =>
+                  updateOtherDraft({
+                    procedureId: event.target.value,
+                    customName:
+                      event.target.value === 'manual' ? otherDraft.customName : '',
+                  })
+                }
+                className="w-full rounded-lg border-2 border-amber-200 bg-white px-3 py-2.5 text-sm font-semibold text-amber-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+              >
+                <option value="">Elija un procedimiento…</option>
+                {OTHER_PROCEDURES.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {otherDraft.procedureId ? (
+              <div className="space-y-4 rounded-lg border border-amber-200 bg-white p-4">
+                {otherDraft.procedureId === 'manual' ? (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">
+                      Nombre del procedimiento
+                    </label>
+                    <input
+                      type="text"
+                      value={otherDraft.customName}
+                      onChange={(event) => updateOtherDraft({ customName: event.target.value })}
+                      placeholder="Ej. Frenectomía, Biopsia, etc."
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-sm font-semibold text-slate-900">{otherProcedureLabel}</p>
+                )}
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Diente o maxilar
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {ANATOMICAL_SCOPE_OPTIONS.map((scope) => {
+                      const isOn = otherDraft.scope === scope.id
+                      return (
+                        <button
+                          key={scope.id}
+                          type="button"
+                          onClick={() =>
+                            updateOtherDraft({
+                              scope: scope.id,
+                              teeth: scope.id === 'teeth' ? otherDraft.teeth : [],
+                            })
+                          }
+                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                            isOn
+                              ? 'border-amber-500 bg-amber-100 text-amber-950'
+                              : 'border-slate-300 bg-white text-slate-600 hover:border-amber-300'
+                          }`}
+                        >
+                          {scope.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {otherDraft.scope === 'teeth' ? (
+                  <ToothChipPicker
+                    selectedTeeth={otherDraft.teeth}
+                    onChange={(teeth) => updateOtherDraft({ teeth })}
+                    accentClass="border-amber-500 bg-amber-100 text-amber-950"
+                    panelClass="border-amber-100 bg-amber-50/50"
+                    titleClass="text-amber-950"
+                    hintClass="text-amber-900"
+                  />
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Alcance: <strong>{resolveScopeLabel(otherDraft)}</strong> · un solo valor
+                  </p>
+                )}
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">
+                      {otherDraft.scope === 'teeth' ? 'Valor por diente ($)' : 'Valor ($)'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1000"
+                      inputMode="numeric"
+                      value={otherDraft.unitPrice}
+                      onChange={(event) => updateOtherDraft({ unitPrice: event.target.value })}
+                      placeholder="0"
+                      className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+                    />
+                  </div>
+                  {otherDraft.scope === 'teeth' ? (
+                    <p className="pb-1 text-xs text-slate-500">
+                      Cantidad: <strong>{otherDraft.teeth.length}</strong>
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-col gap-3 border-t border-slate-200 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-amber-950">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                      Subtotal
+                    </span>
+                    <p className="text-xl font-bold tabular-nums">{formatCOP(otherSubtotal)}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addOtherProcedure}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
+                    Agregar procedimiento
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-amber-900">
+                Elija un procedimiento del menú o cree uno manual; luego asigne diente o maxilar y
+                valor.
               </p>
             )}
           </div>
