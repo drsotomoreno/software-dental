@@ -194,22 +194,25 @@ export function RapidValuationForm({
       ) : null}
 
       <div id="clinical-section-tratamiento" className="space-y-6">
-        <div className="print:hidden">
-          <TreatmentPlanForm
-            treatmentPlan={form.treatmentPlan}
-            treatmentPlanNotes={form.treatmentPlanNotes}
-            diagnoses={form.diagnoses}
-            diagnosticChart={form.diagnosticChart}
-            specializedAnnexes={form.specializedAnnexes}
-            affectedTeeth={[...new Set(form.diagnoses.flatMap((d) => d.affectedTeeth ?? []))].sort(
-              (a, b) => a - b,
-            )}
-            budgetLinkedItemIds={budgetLinkedPlanItemIds}
-            disabled={disabled}
-            onChange={(patch) => update(patch)}
-            onMoveToBudget={replaceBudgetWithQuick ? undefined : moveTreatmentPlanItemToBudget}
-          />
-        </div>
+        {/* Nuevo Paciente: oculta la sección 7; el plan/presupuesto va en Presupuesto Rápido. */}
+        {!replaceBudgetWithQuick ? (
+          <div className="print:hidden">
+            <TreatmentPlanForm
+              treatmentPlan={form.treatmentPlan}
+              treatmentPlanNotes={form.treatmentPlanNotes}
+              diagnoses={form.diagnoses}
+              diagnosticChart={form.diagnosticChart}
+              specializedAnnexes={form.specializedAnnexes}
+              affectedTeeth={[...new Set(form.diagnoses.flatMap((d) => d.affectedTeeth ?? []))].sort(
+                (a, b) => a - b,
+              )}
+              budgetLinkedItemIds={budgetLinkedPlanItemIds}
+              disabled={disabled}
+              onChange={(patch) => update(patch)}
+              onMoveToBudget={moveTreatmentPlanItemToBudget}
+            />
+          </div>
+        ) : null}
 
         {!replaceBudgetWithQuick ? (
           <div className="print:hidden">
