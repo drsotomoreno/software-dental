@@ -39,11 +39,12 @@ describe('quickBudgetPrint', () => {
     expect(html).toMatch(/\$\s?850\.000|850\.000/)
   })
 
-  it('arma mensaje de WhatsApp legible', () => {
+  it('arma mensaje corto de WhatsApp para acompañar la imagen', () => {
     const message = buildQuickBudgetWhatsAppMessage(sample)
+    expect(message).toContain('Hola Ana')
     expect(message).toContain('*Clínica Dental Sonrisa*')
-    expect(message).toContain('Paciente: Ana Pérez')
     expect(message).toContain('Total:')
-    expect(message).toContain('Carilla (Resina)')
+    expect(message).toContain('imagen adjunta')
+    expect(message).not.toContain('Carilla (Resina)')
   })
 })

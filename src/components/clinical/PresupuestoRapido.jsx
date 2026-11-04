@@ -363,6 +363,8 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
   const [otherDraft, setOtherDraft] = useState(emptyOtherDraft)
   const [items, setItems] = useState([])
   const [formError, setFormError] = useState('')
+  const [whatsAppBusy, setWhatsAppBusy] = useState(false)
+  const [whatsAppHint, setWhatsAppHint] = useState('')
 
   const total = items.reduce((sum, item) => sum + (Number(item.valor) || 0), 0)
   const implantDraftTotal = IMPLANT_OPTIONS.reduce(
@@ -690,9 +692,24 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     printQuickBudget(buildPrintPayload())
   }
 
-  const handleWhatsApp = () => {
-    if (items.length === 0) return
-    openQuickBudgetWhatsApp(buildPrintPayload(), patient?.phone)
+  const handleWhatsApp = async () => {
+    if (items.length === 0 || whatsAppBusy) return
+    setWhatsAppBusy(true)
+    setWhatsAppHint('')
+    try {
+      const result = await openQuickBudgetWhatsApp(buildPrintPayload(), patient?.phone)
+      if (result === 'download-fallback') {
+        setWhatsAppHint(
+          'Se descargó la tarjeta del presupuesto. Adjúntala en el chat de WhatsApp que se abrió.',
+        )
+      } else if (result === 'shared') {
+        setWhatsAppHint('Presupuesto listo para enviar como imagen.')
+      }
+    } catch {
+      setWhatsAppHint('No se pudo generar la imagen. Intente de nuevo o use Imprimir.')
+    } finally {
+      setWhatsAppBusy(false)
+    }
   }
 
   return (
@@ -1341,25 +1358,30 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
             </span>
             <p className="text-2xl font-bold tabular-nums">{formatCOP(total)}</p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <button
-              type="button"
-              onClick={handleWhatsApp}
-              disabled={items.length === 0}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-5 py-3.5 text-base font-semibold text-white shadow-md transition hover:bg-[#1ebe57] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <MessageCircle className="h-5 w-5" aria-hidden />
-              Enviar por WhatsApp
-            </button>
-            <button
-              type="button"
-              onClick={handlePrint}
-              disabled={items.length === 0}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-6 py-3.5 text-base font-semibold text-white shadow-md transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Printer className="h-5 w-5" aria-hidden />
-              Imprimir Presupuesto
-            </button>
+          <div className="flex flex-col items-stretch gap-2 sm:items-end">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <button
+                type="button"
+                onClick={handleWhatsApp}
+                disabled={items.length === 0 || whatsAppBusy}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-5 py-3.5 text-base font-semibold text-white shadow-md transition hover:bg-[#1ebe57] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <MessageCircle className="h-5 w-5" aria-hidden />
+                {whatsAppBusy ? 'Preparando imagen…' : 'Enviar por WhatsApp'}
+              </button>
+              <button
+                type="button"
+                onClick={handlePrint}
+                disabled={items.length === 0}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-6 py-3.5 text-base font-semibold text-white shadow-md transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Printer className="h-5 w-5" aria-hidden />
+                Imprimir Presupuesto
+              </button>
+            </div>
+            {whatsAppHint ? (
+              <p className="max-w-md text-right text-sm text-teal-800">{whatsAppHint}</p>
+            ) : null}
           </div>
         </div>
       </div>

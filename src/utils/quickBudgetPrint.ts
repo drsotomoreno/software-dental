@@ -314,42 +314,364 @@ export function printQuickBudget(input: QuickBudgetPrintInput): void {
   openPortabilityHtmlForPrint(buildQuickBudgetPrintHtml(input))
 }
 
-/** Mensaje legible para compartir el presupuesto por WhatsApp. */
+/** Pieza corta para acompañar la imagen del presupuesto en WhatsApp. */
 export function buildQuickBudgetWhatsAppMessage(input: QuickBudgetPrintInput): string {
-  const lines = input.items.map(
-    (item, index) => `${index + 1}. ${item.concepto}: ${formatCOP(item.valor)}`,
-  )
-  const parts = [
-    `*${input.accountHolderName}*`,
-    'Presupuesto odontológico',
+  const firstName =
+    String(input.patientName ?? '')
+      .trim()
+      .split(/\s+/)[0] || 'paciente'
+  return [
+    `Hola ${firstName} 👋`,
     '',
-    `Paciente: ${input.patientName}`,
-    `Identificación: ${input.patientDocument}`,
+    `Te compartimos el *presupuesto odontológico* de *${input.accountHolderName}*.`,
+    `Total: *${formatCOP(input.total)}*`,
     '',
-    '*Detalle*',
-    ...lines,
-    '',
-    `*Total: ${formatCOP(input.total)}*`,
-    '',
-    '_Cotización informativa. Valores en COP._',
-  ]
-  return parts.join('\n')
+    '_El detalle completo va en la imagen adjunta._',
+  ].join('\n')
+}
+
+function wrapCanvasText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string[] {
+  const words = String(text ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  if (!words.length) return ['']
+  const lines: string[] = []
+  let current = words[0]
+  for (let i = 1; i < words.length; i += 1) {
+    const next = `${current} ${words[i]}`
+    if (ctx.measureText(next).width <= maxWidth) {
+      current = next
+    } else {
+      lines.push(current)
+      current = words[i]
+    }
+  }
+  lines.push(current)
+  return lines
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  const radius = Math.min(r, w / 2, h / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.arcTo(x + w, y, x + w, y + h, radius)
+  ctx.arcTo(x + w, y + h, x, y + h, radius)
+  ctx.arcTo(x, y + h, x, y, radius)
+  ctx.arcTo(x, y, x + w, y, radius)
+  ctx.closePath()
+}
+
+function sanitizeFileNamePart(value: string): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, 40) || 'paciente'
 }
 
 /**
- * Abre WhatsApp con el presupuesto listo para enviar.
- * Si hay teléfono del paciente, lo preselecciona; si no, deja elegir el contacto.
+ * Tarjeta visual del presupuesto (mismo estilo teal del documento de impresión).
+ * WhatsApp muestra imágenes de forma nativa y amigable.
  */
-export function openQuickBudgetWhatsApp(
+export async function renderQuickBudgetShareImage(
   input: QuickBudgetPrintInput,
-  phone?: string,
-): boolean {
-  if (!input.items.length) return false
-  const message = buildQuickBudgetWhatsAppMessage(input)
+): Promise<Blob> {
+  const width = 1080
+  const padX = 64
+  const contentWidth = width - padX * 2
+  const issued = input.emittedAt ?? new Date()
+  const emissionLabel = formatEmissionDate(issued)
+
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('No se pudo crear el lienzo del presupuesto.')
+
+  // Medición previa para altura dinámica
+  canvas.width = width
+  canvas.height = 10
+  ctx.font = '600 28px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  const conceptMaxWidth = contentWidth - 300
+  const itemBlocks = input.items.map((item, index) => {
+    const lines = wrapCanvasText(ctx, item.concepto, conceptMaxWidth)
+    return { index: index + 1, lines, amount: formatCOP(item.valor) }
+  })
+  const itemsHeight = itemBlocks.reduce(
+    (sum, block) => sum + Math.max(block.lines.length, 1) * 42 + 28,
+    0,
+  )
+  const height = Math.max(
+    1400,
+    720 +
+      itemsHeight +
+      (input.professionalName ? 40 : 0) +
+      (input.patientPhone ? 32 : 0) +
+      (input.patientEmail ? 32 : 0),
+  )
+  canvas.height = height
+
+  // Fondo
+  ctx.fillStyle = '#f8fafc'
+  ctx.fillRect(0, 0, width, height)
+
+  // Hoja blanca
+  const sheetX = 36
+  const sheetY = 36
+  const sheetW = width - 72
+  const sheetH = height - 72
+  ctx.save()
+  ctx.shadowColor = 'rgba(15, 23, 42, 0.12)'
+  ctx.shadowBlur = 28
+  ctx.shadowOffsetY = 10
+  roundRect(ctx, sheetX, sheetY, sheetW, sheetH, 28)
+  ctx.fillStyle = '#ffffff'
+  ctx.fill()
+  ctx.restore()
+
+  // Barra de marca
+  const grad = ctx.createLinearGradient(padX, 0, width - padX, 0)
+  grad.addColorStop(0, '#0d9488')
+  grad.addColorStop(0.55, '#14b8a6')
+  grad.addColorStop(1, '#5eead4')
+  roundRect(ctx, padX, 72, contentWidth, 10, 999)
+  ctx.fillStyle = grad
+  ctx.fill()
+
+  let y = 120
+  ctx.fillStyle = '#115e59'
+  ctx.font = '800 52px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  const titleLines = wrapCanvasText(ctx, input.accountHolderName, contentWidth)
+  for (const line of titleLines) {
+    ctx.fillText(line, padX, y)
+    y += 58
+  }
+
+  y += 8
+  ctx.fillStyle = '#0f766e'
+  ctx.font = '700 22px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  ctx.fillText('PRESUPUESTO ODONTOLÓGICO', padX, y)
+  y += 36
+
+  ctx.fillStyle = '#475569'
+  ctx.font = '400 24px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  ctx.fillText(`Fecha de emisión: ${emissionLabel}`, padX, y)
+  y += 34
+
+  if (input.professionalName) {
+    const proDoc = input.professionalDocument
+      ? ` · Doc. ${input.professionalDocument}`
+      : ''
+    ctx.fillText(`Profesional: ${input.professionalName}${proDoc}`, padX, y)
+    y += 34
+  }
+
+  // Tarjeta paciente
+  y += 18
+  ctx.font = '700 32px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  const patientNameLines = wrapCanvasText(
+    ctx,
+    input.patientName || '—',
+    contentWidth - 56,
+  ).slice(0, 2)
+  const patientCardH =
+    90 +
+    patientNameLines.length * 36 +
+    28 +
+    (input.patientPhone ? 32 : 0) +
+    (input.patientEmail ? 32 : 0)
+  roundRect(ctx, padX, y, contentWidth, patientCardH, 18)
+  ctx.fillStyle = '#f0fdfa'
+  ctx.fill()
+  ctx.strokeStyle = '#cbd5e1'
+  ctx.lineWidth = 2
+  ctx.stroke()
+
+  let py = y + 38
+  ctx.fillStyle = '#0f766e'
+  ctx.font = '700 18px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  ctx.fillText('PACIENTE', padX + 28, py)
+  py += 40
+  ctx.fillStyle = '#0f172a'
+  ctx.font = '700 32px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  for (const line of patientNameLines) {
+    ctx.fillText(line, padX + 28, py)
+    py += 36
+  }
+  ctx.fillStyle = '#475569'
+  ctx.font = '500 24px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  ctx.fillText(`Identificación  ${input.patientDocument || '—'}`, padX + 28, py)
+  if (input.patientPhone) {
+    py += 32
+    ctx.fillText(`Teléfono  ${input.patientPhone}`, padX + 28, py)
+  }
+  if (input.patientEmail) {
+    py += 32
+    ctx.fillText(`Email  ${input.patientEmail}`, padX + 28, py)
+  }
+  y += patientCardH + 48
+
+  // Encabezado de tabla
+  ctx.fillStyle = '#115e59'
+  ctx.font = '700 18px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  ctx.fillText('#', padX, y)
+  ctx.fillText('CONCEPTO', padX + 56, y)
+  const amountHeader = 'VALOR'
+  const amountHeaderW = ctx.measureText(amountHeader).width
+  ctx.fillText(amountHeader, padX + contentWidth - amountHeaderW, y)
+  y += 14
+  ctx.strokeStyle = '#0f766e'
+  ctx.lineWidth = 3
+  ctx.beginPath()
+  ctx.moveTo(padX, y)
+  ctx.lineTo(padX + contentWidth, y)
+  ctx.stroke()
+  y += 36
+
+  for (const block of itemBlocks) {
+    const rowTop = y
+    ctx.fillStyle = '#94a3b8'
+    ctx.font = '600 28px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+    ctx.fillText(String(block.index), padX, rowTop)
+
+    ctx.fillStyle = '#0f172a'
+    ctx.font = '600 28px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+    for (let i = 0; i < block.lines.length; i += 1) {
+      ctx.fillText(block.lines[i], padX + 56, rowTop + i * 42)
+    }
+
+    ctx.font = '700 28px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+    const amountW = ctx.measureText(block.amount).width
+    ctx.fillText(block.amount, padX + contentWidth - amountW, rowTop)
+
+    y += Math.max(block.lines.length, 1) * 42 + 18
+    ctx.strokeStyle = '#e2e8f0'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(padX, y - 10)
+    ctx.lineTo(padX + contentWidth, y - 10)
+    ctx.stroke()
+  }
+
+  // Total
+  y += 28
+  const boxW = 420
+  const boxH = 110
+  const boxX = padX + contentWidth - boxW
+  roundRect(ctx, boxX, y, boxW, boxH, 18)
+  ctx.fillStyle = '#ffffff'
+  ctx.fill()
+  ctx.strokeStyle = '#115e59'
+  ctx.lineWidth = 3
+  ctx.stroke()
+  ctx.fillStyle = '#0f766e'
+  ctx.font = '700 18px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  ctx.fillText('TOTAL PRESUPUESTO', boxX + 28, y + 38)
+  ctx.fillStyle = '#0f172a'
+  ctx.font = '800 40px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  const totalLabel = formatCOP(input.total)
+  const totalW = ctx.measureText(totalLabel).width
+  ctx.fillText(totalLabel, boxX + boxW - 28 - totalW, y + 82)
+
+  y += boxH + 48
+  ctx.fillStyle = '#64748b'
+  ctx.font = '400 20px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  const noteLines = wrapCanvasText(
+    ctx,
+    'Valores en pesos colombianos (COP). Cotización informativa; no constituye factura ni compromiso hasta su aceptación formal.',
+    contentWidth,
+  )
+  for (const line of noteLines) {
+    ctx.fillText(line, padX, y)
+    y += 28
+  }
+
+  y += 18
+  ctx.font = '400 18px "Segoe UI", "Helvetica Neue", Arial, sans-serif'
+  ctx.fillText(`Generado con ${APP_NAME}`, padX, y)
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob)
+        else reject(new Error('No se pudo generar la imagen del presupuesto.'))
+      },
+      'image/png',
+      0.95,
+    )
+  })
+}
+
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.rel = 'noopener'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 2_000)
+}
+
+function openWhatsAppUrl(message: string, phone?: string): void {
   const normalized = phone ? normalizePhoneForWhatsApp(phone) : ''
   const url = normalized
     ? `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`
     : `https://wa.me/?text=${encodeURIComponent(message)}`
   window.open(url, '_blank', 'noopener,noreferrer')
-  return true
+}
+
+export type QuickBudgetWhatsAppResult = 'shared' | 'download-fallback' | false
+
+/**
+ * Comparte el presupuesto como imagen visual por WhatsApp.
+ * En móvil suele abrir el selector de apps (WhatsApp) con la tarjeta adjunta.
+ * En escritorio descarga la imagen y abre WhatsApp con un mensaje corto.
+ */
+export async function openQuickBudgetWhatsApp(
+  input: QuickBudgetPrintInput,
+  phone?: string,
+): Promise<QuickBudgetWhatsAppResult> {
+  if (!input.items.length) return false
+
+  const message = buildQuickBudgetWhatsAppMessage(input)
+  const imageBlob = await renderQuickBudgetShareImage(input)
+  const fileName = `Presupuesto_${sanitizeFileNamePart(input.patientName)}.png`
+  const file = new File([imageBlob], fileName, { type: 'image/png' })
+
+  const nav = navigator as Navigator & {
+    canShare?: (data?: ShareData) => boolean
+  }
+
+  if (typeof nav.share === 'function' && nav.canShare?.({ files: [file] })) {
+    try {
+      await nav.share({
+        files: [file],
+        title: `Presupuesto — ${input.accountHolderName}`,
+        text: message,
+      })
+      return 'shared'
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return 'shared'
+      }
+      // Continúa al fallback de descarga + wa.me
+    }
+  }
+
+  downloadBlob(imageBlob, fileName)
+  openWhatsAppUrl(message, phone)
+  return 'download-fallback'
 }
