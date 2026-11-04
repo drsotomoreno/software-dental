@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { AlertTriangle } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   dismissBackupReminder,
@@ -42,23 +43,38 @@ export function BackupReminderBanner() {
     : 'Nunca'
 
   return (
-    <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2">
-        <p>
-          <span className="font-medium">Recordatorio de copia de seguridad.</span>{' '}
-          {REMINDER_COPY[reason]} Último respaldo: {lastBackup}.
-        </p>
-        <div className="flex items-center gap-2">
+    <div
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none fixed bottom-4 right-4 z-[70] w-[min(22rem,calc(100vw-2rem))] print:hidden"
+    >
+      <div className="pointer-events-auto rounded-2xl border border-amber-200/90 bg-white p-4 shadow-lg shadow-slate-900/10 ring-1 ring-amber-100">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-700">
+            <AlertTriangle className="h-4 w-4" strokeWidth={2.25} aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-slate-900">
+              Recordatorio de copia de seguridad
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-600">
+              {REMINDER_COPY[reason]}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">Último respaldo: {lastBackup}</p>
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={() => dismissBackupReminder()}
-            className="rounded-lg px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
+            className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
           >
             Más tarde
           </button>
           <Link
             to="/respaldos"
-            className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
+            className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-700"
           >
             Descargar copia
           </Link>
