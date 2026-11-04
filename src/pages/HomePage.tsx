@@ -15,10 +15,11 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { APP_NAME } from '@/constants/branding'
-import { CLINICAL_HISTORY_PAGE_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 import { EditableHomeTitle } from '@/components/home/EditableHomeTitle'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Permission } from '@/utils/permissions'
+
+type DashAccent = 'patients' | 'clinical' | 'billing' | 'admin'
 
 type DashAction = {
   label: string
@@ -33,6 +34,7 @@ type DashAction = {
 type DashCard = {
   title: string
   description: string
+  accent: DashAccent
   actions: DashAction[]
 }
 
@@ -40,6 +42,7 @@ const DASHBOARD_CARDS: DashCard[] = [
   {
     title: 'Pacientes',
     description: 'Registro y seguimiento del flujo clínico',
+    accent: 'patients',
     actions: [
       {
         label: 'Nuevo Paciente',
@@ -71,6 +74,7 @@ const DASHBOARD_CARDS: DashCard[] = [
   {
     title: 'Gestión Clínica',
     description: 'Agenda y acceso a la historia clínica',
+    accent: 'clinical',
     actions: [
       {
         label: 'Agenda',
@@ -89,6 +93,7 @@ const DASHBOARD_CARDS: DashCard[] = [
   {
     title: 'Facturación y RIPS',
     description: 'Tarifas, cuentas y reporte normativo',
+    accent: 'billing',
     actions: [
       {
         label: 'Mis Precios y Procedimientos',
@@ -113,6 +118,7 @@ const DASHBOARD_CARDS: DashCard[] = [
   {
     title: 'Administración',
     description: 'Usuarios, catálogos, respaldos y auditoría',
+    accent: 'admin',
     actions: [
       {
         label: 'Gestión de Usuarios',
@@ -167,7 +173,7 @@ function DashActionButton({ action }: { action: DashAction }) {
     return (
       <Link
         to={action.to}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-dental-600 px-4 py-3 text-sm font-semibold text-white shadow-sm shadow-dental-600/25 transition hover:bg-dental-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-dental-500 focus-visible:ring-offset-2"
+        className="dash-action-primary inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
       >
         <Icon className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
         {action.label}
@@ -178,9 +184,9 @@ function DashActionButton({ action }: { action: DashAction }) {
   return (
     <Link
       to={action.to}
-      className="inline-flex w-full items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-2.5 text-sm font-medium text-slate-800 transition hover:border-dental-200 hover:bg-white hover:text-dental-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-dental-500 focus-visible:ring-offset-2"
+      className="dash-action-secondary group inline-flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
     >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-dental-700 shadow-sm ring-1 ring-slate-200/80">
+      <span className="dash-action-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
         <Icon className="h-4 w-4" strokeWidth={2.25} aria-hidden />
       </span>
       <span className="min-w-0 leading-snug">{action.label}</span>
@@ -198,9 +204,11 @@ export function HomePage() {
   })).filter((card) => card.actions.length > 0)
 
   return (
-    <div className="space-y-6">
+    <div className="dash-home space-y-6">
       <div>
-        <h1 className={CLINICAL_HISTORY_PAGE_TITLE_CLASS}>Bienvenido a {APP_NAME}</h1>
+        <h1 className="dash-home-title text-2xl font-bold tracking-tight">
+          Bienvenido a {APP_NAME}
+        </h1>
         <p className="mt-1 text-slate-600">
           Acceso directo a todas las funciones — un clic, sin menús ocultos
         </p>
@@ -211,13 +219,14 @@ export function HomePage() {
         {visibleCards.map((card) => (
           <section
             key={card.title}
-            className="flex flex-col rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm"
+            className="dash-card flex flex-col rounded-2xl bg-white p-5"
+            data-accent={card.accent}
             aria-labelledby={`dash-card-${card.title}`}
           >
-            <header className="mb-4 border-b border-slate-100 pb-3">
+            <header className="mb-4 border-b border-slate-100/80 pb-3">
               <h2
                 id={`dash-card-${card.title}`}
-                className="text-base font-semibold tracking-tight text-slate-900"
+                className="dash-card-title text-base font-semibold tracking-tight text-slate-900"
               >
                 {card.title}
               </h2>

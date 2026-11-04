@@ -252,3 +252,108 @@
     animation: none;
   }
 }
+
+/* ── Dashboard home: color-coding + floating cards ── */
+.dash-home-title {
+  background-image: linear-gradient(115deg, #0369a1 0%, #0284c7 42%, #0ea5e9 78%, #14b8a6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.dash-card {
+  --dash-accent: #0284c7;
+  --dash-accent-strong: #0369a1;
+  --dash-accent-soft: rgba(2, 132, 199, 0.1);
+  --dash-accent-icon-bg: rgba(2, 132, 199, 0.1);
+  border-top: 3px solid var(--dash-accent);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.dash-card[data-accent='patients'] {
+  --dash-accent: #0284c7;
+  --dash-accent-strong: #0369a1;
+  --dash-accent-soft: rgba(2, 132, 199, 0.1);
+  --dash-accent-icon-bg: rgba(2, 132, 199, 0.1);
+}
+
+.dash-card[data-accent='clinical'] {
+  --dash-accent: #0d9488;
+  --dash-accent-strong: #0f766e;
+  --dash-accent-soft: rgba(13, 148, 136, 0.1);
+  --dash-accent-icon-bg: rgba(13, 148, 136, 0.1);
+}
+
+.dash-card[data-accent='billing'] {
+  --dash-accent: #f59e0b;
+  --dash-accent-strong: #d97706;
+  --dash-accent-soft: rgba(245, 158, 11, 0.12);
+  --dash-accent-icon-bg: rgba(245, 158, 11, 0.12);
+}
+
+.dash-card[data-accent='admin'] {
+  --dash-accent: #6366f1;
+  --dash-accent-strong: #4f46e5;
+  --dash-accent-soft: rgba(99, 102, 241, 0.1);
+  --dash-accent-icon-bg: rgba(99, 102, 241, 0.1);
+}
+
+.dash-card-title {
+  color: var(--dash-accent-strong);
+}
+
+.dash-action-primary {
+  background-color: var(--dash-accent-strong);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--dash-accent-strong) 28%, transparent);
+  transition: all 0.2s ease-in-out;
+}
+
+.dash-action-primary:hover {
+  background-color: var(--dash-accent);
+  transform: translateY(-1px);
+}
+
+.dash-action-primary:focus-visible {
+  --tw-ring-color: var(--dash-accent);
+}
+
+.dash-action-secondary {
+  background-color: rgba(148, 163, 184, 0.12);
+  box-shadow: none;
+  transition: all 0.2s ease-in-out;
+}
+
+.dash-action-secondary:hover {
+  background-color: var(--dash-accent-soft);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+  transform: translateY(-2px);
+}
+
+.dash-action-secondary:focus-visible {
+  --tw-ring-color: var(--dash-accent);
+}
+
+.dash-action-icon {
+  color: var(--dash-accent);
+  background-color: var(--dash-accent-icon-bg);
+  transition: all 0.2s ease-in-out;
+}
+
+.dash-action-secondary:hover .dash-action-icon {
+  background-color: color-mix(in srgb, var(--dash-accent) 18%, white);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-action-primary,
+  .dash-action-secondary,
+  .dash-action-icon {
+    transition: none;
+  }
+
+  .dash-action-primary:hover,
+  .dash-action-secondary:hover {
+    transform: none;
+  }
+}
