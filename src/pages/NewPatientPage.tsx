@@ -250,7 +250,11 @@ export function NewPatientPage() {
         >
           {saving ? 'Guardando...' : 'Solo Valoración (Registrar Solo Datos)'}
         </button>
-        <button type="button" onClick={() => navigate('/pacientes')} className="btn-secondary">
+        <button
+          type="button"
+          onClick={() => navigate('/app')}
+          className="btn-secondary"
+        >
           Cancelar
         </button>
       </div>

@@ -1,15 +1,20 @@
 import { useState, useRef, useEffect } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { Home } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { RipsStatusWidget } from '@/components/RipsStatusWidget'
 import { APP_INITIALS, APP_SHORT_NAME } from '@/constants/branding'
 import { ROLE_LABELS } from '@/utils/permissions'
 
+const DASHBOARD_PATH = '/app'
+
 export function TopNavbar() {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
+  const location = useLocation()
   const { user, logout } = useAuth()
+  const onDashboard = location.pathname === DASHBOARD_PATH
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -34,24 +39,37 @@ export function TopNavbar() {
     <header className="sticky top-0 z-50 border-b border-slate-200 bg-white shadow-sm">
       <div className="mx-auto max-w-[100rem] px-2 py-2 sm:px-3 sm:py-2.5">
         <div className="flex items-center justify-between gap-2 sm:gap-3">
-          <NavLink
-            to="/app"
-            end
-            className={({ isActive }) =>
-              `top-nav-brand flex shrink-0 items-center gap-2 rounded-full border px-2 py-1.5 pr-3 transition sm:pr-3.5 ${
-                isActive
-                  ? 'border-dental-600 bg-dental-600 text-white'
-                  : 'border-orange-200 bg-orange-50 text-orange-900 hover:bg-orange-100'
-              }`
-            }
-          >
-            <div className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold sm:h-9 sm:w-9">
-              {APP_INITIALS}
-            </div>
-            <span className="hidden text-sm font-semibold leading-tight sm:inline">
-              {APP_SHORT_NAME}
-            </span>
-          </NavLink>
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+            <NavLink
+              to={DASHBOARD_PATH}
+              end
+              className={({ isActive }) =>
+                `top-nav-brand flex shrink-0 items-center gap-2 rounded-full border px-2 py-1.5 pr-3 transition sm:pr-3.5 ${
+                  isActive
+                    ? 'border-dental-600 bg-dental-600 text-white'
+                    : 'border-orange-200 bg-orange-50 text-orange-900 hover:bg-orange-100'
+                }`
+              }
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold sm:h-9 sm:w-9">
+                {APP_INITIALS}
+              </div>
+              <span className="hidden text-sm font-semibold leading-tight sm:inline">
+                {APP_SHORT_NAME}
+              </span>
+            </NavLink>
+
+            {!onDashboard && (
+              <Link
+                to={DASHBOARD_PATH}
+                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 sm:px-2.5"
+                aria-label="Volver al panel principal"
+              >
+                <Home className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                <span className="hidden sm:inline">Inicio</span>
+              </Link>
+            )}
+          </div>
 
           <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2">
             <RipsStatusWidget />
