@@ -13,7 +13,6 @@ import { RapidValuationForm, createEmptyClinicalForm } from '@/components/clinic
 import { createDefaultOdontogram } from '@/types/odontogram'
 import { useToast } from '@/hooks/useToast'
 import { Toast } from '@/components/ui/Toast'
-import { validateAcceptTreatment } from '@/utils/patientPhase'
 import {
   buildValuationConsentMetadata,
   recordValuationConsentAudit,
@@ -62,13 +61,11 @@ export function NewPatientPage() {
   const [clinicalData, setClinicalData] = useState<ClinicalRecordFormData | null>(null)
   const [consentAccepted, setConsentAccepted] = useState(false)
   const [consentMetadata, setConsentMetadata] = useState<ValuationConsentMetadata | null>(null)
-  const [budgetAccepted, setBudgetAccepted] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const { toastMessage, showToast, clearToast } = useToast()
 
   const professionalLicense = user?.documentNumber ?? ''
-  const patientFormError = validatePatientForm(form)
 
   useEffect(() => {
     if (!clinicalData) {
@@ -77,10 +74,17 @@ export function NewPatientPage() {
   }, [clinicalData, professionalLicense])
 
   const resetValuationProgress = () => {
-    setBudgetAccepted(false)
     setConsentAccepted(false)
     setConsentMetadata(null)
     setClinicalData((prev) => (prev ? { ...prev, valuationConsent: null } : prev))
+  }
+
+  const resolveConsentMetadata = (): ValuationConsentMetadata | null => {
+    if (!consentAccepted) return null
+    if (consentMetadata) return consentMetadata
+    const metadata = buildValuationConsentMetadata(user?.id)
+    setConsentMetadata(metadata)
+    return metadata
   }
 
   const ensureClinicalData = (): ClinicalRecordFormData => {
@@ -103,12 +107,13 @@ export function NewPatientPage() {
       return null
     }
 
+    const resolvedConsent = resolveConsentMetadata()
     const now = new Date().toISOString()
     const id = await db.patients.add({
       ...form,
-      phase: withHistory && budgetAccepted ? 'TRATAMIENTO_ACEPTADO' : DEFAULT_PATIENT_PHASE,
+      phase: withHistory ? 'TRATAMIENTO_ACEPTADO' : DEFAULT_PATIENT_PHASE,
       valuationOnly: !withHistory,
-      valuationConsent: consentMetadata ?? undefined,
+      valuationConsent: resolvedConsent ?? undefined,
       createdAt: now,
       updatedAt: now,
     })
@@ -124,11 +129,11 @@ export function NewPatientPage() {
       details: `${form.documentType} ${form.documentNumber} — ${form.firstName} ${form.lastName}`,
     })
 
-    if (consentMetadata) {
+    if (resolvedConsent) {
       await recordValuationConsentAudit({
         user: user ?? null,
         resourceId: patientRouteId,
-        metadata: consentMetadata,
+        metadata: resolvedConsent,
         patientLabel: `${form.documentType} ${form.documentNumber}`,
       })
     }
@@ -145,7 +150,7 @@ export function NewPatientPage() {
         state: {
           draftClinicalData: {
             ...draft,
-            valuationConsent: consentMetadata,
+            valuationConsent: resolvedConsent,
           },
           resetHistoryView: true,
         },
@@ -154,7 +159,7 @@ export function NewPatientPage() {
       const draft = ensureClinicalData()
       const valuationDraft = {
         ...draft,
-        valuationConsent: consentMetadata,
+        valuationConsent: resolvedConsent,
       }
       await savePatientValuationDraft(patientRouteId, valuationDraft)
       showToast('Paciente guardado en Pacientes Valorados.')
@@ -189,35 +194,6 @@ export function NewPatientPage() {
     }
   }
 
-  const handleAcceptTreatment = async () => {
-    const patientError = validatePatientForm(form)
-    if (patientError) {
-      setError(`Complete los datos del paciente: ${patientError}`)
-      return
-    }
-
-    if (!consentAccepted) {
-      setError('Debe aceptar el consentimiento de valoración.')
-      return
-    }
-
-    const data = ensureClinicalData()
-    const validationError = validateAcceptTreatment(data)
-    if (validationError) {
-      setError(validationError)
-      return
-    }
-
-    const metadata = buildValuationConsentMetadata(user?.id)
-    setConsentMetadata(metadata)
-    setClinicalData({ ...data, valuationConsent: metadata })
-    setBudgetAccepted(true)
-    setError('')
-    showToast(
-      'Consentimiento y presupuesto registrados. Puede pasar a la historia completa cuando lo desee.',
-    )
-  }
-
   return (
     <div className="mx-auto max-w-5xl">
       <div className="print:hidden">
@@ -248,22 +224,13 @@ export function NewPatientPage() {
           onConsentAcceptedChange={(accepted) => {
             setConsentAccepted(accepted)
             if (!accepted) {
-              setBudgetAccepted(false)
               setConsentMetadata(null)
             }
           }}
           consentRecordedAt={consentMetadata?.consentimientoTimestamp ?? null}
-          onAcceptTreatment={handleAcceptTreatment}
           disabled={false}
           replaceBudgetWithQuick
         />
-      )}
-
-      {budgetAccepted && consentMetadata && (
-        <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900 print:hidden">
-          Consentimiento y presupuesto aceptados. Puede pasar a la historia completa cuando lo
-          desee.
-        </div>
       )}
 
       <div className="sticky bottom-4 mt-6 flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-lg print:hidden">

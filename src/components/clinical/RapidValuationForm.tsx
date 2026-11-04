@@ -237,7 +237,8 @@ export function RapidValuationForm({
             recordedAt={consentRecordedAt}
           />
 
-          {!disabled && onAcceptTreatment && (
+          {/* Nuevo Paciente (replaceBudgetWithQuick): sin caja «Aceptar Presupuesto». */}
+          {!disabled && !replaceBudgetWithQuick && onAcceptTreatment && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dental-200 bg-dental-50/50 p-4">
               <p className="text-sm text-slate-700">
                 Al aceptar el presupuesto, el paciente pasa a fase de tratamiento y se habilitan
