@@ -699,7 +699,7 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     <section className="presupuesto-rapido rounded-xl border-2 border-teal-300 bg-white shadow-md ring-1 ring-teal-100">
       <div className="space-y-5 p-5 sm:p-6">
         <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3">
-          <h2 className="text-lg font-bold text-teal-950">Presupuesto Rápido</h2>
+          <h2 className="text-lg font-bold text-teal-950">Presupuesto Rápido/ Plan de Tratamiento</h2>
           <p className="mt-1 text-sm text-teal-800">
             Cotice al instante sin diagnósticos previos. Ortodoncia, implantes, restauración /
             estética u otro procedimiento despliegan solo lo seleccionado.
