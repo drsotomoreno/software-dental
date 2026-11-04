@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlignVerticalJustifyCenter, Plus, Printer, Smile, Trash2 } from 'lucide-react'
+import { AlignVerticalJustifyCenter, MessageCircle, Plus, Printer, Smile, Trash2 } from 'lucide-react'
 import { UPPER_LEFT, UPPER_RIGHT, LOWER_LEFT, LOWER_RIGHT } from '@/constants/dental'
-
-const CLINIC_NAME = 'Clínica Dental Dr. Mauricio Soto'
+import { useAuth } from '@/contexts/AuthContext'
+import {
+  openQuickBudgetWhatsApp,
+  printQuickBudget,
+  resolveAccountHolderTitle,
+} from '@/utils/quickBudgetPrint'
 
 const FDI_UPPER = [...UPPER_RIGHT, ...UPPER_LEFT]
 const FDI_LOWER = [...LOWER_RIGHT, ...LOWER_LEFT]
@@ -270,6 +274,7 @@ function ToothChipPicker({
  * Pensado para la vista de Nuevo Paciente (sustituye visualmente la sección 8).
  */
 export function PresupuestoRapido({ patient = null, onItemsChange }) {
+  const { user } = useAuth()
   const onItemsChangeRef = useRef(onItemsChange)
   onItemsChangeRef.current = onItemsChange
 
@@ -292,7 +297,10 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
   )
   const patientName = buildPatientLabel(patient)
   const patientDocument = buildDocumentLabel(patient)
-  const emissionDate = new Date().toLocaleDateString('es-CO')
+  const accountHolderName = resolveAccountHolderTitle(user)
+  const professionalName = user
+    ? [user.firstName, user.lastName].filter(Boolean).join(' ').trim()
+    : ''
   const showOrthoPanel = activeCategory === 'ortodoncia'
   const showImplantPanel = activeCategory === 'implantes'
   const showAestheticPanel = activeCategory === 'estetica'
@@ -530,13 +538,31 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
     setItems((prev) => prev.filter((item) => item.id !== id))
   }
 
+  const buildPrintPayload = () => ({
+    accountHolderName,
+    patientName,
+    patientDocument,
+    patientPhone: patient?.phone || '',
+    patientEmail: patient?.email || '',
+    items: items.map((item) => ({ concepto: item.concepto, valor: Number(item.valor) || 0 })),
+    total,
+    professionalName: professionalName || undefined,
+    professionalDocument: user?.documentNumber || undefined,
+  })
+
   const handlePrint = () => {
-    window.print()
+    if (items.length === 0) return
+    printQuickBudget(buildPrintPayload())
+  }
+
+  const handleWhatsApp = () => {
+    if (items.length === 0) return
+    openQuickBudgetWhatsApp(buildPrintPayload(), patient?.phone)
   }
 
   return (
     <section className="presupuesto-rapido rounded-xl border-2 border-teal-300 bg-white shadow-md ring-1 ring-teal-100">
-      <div className="space-y-5 p-5 print:hidden sm:p-6">
+      <div className="space-y-5 p-5 sm:p-6">
         <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3">
           <h2 className="text-lg font-bold text-teal-950">Presupuesto Rápido</h2>
           <p className="mt-1 text-sm text-teal-800">
@@ -1037,70 +1063,25 @@ export function PresupuestoRapido({ patient = null, onItemsChange }) {
             </span>
             <p className="text-2xl font-bold tabular-nums">{formatCOP(total)}</p>
           </div>
-          <button
-            type="button"
-            onClick={handlePrint}
-            disabled={items.length === 0}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-6 py-3.5 text-base font-semibold text-white shadow-md transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Printer className="h-5 w-5" aria-hidden />
-            Imprimir Presupuesto
-          </button>
-        </div>
-      </div>
-
-      <div className="hidden print:block print:bg-white print:p-0 print:text-black">
-        <header className="mb-8 border-b-2 border-slate-900 pb-4">
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">
-            Presupuesto odontológico
-          </p>
-          <h1 className="mt-1 text-2xl font-extrabold text-slate-900">{CLINIC_NAME}</h1>
-          <p className="mt-1 text-sm text-slate-600">Fecha de emisión: {emissionDate}</p>
-        </header>
-
-        <section className="mb-8">
-          <h2 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
-            Datos del paciente
-          </h2>
-          <p className="text-base font-bold text-slate-900">{patientName}</p>
-          <p className="text-sm text-slate-700">
-            <span className="font-semibold">Identificación:</span> {patientDocument}
-          </p>
-          {patient?.phone ? (
-            <p className="text-sm text-slate-700">
-              <span className="font-semibold">Teléfono:</span> {patient.phone}
-            </p>
-          ) : null}
-          {patient?.email ? (
-            <p className="text-sm text-slate-700">
-              <span className="font-semibold">Email:</span> {patient.email}
-            </p>
-          ) : null}
-        </section>
-
-        <table className="mb-6 w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b-2 border-slate-900 text-left">
-              <th className="py-2 pr-4 font-bold">Concepto</th>
-              <th className="py-2 text-right font-bold">Valor</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.id} className="border-b border-slate-200">
-                <td className="py-2.5 pr-4 text-slate-900">{item.concepto}</td>
-                <td className="py-2.5 text-right tabular-nums text-slate-800">
-                  {formatCOP(item.valor)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="flex justify-end border-t-2 border-slate-900 pt-4">
-          <div className="min-w-[14rem] text-right">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total</p>
-            <p className="text-2xl font-extrabold tabular-nums text-slate-900">{formatCOP(total)}</p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <button
+              type="button"
+              onClick={handleWhatsApp}
+              disabled={items.length === 0}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-5 py-3.5 text-base font-semibold text-white shadow-md transition hover:bg-[#1ebe57] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <MessageCircle className="h-5 w-5" aria-hidden />
+              Enviar por WhatsApp
+            </button>
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={items.length === 0}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-6 py-3.5 text-base font-semibold text-white shadow-md transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Printer className="h-5 w-5" aria-hidden />
+              Imprimir Presupuesto
+            </button>
           </div>
         </div>
       </div>
