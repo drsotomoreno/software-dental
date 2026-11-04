@@ -3,13 +3,18 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { Home } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { RipsStatusWidget } from '@/components/RipsStatusWidget'
-import { APP_INITIALS, APP_SHORT_NAME } from '@/constants/branding'
+import { APP_SHORT_NAME } from '@/constants/branding'
+import {
+  getHomeDisplayTitle,
+  HOME_DISPLAY_TITLE_CHANGED_EVENT,
+} from '@/services/homeDisplayTitleService'
 import { ROLE_LABELS } from '@/utils/permissions'
 
 const DASHBOARD_PATH = '/app'
 
 export function TopNavbar() {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [accountTitle, setAccountTitle] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
   const location = useLocation()
@@ -27,6 +32,18 @@ export function TopNavbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  useEffect(() => {
+    const refresh = () => setAccountTitle(getHomeDisplayTitle(user?.id))
+    refresh()
+    window.addEventListener(HOME_DISPLAY_TITLE_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(HOME_DISPLAY_TITLE_CHANGED_EVENT, refresh)
+  }, [user?.id])
+
+  const brandLabel =
+    accountTitle ||
+    (user ? `Dr(a). ${user.firstName} ${user.lastName}`.trim() : '') ||
+    APP_SHORT_NAME
+
   const displayName = user ? `Dr(a). ${user.firstName} ${user.lastName}` : 'Usuario'
 
   const handleLogout = async () => {
@@ -39,56 +56,51 @@ export function TopNavbar() {
     <header className="sticky top-0 z-50 border-b border-slate-200 bg-white shadow-sm">
       <div className="mx-auto max-w-[100rem] px-2 py-2 sm:px-3 sm:py-2.5">
         <div className="flex items-center justify-between gap-2 sm:gap-3">
-          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <NavLink
               to={DASHBOARD_PATH}
               end
               className={({ isActive }) =>
-                `top-nav-brand flex shrink-0 items-center gap-2 rounded-full border px-2 py-1.5 pr-3 transition sm:pr-3.5 ${
+                `top-nav-brand flex min-w-0 max-w-[14rem] shrink items-center rounded-md border px-2.5 py-1.5 transition sm:max-w-[18rem] sm:px-3 ${
                   isActive
-                    ? 'border-dental-600 bg-dental-600 text-white'
-                    : 'border-orange-200 bg-orange-50 text-orange-900 hover:bg-orange-100'
+                    ? 'border-blue-700 bg-blue-700 text-white'
+                    : 'border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-100'
                 }`
               }
+              title={brandLabel}
             >
-              <div className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold sm:h-9 sm:w-9">
-                {APP_INITIALS}
-              </div>
-              <span className="hidden text-sm font-semibold leading-tight sm:inline">
-                {APP_SHORT_NAME}
+              <span className="truncate text-sm font-black tracking-tight sm:text-base">
+                {brandLabel}
               </span>
             </NavLink>
 
             {!onDashboard && (
               <Link
                 to={DASHBOARD_PATH}
-                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 sm:px-2.5"
+                className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-base font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
                 aria-label="Volver al panel principal"
               >
-                <Home className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                <span className="hidden sm:inline">Inicio</span>
+                <Home className="h-7 w-7 shrink-0" strokeWidth={2.25} aria-hidden />
+                <span>Inicio</span>
               </Link>
             )}
           </div>
 
-          <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2">
+          <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-3">
             <RipsStatusWidget />
 
             <div className="relative shrink-0" ref={menuRef}>
               <button
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
-                className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 sm:gap-2 sm:px-3 sm:py-2"
+                className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 sm:gap-2 sm:px-3 sm:py-2"
                 aria-expanded={menuOpen}
                 aria-haspopup="true"
                 aria-label="Menú de cuenta"
               >
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-orange-100 text-sm font-semibold text-orange-900">
-                  {user?.firstName?.[0] ?? 'U'}
-                </span>
-                <span className="hidden lg:inline">{displayName}</span>
+                <span className="max-w-[9rem] truncate sm:max-w-[12rem]">{displayName}</span>
                 <svg
-                  className={`h-4 w-4 transition ${menuOpen ? 'rotate-180' : ''}`}
+                  className={`h-4 w-4 shrink-0 transition ${menuOpen ? 'rotate-180' : ''}`}
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"

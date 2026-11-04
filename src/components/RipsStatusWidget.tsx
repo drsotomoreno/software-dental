@@ -61,7 +61,7 @@ export function RipsStatusWidget() {
   }
 
   return (
-    <div className="flex max-w-[22rem] flex-wrap items-center justify-end gap-1.5 sm:max-w-none">
+    <div className="flex max-w-[24rem] flex-wrap items-center justify-end gap-4 sm:max-w-none sm:gap-5">
       <button
         type="button"
         onClick={() => setOpen(true)}
