@@ -61,7 +61,7 @@ export function RipsStatusWidget() {
   }
 
   return (
-    <div className="flex max-w-[16rem] flex-col items-end gap-1 sm:max-w-none">
+    <div className="flex max-w-[22rem] flex-wrap items-center justify-end gap-1.5 sm:max-w-none">
       <button
         type="button"
         onClick={() => setOpen(true)}
@@ -78,7 +78,7 @@ export function RipsStatusWidget() {
         type="button"
         onClick={enviar}
         disabled={running}
-        className="rounded-full bg-dental-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-dental-700 disabled:opacity-60"
+        className="rounded-full bg-dental-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-dental-700 disabled:opacity-60"
         aria-label="Cierre de Jornada / Enviar RIPS del Día"
         title="Cierre de Jornada / Enviar RIPS del Día"
       >
