@@ -1,11 +1,39 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlignVerticalJustifyCenter, Plus, Printer, Sparkles, Trash2, Bone } from 'lucide-react'
+import { AlignVerticalJustifyCenter, Plus, Printer, Smile, Trash2 } from 'lucide-react'
 import { UPPER_LEFT, UPPER_RIGHT, LOWER_LEFT, LOWER_RIGHT } from '@/constants/dental'
 
 const CLINIC_NAME = 'Clínica Dental Dr. Mauricio Soto'
 
 const FDI_UPPER = [...UPPER_RIGHT, ...UPPER_LEFT]
 const FDI_LOWER = [...LOWER_RIGHT, ...LOWER_LEFT]
+
+/** Icono de implante dental (tornillo + corona) — Lucide no trae uno específico. */
+function DentalImplantIcon({ className = 'h-5 w-5' }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      {/* Corona */}
+      <path d="M8.5 3.5c0-1 1.2-1.8 3.5-1.8s3.5.8 3.5 1.8v1.7H8.5V3.5Z" />
+      <path d="M7.5 5.2h9v1.6c0 .7-.6 1.2-1.2 1.2H8.7c-.6 0-1.2-.5-1.2-1.2V5.2Z" />
+      {/* Pilar */}
+      <path d="M10.2 8h3.6v2.2h-3.6V8Z" />
+      {/* Cuerpo del implante con rosca */}
+      <path d="M9.4 10.2h5.2l-.7 9.2c0 .9-1.2 1.6-1.9 1.6s-1.9-.7-1.9-1.6l-.7-9.2Z" />
+      <path d="M9.6 12.2h4.8" />
+      <path d="M9.7 14.2h4.6" />
+      <path d="M9.9 16.2h4.2" />
+      <path d="M10.1 18.2h3.8" />
+    </svg>
+  )
+}
 
 const QUICK_CATEGORIES = [
   {
@@ -19,7 +47,7 @@ const QUICK_CATEGORIES = [
     id: 'implantes',
     label: 'Implantes',
     concepto: 'Implantes',
-    icon: Bone,
+    icon: DentalImplantIcon,
     accent:
       'border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 focus-visible:ring-emerald-400',
   },
@@ -27,7 +55,7 @@ const QUICK_CATEGORIES = [
     id: 'estetica',
     label: 'Restauración / Estética',
     concepto: 'Restauración / Estética',
-    icon: Sparkles,
+    icon: Smile,
     accent:
       'border-violet-300 bg-violet-50 text-violet-900 hover:bg-violet-100 focus-visible:ring-violet-400',
   },
