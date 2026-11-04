@@ -86,34 +86,34 @@ export function AppBreadcrumbs() {
 
   if (!trail) return null
 
+  const crumbPillClass =
+    'inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-blue-50 px-3 py-1 text-[1.125rem] font-medium leading-snug text-blue-700 transition-colors duration-200 ease-in-out hover:bg-blue-100 hover:text-blue-800'
+
   return (
     <nav aria-label="Migas de pan" className="mb-4 print:hidden">
-      <ol className="flex flex-wrap items-center gap-1.5 text-[13px] text-slate-500">
+      <ol className="flex flex-wrap items-center gap-2">
         <li className="inline-flex items-center">
-          <Link
-            to={DASHBOARD_PATH}
-            className="inline-flex items-center gap-1 rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
-          >
-            <Home className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden />
+          <Link to={DASHBOARD_PATH} className={crumbPillClass}>
+            <Home className="h-5 w-5 shrink-0" strokeWidth={2.25} aria-hidden />
             <span>Inicio</span>
           </Link>
         </li>
 
         {trail.map((crumb) => (
           <Fragment key={`${crumb.label}-${crumb.to ?? 'current'}`}>
-            <li aria-hidden className="select-none text-slate-300">
+            <li aria-hidden className="select-none text-sm text-gray-300">
               /
             </li>
             <li className="inline-flex min-w-0 items-center">
               {crumb.to ? (
-                <Link
-                  to={crumb.to}
-                  className="truncate rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
-                >
+                <Link to={crumb.to} className={crumbPillClass}>
                   {crumb.label}
                 </Link>
               ) : (
-                <span className="truncate font-medium text-slate-700" aria-current="page">
+                <span
+                  className="truncate px-1 text-[1.125rem] font-semibold leading-snug text-slate-800"
+                  aria-current="page"
+                >
                   {crumb.label}
                 </span>
               )}
