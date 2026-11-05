@@ -61,34 +61,34 @@ export function RipsStatusWidget() {
   }
 
   return (
-    <div className="flex flex-col items-end gap-0.5">
-      <p className="text-[11px] font-semibold leading-none text-slate-600 sm:text-xs">
-        Control de RIPS
-      </p>
-      <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="flex flex-wrap items-center justify-end gap-1 rounded-xl border border-slate-200 bg-slate-50 px-1.5 py-1 text-left hover:bg-white"
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-label={`RIPS: ${summary.listos} listos para enviar, ${summary.sincronizadosHoy} sincronizados hoy, ${summary.conErrores} con errores`}
-        >
+    <div className="flex items-center gap-4">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex h-10 items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-4 text-left hover:bg-white"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`RIPS: ${summary.listos} listos para enviar, ${summary.sincronizadosHoy} sincronizados hoy, ${summary.conErrores} con errores`}
+      >
+        <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-bold tracking-wide text-white">
+          RIPS
+        </span>
+        <span className="flex items-center gap-2">
           <Pill count={summary.listos} label="listos" className="bg-amber-100 text-amber-950" />
           <Pill count={summary.sincronizadosHoy} label="hoy" className="bg-emerald-100 text-emerald-900" />
           <Pill count={summary.conErrores} label="errores" className="bg-red-100 text-red-900" />
-        </button>
-        <button
-          type="button"
-          onClick={enviar}
-          disabled={running}
-          className="rounded-full bg-dental-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-dental-700 disabled:opacity-60"
-          aria-label="Cierre de Jornada / Enviar RIPS del Día"
-          title="Cierre de Jornada / Enviar RIPS del Día"
-        >
-          {running ? 'Enviando RIPS…' : 'Cierre de Jornada'}
-        </button>
-      </div>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={enviar}
+        disabled={running}
+        className="inline-flex h-10 items-center rounded-full bg-dental-600 px-4 text-sm font-semibold text-white hover:bg-dental-700 disabled:opacity-60"
+        aria-label="Cierre de Jornada / Enviar RIPS del Día"
+        title="Cierre de Jornada / Enviar RIPS del Día"
+      >
+        {running ? 'Enviando RIPS…' : 'Cierre de Jornada'}
+      </button>
 
       {open && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/40 p-4 sm:items-center">
