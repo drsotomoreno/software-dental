@@ -61,29 +61,34 @@ export function RipsStatusWidget() {
   }
 
   return (
-    <div className="flex max-w-[24rem] flex-wrap items-center justify-end gap-4 sm:max-w-none sm:gap-5">
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="flex flex-wrap items-center justify-end gap-1 rounded-xl border border-slate-200 bg-slate-50 px-1.5 py-1 text-left hover:bg-white"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-label={`RIPS: ${summary.listos} listos para enviar, ${summary.sincronizadosHoy} sincronizados hoy, ${summary.conErrores} con errores`}
-      >
-        <Pill count={summary.listos} label="listos" className="bg-amber-100 text-amber-950" />
-        <Pill count={summary.sincronizadosHoy} label="hoy" className="bg-emerald-100 text-emerald-900" />
-        <Pill count={summary.conErrores} label="errores" className="bg-red-100 text-red-900" />
-      </button>
-      <button
-        type="button"
-        onClick={enviar}
-        disabled={running}
-        className="rounded-full bg-dental-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-dental-700 disabled:opacity-60"
-        aria-label="Cierre de Jornada / Enviar RIPS del Día"
-        title="Cierre de Jornada / Enviar RIPS del Día"
-      >
-        {running ? 'Enviando RIPS…' : 'Cierre de Jornada'}
-      </button>
+    <div className="flex flex-col items-end gap-0.5">
+      <p className="text-[11px] font-semibold leading-none text-slate-600 sm:text-xs">
+        Control de RIPS
+      </p>
+      <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex flex-wrap items-center justify-end gap-1 rounded-xl border border-slate-200 bg-slate-50 px-1.5 py-1 text-left hover:bg-white"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={`RIPS: ${summary.listos} listos para enviar, ${summary.sincronizadosHoy} sincronizados hoy, ${summary.conErrores} con errores`}
+        >
+          <Pill count={summary.listos} label="listos" className="bg-amber-100 text-amber-950" />
+          <Pill count={summary.sincronizadosHoy} label="hoy" className="bg-emerald-100 text-emerald-900" />
+          <Pill count={summary.conErrores} label="errores" className="bg-red-100 text-red-900" />
+        </button>
+        <button
+          type="button"
+          onClick={enviar}
+          disabled={running}
+          className="rounded-full bg-dental-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-dental-700 disabled:opacity-60"
+          aria-label="Cierre de Jornada / Enviar RIPS del Día"
+          title="Cierre de Jornada / Enviar RIPS del Día"
+        >
+          {running ? 'Enviando RIPS…' : 'Cierre de Jornada'}
+        </button>
+      </div>
 
       {open && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/40 p-4 sm:items-center">
@@ -101,8 +106,11 @@ export function RipsStatusWidget() {
           >
             <div className="border-b border-slate-200 px-4 py-3">
               <h2 id={titleId} className="text-base font-semibold text-slate-900">
-                Cierre de Jornada / Enviar RIPS del Día
+                Control de RIPS
               </h2>
+              <p className="mt-0.5 text-xs font-medium text-slate-500">
+                Cierre de Jornada / Enviar RIPS del Día
+              </p>
               <p className="mt-1 text-sm text-slate-600">
                 {summary.listos} listos para enviar · {summary.sincronizadosHoy} sincronizados hoy ·{' '}
                 {summary.conErrores} con errores
