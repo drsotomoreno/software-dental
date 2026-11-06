@@ -280,6 +280,19 @@ function causaConCodigo(error) {
   return error
 }
 
+/** El envoltorio MUV_NETWORK oculta el Error de Node. Esta función baja por `cause` hasta el original. */
+function errorNativoDeTransporte(error) {
+  let actual = error
+  const vistos = new Set()
+  let nativo = error
+  while (actual && typeof actual === 'object' && !vistos.has(actual)) {
+    vistos.add(actual)
+    if (actual.name !== 'MuvInfrastructureError') nativo = actual
+    actual = actual.cause
+  }
+  return nativo
+}
+
 /**
  * Node dice "fetch failed" cuando el socket no llega a responder.
  * La pantalla muestra la causa (DNS, TLS, rechazo) y no ese texto ni la URL.
@@ -684,13 +697,20 @@ export class SisproMuvService {
       }
       wrapped.canal = canal
       wrapped.durationMs = durationMs
-      console.error('[sispro-muv] infraestructura', {
-        canal,
-        code: wrapped.code,
-        httpStatus: wrapped.httpStatus ?? null,
-        durationMs,
-        message: wrapped.message,
-      })
+      const nativo = errorNativoDeTransporte(error)
+      console.error(
+        '[sispro-muv] infraestructura',
+        {
+          canal,
+          code: wrapped.code,
+          httpStatus: wrapped.httpStatus ?? null,
+          durationMs,
+          message: wrapped.message,
+          nativeCode: nativo?.code ?? null,
+          nativeMessage: nativo?.message ?? null,
+        },
+        nativo,
+      )
       throw wrapped
     }
   }
