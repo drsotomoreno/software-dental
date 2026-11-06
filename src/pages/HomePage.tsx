@@ -7,6 +7,7 @@ import {
   ClipboardList,
   FileText,
   HardDrive,
+  LayoutDashboard,
   Receipt,
   ShieldCheck,
   Stethoscope,
@@ -18,6 +19,7 @@ import { APP_NAME } from '@/constants/branding'
 import { EditableHomeTitle } from '@/components/home/EditableHomeTitle'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Permission } from '@/utils/permissions'
+import { sessionIsSuperAdmin } from '@/utils/superadminAccess'
 
 type DashAccent = 'patients' | 'clinical' | 'billing' | 'admin'
 
@@ -197,6 +199,7 @@ function DashActionButton({ action }: { action: DashAction }) {
 export function HomePage() {
   const { can, user, hasRole } = useAuth()
   const isSuperAdmin = hasRole('superadmin')
+  const showControlPanel = sessionIsSuperAdmin(user)
 
   const visibleCards = DASHBOARD_CARDS.map((card) => ({
     ...card,
@@ -214,6 +217,35 @@ export function HomePage() {
         </p>
         <EditableHomeTitle userId={user?.id} />
       </div>
+
+      {showControlPanel && (
+        <section
+          className="dash-card rounded-2xl bg-white p-5"
+          data-accent="platform"
+          aria-labelledby="superadmin-panel-title"
+        >
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+                Solo superadministrador
+              </p>
+              <h2 id="superadmin-panel-title" className="dash-card-title mt-1 text-base font-semibold">
+                Panel de Control mihistoriadental
+              </h2>
+              <p className="mt-1 max-w-2xl text-sm text-slate-500">
+                Clínicas, suscripciones, monitoreo DIAN/RIPS e infraestructura de la plataforma.
+              </p>
+            </div>
+            <Link
+              to="/superadmin"
+              className="dash-action-primary inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white"
+            >
+              <LayoutDashboard className="h-4 w-4" aria-hidden />
+              Abrir panel
+            </Link>
+          </div>
+        </section>
+      )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {visibleCards.map((card) => (

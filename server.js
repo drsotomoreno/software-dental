@@ -16,6 +16,7 @@ import invoicesRoutes from './server/routes/invoices.routes.js'
 import authRoutes from './server/routes/auth.routes.js'
 import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
 import kioskRoutes from './server/routes/kiosk.routes.js'
+import superadminRoutes from './server/routes/superadmin.routes.js'
 import { attachKioskSocket } from './server/socket/kioskSocket.js'
 import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
@@ -66,6 +67,7 @@ app.use('/api/rips', ripsRoutes)
 app.use('/api/invoices', invoicesRoutes)
 app.use('/api/sync', clinicalSyncRoutes)
 app.use('/api/v1/kiosk', kioskRoutes)
+app.use('/api/superadmin', superadminRoutes)
 app.use('/api', authRoutes)
 
 const distDir = path.join(__dirname, 'dist')

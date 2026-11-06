@@ -300,6 +300,13 @@
   --dash-accent-icon-bg: rgba(99, 102, 241, 0.1);
 }
 
+.dash-card[data-accent='platform'] {
+  --dash-accent: #0369a1;
+  --dash-accent-strong: #0f172a;
+  --dash-accent-soft: rgba(3, 105, 161, 0.1);
+  --dash-accent-icon-bg: rgba(3, 105, 161, 0.1);
+}
+
 .dash-card-title {
   color: var(--dash-accent-strong);
 }

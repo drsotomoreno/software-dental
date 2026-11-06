@@ -3,7 +3,9 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { MainLayout } from '@/components/layout'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
+import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin'
 import { PermissionRoute } from '@/components/auth/PermissionRoute'
+import { SuperAdminLayout } from '@/components/superadmin/SuperAdminLayout'
 import {
   HomePage,
   LandingPage,
@@ -30,6 +32,11 @@ import {
   WelcomeTrialPage,
   AdminSubscriptionUsersPage,
   RegisteredUsersAdminPage,
+  SuperAdminDashboardPage,
+  SuperAdminClinicsPage,
+  SuperAdminSubscriptionsPage,
+  SuperAdminMonitoringPage,
+  SuperAdminSettingsPage,
 } from '@/pages'
 import { seedDemoData } from '@/db/database'
 import { hydrateBillingSettingsFromIndexedDb } from '@/services/billingModalityService'
@@ -63,6 +70,15 @@ export default function ClinicalApp() {
         <Route element={<ProtectedRoute />}>
           <Route path="welcome-trial" element={<WelcomeTrialPage />} />
           <Route path="subscription-plans" element={<WelcomeTrialPage />} />
+          <Route element={<RequireSuperAdmin />}>
+            <Route element={<SuperAdminLayout />}>
+              <Route path="superadmin" element={<SuperAdminDashboardPage />} />
+              <Route path="superadmin/clinicas" element={<SuperAdminClinicsPage />} />
+              <Route path="superadmin/suscripciones" element={<SuperAdminSubscriptionsPage />} />
+              <Route path="superadmin/monitoreo" element={<SuperAdminMonitoringPage />} />
+              <Route path="superadmin/configuracion" element={<SuperAdminSettingsPage />} />
+            </Route>
+          </Route>
           <Route element={<MainLayout />}>
             <Route path="app" element={<HomePage />} />
             <Route element={<PermissionRoute permission="patients.write" />}>

@@ -74,6 +74,11 @@ export const config = {
     password: 'Dragon1976%',
     nombre: process.env.SUPERADMIN_NAME ?? 'Dr. Mauricio Soto',
   },
+  /** Secreto HS256 para JWT de sesión de la app ({ id, clinica_id, is_superadmin, rol }). */
+  jwtSecret:
+    process.env.JWT_SECRET ||
+    process.env.SESSION_JWT_SECRET ||
+    'dev-session-jwt-secret-change-me',
   /** Secreto HS256 para JWT de modo kiosco (`role: "kiosk"`). */
   kioskJwtSecret:
     process.env.KIOSK_JWT_SECRET ||
