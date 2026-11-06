@@ -81,6 +81,20 @@ export function pingMinsaludEndpoint() {
   return request<MinsaludPingResult>('/ping/minsalud', { method: 'POST', body: '{}' })
 }
 
+export function forceGlobalOfflineSync() {
+  return request<{ ok: true; queued: number; queuedAt: string; message: string }>('/sync', {
+    method: 'POST',
+    body: '{}',
+  })
+}
+
+export function verifyDianCredentials() {
+  return request<{ ok: boolean; configured: boolean; softwareId: string; message: string }>(
+    '/dian/credentials',
+    { method: 'POST', body: '{}' },
+  )
+}
+
 export function fetchSubscriptions() {
   return request<SubscriptionFeed>('/subscriptions')
 }

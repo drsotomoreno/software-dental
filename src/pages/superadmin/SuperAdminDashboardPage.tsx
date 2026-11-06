@@ -1,9 +1,17 @@
+import { useState } from 'react'
 import { Building2, CircleDollarSign, Users } from 'lucide-react'
 import { InfraStatusCards } from '@/components/superadmin/InfraStatusCards'
 import { MetricCard } from '@/components/superadmin/MetricCard'
 import { ServiceStatusCard } from '@/components/superadmin/ServiceStatusCard'
 import { useSuperadminResource } from '@/hooks/useSuperadminResource'
-import { fetchDashboardMetrics, fetchInfrastructure } from '@/services/superadminApi'
+import {
+  fetchDashboardMetrics,
+  fetchInfrastructure,
+  forceGlobalOfflineSync,
+  pingMinsaludEndpoint,
+  verifyDianCredentials,
+} from '@/services/superadminApi'
+import type { ServiceStatus } from '@/types/superadmin'
 
 const cop = new Intl.NumberFormat('es-CO', {
   style: 'currency',
@@ -13,16 +21,116 @@ const cop = new Intl.NumberFormat('es-CO', {
 
 const integer = new Intl.NumberFormat('es-CO')
 
+const outlineButtonClass =
+  'inline-flex items-center justify-center rounded-lg border border-sky-700 px-3 py-1.5 text-xs font-semibold text-sky-800 hover:bg-sky-50 disabled:opacity-60'
+
 export function SuperAdminDashboardPage() {
   const metrics = useSuperadminResource(fetchDashboardMetrics)
   const infra = useSuperadminResource(fetchInfrastructure)
+  const [syncing, setSyncing] = useState(false)
+  const [syncNotice, setSyncNotice] = useState('')
+  const [syncError, setSyncError] = useState('')
+  const [pinging, setPinging] = useState(false)
+  const [pingNotice, setPingNotice] = useState('')
+  const [checkingDian, setCheckingDian] = useState(false)
+  const [dianNotice, setDianNotice] = useState('')
+
+  async function handleGlobalSync() {
+    setSyncing(true)
+    setSyncNotice('')
+    setSyncError('')
+    try {
+      const result = await forceGlobalOfflineSync()
+      setSyncNotice(result.message)
+    } catch (cause) {
+      setSyncError(cause instanceof Error ? cause.message : 'No se pudo encolar la sincronización.')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  async function handlePing() {
+    setPinging(true)
+    setPingNotice('')
+    try {
+      const result = await pingMinsaludEndpoint()
+      setPingNotice(result.event.message)
+    } catch (cause) {
+      setPingNotice(cause instanceof Error ? cause.message : 'El ping no se completó.')
+    } finally {
+      setPinging(false)
+    }
+  }
+
+  async function handleDianCheck() {
+    setCheckingDian(true)
+    setDianNotice('')
+    try {
+      const result = await verifyDianCredentials()
+      setDianNotice(result.message)
+    } catch (cause) {
+      setDianNotice(cause instanceof Error ? cause.message : 'No se pudieron verificar las credenciales.')
+    } finally {
+      setCheckingDian(false)
+    }
+  }
+
+  function serviceAction(service: ServiceStatus) {
+    if (service.id === 'muv') {
+      return (
+        <div className="space-y-2">
+          <button type="button" className={outlineButtonClass} disabled={pinging} onClick={() => void handlePing()}>
+            {pinging ? 'Haciendo ping...' : 'Hacer Ping a MinSalud'}
+          </button>
+          {pingNotice ? <p className="text-xs leading-relaxed text-slate-500">{pingNotice}</p> : null}
+        </div>
+      )
+    }
+    if (service.id === 'dian') {
+      return (
+        <div className="space-y-2">
+          <button
+            type="button"
+            className={outlineButtonClass}
+            disabled={checkingDian}
+            onClick={() => void handleDianCheck()}
+          >
+            {checkingDian ? 'Verificando...' : 'Verificar Credenciales DIAN'}
+          </button>
+          {dianNotice ? <p className="text-xs leading-relaxed text-slate-500">{dianNotice}</p> : null}
+        </div>
+      )
+    }
+    return undefined
+  }
 
   return (
     <div className="space-y-8">
-      <p className="max-w-3xl text-sm text-slate-600">
-        Gestión global de la plataforma. Las clínicas y los pacientes se leen de PostgreSQL cuando
-        RDS responde. El ingreso recurrente sigue en demostración hasta la tabla de suscripciones.
-      </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-slate-900">Dashboard</h1>
+          <p className="mt-1 max-w-3xl text-sm text-slate-600">
+            Gestión global de la plataforma. Las clínicas y los pacientes se leen de PostgreSQL cuando
+            RDS responde. El ingreso recurrente sigue en demostración hasta la tabla de suscripciones.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleGlobalSync()}
+          disabled={syncing}
+          className="inline-flex shrink-0 items-center justify-center rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
+        >
+          {syncing ? 'Sincronizando...' : 'Forzar Sincronización Global'}
+        </button>
+      </div>
+      {syncNotice ? (
+        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {syncNotice}
+        </p>
+      ) : null}
+      {syncError ? (
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{syncError}</p>
+      ) : null}
 
       {metrics.error && (
         <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -72,7 +180,7 @@ export function SuperAdminDashboardPage() {
             </h2>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {metrics.data.services.map((service) => (
-                <ServiceStatusCard key={service.id} service={service} />
+                <ServiceStatusCard key={service.id} service={service} action={serviceAction(service)} />
               ))}
             </div>
           </section>

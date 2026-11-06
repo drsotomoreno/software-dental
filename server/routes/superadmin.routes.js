@@ -5,6 +5,7 @@
 import { Router } from 'express'
 import { soloSuperAdmin, verificarToken } from '../middleware/tenantAuth.middleware.js'
 import {
+  forceGlobalOfflineSync,
   forceOfflineSync,
   getDashboardMetrics,
   getInfrastructure,
@@ -14,6 +15,7 @@ import {
   listTenants,
   pingMinsaludEndpoint,
   suspendTenant,
+  verifyDianCredentials,
 } from '../services/superadminDashboard.js'
 
 const router = Router()
@@ -98,6 +100,20 @@ router.get('/logs', async (_req, res, next) => {
   } catch (error) {
     next(error)
   }
+})
+
+router.post('/sync', async (req, res, next) => {
+  try {
+    const result = await forceGlobalOfflineSync()
+    console.info(`[superadmin] sync global clínicas=${result.queued} actor=${req.user?.id ?? 'desconocido'}`)
+    res.json({ ok: true, ...result })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/dian/credentials', (_req, res) => {
+  res.json({ ok: true, ...verifyDianCredentials() })
 })
 
 router.post('/ping/minsalud', async (_req, res, next) => {

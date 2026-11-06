@@ -265,6 +265,19 @@ export async function suspendTenant(id, status = 'suspendida', deps = {}) {
   return applyOverride(current)
 }
 
+export async function forceGlobalOfflineSync(deps = {}) {
+  const snapshot = await listTenants(deps)
+  const queuedAt = new Date().toISOString()
+  for (const tenant of snapshot.tenants) {
+    overrides.set(tenant.id, { ...(overrides.get(tenant.id) || {}), lastSyncAt: queuedAt })
+  }
+  return {
+    queued: snapshot.tenants.length,
+    queuedAt,
+    message: `Se registró la sincronización offline para ${snapshot.tenants.length} clínicas. Cada consultorio la aplicará en su próximo ciclo.`,
+  }
+}
+
 export async function forceOfflineSync(id, deps = {}) {
   const current = await findTenant(id, deps)
   if (!current) return null
@@ -434,12 +447,22 @@ export async function listIntegrationLogs(deps = {}) {
   return { source: 'fixture', events: fixtureLogs() }
 }
 
+function hostFevrips(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.includes('fevrips')
+  } catch {
+    return false
+  }
+}
+
 function muvPingUrl() {
   const configured = String(config.minsalud.apiBaseUrl || '').replace(/\/$/, '')
-  if (configured) return `${configured}/api/Auth/LoginSISPRO`
-  const base = config.minsalud.sandbox
-    ? 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
-    : 'https://fevrips.sispro.gov.co/fevrips-api'
+  const base = hostFevrips(configured)
+    ? configured
+    : config.minsalud.sandbox
+      ? 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
+      : 'https://fevrips.sispro.gov.co/fevrips-api'
   return `${base}/api/Auth/LoginSISPRO`
 }
 
@@ -527,6 +550,18 @@ export function listSubscriptions() {
       status: tenant.status,
       renewsAt: tenant.status === 'activa' ? addDays(12 + index * 5) : null,
     })),
+  }
+}
+
+export function verifyDianCredentials() {
+  const settings = getSystemSettings()
+  return {
+    ok: settings.dianConfigured,
+    configured: settings.dianConfigured,
+    softwareId: settings.dianSoftwareId,
+    message: settings.dianConfigured
+      ? `La clave técnica DIAN está presente para el software ${settings.dianSoftwareId}.`
+      : 'La clave técnica DIAN no está configurada en este entorno.',
   }
 }
 
