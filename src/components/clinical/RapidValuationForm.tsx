@@ -8,6 +8,7 @@ import { VitalAlertsSection } from './VitalAlertsSection'
 import { Cie10DiagnosisSearchSection } from './Cie10DiagnosisSearchSection'
 import { PatientRegistrationSection } from './PatientRegistrationSection'
 import { ConsentimientoValoracionSection } from './ConsentimientoValoracionSection'
+import { applyTabletAnamnesis } from '@/components/kiosk/FillIdentificationOnTablet'
 import { TreatmentPlanForm } from './TreatmentPlanForm'
 import { BudgetForm } from './BudgetForm'
 import { PresupuestoRapido } from './PresupuestoRapido'
@@ -135,6 +136,9 @@ export function RapidValuationForm({
               sectionTitle="Datos de Identificación del Paciente"
               patientRecord={patient}
               canRequestExternalHistory={!disabled}
+              onTabletAnamnesis={(answers) => {
+                update({ anamnesis: applyTabletAnamnesis(form.anamnesis, answers) })
+              }}
             />
           </div>
         )}
@@ -235,6 +239,29 @@ export function RapidValuationForm({
             onAcceptedChange={onConsentAcceptedChange}
             disabled={disabled || Boolean(consentRecordedAt)}
             recordedAt={consentRecordedAt}
+            tabletPatient={
+              patientData
+                ? {
+                    id: patient?.id != null ? String(patient.id) : undefined,
+                    firstName: patientData.firstName,
+                    lastName: patientData.lastName,
+                    documentType: patientData.documentType,
+                    documentNumber: patientData.documentNumber,
+                    phone: patientData.phone,
+                    birthDate: patientData.birthDate,
+                  }
+                : patient
+                  ? {
+                      id: patient.id != null ? String(patient.id) : undefined,
+                      firstName: patient.firstName,
+                      lastName: patient.lastName,
+                      documentType: patient.documentType,
+                      documentNumber: patient.documentNumber,
+                      phone: patient.phone,
+                      birthDate: patient.birthDate,
+                    }
+                  : null
+            }
           />
 
           {/* Nuevo Paciente (replaceBudgetWithQuick): sin caja «Aceptar Presupuesto». */}

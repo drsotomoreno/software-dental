@@ -3,6 +3,7 @@
  * Usa el token de suscripción; no pertenece al chunk del kiosco.
  */
 import { io, type Socket } from 'socket.io-client'
+import { resolveSocketOrigin } from '@/kiosk/socketOrigin'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import type {
   KioskActionType,
@@ -22,7 +23,7 @@ export function getClinicKioskSocket(): Socket | null {
     return null
   }
 
-  if (clinicalSocket?.connected && connectingToken === token) {
+  if (clinicalSocket && connectingToken === token) {
     return clinicalSocket
   }
 
@@ -32,7 +33,8 @@ export function getClinicKioskSocket(): Socket | null {
   }
 
   connectingToken = token
-  clinicalSocket = io({
+  const origin = resolveSocketOrigin()
+  clinicalSocket = io(origin, {
     path: '/socket.io',
     transports: ['websocket', 'polling'],
     auth: { token, mode: 'clinical' },

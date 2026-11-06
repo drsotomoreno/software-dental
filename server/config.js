@@ -5,10 +5,19 @@ import { dirname, join } from 'node:path'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const port = Number(process.env.PORT) || 3000
 
-const LOCAL_DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/software_dental'
+const LOCAL_DATABASE_URL = 'postgresql://postgres:postgres@localhost:1234/software_dental'
 
 function resolveDatabaseUrl(fromEnv = process.env.DATABASE_URL) {
   const trimmed = typeof fromEnv === 'string' ? fromEnv.trim() : ''
+  const production = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true'
+  if (production) {
+    if (!trimmed) {
+      console.error(
+        '[config] NODE_ENV=production exige DATABASE_URL con el endpoint de AWS RDS. No se usa el Postgres local.',
+      )
+    }
+    return trimmed
+  }
   return trimmed || LOCAL_DATABASE_URL
 }
 

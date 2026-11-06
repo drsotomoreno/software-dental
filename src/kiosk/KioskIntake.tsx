@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { useParams } from 'react-router-dom'
 import SignaturePad, { type SignaturePadHandle } from './SignaturePad'
@@ -15,12 +15,17 @@ const DOCUMENT_TYPES = [
 type YesNo = 'si' | 'no'
 type DocumentType = (typeof DOCUMENT_TYPES)[number]['value']
 
-interface KioskIntakeFormValues {
+export interface KioskIntakeFormValues {
   firstName: string
   lastName: string
   documentType: DocumentType
   documentNumber: string
+  birthDate: string
   phone: string
+  email: string
+  patientIsMinor: YesNo | null
+  guardianName: string
+  guardianDocument: string
   allergicToMedication: YesNo | null
   hasHypertension: YesNo | null
   hasDiabetes: YesNo | null
@@ -83,7 +88,12 @@ export interface KioskIntakeSubmitPayload {
     lastName: string
     documentType: DocumentType
     documentNumber: string
+    birthDate: string
     phone: string
+    email: string
+    esMenorDeEdad: boolean
+    guardianName: string
+    guardianDocument: string
   }
   anamnesis: {
     allergicToMedication: boolean
@@ -106,6 +116,10 @@ export interface KioskIntakeProps {
   /** ms antes de onSuccessComplete. 0 = no auto-reset. */
   successHoldMs?: number
   submitLabel?: string
+  /** Borrador en memoria del padre: sobrevive a un remonte si el socket se cae. */
+  onDraftChange?: (values: KioskIntakeFormValues) => void
+  signatureDataUrl?: string | null
+  onSignatureSnapshot?: (dataUrl: string | null) => void
 }
 
 /**
@@ -118,6 +132,9 @@ export default function KioskIntake({
   onSuccessComplete,
   successHoldMs = 0,
   submitLabel = 'Firmar y Enviar',
+  onDraftChange,
+  signatureDataUrl = null,
+  onSignatureSnapshot,
 }: KioskIntakeProps = {}) {
   const { clinicId, token } = useParams<{ clinicId: string; token: string }>()
   const signatureRef = useRef<SignaturePadHandle>(null)
@@ -130,13 +147,19 @@ export default function KioskIntake({
     control,
     handleSubmit,
     formState: { errors, isSubmitting },
+    watch,
   } = useForm<KioskIntakeFormValues>({
     defaultValues: {
       firstName: initialValues?.firstName ?? '',
       lastName: initialValues?.lastName ?? '',
       documentType: initialValues?.documentType ?? 'CC',
       documentNumber: initialValues?.documentNumber ?? '',
+      birthDate: initialValues?.birthDate ?? '',
       phone: initialValues?.phone ?? '',
+      email: initialValues?.email ?? '',
+      patientIsMinor: initialValues?.patientIsMinor ?? null,
+      guardianName: initialValues?.guardianName ?? '',
+      guardianDocument: initialValues?.guardianDocument ?? '',
       allergicToMedication: initialValues?.allergicToMedication ?? null,
       hasHypertension: initialValues?.hasHypertension ?? null,
       hasDiabetes: initialValues?.hasDiabetes ?? null,
@@ -144,9 +167,31 @@ export default function KioskIntake({
     },
   })
 
+  useEffect(() => {
+    if (!onDraftChange) return
+    const subscription = watch((values) => {
+      onDraftChange(values as KioskIntakeFormValues)
+    })
+    return () => subscription.unsubscribe()
+  }, [onDraftChange, watch])
+
+  const documentType = watch('documentType')
+  const patientIsMinor = watch('patientIsMinor')
+  const minorByDocument = documentType === 'TI' || documentType === 'RC'
+  const signerIsGuardian = minorByDocument || patientIsMinor === 'si'
+
   const onSubmit = handleSubmit(async (values) => {
     setSubmitError(null)
     setSignatureError(null)
+
+    const minorByDocument = values.documentType === 'TI' || values.documentType === 'RC'
+    const esMenorDeEdad = minorByDocument || values.patientIsMinor === 'si'
+    if (esMenorDeEdad && (!values.guardianName.trim() || !values.guardianDocument.trim())) {
+      setSubmitError(
+        'El paciente es menor de 18 años. Escriba el nombre y la cédula del acudiente antes de firmar.',
+      )
+      return
+    }
 
     const signatureBase64 = signatureRef.current?.toDataURL() ?? null
     if (!signatureBase64) {
@@ -165,7 +210,12 @@ export default function KioskIntake({
         lastName: values.lastName.trim(),
         documentType: values.documentType,
         documentNumber: values.documentNumber.trim(),
+        birthDate: values.birthDate,
         phone: values.phone.trim(),
+        email: values.email.trim(),
+        esMenorDeEdad,
+        guardianName: esMenorDeEdad ? values.guardianName.trim() : '',
+        guardianDocument: esMenorDeEdad ? values.guardianDocument.trim() : '',
       },
       anamnesis: {
         allergicToMedication: values.allergicToMedication === 'si',
@@ -240,7 +290,7 @@ export default function KioskIntake({
         className="mx-auto flex min-h-[100dvh] w-full max-w-3xl flex-col px-5 py-8 sm:px-8"
       >
         <h1 className="text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
-          Sus datos
+          Datos de identificación
         </h1>
         <p className="mt-2 text-lg text-slate-600">
           Complete la información y firme al final. Campos marcados con * son obligatorios.
@@ -325,6 +375,21 @@ export default function KioskIntake({
             </div>
 
             <div>
+              <label htmlFor="birthDate" className={labelClass}>
+                Fecha de nacimiento *
+              </label>
+              <input
+                id="birthDate"
+                type="date"
+                className={inputClass}
+                {...register('birthDate', { required: 'Ingrese su fecha de nacimiento' })}
+              />
+              {errors.birthDate ? (
+                <p className="mt-2 text-base text-red-600">{errors.birthDate.message}</p>
+              ) : null}
+            </div>
+
+            <div>
               <label htmlFor="phone" className={labelClass}>
                 Teléfono *
               </label>
@@ -341,6 +406,28 @@ export default function KioskIntake({
               />
               {errors.phone ? (
                 <p className="mt-2 text-base text-red-600">{errors.phone.message}</p>
+              ) : null}
+            </div>
+
+            <div>
+              <label htmlFor="email" className={labelClass}>
+                Correo
+              </label>
+              <input
+                id="email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                className={inputClass}
+                {...register('email', {
+                  validate: (value) =>
+                    !value.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+                      ? true
+                      : 'Correo inválido',
+                })}
+              />
+              {errors.email ? (
+                <p className="mt-2 text-base text-red-600">{errors.email.message}</p>
               ) : null}
             </div>
           </section>
@@ -407,14 +494,88 @@ export default function KioskIntake({
             />
           </section>
 
+          <section className={sectionClass} aria-labelledby="kiosk-acudiente">
+            <h2 id="kiosk-acudiente" className="text-2xl font-semibold text-slate-900">
+              ¿Quién firma?
+            </h2>
+            {minorByDocument ? (
+              <p className="text-lg text-slate-700">
+                Con tarjeta de identidad o registro civil, la firma la hace el acudiente o
+                representante legal.
+              </p>
+            ) : (
+              <Controller
+                name="patientIsMinor"
+                control={control}
+                rules={{ required: 'Indique si el paciente es menor de 18 años' }}
+                render={({ field }) => (
+                  <YesNoField
+                    label="¿El paciente es menor de 18 años? *"
+                    value={field.value}
+                    onChange={field.onChange}
+                    error={errors.patientIsMinor?.message}
+                  />
+                )}
+              />
+            )}
+            {signerIsGuardian ? (
+              <>
+                <div>
+                  <label htmlFor="guardianName" className={labelClass}>
+                    Nombre del acudiente *
+                  </label>
+                  <input
+                    id="guardianName"
+                    autoComplete="name"
+                    className={inputClass}
+                    {...register('guardianName', {
+                      validate: (value) =>
+                        !signerIsGuardian || value.trim().length >= 3 || 'Escriba el nombre del acudiente',
+                    })}
+                  />
+                  {errors.guardianName ? (
+                    <p className="mt-2 text-base text-red-600">{errors.guardianName.message}</p>
+                  ) : null}
+                </div>
+                <div>
+                  <label htmlFor="guardianDocument" className={labelClass}>
+                    Cédula del acudiente *
+                  </label>
+                  <input
+                    id="guardianDocument"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    className={inputClass}
+                    {...register('guardianDocument', {
+                      validate: (value) =>
+                        !signerIsGuardian ||
+                        value.trim().length >= 5 ||
+                        'Escriba la cédula del acudiente',
+                    })}
+                  />
+                  {errors.guardianDocument ? (
+                    <p className="mt-2 text-base text-red-600">{errors.guardianDocument.message}</p>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+          </section>
+
           <section className="space-y-3" aria-labelledby="kiosk-firma">
             <h2 id="kiosk-firma" className="text-2xl font-semibold text-slate-900">
-              Firma *
+              {signerIsGuardian ? 'Firma del acudiente / representante legal *' : 'Firma del paciente *'}
             </h2>
             <p className="text-lg text-slate-600">
-              Firme con el dedo dentro del recuadro para autorizar el registro.
+              {signerIsGuardian
+                ? 'El acudiente firma con el dedo dentro del recuadro para autorizar el registro.'
+                : 'Firme con el dedo dentro del recuadro para autorizar el registro.'}
             </p>
-            <SignaturePad ref={signatureRef} height={240} />
+            <SignaturePad
+              ref={signatureRef}
+              height={240}
+              initialDataUrl={signatureDataUrl}
+              onSnapshot={onSignatureSnapshot}
+            />
             {signatureError ? (
               <p className="text-base text-red-600" role="alert">
                 {signatureError}

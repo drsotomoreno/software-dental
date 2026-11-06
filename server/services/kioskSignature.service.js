@@ -12,6 +12,63 @@ const MIGRATION_FILE = join(
 )
 
 const ACTION_TYPES = new Set(['INTAKE', 'EVOLUTION', 'CONSENT'])
+const MINOR_DOCUMENT_TYPES = new Set(['TI', 'RC'])
+
+const EVOLUTION_PATIENT_SIGNATURE_MESSAGE =
+  'La nota de evolución es de autoría exclusiva del odontólogo (Resolución 1995 de 1999). La tableta no puede registrar la firma del paciente ni del acudiente.'
+
+function asRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function guardianFields(form) {
+  const datos = asRecord(form.datosBasicos)
+  return {
+    name: String(form.guardianName || datos.guardianName || '').trim(),
+    document: String(form.guardianDocument || datos.guardianDocument || '').trim(),
+  }
+}
+
+/** TI y registro civil identifican a un menor. El flag explícito también. */
+export function kioskFormRequiresGuardian(documentType, formData) {
+  const type = normalizeKioskActionType(documentType)
+  if (type !== 'INTAKE' && type !== 'CONSENT') return false
+  const form = asRecord(formData)
+  const datos = asRecord(form.datosBasicos)
+  if (form.esMenorDeEdad === true || datos.esMenorDeEdad === true) return true
+  const docType = String(datos.documentType || form.documentType || '').trim().toUpperCase()
+  return MINOR_DOCUMENT_TYPES.has(docType)
+}
+
+/**
+ * INTAKE y CONSENT admiten firma del paciente o, si es menor, del acudiente.
+ * EVOLUTION nunca admite firma en la tableta.
+ */
+export function assertKioskPatientSignatureAllowed({ documentType, formData }) {
+  const type = normalizeKioskActionType(documentType)
+  if (!type) {
+    const error = new Error('documentType inválido.')
+    error.status = 400
+    throw error
+  }
+  if (type === 'EVOLUTION') {
+    const error = new Error(EVOLUTION_PATIENT_SIGNATURE_MESSAGE)
+    error.status = 403
+    error.code = 'EVOLUTION_PATIENT_SIGNATURE_FORBIDDEN'
+    throw error
+  }
+  if (kioskFormRequiresGuardian(type, formData)) {
+    const guardian = guardianFields(asRecord(formData))
+    if (!guardian.name || !guardian.document) {
+      const error = new Error(
+        'El paciente es menor de 18 años. Debe firmar el acudiente o representante legal, con nombre y cédula.',
+      )
+      error.status = 400
+      error.code = 'GUARDIAN_REQUIRED'
+      throw error
+    }
+  }
+}
 
 const SQL_INSERT = `
   INSERT INTO kiosk_signatures (
@@ -68,11 +125,7 @@ export async function saveKioskSignature({
     error.status = 400
     throw error
   }
-  if (!type) {
-    const error = new Error('documentType inválido.')
-    error.status = 400
-    throw error
-  }
+  assertKioskPatientSignatureAllowed({ documentType: type, formData })
   if (!signature.startsWith('data:image/')) {
     const error = new Error('signatureBase64 inválida.')
     error.status = 400

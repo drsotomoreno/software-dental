@@ -403,8 +403,8 @@ export function EvolutionRipsPanel({
         rips,
         cie10: [lista.codDiagnosticoPrincipal],
         cups: rips.usuarios.flatMap((usuario) => [
-          ...usuario.servicios.consultas.map((consulta) => consulta.codConsulta),
-          ...usuario.servicios.procedimientos.map((procedimiento) => procedimiento.codProcedimiento),
+          ...(usuario.servicios.consultas ?? []).map((consulta) => consulta.codConsulta),
+          ...(usuario.servicios.procedimientos ?? []).map((procedimiento) => procedimiento.codProcedimiento),
         ]),
         metadatos: {
           patientUuid: patientId || undefined,

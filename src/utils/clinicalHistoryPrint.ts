@@ -1,4 +1,5 @@
 import { APP_NAME } from '@/constants/branding'
+import { renderKioskSignatureBlock } from '@/utils/kioskSignaturePrint'
 import { toClinicalTitleCase } from '@/utils/clinicalLabels'
 import {
   CLINICAL_HISTORY_PRINT_SECTIONS,
@@ -228,6 +229,23 @@ function buildIdentificationSection(patient: Patient): string {
             : '—',
         )}
       </table>
+      <div class="signatures">
+        ${renderKioskSignatureBlock({
+          heading: patient.kioskIntakeSignature?.signerIsGuardian
+            ? 'Firma del acudiente / representante legal'
+            : 'Firma del paciente — registro',
+          signatureDataUrl: patient.kioskIntakeSignature?.patientSignatureDataUrl,
+          signerName: patient.kioskIntakeSignature?.signerName || `${patient.firstName} ${patient.lastName}`,
+          signerDocument:
+            patient.kioskIntakeSignature?.signerDocument ||
+            `${patient.documentType} ${patient.documentNumber}`,
+          signedAtLabel: patient.kioskIntakeSignature?.signedAt
+            ? formatDate(patient.kioskIntakeSignature.signedAt)
+            : '',
+          ipAddress: patient.kioskIntakeSignature?.ipAddress,
+          kioskDeviceId: patient.kioskIntakeSignature?.kioskDeviceId,
+        })}
+      </div>
     </section>`
 }
 
@@ -899,11 +917,18 @@ function buildTreatingDentistSignatureSection(
     </section>`
 }
 
-function buildConsentSection(data: ClinicalRecordFormData): string {
+function buildConsentSection(data: ClinicalRecordFormData, patient: Patient): string {
   const consent = data.informedConsent
   const selectedConsents = consent.selectedConsentIds
     .map((id) => CONSENT_TEMPLATES.find((template) => template.id === id)?.label ?? id)
     .join(', ')
+  const guardianSigns = Boolean(consent.guardianName?.trim() && consent.guardianDocument?.trim())
+  const signerName = guardianSigns
+    ? consent.guardianName || ''
+    : `${patient.firstName} ${patient.lastName}`
+  const signerDocument = guardianSigns
+    ? consent.guardianDocument || ''
+    : `${patient.documentType} ${patient.documentNumber}`
 
   return `
     <section class="print-section">
@@ -915,15 +940,21 @@ function buildConsentSection(data: ClinicalRecordFormData): string {
         ${fieldRow('Fecha de firma', consent.signedAt ? formatDate(consent.signedAt) : '—')}
       </table>
       <div class="signatures">
-        ${
-          consent.patientSignatureDataUrl
-            ? `<div class="signature-box"><p>Firma del paciente</p><img src="${consent.patientSignatureDataUrl}" alt="Firma del paciente" /></div>`
-            : ''
-        }
+        ${renderKioskSignatureBlock({
+          heading: guardianSigns
+            ? 'Firma del acudiente / representante legal'
+            : 'Firma del paciente',
+          signatureDataUrl: consent.patientSignatureDataUrl,
+          signerName,
+          signerDocument,
+          signedAtLabel: consent.signedAt ? formatDate(consent.signedAt) : '',
+          ipAddress: consent.signatureIp,
+          kioskDeviceId: consent.kioskDeviceId,
+        })}
         ${
           consent.professionalSignatureDataUrl
             ? `<div class="signature-box"><p>Firma del profesional</p><img src="${consent.professionalSignatureDataUrl}" alt="Firma del profesional" /></div>`
-            : ''
+            : '<div class="signature-box"><p>Firma del odontólogo</p><p><strong>Pendiente de firma digital</strong></p></div>'
         }
       </div>
     </section>`
@@ -962,7 +993,7 @@ const SECTION_BUILDERS: Record<
   firmaTratante: ({ mainHistorySignature }) =>
     buildTreatingDentistSignatureSection(mainHistorySignature),
   evolucion: ({ clinicalData }) => buildEvolutionSection(clinicalData),
-  consentimiento: ({ clinicalData }) => buildConsentSection(clinicalData),
+  consentimiento: ({ clinicalData, patient }) => buildConsentSection(clinicalData, patient),
   exportacionHistoria: () => buildExportSection(),
 }
 

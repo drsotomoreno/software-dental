@@ -75,6 +75,19 @@ export interface Patient {
   /** true = hay cambios locales aún no confirmados por el servidor. */
   pendingSync?: boolean
   lastSyncedAt?: string
+  /** Firma de registro / habeas data capturada en la tableta kiosco. */
+  kioskIntakeSignature?: KioskIntakeSignature | null
+}
+
+/** Estampado legal de la firma de ingreso hecha en la tableta. */
+export interface KioskIntakeSignature {
+  patientSignatureDataUrl: string
+  signedAt: string
+  signerName: string
+  signerDocument: string
+  signerIsGuardian?: boolean
+  ipAddress?: string
+  kioskDeviceId?: string
 }
 
 export interface PatientFormData extends Omit<Patient, 'id' | 'createdAt' | 'updatedAt'> {}

@@ -533,6 +533,8 @@ export function buildPreliminaryRipsJson(input: RipsEvolutionCloseData): RipsQue
       numDocumentoIdentificacion: prestadorDoc,
       ...diagnostico,
       codDiagnosticoRelacionado: null,
+      codDiagnosticoRelacionadoCIE11: '',
+      nomCodDiagnosticoRelacionadoCIE11: '',
       codComplicacion: null,
       codComplicacionCIE11: '',
       nomComplicacionCIE11: '',

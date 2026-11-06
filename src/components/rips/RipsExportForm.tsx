@@ -426,11 +426,11 @@ export function RipsExportForm({
   }
 
   const totalConsultas = result.rips.usuarios.reduce(
-    (n, u) => n + u.servicios.consultas.length,
+    (n, u) => n + (u.servicios.consultas?.length ?? 0),
     0,
   )
   const totalProcedimientos = result.rips.usuarios.reduce(
-    (n, u) => n + u.servicios.procedimientos.length,
+    (n, u) => n + (u.servicios.procedimientos?.length ?? 0),
     0,
   )
 

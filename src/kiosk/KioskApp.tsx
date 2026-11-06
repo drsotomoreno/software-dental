@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import SignaturePad, { type SignaturePadHandle } from './SignaturePad'
-import KioskIntake from './KioskIntake'
+import KioskIntake, { type KioskIntakeFormValues } from './KioskIntake'
 import {
   connectKioskSocket,
   emitKioskCancelled,
@@ -63,17 +63,14 @@ function ConnectionBadge({
 
   return (
     <div
-      className={`pointer-events-none absolute right-3 top-3 z-20 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm backdrop-blur ${
+      className={`pointer-events-none absolute right-3 top-3 z-20 inline-flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm backdrop-blur ${
         dark
-          ? 'animate-pulse bg-black/40 text-amber-100'
-          : 'animate-pulse bg-amber-50 text-amber-900 border border-amber-300'
+          ? 'animate-pulse bg-black/45 text-amber-100'
+          : 'animate-pulse border border-rose-300 bg-amber-50 text-rose-900'
       }`}
       role="status"
     >
-      <span
-        className={`h-2 w-2 rounded-full ${reconnecting ? 'bg-amber-400' : 'bg-rose-500'} animate-pulse`}
-        aria-hidden
-      />
+      <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-rose-500" aria-hidden />
       Reconectando con el servidor…
     </div>
   )
@@ -127,11 +124,13 @@ function StillThereModal({
   onStay: () => void
 }) {
   return (
-    <div
+      <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-5 backdrop-blur-[2px]"
       role="alertdialog"
       aria-labelledby="kiosk-still-there-title"
       aria-describedby="kiosk-still-there-desc"
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
     >
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-xl">
         <h2 id="kiosk-still-there-title" className="text-2xl font-semibold text-slate-900">
@@ -153,22 +152,71 @@ function StillThereModal({
   )
 }
 
+function EvolutionReadScreen({
+  title,
+  contentText,
+  onDone,
+}: {
+  title: string
+  contentText: string
+  onDone: () => void
+}) {
+  return (
+    <div className="mx-auto flex min-h-[100dvh] w-full max-w-3xl flex-col px-5 py-8 sm:px-8">
+      <header className="mb-6">
+        <p className="text-sm font-semibold uppercase tracking-wide text-teal-700">
+          Mi Historia Dental
+        </p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
+          {title || 'Nota de evolución'}
+        </h1>
+        <p className="mt-3 text-base text-slate-600">
+          Esta nota es del odontólogo. Puede leerla aquí. La firma queda en el computador del
+          profesional, con su registro ReTHUS.
+        </p>
+      </header>
+      <article className="mb-6 flex-1 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
+        <pre className="whitespace-pre-wrap font-sans text-base leading-relaxed text-slate-800">
+          {contentText || 'Sin contenido.'}
+        </pre>
+      </article>
+      <button
+        type="button"
+        className="mt-auto min-h-14 w-full rounded-xl bg-teal-700 text-xl font-semibold text-white"
+        onClick={onDone}
+      >
+        Listo
+      </button>
+    </div>
+  )
+}
+
 function DocumentSignScreen({
   title,
   contentText,
   showAcceptBoxes,
+  signerIsGuardian,
+  guardianName,
+  guardianDocument,
   busy,
   error,
   onActivity,
   onSubmit,
+  signatureDataUrl,
+  onSignatureSnapshot,
 }: {
   title: string
   contentText: string
   showAcceptBoxes: boolean
+  signerIsGuardian: boolean
+  guardianName: string
+  guardianDocument: string
   busy: boolean
   error: string | null
   onActivity: () => void
   onSubmit: (signatureBase64: string, accepted: boolean) => void
+  signatureDataUrl?: string | null
+  onSignatureSnapshot?: (dataUrl: string | null) => void
 }) {
   const signatureRef = useRef<SignaturePadHandle>(null)
   const [acceptedText, setAcceptedText] = useState(false)
@@ -176,6 +224,10 @@ function DocumentSignScreen({
   const [localError, setLocalError] = useState<string | null>(null)
 
   const canSign = !showAcceptBoxes || (acceptedText && acceptedPrivacy)
+  const guardianReady = !signerIsGuardian || (guardianName.trim() && guardianDocument.trim())
+  const signatureHeading = signerIsGuardian
+    ? 'Firma del acudiente / representante legal'
+    : 'Firma del paciente'
 
   return (
     <div
@@ -227,10 +279,34 @@ function DocumentSignScreen({
         </div>
       ) : null}
 
-      <div className="mb-4" onPointerDown={onActivity}>
-        <p className="mb-2 text-lg font-medium text-slate-800">Firma del paciente</p>
-        <SignaturePad ref={signatureRef} height={220} />
-      </div>
+      {signerIsGuardian ? (
+        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-base text-amber-950">
+          <p className="font-semibold">El paciente es menor de 18 años.</p>
+          <p className="mt-1">Debe firmar el acudiente o representante legal.</p>
+          {guardianReady ? (
+            <p className="mt-2">
+              {guardianName} · C.C. {guardianDocument}
+            </p>
+          ) : (
+            <p className="mt-2">
+              Faltan el nombre y la cédula del acudiente. Devuelva la tableta al profesional para
+              completarlos antes de firmar.
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      {guardianReady ? (
+        <div className="mb-4" onPointerDown={onActivity}>
+          <p className="mb-2 text-lg font-medium text-slate-800">{signatureHeading}</p>
+          <SignaturePad
+            ref={signatureRef}
+            height={220}
+            initialDataUrl={signatureDataUrl}
+            onSnapshot={onSignatureSnapshot}
+          />
+        </div>
+      ) : null}
 
       {(localError || error) && (
         <p role="alert" className="mb-3 text-base text-red-600">
@@ -240,11 +316,15 @@ function DocumentSignScreen({
 
       <button
         type="button"
-        disabled={busy || !canSign}
+        disabled={busy || !canSign || !guardianReady}
         className="mt-auto min-h-14 w-full rounded-xl bg-teal-700 text-xl font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
         onClick={() => {
           onActivity()
           setLocalError(null)
+          if (!guardianReady) {
+            setLocalError('El acudiente debe identificarse con nombre y cédula antes de firmar.')
+            return
+          }
           if (showAcceptBoxes && !canSign) {
             setLocalError('Marque las casillas de aceptación antes de firmar.')
             return
@@ -287,6 +367,9 @@ export default function KioskApp() {
   const activeRef = useRef<KioskTriggerEvent | null>(null)
   const inactivityTimerRef = useRef<number | null>(null)
   const stillThereTimerRef = useRef<number | null>(null)
+  /** Borrador del formulario y de la firma: no se borra si el socket se cae. */
+  const intakeMemoryRef = useRef<Partial<KioskIntakeFormValues> | null>(null)
+  const signatureMemoryRef = useRef<string | null>(null)
 
   screenRef.current = screen
   activeRef.current = active
@@ -300,6 +383,22 @@ export default function KioskApp() {
       documentType: (String(datos.documentType || 'CC') as 'CC') || 'CC',
       documentNumber: String(datos.documentNumber || ''),
       phone: String(datos.phone || ''),
+      birthDate: String(datos.birthDate || ''),
+      email: String(datos.email || ''),
+      patientIsMinor: form.esMenorDeEdad === true || datos.esMenorDeEdad === true ? 'si' : null,
+      guardianName: String(form.guardianName || datos.guardianName || ''),
+      guardianDocument: String(form.guardianDocument || datos.guardianDocument || ''),
+      allergicToMedication:
+        form.allergicToMedication === 'si' || form.allergicToMedication === 'no'
+          ? form.allergicToMedication
+          : null,
+      hasHypertension:
+        form.hasHypertension === 'si' || form.hasHypertension === 'no' ? form.hasHypertension : null,
+      hasDiabetes: form.hasDiabetes === 'si' || form.hasDiabetes === 'no' ? form.hasDiabetes : null,
+      takesAnticoagulants:
+        form.takesAnticoagulants === 'si' || form.takesAnticoagulants === 'no'
+          ? form.takesAnticoagulants
+          : null,
     }
   }, [active])
 
@@ -316,6 +415,8 @@ export default function KioskApp() {
 
   const goIdle = useCallback(() => {
     clearInactivityTimers()
+    intakeMemoryRef.current = null
+    signatureMemoryRef.current = null
     setStillThereOpen(false)
     setScreen('IDLE')
     setActive(null)
@@ -381,7 +482,7 @@ export default function KioskApp() {
       setSocketError(null)
     }
     const onDisconnect = () => {
-      // No tocamos screen/active: el formulario y la firma quedan en memoria.
+      // El formulario, el borrador y la firma siguen en memoria (estado + refs).
       setConnected(false)
       setReconnecting(true)
     }
@@ -399,12 +500,15 @@ export default function KioskApp() {
     }
 
     socket.on('connect', onConnect)
+    socket.on('reconnect', onConnect)
     socket.on('disconnect', onDisconnect)
     socket.on('reconnect_attempt', onReconnectAttempt)
     socket.on('kiosk:ready', onReady)
     socket.on('connect_error', onError)
 
     const stopTrigger = onKioskTrigger(socket, (event) => {
+      intakeMemoryRef.current = null
+      signatureMemoryRef.current = null
       setSubmitError(null)
       setStillThereOpen(false)
       setActive(event)
@@ -414,6 +518,7 @@ export default function KioskApp() {
     return () => {
       stopTrigger()
       socket.off('connect', onConnect)
+      socket.off('reconnect', onConnect)
       socket.off('disconnect', onDisconnect)
       socket.off('reconnect_attempt', onReconnectAttempt)
       socket.off('kiosk:ready', onReady)
@@ -505,15 +610,26 @@ export default function KioskApp() {
         className="relative"
         onPointerDown={bumpActivity}
         onKeyDown={bumpActivity}
+        onInput={bumpActivity}
       >
         {connectionBadge}
         {stillThereOverlay}
         <KioskIntake
-          initialValues={intakeDefaults}
+          initialValues={{
+            ...intakeDefaults,
+            ...(intakeMemoryRef.current ?? {}),
+          }}
+          signatureDataUrl={signatureMemoryRef.current}
+          onSignatureSnapshot={(dataUrl) => {
+            signatureMemoryRef.current = dataUrl
+          }}
+          onDraftChange={(values) => {
+            intakeMemoryRef.current = values
+          }}
           successMessage="Firma registrada con éxito"
           successHoldMs={SUCCESS_HOLD_MS}
           onSuccessComplete={goIdle}
-          submitLabel="Firmar y Enviar"
+          submitLabel="Finalizar y Enviar"
           onRemoteSubmit={async (payload) => {
             bumpActivity()
             await persistSignature({
@@ -521,6 +637,9 @@ export default function KioskApp() {
               formData: {
                 datosBasicos: payload.datosBasicos,
                 anamnesis: payload.anamnesis,
+                esMenorDeEdad: payload.datosBasicos.esMenorDeEdad,
+                guardianName: payload.datosBasicos.guardianName,
+                guardianDocument: payload.datosBasicos.guardianDocument,
               },
             })
           }}
@@ -529,20 +648,52 @@ export default function KioskApp() {
     )
   }
 
-  if (screen === 'SHOW_EVOLUTION' || screen === 'SHOW_CONSENT') {
+  if (screen === 'SHOW_EVOLUTION' || active?.patientMaySign === false) {
     return (
-      <div className="relative">
+      <div className="relative" onPointerDown={bumpActivity} onKeyDown={bumpActivity} onInput={bumpActivity}>
+        {connectionBadge}
+        {stillThereOverlay}
+        <EvolutionReadScreen
+          title={active?.payload?.title || 'Nota de evolución'}
+          contentText={active?.payload?.contentText || ''}
+          onDone={() => {
+            const action = activeRef.current
+            const socket = socketRef.current
+            if (action && socket) {
+              emitKioskCancelled(socket, {
+                actionType: action.actionType,
+                documentId: action.payload?.documentId,
+                patientId: action.payload?.patientId,
+                reason: 'viewed',
+              })
+            }
+            goIdle()
+          }}
+        />
+      </div>
+    )
+  }
+
+  if (screen === 'SHOW_CONSENT') {
+    const form = (active?.payload?.formData || {}) as Record<string, unknown>
+    const signerIsGuardian = form.esMenorDeEdad === true
+    return (
+      <div className="relative" onPointerDown={bumpActivity} onKeyDown={bumpActivity} onInput={bumpActivity}>
         {connectionBadge}
         {stillThereOverlay}
         <DocumentSignScreen
-          title={
-            active?.payload?.title ||
-            (screen === 'SHOW_CONSENT' ? 'Consentimiento informado' : 'Nota de evolución')
-          }
+          title={active?.payload?.title || 'Consentimiento informado'}
           contentText={active?.payload?.contentText || ''}
-          showAcceptBoxes={screen === 'SHOW_CONSENT'}
+          showAcceptBoxes
+          signerIsGuardian={signerIsGuardian}
+          guardianName={String(form.guardianName || '')}
+          guardianDocument={String(form.guardianDocument || '')}
           busy={busy}
           error={submitError}
+          signatureDataUrl={signatureMemoryRef.current}
+          onSignatureSnapshot={(dataUrl) => {
+            signatureMemoryRef.current = dataUrl
+          }}
           onActivity={bumpActivity}
           onSubmit={(signatureBase64, accepted) => {
             setBusy(true)

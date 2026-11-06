@@ -5,6 +5,7 @@
  */
 import { config } from '../config.js'
 import { normalizeRipsNumFactura } from '../../shared/fiscalProfile.js'
+import { completarRipsSinFactura, normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
 import { submitRipsToMinsalud } from './minsaludRipsClient.js'
 import { MuvInfrastructureError, SisproMuvService, canalDeEnvio } from './sisproMuvService.js'
 import { actualizarAtencionRips, registrarRipsLog } from './ripsLogRepository.js'
@@ -165,10 +166,18 @@ async function guardarLog(entry, registrar) {
  * @param {{ service?: { enviar: Function }, registrar?: Function, actualizarAtencion?: Function }} [deps]
  */
 export async function transmitirRips(envelope, context = {}, deps = {}) {
+  // CargarRipsSinFactura exige SI/NO, grupos vacíos en null y CIE-11/codigoVIDA en "".
+  if (envelope?.rips) {
+    envelope = { ...envelope, rips: normalizarEstructuraRips(envelope.rips) }
+  }
+  const canalPrevisto = canalDeEnvio(envelope)
+  const esSandbox = config.minsalud.sandbox && deps.service == null
+  if (!esSandbox && canalPrevisto === 'sin_factura' && envelope?.rips) {
+    envelope = { ...envelope, rips: completarRipsSinFactura(envelope.rips) }
+  }
   const user = context.user ?? {}
   const prestador = usuarioPrestadorDeSesion(user)
   const modo = context.modo === 'batch' ? 'batch' : 'single'
-  const canalPrevisto = canalDeEnvio(envelope)
   const base = {
     usuarioPrestador: prestador,
     usuarioPrestadorId: prestador.id,
@@ -231,6 +240,7 @@ export async function transmitirRips(envelope, context = {}, deps = {}) {
         estado: outcome.success ? 'enviado_ok' : 'error',
         cuv: outcome.success ? outcome.cuv : null,
         errorLog: outcome.success ? null : textoErrorRips(outcome.errors),
+        logId: saved?.id ?? null,
       })
       atencionUpdated = estado?.updated === true
     } catch (error) {

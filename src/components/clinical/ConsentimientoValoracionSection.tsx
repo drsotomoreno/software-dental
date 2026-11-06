@@ -5,13 +5,28 @@ import {
   VALUATION_CONSENT_KEY_POINTS,
   VALUATION_CONSENT_SUMMARY,
   VALUATION_CONSENT_TITLE,
+  buildValuationConsentTextSnapshot,
 } from '@/constants/valuationConsentText'
+import { KioskRemoteTrigger } from '@/components/kiosk/KioskRemoteTrigger'
+import { esMenorDeEdad } from '@/utils/patientMinorAge'
+
+interface TabletPatientSnapshot {
+  id?: string
+  firstName?: string
+  lastName?: string
+  documentType?: string
+  documentNumber?: string
+  phone?: string
+  birthDate?: string
+}
 
 interface ConsentimientoValoracionSectionProps {
   accepted: boolean
   onAcceptedChange: (accepted: boolean) => void
   disabled?: boolean
   recordedAt?: string | null
+  /** Datos actuales del formulario, para firmar este consentimiento en la tableta. */
+  tabletPatient?: TabletPatientSnapshot | null
 }
 
 export function ConsentimientoValoracionSection({
@@ -19,6 +34,7 @@ export function ConsentimientoValoracionSection({
   onAcceptedChange,
   disabled = false,
   recordedAt = null,
+  tabletPatient = null,
 }: ConsentimientoValoracionSectionProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -52,6 +68,29 @@ export function ConsentimientoValoracionSection({
           <p className="mt-2 text-[10px] text-slate-400">
             Ley 1581 de 2012 — Protección de datos personales (habeas data).
           </p>
+        </div>
+      )}
+
+      {!disabled && (
+        <div className="border-t border-slate-100 px-3 py-2.5">
+          <KioskRemoteTrigger
+            type="CONSENT"
+            documentId={`valoracion:${tabletPatient?.id || tabletPatient?.documentNumber || 'borrador'}`}
+            patientId={tabletPatient?.id || tabletPatient?.documentNumber || 'borrador'}
+            dataToSign={{
+              title: VALUATION_CONSENT_TITLE,
+              contentText: buildValuationConsentTextSnapshot(),
+              formData: {
+                esMenorDeEdad: esMenorDeEdad(tabletPatient?.birthDate),
+                firstName: tabletPatient?.firstName || '',
+                lastName: tabletPatient?.lastName || '',
+                documentType: tabletPatient?.documentType || '',
+                documentNumber: tabletPatient?.documentNumber || '',
+                phone: tabletPatient?.phone || '',
+              },
+            }}
+            onSigned={() => onAcceptedChange(true)}
+          />
         </div>
       )}
 

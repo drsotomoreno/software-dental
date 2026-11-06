@@ -5,12 +5,13 @@
 
 import http from 'node:http'
 import https from 'node:https'
+import { completarRipsSinFactura, normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
 
 const SANDBOX_BASE_URL = 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
 const PRODUCTION_BASE_URL = 'https://fevrips.sispro.gov.co/fevrips-api'
 const LOGIN_PATH = '/api/Auth/LoginSISPRO'
 const CARGAR_SIN_FACTURA_PATH = '/api/PaquetesFevRips/CargarRipsSinFactura'
-const DEFAULT_APP_VERSION = '5.4.11'
+const DEFAULT_APP_VERSION = '1.4.11'
 const DEFAULT_TIPO_MECANISMO = 1
 const TOKEN_RENEW_SKEW_MS = 60_000
 const DEFAULT_TOKEN_TTL_MS = 50 * 60 * 1000
@@ -34,6 +35,22 @@ function joinUrl(base, path) {
 
 function isLocalHttps(url) {
   return /^https:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(url)
+}
+
+/** api.sispro.gov.co no resuelve. Solo se conserva un host FEV-RIPS o localhost. */
+function baseMuvUsable(configured, sandbox) {
+  const oficial = sandbox ? SANDBOX_BASE_URL : PRODUCTION_BASE_URL
+  const raw = String(configured ?? '').trim()
+  if (!raw) return oficial
+  try {
+    const host = new URL(raw).hostname.toLowerCase()
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.includes('fevrips')) {
+      return raw.replace(/\/$/, '')
+    }
+  } catch {
+    return oficial
+  }
+  return oficial
 }
 
 /**
@@ -77,11 +94,10 @@ export function resolveTipoUsuario(explicit, numeroDocumento, nit) {
  */
 export function readFevRipsSettings(source = process.env, overrides = {}) {
   const sandbox = envValue('MINSALUD_SANDBOX', source) !== 'false'
-  const baseUrl = (
-    overrides.baseUrl ||
-    envValue('MINSALUD_API_BASE_URL', source) ||
-    (sandbox ? SANDBOX_BASE_URL : PRODUCTION_BASE_URL)
-  ).replace(/\/$/, '')
+  const baseUrl = baseMuvUsable(
+    overrides.baseUrl || envValue('MINSALUD_API_BASE_URL', source),
+    sandbox,
+  )
   const identidad = splitUsuarioDocumento(
     overrides.username ?? envValue('MINSALUD_USERNAME', source),
     overrides.tipoDocumento ?? (envValue('MINSALUD_TIPO_DOCUMENTO', source) || 'CC'),
@@ -96,7 +112,7 @@ export function readFevRipsSettings(source = process.env, overrides = {}) {
   return {
     sandbox,
     baseUrl,
-    loginUrl: overrides.loginUrl || envValue('MINSALUD_AUTH_URL', source) || joinUrl(baseUrl, LOGIN_PATH),
+    loginUrl: joinUrl(baseUrl, LOGIN_PATH),
     cargarSinFacturaUrl: joinUrl(baseUrl, CARGAR_SIN_FACTURA_PATH),
     tipoDocumento: identidad.tipo,
     numeroDocumento: identidad.numero,
@@ -120,9 +136,17 @@ export function readFevRipsSettings(source = process.env, overrides = {}) {
   }
 }
 
+/** Estructura MUV justo antes de serializar CargarRipsSinFactura. */
+function cuerpoParaCargarRips(url, body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body
+  if (!/CargarRipsSinFactura/i.test(String(url)) || body.rips == null) return body
+  return { ...body, rips: completarRipsSinFactura(normalizarEstructuraRips(body.rips)) }
+}
+
 function requestJson(url, { method = 'POST', headers = {}, body } = {}) {
   const target = new URL(url)
-  const payload = body === undefined ? null : JSON.stringify(body)
+  const cuerpo = cuerpoParaCargarRips(url, body)
+  const payload = cuerpo === undefined ? null : JSON.stringify(cuerpo)
   const lib = target.protocol === 'https:' ? https : http
   const requestHeaders = { ...headers }
   if (payload !== null) requestHeaders['Content-Length'] = Buffer.byteLength(payload)
@@ -281,6 +305,7 @@ export class FevRipsService {
    */
   async enviarRipsSinFactura(payloadJSON) {
     const auth = await this._authenticate()
+    const rips = completarRipsSinFactura(normalizarEstructuraRips(payloadJSON))
     const { response, data } = await this._request(this.settings.cargarSinFacturaUrl, {
       headers: {
         'Content-Type': 'application/json',
@@ -288,7 +313,7 @@ export class FevRipsService {
         Authorization: `Bearer ${auth.token}`,
       },
       body: {
-        rips: payloadJSON,
+        rips,
         xmlFevFile: '',
       },
     })

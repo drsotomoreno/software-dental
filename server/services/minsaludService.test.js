@@ -26,6 +26,21 @@ const CREDENCIALES_ENV = {
   MINSALUD_NIT: '79904620',
 }
 
+test('api.sispro.gov.co no es el MUV y se sustituye por fevrips de producción', () => {
+  const settings = resolveMinsaludSettings({
+    ...CREDENCIALES_ENV,
+    MINSALUD_SANDBOX: 'false',
+    MINSALUD_API_BASE_URL: 'https://api.sispro.gov.co',
+    MINSALUD_AUTH_URL: 'https://api.sispro.gov.co/api/Auth/LoginSISPRO',
+  })
+  assert.equal(settings.baseUrl, 'https://fevrips.sispro.gov.co/fevrips-api')
+  assert.equal(settings.loginUrl, 'https://fevrips.sispro.gov.co/fevrips-api/api/Auth/LoginSISPRO')
+  assert.equal(
+    settings.cargarSinFacturaUrl,
+    'https://fevrips.sispro.gov.co/fevrips-api/api/PaquetesFevRips/CargarRipsSinFactura',
+  )
+})
+
 test('un oauth o un host ajeno no reemplazan LoginSISPRO de producción', () => {
   const settings = resolveMinsaludSettings({
     ...CREDENCIALES_ENV,
@@ -85,6 +100,28 @@ test('falta de credenciales aborta la instancia', () => {
     () => new MinsaludService({ env: {}, username: 'CC1', password: 'x', nit: 'abc' }),
     (error) => error.missing.includes('MINSALUD_NIT'),
   )
+})
+
+test('un NIT con dígito de verificación se envía sin ese dígito', () => {
+  const settings = resolveMinsaludSettings({
+    ...CREDENCIALES_ENV,
+    MINSALUD_NIT: '79904620-4',
+    MINSALUD_SANDBOX: 'false',
+  })
+  assert.equal(settings.nit, '79904620')
+  assert.equal(settings.numeroDocumento, '79904620')
+  assert.equal(settings.tipoUsuario, 'PIN')
+})
+
+test('si la cédula y el NIT no son el mismo documento el login usa RE', () => {
+  const settings = resolveMinsaludSettings({
+    ...CREDENCIALES_ENV,
+    MINSALUD_NIT: '900123456',
+    MINSALUD_SANDBOX: 'false',
+  })
+  assert.equal(settings.numeroDocumento, '79904620')
+  assert.equal(settings.nit, '900123456')
+  assert.equal(settings.tipoUsuario, 'RE')
 })
 
 test('separa el usuario en tipo y número y envía tipoUsuario PIN', async () => {

@@ -2,13 +2,14 @@
  * Cliente de radicación RIPS contra el MUV/SISPRO.
  * Vive en el servidor para que el bearer y la clave del prestador no entren al bundle de Vite.
  * Con CUFE o XML usa CargarFevRips; sin ellos, CargarRipsSinFactura.
- * El login reutiliza el contrato LoginSISPRO (tipoUsuario PIN) de resolveMinsaludSettings.
+ * El login reutiliza el contrato LoginSISPRO de resolveMinsaludSettings.
  */
 
 import dns from 'node:dns'
 import http from 'node:http'
 import https from 'node:https'
 import net from 'node:net'
+import { completarRipsSinFactura, normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
 import { resolveMinsaludSettings } from './minsaludService.js'
 
 const CARGAR_FEV_PATH = '/api/PaquetesFevRips/CargarFevRips'
@@ -247,7 +248,12 @@ function jwtExpiryMs(token) {
 
 function loginErrors(data) {
   if (!data || typeof data !== 'object') return []
-  return erroresModelo(data).map((item) => item.message).filter(Boolean)
+  const modelo = erroresModelo(data).map((item) => item.message).filter(Boolean)
+  if (modelo.length > 0) return modelo
+  const texto = [data.mensaje, data.Mensaje, data.message, data.Message, data.Detail, data.detail].find(
+    (item) => typeof item === 'string' && item.trim(),
+  )
+  return texto ? [String(texto).trim()] : []
 }
 
 const CODIGOS_TLS = new Set([
@@ -278,6 +284,19 @@ function causaConCodigo(error) {
     actual = actual.cause
   }
   return error
+}
+
+/** El envoltorio MUV_NETWORK oculta el Error de Node. Esta función baja por `cause` hasta el original. */
+function errorNativoDeTransporte(error) {
+  let actual = error
+  const vistos = new Set()
+  let nativo = error
+  while (actual && typeof actual === 'object' && !vistos.has(actual)) {
+    vistos.add(actual)
+    if (actual.name !== 'MuvInfrastructureError') nativo = actual
+    actual = actual.cause
+  }
+  return nativo
 }
 
 /**
@@ -456,6 +475,26 @@ export function agenteParaProtocolo(protocol) {
   return protocol === 'https:' ? agenteHttps : agenteHttp
 }
 
+/** Temporal: vuelca la petición real al MUV para copiarla desde `pm2 logs`. */
+function registrarPeticionMuv(url, method, headers, body) {
+  const tipo = /LoginSISPRO/i.test(String(url)) ? 'LOGIN' : 'RIPS'
+  const version =
+    body && typeof body === 'object' && !Array.isArray(body) && body.appVersion != null
+      ? body.appVersion
+      : '(no va en este cuerpo; la versión viaja en LoginSISPRO)'
+  console.log(
+    [
+      `[sispro-muv] PETICION ${tipo}`,
+      `URL: ${method} ${url}`,
+      `VERSION: ${version}`,
+      'HEADERS:',
+      JSON.stringify(headers, null, 2),
+      'BODY:',
+      body === undefined ? 'null' : JSON.stringify(body, null, 2),
+    ].join('\n'),
+  )
+}
+
 function emitirRequestJson(url, { method = 'POST', headers = {}, body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const target = new URL(url)
   const payload = body === undefined ? null : JSON.stringify(body)
@@ -463,6 +502,7 @@ function emitirRequestJson(url, { method = 'POST', headers = {}, body, timeoutMs
   const lib = esHttps ? https : http
   const requestHeaders = { Accept: 'application/json', ...headers }
   if (payload !== null) requestHeaders['Content-Length'] = Buffer.byteLength(payload)
+  registrarPeticionMuv(url, method, requestHeaders, body)
 
   return new Promise((resolve, reject) => {
     let settled = false
@@ -595,7 +635,7 @@ export class SisproMuvService {
           },
           clave: settings.clave,
           nit: settings.nit,
-          tipoUsuario: 'PIN',
+          tipoUsuario: settings.tipoUsuario,
           appVersion: settings.appVersion,
           tipoMecanismoValidacion: settings.tipoMecanismoValidacion,
         },
@@ -637,7 +677,10 @@ export class SisproMuvService {
    */
   async enviar(envelope = {}) {
     const canal = canalDeEnvio(envelope)
-    const rips = ripsParaMinisterio(envelope.rips && typeof envelope.rips === 'object' ? envelope.rips : envelope)
+    let rips = normalizarEstructuraRips(
+      ripsParaMinisterio(envelope.rips && typeof envelope.rips === 'object' ? envelope.rips : envelope),
+    )
+    if (canal === 'sin_factura') rips = completarRipsSinFactura(rips)
     const xml = canal === 'fev' ? codificarXmlFev(leerXmlFev(envelope)) : ''
     const url = canal === 'fev' ? this.cargarFevUrl : this.cargarSinFacturaUrl
     const started = Date.now()
@@ -667,6 +710,7 @@ export class SisproMuvService {
       if (parsed.success) {
         console.info('[sispro-muv] CUV recibido', { canal, httpStatus: parsed.httpStatus, durationMs })
       } else {
+        console.error("DETALLE ERROR MUV:", JSON.stringify(data, null, 2))
         console.warn('[sispro-muv] validación rechazada', {
           canal,
           httpStatus: parsed.httpStatus,
@@ -676,6 +720,7 @@ export class SisproMuvService {
       }
       return { ...parsed, canal, durationMs }
     } catch (error) {
+      console.error("DETALLE ERROR MUV:", JSON.stringify(error.response?.data ?? error.response ?? null, null, 2))
       const durationMs = Date.now() - started
       const wrapped = envolverTransporte(error)
       if (wrapped.code === 'MUV_AUTH') {
@@ -684,13 +729,23 @@ export class SisproMuvService {
       }
       wrapped.canal = canal
       wrapped.durationMs = durationMs
-      console.error('[sispro-muv] infraestructura', {
-        canal,
-        code: wrapped.code,
-        httpStatus: wrapped.httpStatus ?? null,
-        durationMs,
-        message: wrapped.message,
-      })
+      const nativo = errorNativoDeTransporte(error)
+      console.error(
+        '[sispro-muv] infraestructura',
+        {
+          canal,
+          code: wrapped.code,
+          httpStatus: wrapped.httpStatus ?? null,
+          durationMs,
+          message: wrapped.message,
+          detalle: Array.isArray(wrapped.errors)
+            ? wrapped.errors.map((item) => item?.message).filter(Boolean)
+            : [],
+          nativeCode: nativo?.code ?? null,
+          nativeMessage: nativo?.message ?? null,
+        },
+        nativo,
+      )
       throw wrapped
     }
   }

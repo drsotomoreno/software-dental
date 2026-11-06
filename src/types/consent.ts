@@ -18,6 +18,10 @@ export interface InformedConsent {
   /** Documento del acudiente / representante legal (obligatorio si el paciente es menor de 18). */
   guardianDocument?: string
   signedAt?: string
+  /** Conexión Socket.io de la tableta que capturó la firma del paciente o acudiente. */
+  kioskDeviceId?: string
+  /** IP registrada por el servidor al recibir la firma del kiosco. */
+  signatureIp?: string
 }
 
 export function createEmptyConsent(
@@ -66,9 +70,10 @@ function asConsentRecord(value: unknown): Partial<InformedConsent> | null {
 }
 
 /**
- * Un consentimiento cuenta como firmado si identifica el procedimiento y hay
- * evidencia de firma del paciente (fecha o imagen). No exige textAccepted:
- * un borrador puede haber desmarcado el checkbox sin borrar la firma guardada.
+ * Un consentimiento cuenta como firmado solo con las dos firmas
+ * (odontólogo y paciente, o acudiente si es menor). No basta la fecha
+ * ni una sola rúbrica. No exige textAccepted: un borrador puede haber
+ * desmarcado el checkbox sin borrar las firmas guardadas.
  */
 export function isSignedInformedConsent(
   consent: Partial<InformedConsent> | null | undefined,
@@ -79,8 +84,10 @@ export function isSignedInformedConsent(
       ? consent.selectedConsentIds
       : normalizeConsent(consent).selectedConsentIds
   if (!ids.length) return false
-  if (consentText(consent.signedAt)) return true
-  return Boolean(consentText(consent.patientSignatureDataUrl))
+  return (
+    Boolean(consentText(consent.patientSignatureDataUrl)) &&
+    Boolean(consentText(consent.professionalSignatureDataUrl))
+  )
 }
 
 /** IDs de procedimientos con consentimiento firmado (sin duplicados, orden de aparición). */
@@ -153,6 +160,8 @@ export function keepStoredConsentSignatures<T>(previous: unknown, next: T): T {
       ? {
           patientSignatureDataUrl: stored.patientSignatureDataUrl,
           patientSignatureMeta: stored.patientSignatureMeta,
+          kioskDeviceId: stored.kioskDeviceId,
+          signatureIp: stored.signatureIp,
         }
       : {}),
     ...(keepProfessional

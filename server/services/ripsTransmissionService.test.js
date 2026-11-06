@@ -34,6 +34,39 @@ test('el XML largo no entra completo a la auditoría', () => {
   assert.equal(payload.xmlFevFile.bytes, Buffer.byteLength(xml))
 })
 
+test('el envío al MUV convierte arreglos vacíos e incapacidad 02', async () => {
+  let recibido = null
+  const { deps } = depsDe({
+    async enviar(envelope) {
+      recibido = envelope
+      return {
+        success: true,
+        cuv: CUV,
+        errors: [],
+        httpStatus: 200,
+        canal: 'sin_factura',
+        durationMs: 1,
+        response: { ResultState: true, CodigoUnicoValidacion: CUV },
+      }
+    },
+  })
+  await transmitirRips(
+    { rips: ripsNicolas(), evolutionId: 'nota-ti' },
+    { user: { id: 'user-1' }, modo: 'single' },
+    deps,
+  )
+  const usuario = recibido.rips.usuarios[0]
+  assert.equal(usuario.tipoDocumentoIdentificacion, 'TI')
+  assert.equal(usuario.incapacidad, 'NO')
+  assert.equal(usuario.servicios.consultas, null)
+  assert.equal(usuario.servicios.otrosServicios, null)
+  assert.equal(usuario.servicios.procedimientos[0].codDiagnosticoRelacionadoCIE11, '')
+  assert.equal(usuario.servicios.procedimientos[0].codigoVIDA, '')
+  assert.equal(recibido.rips.numFactura, null)
+  assert.equal(recibido.rips.tipoNota, 'RS')
+  assert.match(recibido.rips.numNota, /^NOTA-\d+$/)
+})
+
 test('un CUV actualiza la atención y queda en el log', async () => {
   const { deps, logs, estados } = depsDe({
     async enviar() {
@@ -64,7 +97,10 @@ test('un CUV actualiza la atención y queda en el log', async () => {
   assert.equal(logs[0].canal, 'fev')
   assert.equal(logs[0].responseMuv.token, undefined)
   assert.equal(logs[0].requestPayload.cufe, 'CUFE-1')
-  assert.deepEqual(estados[0], { evolutionId: 'evo-1', patch: { estado: 'enviado_ok', cuv: CUV, errorLog: null } })
+  assert.deepEqual(estados[0], {
+    evolutionId: 'evo-1',
+    patch: { estado: 'enviado_ok', cuv: CUV, errorLog: null, logId: 'log-1' },
+  })
 })
 
 test('la validación marca error en la atención y no lanza', async () => {

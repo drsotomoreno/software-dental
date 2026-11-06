@@ -248,12 +248,12 @@ export function InformedConsentForm({
         )}
       </h3>
 
-      {!disabled && patientId && guardianOk && (activeConsentId || selectedIds.length > 0) && (
+      {!disabled && guardianOk && (activeConsentId || selectedIds.length > 0) && (
         <div className="mb-4">
           <KioskRemoteTrigger
             type="CONSENT"
             documentId={consentDocumentId}
-            patientId={patientId}
+            patientId={patientId || 'borrador'}
             dataToSign={{
               title: activeTemplate?.label || getConsentLabel(activeConsentId || selectedIds[0]),
               contentText: consentContent,
@@ -267,10 +267,13 @@ export function InformedConsentForm({
             }}
             onSigned={({ signatureBase64 }) => {
               if (!guardianOk) return
+              const professionalReady = Boolean(data.professionalSignatureDataUrl?.trim())
               update({
                 patientSignatureDataUrl: signatureBase64,
                 textAccepted: true,
-                signedAt: new Date().toISOString(),
+                ...(professionalReady
+                  ? { signedAt: data.signedAt?.trim() || new Date().toISOString() }
+                  : {}),
               })
             }}
           />

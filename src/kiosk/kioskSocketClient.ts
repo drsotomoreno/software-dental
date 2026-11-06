@@ -3,6 +3,7 @@
  * Prohibido importar @/db/*, Dexie, Auth o servicios clínicos.
  */
 import { io, type Socket } from 'socket.io-client'
+import { resolveSocketOrigin } from './socketOrigin'
 import type {
   KioskActionType,
   KioskCancelledEvent,
@@ -17,7 +18,8 @@ export function connectKioskSocket(input: {
   token: string
   clinicName?: string
 }): KioskSocket {
-  const socket = io({
+  const origin = resolveSocketOrigin()
+  const socket = io(origin, {
     path: '/socket.io',
     transports: ['websocket', 'polling'],
     auth: {
@@ -29,6 +31,7 @@ export function connectKioskSocket(input: {
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
   })
   return socket
 }

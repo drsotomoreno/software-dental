@@ -143,7 +143,7 @@ export const RIPS_DEFAULTS = {
   codPaisResidencia: '170',
   codPaisOrigen: '170',
   codZonaTerritorialResidencia: '01',
-  incapacidad: '02',
+  incapacidad: 'NO',
   modalidadConsulta: '09',
   grupoServiciosConsulta: '01',
   modalidadProcedimiento: '01',

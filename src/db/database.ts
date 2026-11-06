@@ -12,6 +12,13 @@ import type { ClinicalRecordAddendum } from '@/types/addendum'
 import type { EvolutionNoteAddendum } from '@/types/evolutionNoteAddendum'
 import type { SyncOutboxEntry } from '@/types/syncOutbox'
 import type { SyncQueueAttachment } from '@/types/syncQueue'
+import type {
+  OfflineClinica,
+  OfflineHistoriaClinica,
+  OfflinePaciente,
+  OfflineSyncQueueItem,
+  OfflineUsuario,
+} from '@/types/offlineMirror'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import type { CatalogItem, CatalogMeta } from '@/types/catalog'
 import type { DiagnosticAid, DiagnosticAidBlobRecord } from '@/types/diagnosticAid'
@@ -92,6 +99,13 @@ export class DentalDatabase extends Dexie {
   rips_queue!: EntityTable<RipsQueueEntry, 'id'>
   consecutivosPrestador!: EntityTable<ConsecutivoPrestador, 'id'>
   recibosCaja!: EntityTable<ReciboCaja, 'id'>
+  /** Espejo Postgres multi-tenant (offline-first → AWS RDS). */
+  pacientes!: EntityTable<OfflinePaciente, 'id'>
+  historias_clinicas!: EntityTable<OfflineHistoriaClinica, 'id'>
+  usuarios!: EntityTable<OfflineUsuario, 'id'>
+  clinicas!: EntityTable<OfflineClinica, 'id'>
+  /** Cola genérica de mutaciones offline hacia Postgres. Distinta de syncQueue (adjuntos). */
+  sync_queue!: EntityTable<OfflineSyncQueueItem, 'id'>
 
   constructor() {
     super('DentalEMR')
@@ -820,6 +834,16 @@ export class DentalDatabase extends Dexie {
           clinicalDraft,
         })
       }
+    })
+
+    // v33 — Espejo Postgres (pacientes / historias_clinicas / usuarios / clinicas)
+    // + cola offline sync_queue para subir mutaciones a AWS RDS.
+    this.version(33).stores({
+      pacientes: 'id, clinica_id, numero_documento, updated_at, deleted_at',
+      historias_clinicas: 'id, paciente_id, clinica_id, estado, updated_at, deleted_at',
+      usuarios: 'id, email, clinica_id',
+      clinicas: 'id, codigo_reps, nombre',
+      sync_queue: '++id, tabla_afectada, operacion, registro_id, timestamp, status',
     })
   }
 }

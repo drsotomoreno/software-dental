@@ -174,7 +174,9 @@ test('el nombre del catálogo legacy cap. 39 cuenta como CUPS 391402 aunque la n
   assert.equal(procedimientos.length, 1)
   assert.equal(procedimientos[0].codProcedimiento, '391402')
   assert.equal(procedimientos[0].vrServicio, 80000)
-  assert.equal(rips.usuarios[0].servicios.consultas.length, 0)
+  assert.equal(rips.usuarios[0].servicios.consultas, null)
+  assert.equal(rips.usuarios[0].incapacidad, 'NO')
+  assert.equal(procedimientos[0].codDiagnosticoRelacionadoCIE11, '')
 })
 
 test('un código punteado junto a «cap. 39» no se convierte en los últimos seis dígitos', () => {

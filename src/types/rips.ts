@@ -35,13 +35,14 @@ export interface RipsUsuario {
 }
 
 export interface RipsServicios {
-  consultas: RipsConsulta[]
-  procedimientos: RipsProcedimiento[]
-  urgencias: []
-  hospitalizacion: []
-  recienNacidos: []
-  medicamentos: []
-  otrosServicios: RipsOtroServicio[]
+  /** Null cuando el grupo no tiene registros. Un arreglo vacío rechaza RVG01. */
+  consultas: RipsConsulta[] | null
+  procedimientos: RipsProcedimiento[] | null
+  urgencias: unknown[] | null
+  hospitalizacion: unknown[] | null
+  recienNacidos: unknown[] | null
+  medicamentos: unknown[] | null
+  otrosServicios: RipsOtroServicio[] | null
 }
 
 export interface RipsConsulta {
@@ -94,6 +95,8 @@ export interface RipsProcedimiento {
   codDiagnosticoPrincipalCIE11: string
   nomCodDiagnosticoPrincipalCIE11: string
   codDiagnosticoRelacionado: string | null
+  codDiagnosticoRelacionadoCIE11: string
+  nomCodDiagnosticoRelacionadoCIE11: string
   codComplicacion: string | null
   codComplicacionCIE11: string
   nomComplicacionCIE11: string

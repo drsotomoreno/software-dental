@@ -3,6 +3,10 @@ import type { Patient, PatientFormData } from '@/types/patient'
 import { DOCUMENT_TYPES, REGIME_TYPES } from '@/constants/dental'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 import { DaneMunicipalityFields } from '@/components/clinical/DaneMunicipalityFields'
+import {
+  FillIdentificationOnTablet,
+  type TabletAnamnesisAnswers,
+} from '@/components/kiosk/FillIdentificationOnTablet'
 import { ExternalHistoryRdaPanel } from './ExternalHistoryRdaPanel'
 
 interface PatientRegistrationSectionProps {
@@ -18,6 +22,8 @@ interface PatientRegistrationSectionProps {
   canRequestExternalHistory?: boolean
   /** Bloque extra junto a documento y teléfono. */
   afterContactFields?: ReactNode
+  /** Aplica la anamnesis rápida que el paciente marcó en la tableta. */
+  onTabletAnamnesis?: (answers: TabletAnamnesisAnswers) => void
 }
 
 export function PatientRegistrationSection({
@@ -31,18 +37,44 @@ export function PatientRegistrationSection({
   showExternalHistoryRda = true,
   canRequestExternalHistory,
   afterContactFields,
+  onTabletAnamnesis,
 }: PatientRegistrationSectionProps) {
   const update = (patch: Partial<PatientFormData>) => onChange({ ...value, ...patch })
 
   return (
     <section className="card">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className={CLINICAL_SECTION_TITLE_CLASS}>{sectionTitle}</h3>
           {description && <p className="mt-1 text-xs text-slate-500">{description}</p>}
         </div>
-        {headerExtra}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {!disabled && (
+            <FillIdentificationOnTablet
+              patientKey={String(patientRecord?.id || patientRecord?.syncId || 'nuevo-paciente')}
+              value={value}
+              onChange={onChange}
+              onAnamnesis={onTabletAnamnesis}
+            />
+          )}
+          {headerExtra}
+        </div>
       </div>
+      {value.kioskIntakeSignature?.patientSignatureDataUrl ? (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+          <img
+            src={value.kioskIntakeSignature.patientSignatureDataUrl}
+            alt="Firma del paciente capturada en la tableta"
+            className="h-14 w-28 rounded-md border border-emerald-100 bg-white object-contain"
+          />
+          <p className="text-xs text-emerald-900">
+            Firmado en tableta por {value.kioskIntakeSignature.signerName}
+            {value.kioskIntakeSignature.signerDocument
+              ? ` · ${value.kioskIntakeSignature.signerDocument}`
+              : ''}
+          </p>
+        </div>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="label-field" htmlFor="patient-document-type">

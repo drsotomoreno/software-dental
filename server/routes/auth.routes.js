@@ -33,6 +33,11 @@ import {
   updateClinicUser,
   updateSubscriptionProfile,
 } from '../services/subscriptionAuthStore.js'
+import {
+  aislarClinica,
+  soloSuperAdmin,
+  verificarToken,
+} from '../middleware/tenantAuth.middleware.js'
 
 function masterUserPayload(user) {
   const base = user
@@ -245,19 +250,8 @@ router.post('/subscription/account/package', buyTitularMessagePackage)
 router.post('/subscription/trial', requestRethusTrial)
 router.post('/subscription/plan', choosePaidPlan)
 
-router.get('/admin/users', async (req, res) => {
+router.get('/admin/users', verificarToken, soloSuperAdmin, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization ?? ''
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
-    const session = await resolveSubscriptionSession(token, sessionHintFromRequest(req))
-    if (!session?.user) {
-      return res.status(401).json({ success: false, ok: false, error: 'Sesión inválida.' })
-    }
-    const email = String(session.user.email ?? '').toLowerCase()
-    const rol = String(session.user.rol ?? '').toLowerCase()
-    if (email !== MASTER_EMAIL && rol !== 'superadmin') {
-      return res.status(403).json({ success: false, ok: false, error: 'Solo el superadministrador puede ver todas las cuentas.' })
-    }
     const users = await listAllSubscriptionUsers()
     return res.json({ success: true, ok: true, users })
   } catch (error) {
@@ -265,6 +259,25 @@ router.get('/admin/users', async (req, res) => {
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo listar los usuarios.' })
   }
 })
+
+/** Ejemplo de ruta con aislamiento de sede (bypass automático si is_superadmin). */
+router.get(
+  '/admin/clinicas/:clinica_id/ping',
+  verificarToken,
+  aislarClinica,
+  (req, res) => {
+    res.json({
+      success: true,
+      ok: true,
+      clinica_id: req.params.clinica_id,
+      actor: {
+        id: req.user.id,
+        is_superadmin: req.user.is_superadmin,
+        rol: req.user.rol,
+      },
+    })
+  },
+)
 
 router.get('/clinic/users', async (req, res) => {
   try {

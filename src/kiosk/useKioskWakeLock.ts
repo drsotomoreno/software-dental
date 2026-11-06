@@ -30,6 +30,14 @@ export function useKioskWakeLock(enabled = true) {
     if (!nav.wakeLock?.request) return
 
     let cancelled = false
+    let retryTimer: number | null = null
+
+    const cancelRetry = () => {
+      if (retryTimer != null) {
+        window.clearTimeout(retryTimer)
+        retryTimer = null
+      }
+    }
 
     const requestLock = async () => {
       if (cancelled || document.visibilityState !== 'visible') return
@@ -43,6 +51,14 @@ export function useKioskWakeLock(enabled = true) {
         sentinelRef.current = sentinel
         sentinel.addEventListener('release', () => {
           if (sentinelRef.current === sentinel) sentinelRef.current = null
+          // El navegador suelta el bloqueo al ocultar la pestaña y, a veces,
+          // con la pestaña aún visible. Si sigue visible, se pide de nuevo.
+          if (cancelled || document.visibilityState !== 'visible') return
+          if (retryTimer != null) return
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null
+            void requestLock()
+          }, 800)
         })
       } catch {
         /* Wake Lock no disponible o denegado (política del navegador). */
@@ -51,6 +67,7 @@ export function useKioskWakeLock(enabled = true) {
 
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
+        cancelRetry()
         void requestLock()
       }
     }
@@ -60,6 +77,7 @@ export function useKioskWakeLock(enabled = true) {
 
     return () => {
       cancelled = true
+      cancelRetry()
       document.removeEventListener('visibilitychange', onVisibility)
       const current = sentinelRef.current
       sentinelRef.current = null

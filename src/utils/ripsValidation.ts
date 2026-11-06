@@ -453,9 +453,9 @@ export function validateRipsExport(
     }
   }
 
-  const totalConsultas = rips.usuarios.reduce((n, u) => n + u.servicios.consultas.length, 0)
+  const totalConsultas = rips.usuarios.reduce((n, u) => n + (u.servicios.consultas?.length ?? 0), 0)
   const totalProcedimientos = rips.usuarios.reduce(
-    (n, u) => n + u.servicios.procedimientos.length,
+    (n, u) => n + (u.servicios.procedimientos?.length ?? 0),
     0,
   )
   const totalOtros = rips.usuarios.reduce(
@@ -522,7 +522,7 @@ export function validateRipsExport(
     })
   } else if (thsValidation.valid && thsValidation.expectedCups && totalConsultas > 0) {
     for (const usuario of rips.usuarios) {
-      for (const consulta of usuario.servicios.consultas) {
+      for (const consulta of usuario.servicios.consultas ?? []) {
         if (normalizeCupsCode(consulta.codConsulta) !== thsValidation.expectedCups) {
           issues.push({
             level: 'error',

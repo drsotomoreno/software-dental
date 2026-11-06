@@ -41,6 +41,7 @@ import {
 import { seedDemoData } from '@/db/database'
 import { hydrateBillingSettingsFromIndexedDb } from '@/services/billingModalityService'
 import { installInvoiceImmutabilityFetchGuard } from '@/bootstrap/invoiceImmutabilityGuard'
+import { KioskSignatureBridge } from '@/components/kiosk/KioskSignatureBridge'
 import './dictation-app'
 import './agenda-app'
 
@@ -61,6 +62,7 @@ export default function ClinicalApp() {
 
   return (
     <AuthProvider>
+      <KioskSignatureBridge />
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />

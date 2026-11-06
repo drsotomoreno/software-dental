@@ -20,6 +20,7 @@ import {
   RIPS_DEFAULTS,
 } from '@/constants/rips'
 import { documentoObligadoDigits } from '@/utils/nit'
+import { normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
 import { extractRepsDigits, parseRepsCode } from '@/utils/repsCode'
 import { RIPS_FEV_NUMERO_PATTERN } from './ripsStructureValidation'
 import { normalizePerfilFiscal, normalizeRipsNumFactura } from './fiscalProfile'
@@ -381,13 +382,13 @@ export function buildRipsFromRecords(
     usuarioConsecutivo++
   }
 
-  const rips: RipsTransaction = {
+  const rips = normalizarEstructuraRips({
     numDocumentoIdObligado: resolvedMetadata.numDocumentoIdObligado,
     numFactura: resolvedMetadata.numFactura,
     tipoNota: metadata.tipoNota ?? null,
     numNota: metadata.numNota ?? null,
     usuarios,
-  }
+  }) as RipsTransaction
 
   issues.push(...validateRipsExport(rips, sources, professional, resolvedMetadata))
 

@@ -15,7 +15,6 @@ const MIGRATION_FILE = join(
   '../db/migrations/20261024125200_rips_logs.sql',
 )
 
-const ERROR_LOG_MAX = 4_000
 const ESTADOS_TRANSMISION = new Set(['enviado_ok', 'error'])
 
 export const SQL_INSERTAR_RIPS_LOG = `INSERT INTO rips_logs (
@@ -27,13 +26,13 @@ export const SQL_INSERTAR_RIPS_LOG = `INSERT INTO rips_logs (
        )
        RETURNING id, created_at`
 
+export const SQL_AGREGAR_RIPS_LOG_ID = `ALTER TABLE atenciones ADD COLUMN IF NOT EXISTS rips_log_id TEXT`
+
 export const SQL_ACTUALIZAR_ATENCION_RIPS = `UPDATE atenciones
-       SET rips_estado = $2,
-           cuv = $3,
-           rips_fecha_transmision = CASE WHEN $2 = 'enviado_ok' THEN now() ELSE rips_fecha_transmision END,
-           rips_error_log = $4,
-           updated_at = now()
-       WHERE evolution_note_id = $1 OR id::text = $1
+       SET rips_estado = $1::text,
+           rips_log_id = $2::text,
+           updated_at = NOW()
+       WHERE id::text = $3::text OR evolution_note_id::text = $3::text
        RETURNING id`
 
 let schemaReady = null
@@ -133,7 +132,7 @@ export async function registrarRipsLog(entry, client) {
  * Un timeout no debe llamar aquí: el estado queda listo para reintentar.
  * Si la tabla o la columna aún no existen, no tumba el CUV ya otorgado.
  * @param {string} evolutionId
- * @param {{ estado: 'enviado_ok' | 'error', cuv?: string | null, errorLog?: string | null }} patch
+ * @param {{ estado: 'enviado_ok' | 'error', cuv?: string | null, errorLog?: string | null, logId?: string | null }} patch
  * @param {{ query: Function }} [client]
  */
 export async function actualizarAtencionRips(evolutionId, patch, client) {
@@ -143,10 +142,10 @@ export async function actualizarAtencionRips(evolutionId, patch, client) {
     throw new Error('rips_estado de transmisión debe ser enviado_ok o error.')
   }
 
-  const errorLog = patch.errorLog ? String(patch.errorLog).slice(0, ERROR_LOG_MAX) : null
-  const params = [id, patch.estado, patch.cuv ?? null, errorLog]
+  const params = [patch.estado, patch.logId ?? null, id]
   const run = async (db) => {
     try {
+      await db.query(SQL_AGREGAR_RIPS_LOG_ID)
       const result = await db.query(SQL_ACTUALIZAR_ATENCION_RIPS, params)
       const updated = (result.rowCount ?? result.rows?.length ?? 0) > 0
       if (!updated) {

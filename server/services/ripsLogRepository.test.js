@@ -36,8 +36,9 @@ test('la migración de rips_logs conserva payload, respuesta, CUV y prestador', 
 test('el insert de auditoría no castea el id de evolución a uuid', () => {
   assert.match(SQL_INSERTAR_RIPS_LOG, /INSERT INTO rips_logs/)
   assert.match(SQL_INSERTAR_RIPS_LOG, /request_payload/)
-  assert.match(SQL_ACTUALIZAR_ATENCION_RIPS, /evolution_note_id = \$1 OR id::text = \$1/)
-  assert.match(SQL_ACTUALIZAR_ATENCION_RIPS, /WHEN \$2 = 'enviado_ok'/)
+  assert.match(SQL_ACTUALIZAR_ATENCION_RIPS, /rips_estado = \$1::text/)
+  assert.match(SQL_ACTUALIZAR_ATENCION_RIPS, /rips_log_id = \$2::text/)
+  assert.match(SQL_ACTUALIZAR_ATENCION_RIPS, /id::text = \$3::text OR evolution_note_id::text = \$3::text/)
   assert.doesNotMatch(SQL_ACTUALIZAR_ATENCION_RIPS, /\$1::uuid/)
 })
 
@@ -92,9 +93,9 @@ test('la atención pasa a enviado_ok y un esquema ausente no tumba el CUV', asyn
       return { rows: [{ id: 'atencion-1' }], rowCount: 1 }
     },
   }
-  const ok = await actualizarAtencionRips('evo-9', { estado: 'enviado_ok', cuv: 'CUV-1', errorLog: null }, client)
+  const ok = await actualizarAtencionRips('evo-9', { estado: 'enviado_ok', cuv: 'CUV-1', errorLog: null, logId: 'log-1' }, client)
   assert.equal(ok.updated, true)
-  assert.deepEqual(vistos[0], ['evo-9', 'enviado_ok', 'CUV-1', null])
+  assert.deepEqual(vistos.find((params) => params?.[2] === 'evo-9'), ['enviado_ok', 'log-1', 'evo-9'])
 
   const ausente = {
     async query() {

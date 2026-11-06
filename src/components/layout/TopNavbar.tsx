@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { Home } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { RipsStatusWidget } from '@/components/RipsStatusWidget'
+import { KioskLanLinkButton } from '@/components/kiosk/KioskLanLinkButton'
 import { ROLE_LABELS } from '@/utils/permissions'
 
 const DASHBOARD_PATH = '/app'
@@ -63,6 +64,7 @@ export function TopNavbar() {
         </div>
 
         <div className="flex items-center gap-4">
+          <KioskLanLinkButton />
           <RipsStatusWidget />
 
           <div className="relative shrink-0" ref={menuRef}>

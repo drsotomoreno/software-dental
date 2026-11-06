@@ -28,6 +28,10 @@ import {
 
 import type { PatientFormData } from '@/types/patient'
 import {
+  KIOSK_SIGNATURE_APPLIED_EVENT,
+  type KioskSignatureAppliedDetail,
+} from '@/services/kioskSignatureApply'
+import {
   DEFAULT_PATIENT_PHASE,
   isCompletedPatient,
   isValuatedOnlyPatient,
@@ -211,6 +215,62 @@ export function PatientDetailPage() {
   const [activeSection, setActiveSection] = useState<string>('all')
 
   const [patientForm, setPatientForm] = useState<PatientFormData | null>(null)
+
+  useEffect(() => {
+    const onApplied = (event: Event) => {
+      const detail = (event as CustomEvent<KioskSignatureAppliedDetail>).detail
+      if (!detail || !id) return
+      const samePatient =
+        detail.patientId === id ||
+        detail.patientId === String(patient?.id ?? '') ||
+        (patient?.syncId != null && detail.patientId === patient.syncId)
+      if (!samePatient) return
+
+      if (detail.documentType === 'INTAKE') {
+        setPatientForm((prev) =>
+          prev
+            ? {
+                ...prev,
+                kioskIntakeSignature: {
+                  patientSignatureDataUrl: detail.signatureBase64,
+                  signedAt: detail.signedAt,
+                  signerName: detail.signerName,
+                  signerDocument: detail.signerDocument,
+                  signerIsGuardian: detail.signerIsGuardian,
+                  ipAddress: detail.ipAddress || undefined,
+                  kioskDeviceId: detail.kioskDeviceId || undefined,
+                },
+              }
+            : prev,
+        )
+        return
+      }
+
+      setClinicalData((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          informedConsent: {
+            ...prev.informedConsent,
+            patientSignatureDataUrl: detail.signatureBase64,
+            textAccepted: true,
+            signedAt: detail.signedAt,
+            kioskDeviceId: detail.kioskDeviceId || undefined,
+            signatureIp: detail.ipAddress || undefined,
+            ...(detail.signerIsGuardian
+              ? {
+                  guardianName: detail.signerName,
+                  guardianDocument: detail.signerDocument,
+                }
+              : {}),
+          },
+        }
+      })
+    }
+
+    window.addEventListener(KIOSK_SIGNATURE_APPLIED_EVENT, onApplied)
+    return () => window.removeEventListener(KIOSK_SIGNATURE_APPLIED_EVENT, onApplied)
+  }, [id, patient?.id, patient?.syncId])
 
   const [consentAccepted, setConsentAccepted] = useState(false)
 

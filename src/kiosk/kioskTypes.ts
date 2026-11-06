@@ -1,5 +1,11 @@
 /** Tipos compartidos del modo tableta esclava (sin Dexie). */
 
+/**
+ * INTAKE: datos + anamnesis + firma del paciente (o acudiente si es menor).
+ * CONSENT: texto legal + casillas + firma del paciente o acudiente.
+ * EVOLUTION: solo lectura en la tableta. La firma es exclusiva del odontólogo
+ * (Resolución 1995 de 1999): no hay SignaturePad ni firma de paciente.
+ */
 export type KioskActionType = 'INTAKE' | 'EVOLUTION' | 'CONSENT'
 
 export type KioskScreenState =
@@ -19,6 +25,8 @@ export interface KioskTriggerPayload {
 
 export interface KioskTriggerEvent {
   actionType: KioskActionType
+  /** false en EVOLUTION: la tableta muestra la nota y no pide firma. */
+  patientMaySign?: boolean
   payload: KioskTriggerPayload
   sentAt?: string
   fromUserId?: string | null
@@ -32,7 +40,19 @@ export interface KioskSignatureReceived {
   formData?: Record<string, unknown>
   savedId?: string
   createdAt?: string
+  /** Estampado del servidor al guardar la firma de la tableta. */
+  signedAt?: string
+  /** IP vista por el servidor (trazabilidad). */
+  ipAddress?: string
+  /** Id de la conexión Socket.io de la tableta. */
+  kioskDeviceId?: string
   intake?: { id?: string; syncId?: string } | null
+}
+
+/** La evolución no admite firma del paciente. Intake y consentimiento sí. */
+export function acceptsKioskPatientSignature(documentType: string): boolean {
+  const type = String(documentType || '').trim().toUpperCase()
+  return type === 'INTAKE' || type === 'CONSENT'
 }
 
 export interface KioskSubmitSignatureInput {

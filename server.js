@@ -18,6 +18,7 @@ import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
 import kioskRoutes from './server/routes/kiosk.routes.js'
 import superadminRoutes from './server/routes/superadmin.routes.js'
 import { attachKioskSocket } from './server/socket/kioskSocket.js'
+import { getLocalLanIPv4, isPrivateLanOrigin } from './server/utils/localLanAddress.js'
 import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
 import { startMonthlyRipsCron } from './server/jobs/monthlyRipsCron.js'
@@ -44,6 +45,7 @@ app.use(
       if (!origin) return callback(null, true)
       const allowed =
         /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+        isPrivateLanOrigin(origin) ||
         origin === config.corsOrigin ||
         /^https:\/\/([a-z0-9-]+\.)?mihistoriadental\.com$/.test(origin)
       callback(null, allowed)
@@ -183,6 +185,12 @@ attachKioskSocket(httpServer)
 
 httpServer.listen(port, '0.0.0.0', () => {
   console.log(`[RIPS API] App y API en http://0.0.0.0:${port}`)
+  const lanIp = getLocalLanIPv4()
+  if (lanIp) {
+    console.log(
+      `[Kiosco] Tableta en http://192.168.80.35:${port}/kiosco/… (IP detectada ${lanIp}). Pulse «Tableta» para el QR de 12 horas.`,
+    )
+  }
   console.log(`[config] DATABASE_URL=${DATABASE_URL.replace(/:([^:@/]+)@/, ':***@')}`)
   console.log(`[Auth] SuperAdmin exento: ${config.superAdmin.email}`)
   console.log(

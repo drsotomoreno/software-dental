@@ -83,6 +83,28 @@ test('un formulario vacío recupera ortodoncia firmada del guardado', () => {
   assert.equal(restored.signedAt, stored.signedAt)
 })
 
+test('falta una de las dos firmas: el consentimiento no queda válido', () => {
+  assert.equal(
+    isSignedInformedConsent({
+      selectedConsentIds: ['ortodoncia_brackets'],
+      patientSignatureDataUrl: 'data:image/png;base64,paciente',
+      professionalLicense: '79984620',
+      professionalRegistry: '79984620',
+    }),
+    false,
+  )
+  assert.equal(
+    isSignedInformedConsent({
+      selectedConsentIds: ['ortodoncia_brackets'],
+      professionalSignatureDataUrl: 'data:image/png;base64,profesional',
+      signedAt: '2026-10-23T18:40:00.000Z',
+      professionalLicense: '79984620',
+      professionalRegistry: '79984620',
+    }),
+    false,
+  )
+})
+
 test('ortodoncia firmada sin textAccepted sigue contando como firmada', () => {
   const consent = {
     selectedConsentIds: ['ortodoncia_brackets'],

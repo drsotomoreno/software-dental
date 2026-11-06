@@ -1,5 +1,6 @@
 import { Server } from 'socket.io'
 import { config } from '../config.js'
+import { isPrivateLanOrigin } from '../utils/localLanAddress.js'
 import { verifyKioskToken } from '../utils/kioskJwt.js'
 import {
   resolveSubscriptionSession,
@@ -25,6 +26,7 @@ function corsOriginAllowed(origin) {
   if (!origin) return true
   return (
     /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+    isPrivateLanOrigin(origin) ||
     origin === config.corsOrigin ||
     /^https:\/\/([a-z0-9-]+\.)?mihistoriadental\.com$/.test(origin)
   )
@@ -44,6 +46,23 @@ function extractToken(socket) {
     return header.slice(7).trim()
   }
   return ''
+}
+
+function clientIpAddress(socket) {
+  const forwarded = socket.handshake.headers?.['x-forwarded-for']
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0].trim()
+  }
+  if (Array.isArray(forwarded) && forwarded[0]) {
+    return String(forwarded[0]).split(',')[0].trim()
+  }
+  return String(socket.handshake.address || '').trim()
+}
+
+function asIsoTimestamp(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString()
+  const parsed = new Date(value || Date.now())
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString()
 }
 
 function extractMode(socket) {
@@ -150,7 +169,7 @@ export function attachKioskSocket(httpServer) {
       room,
     })
 
-    socket.on('kiosk:trigger_action', (raw, ack) => {
+    socket.on('kiosk:trigger_action', async (raw, ack) => {
       try {
         if (identity.role !== 'clinical') {
           const message = 'Solo la app clínica puede enviar acciones a la tableta.'
@@ -165,8 +184,18 @@ export function attachKioskSocket(httpServer) {
           if (typeof ack === 'function') ack({ ok: false, message })
           return
         }
+        const roomSockets = await io.in(room).fetchSockets()
+        const kioskCount = roomSockets.filter((peer) => peer.data?.identity?.role === 'kiosk').length
+        if (kioskCount === 0) {
+          const message =
+            'No hay una tableta conectada en esta clínica. Abra el QR de «Tableta» en la tablet y vuelva a enviar.'
+          if (typeof ack === 'function') ack({ ok: false, message })
+          return
+        }
         const event = {
           actionType,
+          // Resolución 1995: la evolución no se firma en la tableta.
+          patientMaySign: actionType !== 'EVOLUTION',
           payload: {
             documentId: payload.documentId != null ? String(payload.documentId) : '',
             patientId: payload.patientId != null ? String(payload.patientId) : '',
@@ -179,6 +208,7 @@ export function attachKioskSocket(httpServer) {
           fromUserId: identity.userId || null,
         }
         socket.to(room).emit('kiosk:trigger_action', event)
+        console.log(`[Kiosco] ${actionType} enviado a ${kioskCount} tableta(s) en ${room}`)
         if (typeof ack === 'function') ack({ ok: true, event })
       } catch (error) {
         const message = error instanceof Error ? error.message : 'No se pudo enviar a la tableta.'
@@ -214,6 +244,9 @@ export function attachKioskSocket(httpServer) {
           formData: saved.formData,
           savedId: saved.id,
           createdAt: saved.createdAt,
+          signedAt: asIsoTimestamp(saved.createdAt),
+          ipAddress: clientIpAddress(socket),
+          kioskDeviceId: String(socket.id || ''),
           intake: saved.intake,
         }
         io.to(room).emit('kiosk:signature_received', received)

@@ -6,6 +6,7 @@ import {
   isOdontologyConsultationCups,
 } from '../constants/rips.ts'
 import { documentoObligadoDigits } from '../../shared/nit.js'
+import { normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
 import type { DocumentType, RegimeType } from '../types/patient.ts'
 import type { EvolutionNote } from '../types/evolutionNote.ts'
 import {
@@ -326,6 +327,8 @@ export function armarRipsNotaEvolucion(input: EnvioRipsNotaInput): RipsTransacti
       grupoServicios: RIPS_DEFAULTS.grupoServiciosProcedimiento,
       modalidadGrupoServicioTecSal: RIPS_DEFAULTS.modalidadProcedimiento,
       codDiagnosticoRelacionado: null,
+      codDiagnosticoRelacionadoCIE11: '',
+      nomCodDiagnosticoRelacionadoCIE11: '',
       codComplicacion: null,
       codComplicacionCIE11: '',
       nomComplicacionCIE11: '',
@@ -361,7 +364,7 @@ export function armarRipsNotaEvolucion(input: EnvioRipsNotaInput): RipsTransacti
   }
 
   const numFactura = tipo === 'fev' ? soporteDe(input, tipo) : null
-  return {
+  return normalizarEstructuraRips({
     numDocumentoIdObligado:
       documentoObligadoDigits(input.prestador.providerNit) ||
       documentoObligadoDigits(input.prestador.documentNumber) ||
@@ -370,7 +373,7 @@ export function armarRipsNotaEvolucion(input: EnvioRipsNotaInput): RipsTransacti
     tipoNota: null,
     numNota: null,
     usuarios: [usuario],
-  }
+  }) as RipsTransaction
 }
 
 export function mensajeCampoRips(error: EvolutionRipsPayloadError): string {

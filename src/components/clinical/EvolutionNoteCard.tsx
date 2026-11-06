@@ -13,6 +13,7 @@ import type { OrthodonticsPaymentRecord, PaymentRecord } from '@/types/clinicalR
 import { cupsExplicitosDeTexto, resolverProcedimientoCups } from '@/utils/cupsCodeResolve'
 import { formatCupsProcedureLabel } from '@/utils/cupsProcedureLabel'
 import { CupsProcedurePicker } from './CupsProcedurePicker'
+import { KioskRemoteTrigger } from '@/components/kiosk/KioskRemoteTrigger'
 import { EvolutionCatalogServicesField } from './EvolutionCatalogServicesField'
 import { EvolutionNoteAddendumPanel } from './EvolutionNoteAddendumPanel'
 import { EvolutionRipsEstadoBadge, EvolutionRipsPanel } from './EvolutionRipsPanel'
@@ -35,6 +36,13 @@ function etiquetaProcedimientoCups(procedure: string, cupsCode?: string | null):
   const resolved = resolverProcedimientoCups(cupsCode) ?? resolverProcedimientoCups(procedure)
   if (!resolved) return procedure
   return formatCupsProcedureLabel(resolved.cupsCode, procedure.trim() || resolved.procedure)
+}
+
+function textoEvolucionParaTableta(note: EvolutionNote): string {
+  const lines: string[] = []
+  if (note.procedure?.trim()) lines.push(`Procedimiento: ${note.procedure.trim()}`)
+  if (note.clinicalNote?.trim()) lines.push(note.clinicalNote.trim())
+  return lines.join('\n\n')
 }
 
 function parcheProcedimientoCups(procedure: string): EvolutionNotePatch {
@@ -226,6 +234,21 @@ export function EvolutionNoteCard({
           )}
         </div>
       </div>
+
+      {patientId && textoEvolucionParaTableta(note) ? (
+        <div className="mb-3">
+          <KioskRemoteTrigger
+            type="EVOLUTION"
+            documentId={note.id}
+            patientId={patientId}
+            disabled={disabled}
+            dataToSign={{
+              title: isAddendum ? 'Nota aclaratoria' : 'Nota de evolución',
+              contentText: textoEvolucionParaTableta(note),
+            }}
+          />
+        </div>
+      ) : null}
 
       {immutable && allowAddendums && !isAddendum && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">

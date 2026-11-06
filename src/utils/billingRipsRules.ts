@@ -111,7 +111,7 @@ export function applyClinicalRulesToRips(
   let consecutivo = 1
 
   const usuarios = rips.usuarios.map((usuario) => {
-    const procedimientos = usuario.servicios.procedimientos
+    const procedimientos = usuario.servicios.procedimientos ?? []
       .filter((proc) => {
         const code = normalizeCups(proc.codProcedimiento)
         return CUPS_PATTERN.test(code) && cupsToVr.has(code)
@@ -139,7 +139,7 @@ export function applyClinicalRulesToRips(
         return next
       })
 
-    const consultas = usuario.servicios.consultas.map((consulta) => {
+    const consultas = (usuario.servicios.consultas ?? []).map((consulta) => {
       const billableConsult = clinicalItems.some(
         (item) => item.sourceType === 'consultation' && isClinicalItemBillable(item),
       )

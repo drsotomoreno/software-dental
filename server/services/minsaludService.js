@@ -1,18 +1,20 @@
 /**
  * Cliente del MUV (LoginSISPRO + CargarRipsSinFactura).
  * El token queda en memoria y se renueva si faltan menos de 5 minutos.
- * El login separa MINSALUD_USERNAME en tipo y número, y envía tipoUsuario PIN.
+ * El login separa MINSALUD_USERNAME en tipo y número.
+ * tipoUsuario es PIN si la cédula y el NIT son el mismo documento; si no, RE.
  */
 
 import http from 'node:http'
 import https from 'node:https'
+import { documentoObligadoDigits } from '../../shared/nit.js'
 import { splitUsuarioDocumento } from './fevRipsService.js'
 
 const SANDBOX_BASE_URL = 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
 const PRODUCTION_BASE_URL = 'https://fevrips.sispro.gov.co/fevrips-api'
 const LOGIN_PATH = '/api/Auth/LoginSISPRO'
 const CARGAR_SIN_FACTURA_PATH = '/api/PaquetesFevRips/CargarRipsSinFactura'
-const DEFAULT_APP_VERSION = '5.4.11'
+const DEFAULT_APP_VERSION = '1.4.11'
 const DEFAULT_TIPO_MECANISMO = 1
 const TOKEN_RENEW_SKEW_MS = 5 * 60 * 1000
 const DEFAULT_TOKEN_TTL_MS = 50 * 60 * 1000
@@ -28,24 +30,34 @@ function digitsOnly(value) {
   return String(value ?? '').replace(/\D/g, '')
 }
 
+/**
+ * PIN solo si la cédula y el NIT son el mismo documento (profesional independiente).
+ * Si el NIT es de la IPS y la cédula es de otra persona, el MUV espera RE.
+ * Un tipo explícito se respeta cuando los documentos no coinciden.
+ */
+function tipoUsuarioLogin(numeroDocumento, nit, explicito) {
+  const documento = digitsOnly(numeroDocumento)
+  const prestador = digitsOnly(nit)
+  if (documento && prestador && documento === prestador) return 'PIN'
+  const pedido = String(explicito ?? '').trim().toUpperCase()
+  return pedido || 'RE'
+}
+
 function joinUrl(base, path) {
   const root = String(base ?? '').replace(/\/$/, '')
   const suffix = path.startsWith('/') ? path : `/${path}`
   return `${root}${suffix}`
 }
 
-/** localhost o un host FEV-RIPS/SISPRO. Un OAuth viejo no sirve para radicar. */
+/**
+ * localhost o un host FEV-RIPS (fevrips.sispro.gov.co / stage-fevrips).
+ * api.sispro.gov.co no resuelve y no es el MUV.
+ */
 function hostUsableParaMuv(url) {
   try {
     const host = new URL(url).hostname.toLowerCase()
     if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
-    return (
-      host.includes('fevrips') ||
-      host === 'sispro.gov.co' ||
-      host.endsWith('.sispro.gov.co') ||
-      host === 'sispropreprod.gov.co' ||
-      host.endsWith('.sispropreprod.gov.co')
-    )
+    return host.includes('fevrips')
   } catch {
     return false
   }
@@ -85,7 +97,7 @@ function isLocalHttps(url) {
 export function resolveMinsaludSettings(source = process.env, overrides = {}) {
   const username = overrides.username ?? envValue('MINSALUD_USERNAME', source)
   const password = overrides.password ?? envValue('MINSALUD_PASSWORD', source)
-  const nit = digitsOnly(overrides.nit ?? envValue('MINSALUD_NIT', source))
+  const nit = documentoObligadoDigits(overrides.nit ?? envValue('MINSALUD_NIT', source))
   const missing = []
   if (!String(username ?? '').trim()) missing.push('MINSALUD_USERNAME')
   if (!String(password ?? '').trim()) missing.push('MINSALUD_PASSWORD')
@@ -119,7 +131,11 @@ export function resolveMinsaludSettings(source = process.env, overrides = {}) {
     numeroDocumento: identidad.numero,
     clave: password,
     nit,
-    tipoUsuario: 'PIN',
+    tipoUsuario: tipoUsuarioLogin(
+      identidad.numero,
+      nit,
+      overrides.tipoUsuario ?? envValue('MINSALUD_TIPO_USUARIO', source),
+    ),
     appVersion: overrides.appVersion || envValue('MINSALUD_APP_VERSION', source) || DEFAULT_APP_VERSION,
     tipoMecanismoValidacion: Number(
       overrides.tipoMecanismoValidacion ??
@@ -276,7 +292,7 @@ export class MinsaludService {
         },
         clave: settings.clave,
         nit: settings.nit,
-        tipoUsuario: 'PIN',
+        tipoUsuario: settings.tipoUsuario,
         appVersion: settings.appVersion,
         tipoMecanismoValidacion: settings.tipoMecanismoValidacion,
       },

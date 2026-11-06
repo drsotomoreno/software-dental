@@ -13,7 +13,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
-    allowedHosts,
+    // La tableta entra por la IP LAN (192.168.x.x); el chequeo de host de Vite la bloqueaba.
+    allowedHosts: true,
     watch: {
       usePolling: true,
       ignored: ['**/src/data/dane-*.json'],
@@ -22,6 +23,11 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+      },
+      '/socket.io': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        ws: true,
       },
     },
   },

@@ -21,6 +21,10 @@ import {
 } from '../../shared/subscriptionPlans.js'
 import { readClinicAssistantLimit } from './clinicAssistantLimit.js'
 import { readDurableJson, writeDurableJson } from './durableStore.js'
+import {
+  ensureMasterUsuarioRow,
+  syncAllAuthUsersToTenantTables,
+} from './tenantRbacStore.js'
 import { splitPersonName, composeLegalName } from '../../shared/personName.js'
 import { formatNitInput, validateProviderNit } from '../../shared/nit.js'
 import { sanitizeRepsInput } from '../../shared/prestadorIdentity.js'
@@ -33,6 +37,7 @@ import {
   normalizePerfilFiscal,
 } from '../../shared/fiscalProfile.js'
 import { parseRepsCodeWithDane } from './repsDane.js'
+import { isLikelyJwt, signSessionToken, verifySessionToken } from '../utils/sessionJwt.js'
 
 
 
@@ -324,30 +329,42 @@ function refreshPaymentStatus(user) {
 
 
 
+function sessionTtlSeconds(exempt) {
+  // Exento (superadmin): ~10 años. Resto: 30 días.
+  return exempt ? 60 * 60 * 24 * 3650 : 60 * 60 * 24 * 30
+}
+
 function createSessionForUser(user) {
-
-  const token = randomBytes(32).toString('hex')
-
-  const exempt = isPaymentExempt(user)
+  const sid = randomBytes(32).toString('hex')
+  const exempt = isPaymentExempt(user) || isSuperAdminUser(user)
+  const isSuper = isSuperAdminUser(user)
+  const clinicaId = isSuper ? null : String(user.clinicId || user.id || '') || null
+  const expiresAt = exempt ? addDays(new Date(), 3650) : addDays(new Date(), 30)
+  const token = signSessionToken(
+    {
+      id: user.id,
+      clinica_id: clinicaId,
+      is_superadmin: isSuper,
+      rol: isSuper ? 'superadmin' : normalizeRole(user.rol),
+      sid,
+    },
+    { expiresInSec: sessionTtlSeconds(exempt) },
+  )
 
   const session = {
-
-    token,
-
+    token: sid,
+    jwt: token,
     userId: user.id,
-
-    rol: user.rol ?? 'odontologo',
-
+    rol: isSuper ? 'superadmin' : user.rol ?? 'odontologo',
     createdAt: new Date().toISOString(),
-
-    expiresAt: exempt ? addDays(new Date(), 3650) : addDays(new Date(), 30),
-
+    expiresAt,
   }
 
   rememberLiveSession(session)
+  // También indexar por JWT completo por si algún cliente lo reenvía como clave de sesión.
+  liveSessions.set(token, session)
 
   return { token, session }
-
 }
 
 
@@ -438,6 +455,8 @@ export async function ensureSuperAdmin() {
 
   console.log(`[Auth] SuperAdmin listo: ${email}`)
 
+  // Espejo relacional en Postgres (clinicas / usuarios.is_superadmin).
+  void ensureMasterUsuarioRow().then(() => syncAllAuthUsersToTenantTables(store.users))
 }
 
 
@@ -827,9 +846,26 @@ export async function issueMasterSessionToken(existingToken) {
   if (!user) {
     return { ok: false, error: 'No hay cuenta superadmin.' }
   }
-  const token = existingToken || randomBytes(32).toString('hex')
-  await adoptSessionToken(store, token, user)
-  return { ok: true, token, user: sanitizeUser(user), expiresAt: addDays(new Date(), 3650) }
+  if (existingToken && isLikelyJwt(existingToken)) {
+    try {
+      const claims = verifySessionToken(existingToken)
+      if (claims.is_superadmin && claims.id) {
+        await adoptSessionToken(store, claims.sid || existingToken, user)
+        return {
+          ok: true,
+          token: existingToken,
+          user: sanitizeUser(user),
+          expiresAt: addDays(new Date(), 3650),
+        }
+      }
+    } catch {
+      // emitir uno nuevo
+    }
+  }
+  const { token, session } = createSessionForUser(user)
+  store.sessions.push(session)
+  await saveStore(store)
+  return { ok: true, token, user: sanitizeUser(user), expiresAt: session.expiresAt }
 }
 
 export async function resolveSubscriptionSession(token, hint = {}) {
@@ -840,8 +876,35 @@ export async function resolveSubscriptionSession(token, hint = {}) {
 
   const store = await loadStore()
 
+  let lookupToken = token
+  if (isLikelyJwt(token)) {
+    try {
+      const claims = verifySessionToken(token)
+      lookupToken = claims.sid || token
+      if (claims.is_superadmin || isMasterAccountEmail(claims.email)) {
+        // God Mode: si el JWT es válido, reatachamos sesión aunque el sid no exista aún.
+        const master = findSuperAdminUser(store)
+        if (master) {
+          const session =
+            store.sessions.find((item) => item.token === lookupToken) ||
+            liveSessions.get(lookupToken) ||
+            liveSessions.get(token) ||
+            null
+          if (!session) {
+            await adoptSessionToken(store, lookupToken, master)
+          }
+        }
+      }
+    } catch {
+      return null
+    }
+  }
+
   let session =
-    store.sessions.find((item) => item.token === token) || liveSessions.get(token) || null
+    store.sessions.find((item) => item.token === lookupToken || item.jwt === token) ||
+    liveSessions.get(lookupToken) ||
+    liveSessions.get(token) ||
+    null
 
   if (!session) {
     let user = hint.userId
@@ -859,7 +922,7 @@ export async function resolveSubscriptionSession(token, hint = {}) {
       user = findSuperAdminUser(store)
     }
     if (user) {
-      session = await adoptSessionToken(store, token, user)
+      session = await adoptSessionToken(store, lookupToken, user)
     }
   }
 
@@ -872,7 +935,7 @@ export async function resolveSubscriptionSession(token, hint = {}) {
   if (userIndex === -1) {
     const superAdmin = findSuperAdminUser(store)
     if (!superAdmin) return null
-    session = await adoptSessionToken(store, token, superAdmin)
+    session = await adoptSessionToken(store, lookupToken, superAdmin)
     userIndex = store.users.findIndex((item) => item.id === superAdmin.id)
     if (userIndex === -1) return null
   }
@@ -893,7 +956,9 @@ export async function resolveSubscriptionSession(token, hint = {}) {
 
   if (!exempt && new Date(session.expiresAt).getTime() <= Date.now()) {
 
-    store.sessions = store.sessions.filter((item) => item.token !== token)
+    store.sessions = store.sessions.filter(
+      (item) => item.token !== lookupToken && item.jwt !== token,
+    )
 
     await saveStore(store)
 

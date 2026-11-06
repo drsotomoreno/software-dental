@@ -18,6 +18,10 @@ interface SignaturePadProps {
   className?: string
   /** Altura CSS del área de firma (default 220). */
   height?: number
+  /** PNG previo, para no perder el trazo si el lienzo se vuelve a montar. */
+  initialDataUrl?: string | null
+  /** Avisa cada vez que el trazo queda cerrado o se limpia. */
+  onSnapshot?: (dataUrl: string | null) => void
 }
 
 type Point = { x: number; y: number }
@@ -40,18 +44,30 @@ function getPoint(
  * Lienzo de firma táctil/mouse. Sin Dexie ni Auth.
  */
 const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
-  function SignaturePad({ className = '', height = 220 }, ref) {
+  function SignaturePad({ className = '', height = 220, initialDataUrl = null, onSnapshot }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const drawingRef = useRef(false)
     const lastPointRef = useRef<Point | null>(null)
-    const emptyRef = useRef(true)
-    const [isEmpty, setIsEmpty] = useState(true)
+    const emptyRef = useRef(!initialDataUrl)
+    const snapshotRef = useRef<string | null>(initialDataUrl)
+    /** true solo después de pintar un trazo real; el lienzo virgen no se lee. */
+    const bitmapReadyRef = useRef(false)
+    const onSnapshotRef = useRef(onSnapshot)
+    const [isEmpty, setIsEmpty] = useState(!initialDataUrl)
+    onSnapshotRef.current = onSnapshot
+
+    const publishSnapshot = useCallback((dataUrl: string | null) => {
+      snapshotRef.current = dataUrl
+      onSnapshotRef.current?.(dataUrl)
+    }, [])
 
     const resizeCanvas = useCallback(() => {
       const canvas = canvasRef.current
       if (!canvas) return
       const parent = canvas.parentElement
       if (!parent) return
+
+      const preserved = bitmapReadyRef.current ? canvas.toDataURL('image/png') : snapshotRef.current
 
       const dpr = window.devicePixelRatio || 1
       const width = parent.clientWidth
@@ -72,8 +88,24 @@ const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
       ctx.lineWidth = 2.5
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, width, cssHeight)
-      emptyRef.current = true
-      setIsEmpty(true)
+
+      if (!preserved) {
+        emptyRef.current = true
+        bitmapReadyRef.current = false
+        setIsEmpty(true)
+        return
+      }
+
+      snapshotRef.current = preserved
+      const img = new Image()
+      img.onload = () => {
+        if (canvasRef.current !== canvas) return
+        ctx.drawImage(img, 0, 0, width, cssHeight)
+        emptyRef.current = false
+        bitmapReadyRef.current = true
+        setIsEmpty(false)
+      }
+      img.src = preserved
     }, [height])
 
     useEffect(() => {
@@ -129,7 +161,11 @@ const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
     const endStroke = useCallback(() => {
       drawingRef.current = false
       lastPointRef.current = null
-    }, [])
+      const canvas = canvasRef.current
+      if (!canvas || emptyRef.current) return
+      bitmapReadyRef.current = true
+      publishSnapshot(canvas.toDataURL('image/png'))
+    }, [publishSnapshot])
 
     const clear = useCallback(() => {
       const canvas = canvasRef.current
@@ -150,10 +186,12 @@ const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, width, cssHeight)
       emptyRef.current = true
+      bitmapReadyRef.current = false
       setIsEmpty(true)
       drawingRef.current = false
       lastPointRef.current = null
-    }, [])
+      publishSnapshot(null)
+    }, [publishSnapshot])
 
     useImperativeHandle(
       ref,

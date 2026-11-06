@@ -77,7 +77,19 @@ export async function saveKioskIntake({ clinicId, datosBasicos, anamnesis, signa
   const id = randomUUID()
   const syncId = `kiosk-${id}`
   const now = new Date().toISOString()
-  const anamnesisJson = anamnesis && typeof anamnesis === 'object' ? anamnesis : {}
+  const anamnesisBase = anamnesis && typeof anamnesis === 'object' ? anamnesis : {}
+  const guardianName = String(datosBasicos?.guardianName || '').trim()
+  const guardianDocument = String(datosBasicos?.guardianDocument || '').trim()
+  const anamnesisJson = {
+    ...anamnesisBase,
+    ...(datosBasicos?.esMenorDeEdad
+      ? {
+          esMenorDeEdad: true,
+          guardianName,
+          guardianDocument,
+        }
+      : {}),
+  }
 
   const row = await withPgClient(async (client) => {
     const { rows } = await client.query(SQL_INSERT_PATIENT, [

@@ -26,6 +26,11 @@ export interface KioskRemoteTriggerProps {
 
 type TriggerUiState = 'idle' | 'sending' | 'waiting' | 'signed' | 'error'
 
+/** La evolución se muestra en la tableta; no se pide firma del paciente. */
+function patientMaySignOnTablet(type: KioskActionType) {
+  return type === 'INTAKE' || type === 'CONSENT'
+}
+
 /**
  * Botón reutilizable: envía el documento a la tableta esclava de la clínica.
  */
@@ -59,6 +64,7 @@ export function KioskRemoteTrigger({
   useEffect(() => {
     getClinicKioskSocket()
     const stopSigned = onClinicKioskSignatureReceived((event) => {
+      if (!patientMaySignOnTablet(type)) return
       const sameDocument =
         String(event.documentId || '') === String(documentId) ||
         (type === 'INTAKE' && String(event.documentType) === 'INTAKE')
@@ -82,7 +88,15 @@ export function KioskRemoteTrigger({
         type === 'INTAKE'
       if (!sameType || !sameDocument) return
       setUi('idle')
-      setError('El paciente no completó la firma en la tableta (tiempo agotado).')
+      if (event.reason === 'viewed') {
+        setError(null)
+        return
+      }
+      setError(
+        patientMaySignOnTablet(type)
+          ? 'El paciente no completó la firma en la tableta (tiempo agotado).'
+          : 'La tableta volvió a la pantalla de espera.',
+      )
     })
     return () => {
       stopSigned()
@@ -103,7 +117,9 @@ export function KioskRemoteTrigger({
     setUi('waiting')
   }
 
-  if (ui === 'signed') {
+  const maySign = patientMaySignOnTablet(type)
+
+  if (ui === 'signed' && maySign) {
     return (
       <div
         className={`inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 ${className}`}
@@ -115,8 +131,19 @@ export function KioskRemoteTrigger({
     )
   }
 
+  const waitingLabel = maySign
+    ? 'Enviado a tableta (Esperando firma del paciente…)'
+    : 'Visible en la tableta (solo lectura)'
+  const idleLabel = maySign ? 'Enviar a Tableta' : 'Mostrar en tableta'
+
   return (
     <div className={`space-y-1 ${className}`}>
+      {!maySign ? (
+        <p className="text-xs text-slate-500">
+          La nota de evolución se muestra para lectura. La firma es exclusiva del odontólogo
+          (ReTHUS y hora de cierre), en este equipo.
+        </p>
+      ) : null}
       <button
         type="button"
         disabled={disabled || ui === 'sending' || ui === 'waiting'}
@@ -133,11 +160,7 @@ export function KioskRemoteTrigger({
           className={`h-4 w-4 ${ui === 'waiting' ? 'animate-pulse text-emerald-600' : 'text-dental-700'}`}
           aria-hidden
         />
-        {ui === 'sending'
-          ? 'Enviando…'
-          : ui === 'waiting'
-            ? 'Enviado a tableta (Esperando firma del paciente…)'
-            : 'Enviar a Tableta'}
+        {ui === 'sending' ? 'Enviando…' : ui === 'waiting' ? waitingLabel : idleLabel}
       </button>
       {error ? (
         <p role="alert" className="text-xs text-rose-700">

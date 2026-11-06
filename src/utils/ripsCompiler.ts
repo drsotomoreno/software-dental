@@ -176,6 +176,8 @@ function buildSingleProcedimiento(
     codDiagnosticoPrincipalCIE11: '',
     nomCodDiagnosticoPrincipalCIE11: '',
     codDiagnosticoRelacionado: relatedCode,
+    codDiagnosticoRelacionadoCIE11: '',
+    nomCodDiagnosticoRelacionadoCIE11: '',
     codComplicacion: null,
     codComplicacionCIE11: '',
     nomComplicacionCIE11: '',
