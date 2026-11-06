@@ -5,14 +5,20 @@
  * El login reutiliza el contrato LoginSISPRO (tipoUsuario PIN) de resolveMinsaludSettings.
  */
 
+import dns from 'node:dns'
 import http from 'node:http'
 import https from 'node:https'
+import net from 'node:net'
 import { resolveMinsaludSettings } from './minsaludService.js'
 
 const CARGAR_FEV_PATH = '/api/PaquetesFevRips/CargarFevRips'
 const DEFAULT_TIMEOUT_MS = 45_000
 const MIN_TIMEOUT_MS = 1_000
 const MAX_TIMEOUT_MS = 180_000
+const DEFAULT_REINTENTOS = 3
+const MAX_REINTENTOS = 5
+const BACKOFF_BASE_MS = 200
+const BACKOFF_TOPE_MS = 2_000
 const TOKEN_RENEW_SKEW_MS = 5 * 60 * 1000
 const DEFAULT_TOKEN_TTL_MS = 50 * 60 * 1000
 
@@ -52,6 +58,18 @@ export function resolveSisproTimeoutMs(source = process.env) {
   const raw = Number(envValue('MINSALUD_TIMEOUT_MS', source))
   if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_TIMEOUT_MS
   return Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, Math.round(raw)))
+}
+
+/**
+ * Reintentos extra después del primer intento. MINSALUD_REINTENTOS=0 los apaga.
+ * @param {NodeJS.ProcessEnv} [source]
+ */
+export function resolveReintentosDeRed(source = process.env) {
+  const raw = envValue('MINSALUD_REINTENTOS', source)
+  if (!raw) return DEFAULT_REINTENTOS
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_REINTENTOS
+  return Math.min(MAX_REINTENTOS, Math.floor(parsed))
 }
 
 /**
@@ -306,10 +324,143 @@ function envolverTransporte(error) {
   })
 }
 
-function requestJson(url, { method = 'POST', headers = {}, body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+/** Fallos de socket o DNS. Un HTTP 400 del ministerio no entra aquí. */
+const CODIGOS_REINTENTO = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ETIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+])
+
+function codigoDeRed(error) {
+  let actual = error
+  const vistos = new Set()
+  while (actual && typeof actual === 'object' && !vistos.has(actual)) {
+    vistos.add(actual)
+    if (CODIGOS_REINTENTO.has(String(actual.code || ''))) return String(actual.code)
+    actual = actual.cause
+  }
+  return ''
+}
+
+export function esFalloDeRedReintentable(error) {
+  return CODIGOS_REINTENTO.has(codigoDeRed(error))
+}
+
+function esperaReintento(numero) {
+  const exponencial = BACKOFF_BASE_MS * 2 ** Math.max(0, numero - 1)
+  const jitter = Math.floor(Math.random() * 100)
+  return Math.min(BACKOFF_TOPE_MS, exponencial + jitter)
+}
+
+const esperarMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Reintenta solo caídas de DNS o de socket. El último error se propaga.
+ * @param {() => Promise<T>} operacion
+ * @param {{ reintentos?: number, esperar?: (ms: number) => Promise<void>, etiqueta?: string }} [opciones]
+ * @template T
+ */
+export async function conReintentosDeRed(operacion, opciones = {}) {
+  const reintentos = Number.isInteger(opciones.reintentos) ? opciones.reintentos : DEFAULT_REINTENTOS
+  const esperar = opciones.esperar ?? esperarMs
+  let ultimo
+  for (let intento = 0; intento <= reintentos; intento += 1) {
+    try {
+      return await operacion()
+    } catch (error) {
+      ultimo = error
+      const reintenta = intento < reintentos && esFalloDeRedReintentable(error)
+      if (!reintenta) throw error
+      const esperaMs = esperaReintento(intento + 1)
+      const total = reintentos + 1
+      const codigo = codigoDeRed(error)
+      console.warn(
+        `[MUV RIPS] Fallo de red (${codigo}). Intento ${intento + 1} de ${total}. Reintentando en ${esperaMs} ms....`,
+      )
+      await esperar(esperaMs)
+    }
+  }
+  throw ultimo
+}
+
+function entregarDirecciones(callback, addresses, all) {
+  if (all) {
+    callback(
+      null,
+      addresses.map((address) => ({ address, family: 4 })),
+    )
+    return
+  }
+  callback(null, addresses[0], 4)
+}
+
+/**
+ * Cada socket nuevo pregunta el registro A por c-ares, sin el caché de getaddrinfo.
+ * Si esa consulta falla, se intenta el resolver del sistema una vez.
+ * Una IP literal no consulta DNS.
+ * @param {Pick<typeof dns, 'resolve4' | 'lookup'>} [dnsResolver]
+ */
+export function crearLookupIpv4(dnsResolver = dns) {
+  return function lookupIpv4(hostname, options, callback) {
+    if (typeof options === 'function') {
+      callback = options
+      options = {}
+    }
+    const familiaLiteral = net.isIP(hostname)
+    if (familiaLiteral) {
+      if (options.all) callback(null, [{ address: hostname, family: familiaLiteral }])
+      else callback(null, hostname, familiaLiteral)
+      return
+    }
+    if (hostname === 'localhost' || hostname.endsWith('.local')) {
+      dnsResolver.lookup(hostname, { family: 4, all: Boolean(options.all) }, callback)
+      return
+    }
+    dnsResolver.resolve4(hostname, (err, addresses) => {
+      if (!err && Array.isArray(addresses) && addresses.length > 0) {
+        entregarDirecciones(callback, addresses, options.all)
+        return
+      }
+      dnsResolver.lookup(hostname, { family: 4, all: Boolean(options.all) }, (lookupErr, address, family) => {
+        if (lookupErr) {
+          callback(err || lookupErr)
+          return
+        }
+        if (options.all) callback(null, address)
+        else callback(null, address, family)
+      })
+    })
+  }
+}
+
+const lookupIpv4 = crearLookupIpv4()
+
+const opcionesAgente = {
+  keepAlive: true,
+  keepAliveMsecs: 30_000,
+  maxSockets: 32,
+  maxFreeSockets: 8,
+  scheduling: 'lifo',
+}
+
+const agenteHttp = new http.Agent(opcionesAgente)
+const agenteHttps = new https.Agent(opcionesAgente)
+
+export function agenteParaProtocolo(protocol) {
+  return protocol === 'https:' ? agenteHttps : agenteHttp
+}
+
+function emitirRequestJson(url, { method = 'POST', headers = {}, body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const target = new URL(url)
   const payload = body === undefined ? null : JSON.stringify(body)
-  const lib = target.protocol === 'https:' ? https : http
+  const esHttps = target.protocol === 'https:'
+  const lib = esHttps ? https : http
   const requestHeaders = { Accept: 'application/json', ...headers }
   if (payload !== null) requestHeaders['Content-Length'] = Buffer.byteLength(payload)
 
@@ -321,46 +472,61 @@ function requestJson(url, { method = 'POST', headers = {}, body, timeoutMs = DEF
       clearTimeout(timer)
       fn(value)
     }
-    const req = lib.request(
-      {
-        protocol: target.protocol,
-        hostname: target.hostname,
-        port: target.port || undefined,
-        path: `${target.pathname}${target.search}`,
-        method,
-        headers: requestHeaders,
-        family: 4,
-      },
-      (response) => {
-        const chunks = []
-        response.on('data', (chunk) => chunks.push(chunk))
-        response.on('end', () => {
-          const rawText = Buffer.concat(chunks).toString('utf8')
-          let data = null
-          if (rawText) {
-            try {
-              data = JSON.parse(rawText)
-            } catch {
-              data = { message: rawText.slice(0, 2_000) }
-            }
+    const opciones = {
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || undefined,
+      path: `${target.pathname}${target.search}`,
+      method,
+      headers: requestHeaders,
+      family: 4,
+      autoSelectFamily: false,
+      lookup: lookupIpv4,
+      agent: agenteParaProtocolo(target.protocol),
+    }
+    if (esHttps && net.isIP(target.hostname) === 0) opciones.servername = target.hostname
+    const req = lib.request(opciones, (response) => {
+      const chunks = []
+      response.on('data', (chunk) => chunks.push(chunk))
+      response.on('end', () => {
+        const rawText = Buffer.concat(chunks).toString('utf8')
+        let data = null
+        if (rawText) {
+          try {
+            data = JSON.parse(rawText)
+          } catch {
+            data = { message: rawText.slice(0, 2_000) }
           }
-          finish(resolve, {
-            response: { status: response.statusCode ?? 0, ok: (response.statusCode ?? 0) < 400 },
-            data,
-          })
+        }
+        finish(resolve, {
+          response: { status: response.statusCode ?? 0, ok: (response.statusCode ?? 0) < 400 },
+          data,
         })
-        response.on('error', (error) => finish(reject, error))
-      },
-    )
+      })
+      response.on('error', (error) => finish(reject, error))
+    })
     const timer = setTimeout(() => {
       const error = new Error('Tiempo de espera agotado al contactar el MUV.')
       error.name = 'TimeoutError'
       error.code = 'MUV_TIMEOUT'
       req.destroy(error)
     }, timeoutMs)
-    req.on('error', (error) => finish(reject, envolverTransporte(error)))
+    req.on('error', (error) => finish(reject, error))
     if (payload !== null) req.write(payload)
     req.end()
+  })
+}
+
+function requestJson(url, options = {}) {
+  let host = ''
+  try {
+    host = new URL(url).hostname
+  } catch {
+    host = ''
+  }
+  const reintentos = Number.isInteger(options.reintentos) ? options.reintentos : resolveReintentosDeRed()
+  return conReintentosDeRed(() => emitirRequestJson(url, options), { reintentos, etiqueta: host }).catch((error) => {
+    throw envolverTransporte(error)
   })
 }
 

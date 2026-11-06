@@ -4,9 +4,14 @@ import test from 'node:test'
 import {
   MuvInfrastructureError,
   SisproMuvService,
+  agenteParaProtocolo,
   canalDeEnvio,
   codificarXmlFev,
+  conReintentosDeRed,
+  crearLookupIpv4,
+  esFalloDeRedReintentable,
   interpretarRespuestaSispro,
+  resolveReintentosDeRed,
   resolveSisproTimeoutMs,
   ripsParaMinisterio,
 } from './sisproMuvService.js'
@@ -39,6 +44,114 @@ test('el timeout del MUV sale de MINSALUD_TIMEOUT_MS y se recorta', () => {
   assert.equal(resolveSisproTimeoutMs({ MINSALUD_TIMEOUT_MS: '50' }), 1_000)
   assert.equal(resolveSisproTimeoutMs({ MINSALUD_TIMEOUT_MS: '999999' }), 180_000)
   assert.equal(resolveSisproTimeoutMs({ MINSALUD_TIMEOUT_MS: 'no-numero' }), 45_000)
+})
+
+test('los reintentos de red salen de MINSALUD_REINTENTOS', () => {
+  assert.equal(resolveReintentosDeRed({}), 3)
+  assert.equal(resolveReintentosDeRed({ MINSALUD_REINTENTOS: '2' }), 2)
+  assert.equal(resolveReintentosDeRed({ MINSALUD_REINTENTOS: '0' }), 0)
+  assert.equal(resolveReintentosDeRed({ MINSALUD_REINTENTOS: '99' }), 5)
+  assert.equal(resolveReintentosDeRed({ MINSALUD_REINTENTOS: 'no' }), 3)
+})
+
+test('ENOTFOUND, ECONNRESET y ETIMEDOUT se reintentan; un rechazo HTTP no', async () => {
+  assert.equal(esFalloDeRedReintentable(Object.assign(new Error('dns'), { code: 'ENOTFOUND' })), true)
+  assert.equal(esFalloDeRedReintentable(Object.assign(new Error('reset'), { code: 'ECONNRESET' })), true)
+  assert.equal(esFalloDeRedReintentable(Object.assign(new Error('tiempo'), { code: 'ETIMEDOUT' })), true)
+  const envuelto = new TypeError('fetch failed')
+  envuelto.cause = Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' })
+  assert.equal(esFalloDeRedReintentable(envuelto), true)
+  assert.equal(esFalloDeRedReintentable(Object.assign(new Error('plazo'), { code: 'MUV_TIMEOUT' })), false)
+  assert.equal(esFalloDeRedReintentable(Object.assign(new Error('validación'), { code: 'RVC012' })), false)
+
+  let dns = 0
+  const resultado = await conReintentosDeRed(
+    async () => {
+      dns += 1
+      if (dns < 3) throw Object.assign(new Error('getaddrinfo ENOTFOUND fevrips.sispro.gov.co'), { code: 'ENOTFOUND' })
+      return 'conectado'
+    },
+    { reintentos: 3, esperar: async () => {} },
+  )
+  assert.equal(resultado, 'conectado')
+  assert.equal(dns, 3)
+
+  let otros = 0
+  await assert.rejects(
+    () =>
+      conReintentosDeRed(
+        async () => {
+          otros += 1
+          throw Object.assign(new Error('rechazo'), { status: 400 })
+        },
+        { reintentos: 3, esperar: async () => {} },
+      ),
+    (error) => error.status === 400,
+  )
+  assert.equal(otros, 1)
+})
+
+test('agotados los reintentos el ENOTFOUND sigue saliendo', async () => {
+  let llamadas = 0
+  await assert.rejects(
+    () =>
+      conReintentosDeRed(
+        async () => {
+          llamadas += 1
+          throw Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' })
+        },
+        { reintentos: 3, esperar: async () => {} },
+      ),
+    (error) => error.code === 'ENOTFOUND',
+  )
+  assert.equal(llamadas, 4)
+})
+
+test('el lookup pide el registro A de nuevo y conserva una IP literal', async () => {
+  const consultas = []
+  const lookup = crearLookupIpv4({
+    resolve4(host, callback) {
+      consultas.push(host)
+      callback(null, ['51.8.26.112'])
+    },
+    lookup() {
+      throw new Error('no debe usar getaddrinfo si resolve4 respondió')
+    },
+  })
+  const direccion = await new Promise((resolve, reject) => {
+    lookup('fevrips.sispro.gov.co', {}, (err, address, family) => (err ? reject(err) : resolve({ address, family })))
+  })
+  assert.deepEqual(direccion, { address: '51.8.26.112', family: 4 })
+  assert.deepEqual(consultas, ['fevrips.sispro.gov.co'])
+
+  const literal = await new Promise((resolve, reject) => {
+    lookup('127.0.0.1', {}, (err, address, family) => (err ? reject(err) : resolve({ address, family })))
+  })
+  assert.deepEqual(literal, { address: '127.0.0.1', family: 4 })
+  assert.deepEqual(consultas, ['fevrips.sispro.gov.co'])
+})
+
+test('si resolve4 falla, el lookup consulta el resolver del sistema', async () => {
+  const lookup = crearLookupIpv4({
+    resolve4(_host, callback) {
+      callback(Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' }))
+    },
+    lookup(_host, _options, callback) {
+      callback(null, '51.8.26.112', 4)
+    },
+  })
+  const direccion = await new Promise((resolve, reject) => {
+    lookup('fevrips.sispro.gov.co', {}, (err, address, family) => (err ? reject(err) : resolve({ address, family })))
+  })
+  assert.deepEqual(direccion, { address: '51.8.26.112', family: 4 })
+})
+
+test('el agente del MUV mantiene las conexiones vivas', () => {
+  const httpsAgent = agenteParaProtocolo('https:')
+  const httpAgent = agenteParaProtocolo('http:')
+  assert.equal(httpsAgent.keepAlive, true)
+  assert.equal(httpAgent.keepAlive, true)
+  assert.notEqual(httpsAgent, httpAgent)
 })
 
 test('fetch failed se explica con la causa y sin el texto de Node', async () => {
