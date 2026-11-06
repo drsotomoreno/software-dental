@@ -434,12 +434,22 @@ export async function listIntegrationLogs(deps = {}) {
   return { source: 'fixture', events: fixtureLogs() }
 }
 
+function hostFevrips(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.includes('fevrips')
+  } catch {
+    return false
+  }
+}
+
 function muvPingUrl() {
   const configured = String(config.minsalud.apiBaseUrl || '').replace(/\/$/, '')
-  if (configured) return `${configured}/api/Auth/LoginSISPRO`
-  const base = config.minsalud.sandbox
-    ? 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
-    : 'https://fevrips.sispro.gov.co/fevrips-api'
+  const base = hostFevrips(configured)
+    ? configured
+    : config.minsalud.sandbox
+      ? 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
+      : 'https://fevrips.sispro.gov.co/fevrips-api'
   return `${base}/api/Auth/LoginSISPRO`
 }
 

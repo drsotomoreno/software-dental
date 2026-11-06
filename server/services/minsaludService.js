@@ -34,18 +34,15 @@ function joinUrl(base, path) {
   return `${root}${suffix}`
 }
 
-/** localhost o un host FEV-RIPS/SISPRO. Un OAuth viejo no sirve para radicar. */
+/**
+ * localhost o un host FEV-RIPS (fevrips.sispro.gov.co / stage-fevrips).
+ * api.sispro.gov.co no resuelve y no es el MUV.
+ */
 function hostUsableParaMuv(url) {
   try {
     const host = new URL(url).hostname.toLowerCase()
     if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
-    return (
-      host.includes('fevrips') ||
-      host === 'sispro.gov.co' ||
-      host.endsWith('.sispro.gov.co') ||
-      host === 'sispropreprod.gov.co' ||
-      host.endsWith('.sispropreprod.gov.co')
-    )
+    return host.includes('fevrips')
   } catch {
     return false
   }

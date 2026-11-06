@@ -36,6 +36,22 @@ function isLocalHttps(url) {
   return /^https:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(url)
 }
 
+/** api.sispro.gov.co no resuelve. Solo se conserva un host FEV-RIPS o localhost. */
+function baseMuvUsable(configured, sandbox) {
+  const oficial = sandbox ? SANDBOX_BASE_URL : PRODUCTION_BASE_URL
+  const raw = String(configured ?? '').trim()
+  if (!raw) return oficial
+  try {
+    const host = new URL(raw).hostname.toLowerCase()
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.includes('fevrips')) {
+      return raw.replace(/\/$/, '')
+    }
+  } catch {
+    return oficial
+  }
+  return oficial
+}
+
 /**
  * MINSALUD_USERNAME puede venir como número (79904620) o como tipo+número (CC79904620).
  * @param {string} raw
@@ -77,11 +93,10 @@ export function resolveTipoUsuario(explicit, numeroDocumento, nit) {
  */
 export function readFevRipsSettings(source = process.env, overrides = {}) {
   const sandbox = envValue('MINSALUD_SANDBOX', source) !== 'false'
-  const baseUrl = (
-    overrides.baseUrl ||
-    envValue('MINSALUD_API_BASE_URL', source) ||
-    (sandbox ? SANDBOX_BASE_URL : PRODUCTION_BASE_URL)
-  ).replace(/\/$/, '')
+  const baseUrl = baseMuvUsable(
+    overrides.baseUrl || envValue('MINSALUD_API_BASE_URL', source),
+    sandbox,
+  )
   const identidad = splitUsuarioDocumento(
     overrides.username ?? envValue('MINSALUD_USERNAME', source),
     overrides.tipoDocumento ?? (envValue('MINSALUD_TIPO_DOCUMENTO', source) || 'CC'),
@@ -96,7 +111,7 @@ export function readFevRipsSettings(source = process.env, overrides = {}) {
   return {
     sandbox,
     baseUrl,
-    loginUrl: overrides.loginUrl || envValue('MINSALUD_AUTH_URL', source) || joinUrl(baseUrl, LOGIN_PATH),
+    loginUrl: joinUrl(baseUrl, LOGIN_PATH),
     cargarSinFacturaUrl: joinUrl(baseUrl, CARGAR_SIN_FACTURA_PATH),
     tipoDocumento: identidad.tipo,
     numeroDocumento: identidad.numero,
