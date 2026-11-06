@@ -34,6 +34,10 @@ import {
   validateRipsWithMinistry,
 } from '@/services/ripsApiService'
 import { saveTemporaryRips } from '@/services/ripsTemporalService'
+import {
+  contarAtencionesEnviadas,
+  guardarHistorialRadicacionRips,
+} from '@/db/ripsSubmissionsStore'
 import { getBillingModalitySettings } from '@/services/billingModalityService'
 import {
   isNoObligadoFev,
@@ -292,6 +296,11 @@ export function RipsExportForm({
         patientId: patientIds.length === 1 ? patientIds[0] : null,
       })
     } catch (error) {
+      guardarHistorialRadicacionRips({
+        cantidad_historias: sources.length,
+        estado: 'error',
+        payload_json: rips,
+      })
       setRadicando(false)
       setRadicacionMensaje(
         error instanceof Error ? error.message : 'No se pudo contactar el Ministerio de Salud.',
@@ -301,6 +310,12 @@ export function RipsExportForm({
     setRadicando(false)
 
     if (!response.success || !response.cuv) {
+      guardarHistorialRadicacionRips({
+        cuv: response.cuv,
+        cantidad_historias: sources.length,
+        estado: 'rechazado',
+        payload_json: rips,
+      })
       const detalle =
         response.errors?.map((item) => item.message).filter(Boolean).join(' ') ||
         response.error ||
@@ -316,6 +331,20 @@ export function RipsExportForm({
       return
     }
 
+    try {
+      const contadasEnJson = contarAtencionesEnviadas(rips)
+      const contadas = contadasEnJson > 0 ? contadasEnJson : sources.length
+      await db.rips_submissions.add({
+        id: crypto.randomUUID(),
+        fecha_radicacion: new Date().toISOString(),
+        cuv: response.cuv,
+        cantidad_historias: contadas,
+        estado: 'radicado',
+        payload_json: JSON.parse(JSON.stringify(rips)) as unknown,
+      })
+    } catch (error) {
+      console.error('No se pudo guardar el CUV en el historial local de RIPS.', error)
+    }
     void saveTemporaryRips({
       clinicId: professional.clinicId || professional.id,
       patientId: first ? String(first.patient.id) : null,
@@ -410,7 +439,20 @@ export function RipsExportForm({
 
     setValidating(false)
 
-    if (response.success && response.approved) {
+    if (response.success && response.approved && response.cuv) {
+      try {
+        await db.rips_submissions.add({
+          id: crypto.randomUUID(),
+          fecha_radicacion: new Date().toISOString(),
+          cuv: response.cuv,
+          cantidad_historias:
+            contarAtencionesEnviadas(result.rips) || sources.length,
+          estado: 'radicado',
+          payload_json: JSON.parse(JSON.stringify(result.rips)) as unknown,
+        })
+      } catch (error) {
+        console.error('No se pudo guardar el CUV en el historial local de RIPS.', error)
+      }
       setCuvResult(response)
       setValidateMessage('RIPS aprobado por el motor de validación. CUV almacenado.')
       onCuvObtained?.(response)

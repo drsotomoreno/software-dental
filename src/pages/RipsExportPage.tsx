@@ -3,7 +3,11 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Link } from 'react-router-dom'
 import { db } from '@/db/database'
 import { RequirePermission } from '@/components/auth/RequirePermission'
-import { RipsExportForm } from '@/components/rips'
+import { RipsExportForm, RipsSubmissionsHistory } from '@/components/rips'
+import {
+  contarAtencionesEnviadas,
+  guardarHistorialRadicacionRips,
+} from '@/db/ripsSubmissionsStore'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import type { Patient } from '@/types/patient'
@@ -169,6 +173,11 @@ export function RipsExportPage() {
           patientId: String(patient.id ?? ''),
         })
       } catch (error) {
+        guardarHistorialRadicacionRips({
+          cantidad_historias: 1,
+          estado: 'error',
+          payload_json: rips,
+        })
         setExportFailed(true)
         setExportMessage(
           error instanceof Error ? error.message : 'No se pudo contactar el Ministerio de Salud.',
@@ -176,6 +185,12 @@ export function RipsExportPage() {
         return
       }
       if (!response.success || !response.cuv) {
+        guardarHistorialRadicacionRips({
+          cuv: response.cuv,
+          cantidad_historias: 1,
+          estado: 'rechazado',
+          payload_json: rips,
+        })
         setExportIssues(
           (response.errors ?? []).map((item) => ({
             level: 'error' as const,
@@ -190,6 +205,19 @@ export function RipsExportPage() {
         return
       }
 
+      try {
+        const contadas = contarAtencionesEnviadas(rips)
+        await db.rips_submissions.add({
+          id: crypto.randomUUID(),
+          fecha_radicacion: new Date().toISOString(),
+          cuv: response.cuv,
+          cantidad_historias: contadas > 0 ? contadas : 1,
+          estado: 'radicado',
+          payload_json: JSON.parse(JSON.stringify(rips)) as unknown,
+        })
+      } catch (error) {
+        console.error('No se pudo guardar el CUV en el historial local de RIPS.', error)
+      }
       void saveTemporaryRips({
         clinicId: user.clinicId || user.id,
         patientId: String(patient.id ?? ''),
@@ -349,6 +377,8 @@ export function RipsExportPage() {
           }}
         />
       </div>
+
+      <RipsSubmissionsHistory />
     </div>
     </RequirePermission>
   )

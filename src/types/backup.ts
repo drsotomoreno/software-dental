@@ -51,6 +51,8 @@ export interface BackupDataTables {
   ripsTemporales?: unknown[]
   /** Cola local RIPS (CUV, errores MUV y sobres pendientes). */
   rips_queue?: unknown[]
+  /** Historial de radicaciones RIPS ante el MUV (Res. 2275). */
+  rips_submissions?: unknown[]
 }
 
 export interface BackupPayload {

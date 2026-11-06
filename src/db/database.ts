@@ -51,6 +51,7 @@ import type { ClinicBillingSettingsRecord } from '@/types/billingModality'
 import type { RdaCryptographicConsent, RdaExternalHistory } from '@/types/rdaExternalHistory'
 import type { TemporaryRipsRecord } from '@/types/ripsTemporal'
 import type { RipsQueueEntry } from '@/types/ripsQueue'
+import type { RipsSubmission } from '@/types/ripsSubmission'
 import type { ConsecutivoPrestador, ReciboCaja } from '@/types/atencionPago'
 import {
   backfillDraftEvolutionNotes,
@@ -97,6 +98,8 @@ export class DentalDatabase extends Dexie {
   ripsTemporales!: EntityTable<TemporaryRipsRecord, 'id'>
   /** Outbox RIPS (Res. 2275): un sobre por evolución, con CUV o error MUV. */
   rips_queue!: EntityTable<RipsQueueEntry, 'id'>
+  /** Historial de radicaciones RIPS ante el MUV. `payload_json` no está indexado. */
+  rips_submissions!: EntityTable<RipsSubmission, 'id'>
   consecutivosPrestador!: EntityTable<ConsecutivoPrestador, 'id'>
   recibosCaja!: EntityTable<ReciboCaja, 'id'>
   /** Espejo Postgres multi-tenant (offline-first → AWS RDS). */
@@ -844,6 +847,13 @@ export class DentalDatabase extends Dexie {
       usuarios: 'id, email, clinica_id',
       clinicas: 'id, codigo_reps, nombre',
       sync_queue: '++id, tabla_afectada, operacion, registro_id, timestamp, status',
+    })
+
+    // v34 — historial de radicaciones RIPS (Res. 2275). Tabla nueva y vacía.
+    // Solo se declara el store nuevo: Dexie conserva pacientes, historias_clinicas
+    // y el resto del esquema. `payload_json` no va en el índice.
+    this.version(34).stores({
+      rips_submissions: 'id, fecha_radicacion',
     })
   }
 }
