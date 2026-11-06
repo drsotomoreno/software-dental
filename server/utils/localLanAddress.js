@@ -37,5 +37,30 @@ export function isPrivateLanOrigin(origin) {
 
 export function buildKioskLanUrl({ ip, port, clinicId, token, protocol = 'http:' }) {
   const host = port ? `${ip}:${port}` : ip
-  return `${protocol}//${host}/kiosco/${encodeURIComponent(clinicId)}/${encodeURIComponent(token)}`
+  const scheme = protocol.endsWith(':') ? protocol : `${protocol}:`
+  return `${scheme}//${host}/kiosco/${encodeURIComponent(clinicId)}/${encodeURIComponent(token)}`
+}
+
+/**
+ * En el dominio público el QR abre https://www.mihistoriadental.com.
+ * La IP de la LAN solo se usa cuando el PC clínico sirve el kiosco en la Wi-Fi.
+ */
+export function resolveKioskLinkTarget(req, { lanIp, lanPort } = {}) {
+  const forwardedHost = String(req?.headers?.['x-forwarded-host'] || req?.headers?.host || '')
+    .split(',')[0]
+    .trim()
+  const hostname = forwardedHost.replace(/:\d+$/, '')
+  if (hostname && !isPrivateLanHostname(hostname)) {
+    const protoRaw = String(req?.headers?.['x-forwarded-proto'] || 'https').split(',')[0].trim()
+    const protocol = protoRaw.endsWith(':') ? protoRaw : `${protoRaw}:`
+    return {
+      origin: `${protocol}//${hostname}`,
+      ip: hostname,
+      port: null,
+    }
+  }
+  const ip = String(lanIp || '').trim()
+  const port = String(lanPort || '').trim()
+  const origin = port ? `http://${ip}:${port}` : `http://${ip}`
+  return { origin, ip, port: port || null }
 }

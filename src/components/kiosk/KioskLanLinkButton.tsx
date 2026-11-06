@@ -13,8 +13,23 @@ interface LanLinkResponse {
   error?: string
 }
 
-function urlOnClinicLan(rawUrl: string) {
+function isPrivateHost(hostname: string) {
+  const host = hostname.trim().toLowerCase()
+  if (host === 'localhost' || host === '127.0.0.1') return true
+  return /^(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})$/.test(
+    host,
+  )
+}
+
+/** En producción el QR abre el dominio del sitio. La IP fija solo sirve en la Wi-Fi local. */
+function urlForTablet(rawUrl: string) {
   const parsed = new URL(rawUrl)
+  if (!isPrivateHost(window.location.hostname)) {
+    parsed.protocol = window.location.protocol
+    parsed.hostname = window.location.hostname
+    parsed.port = window.location.port
+    return parsed.toString()
+  }
   parsed.hostname = KIOSK_LAN_IP
   return parsed.toString()
 }
@@ -46,16 +61,25 @@ export function KioskLanLinkButton() {
         `/api/v1/kiosk/lan-link${port ? `?port=${encodeURIComponent(port)}` : ''}`,
         { headers: { Authorization: `Bearer ${auth.token}` } },
       )
-      const data = (await response.json()) as LanLinkResponse
+      const raw = await response.text()
+      let data: LanLinkResponse
+      try {
+        data = JSON.parse(raw) as LanLinkResponse
+      } catch {
+        setError('El servidor no entregó el enlace de la tableta.')
+        setUrl('')
+        setQr('')
+        return
+      }
       if (!response.ok || !data.url) {
         setError(data.error || 'No se pudo armar el enlace del kiosco.')
         setUrl('')
         setQr('')
         return
       }
-      const lanUrl = urlOnClinicLan(data.url)
+      const lanUrl = urlForTablet(data.url)
       setUrl(lanUrl)
-      setQr(await QRCode.toDataURL(lanUrl, { margin: 1, width: 280, errorCorrectionLevel: 'M' }))
+      setQr(await QRCode.toDataURL(lanUrl, { margin: 1, width: 280, errorCorrectionLevel: 'L' }))
     } catch {
       setError('Sin conexión con el servidor de este PC.')
     } finally {
@@ -93,8 +117,9 @@ export function KioskLanLinkButton() {
               Conectar tableta
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              La tableta y este PC deben estar en la misma Wi-Fi. Escanee el código o abra el enlace.
-              También quedó impreso en la terminal del servidor.
+              {isPrivateHost(window.location.hostname)
+                ? 'La tableta y este PC deben estar en la misma Wi-Fi. Escanee el código o abra el enlace.'
+                : 'Escanee el código con la tableta. Se abre el modo kiosco en este mismo sitio.'}
             </p>
 
             {loading ? <p className="mt-6 text-sm text-slate-500">Detectando IP local…</p> : null}

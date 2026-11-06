@@ -109,12 +109,21 @@ jobs:
               git remote get-url origin || return 1
               git status --short --branch || true
               git fetch origin main || return 1
-              # Si el índice no coincide con el archivo, checkout y reset
-              # abortan con "Entry not uptodate" y el build sigue en el
-              # commit viejo. git add alinea el índice; reset --hard deja
-              # el directorio exactamente en origin/main.
-              git add -A || return 1
-              git reset --hard origin/main || return 1
+              # "Entry not uptodate" deja el proceso de PM2 en un server.js
+              # viejo. Borrar el archivo bloqueado permite que reset --hard
+              # deje el directorio en origin/main.
+              git update-index --no-skip-worktree server/services/fevRipsService.js || true
+              local attempt
+              for attempt in 1 2 3; do
+                if git reset --hard origin/main; then
+                  break
+                fi
+                echo "Intento $attempt: reset bloqueado. Se quitan archivos que git no puede pisar."
+                git diff --name-only HEAD origin/main 2>/dev/null | while IFS= read -r path; do
+                  [ -n "$path" ] && rm -f "$path"
+                done
+                rm -f server/services/fevRipsService.js
+              done
               local head origin_rev
               head=$(git rev-parse HEAD)
               origin_rev=$(git rev-parse origin/main)
@@ -153,16 +162,20 @@ jobs:
               fi
               if is_this_repo "$dir"; then
                 if ! deploy_repo "$dir"; then
-                  echo "AVISO: $dir no compiló origin/main. Se copia el dist canónico (es el que sirve PM2)."
+                  echo "AVISO: $dir no compiló origin/main. Se copia el servidor y el dist canónicos (se conserva .env)."
+                  tar -C "$CANONICAL" --exclude .env --exclude node_modules --exclude dist --exclude .git -cf - . | tar -C "$dir" -xf -
                   rm -rf "$dir/dist"
                   cp -a "$CANONICAL/dist" "$dir/dist"
-                  echo "Bundle copiado:"
+                  (cd "$dir" && npm install)
+                  echo "Bundle en ejecución:"
                   grep -o 'assets/index-[^"]*' "$dir/dist/index.html" || true
                 fi
               elif [ -f "$dir/server.js" ] && [ -f "$dir/package.json" ]; then
-                echo "---- Copiando dist a $dir ----"
+                echo "---- Copiando servidor y dist a $dir (se conserva .env) ----"
+                tar -C "$CANONICAL" --exclude .env --exclude node_modules --exclude dist --exclude .git -cf - . | tar -C "$dir" -xf -
                 rm -rf "$dir/dist"
                 cp -a "$CANONICAL/dist" "$dir/dist"
+                (cd "$dir" && npm install)
                 echo "Bundle copiado:"
                 grep -o 'assets/index-[^"]*' "$dir/dist/index.html" || true
               else
