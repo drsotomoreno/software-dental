@@ -102,6 +102,28 @@ test('falta de credenciales aborta la instancia', () => {
   )
 })
 
+test('un NIT con dígito de verificación se envía sin ese dígito', () => {
+  const settings = resolveMinsaludSettings({
+    ...CREDENCIALES_ENV,
+    MINSALUD_NIT: '79904620-4',
+    MINSALUD_SANDBOX: 'false',
+  })
+  assert.equal(settings.nit, '79904620')
+  assert.equal(settings.numeroDocumento, '79904620')
+  assert.equal(settings.tipoUsuario, 'PIN')
+})
+
+test('si la cédula y el NIT no son el mismo documento el login usa RE', () => {
+  const settings = resolveMinsaludSettings({
+    ...CREDENCIALES_ENV,
+    MINSALUD_NIT: '900123456',
+    MINSALUD_SANDBOX: 'false',
+  })
+  assert.equal(settings.numeroDocumento, '79904620')
+  assert.equal(settings.nit, '900123456')
+  assert.equal(settings.tipoUsuario, 'RE')
+})
+
 test('separa el usuario en tipo y número y envía tipoUsuario PIN', async () => {
   const calls = []
   const service = new MinsaludService({

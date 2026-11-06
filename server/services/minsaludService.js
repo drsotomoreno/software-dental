@@ -1,11 +1,13 @@
 /**
  * Cliente del MUV (LoginSISPRO + CargarRipsSinFactura).
  * El token queda en memoria y se renueva si faltan menos de 5 minutos.
- * El login separa MINSALUD_USERNAME en tipo y número, y envía tipoUsuario PIN.
+ * El login separa MINSALUD_USERNAME en tipo y número.
+ * tipoUsuario es PIN si la cédula y el NIT son el mismo documento; si no, RE.
  */
 
 import http from 'node:http'
 import https from 'node:https'
+import { documentoObligadoDigits } from '../../shared/nit.js'
 import { splitUsuarioDocumento } from './fevRipsService.js'
 
 const SANDBOX_BASE_URL = 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
@@ -26,6 +28,19 @@ function envValue(name, source = process.env) {
 
 function digitsOnly(value) {
   return String(value ?? '').replace(/\D/g, '')
+}
+
+/**
+ * PIN solo si la cédula y el NIT son el mismo documento (profesional independiente).
+ * Si el NIT es de la IPS y la cédula es de otra persona, el MUV espera RE.
+ * Un tipo explícito se respeta cuando los documentos no coinciden.
+ */
+function tipoUsuarioLogin(numeroDocumento, nit, explicito) {
+  const documento = digitsOnly(numeroDocumento)
+  const prestador = digitsOnly(nit)
+  if (documento && prestador && documento === prestador) return 'PIN'
+  const pedido = String(explicito ?? '').trim().toUpperCase()
+  return pedido || 'RE'
 }
 
 function joinUrl(base, path) {
@@ -82,7 +97,7 @@ function isLocalHttps(url) {
 export function resolveMinsaludSettings(source = process.env, overrides = {}) {
   const username = overrides.username ?? envValue('MINSALUD_USERNAME', source)
   const password = overrides.password ?? envValue('MINSALUD_PASSWORD', source)
-  const nit = digitsOnly(overrides.nit ?? envValue('MINSALUD_NIT', source))
+  const nit = documentoObligadoDigits(overrides.nit ?? envValue('MINSALUD_NIT', source))
   const missing = []
   if (!String(username ?? '').trim()) missing.push('MINSALUD_USERNAME')
   if (!String(password ?? '').trim()) missing.push('MINSALUD_PASSWORD')
@@ -116,7 +131,11 @@ export function resolveMinsaludSettings(source = process.env, overrides = {}) {
     numeroDocumento: identidad.numero,
     clave: password,
     nit,
-    tipoUsuario: 'PIN',
+    tipoUsuario: tipoUsuarioLogin(
+      identidad.numero,
+      nit,
+      overrides.tipoUsuario ?? envValue('MINSALUD_TIPO_USUARIO', source),
+    ),
     appVersion: overrides.appVersion || envValue('MINSALUD_APP_VERSION', source) || DEFAULT_APP_VERSION,
     tipoMecanismoValidacion: Number(
       overrides.tipoMecanismoValidacion ??
@@ -273,7 +292,7 @@ export class MinsaludService {
         },
         clave: settings.clave,
         nit: settings.nit,
-        tipoUsuario: 'PIN',
+        tipoUsuario: settings.tipoUsuario,
         appVersion: settings.appVersion,
         tipoMecanismoValidacion: settings.tipoMecanismoValidacion,
       },

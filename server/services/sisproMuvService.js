@@ -2,7 +2,7 @@
  * Cliente de radicación RIPS contra el MUV/SISPRO.
  * Vive en el servidor para que el bearer y la clave del prestador no entren al bundle de Vite.
  * Con CUFE o XML usa CargarFevRips; sin ellos, CargarRipsSinFactura.
- * El login reutiliza el contrato LoginSISPRO (tipoUsuario PIN) de resolveMinsaludSettings.
+ * El login reutiliza el contrato LoginSISPRO de resolveMinsaludSettings.
  */
 
 import dns from 'node:dns'
@@ -247,7 +247,12 @@ function jwtExpiryMs(token) {
 
 function loginErrors(data) {
   if (!data || typeof data !== 'object') return []
-  return erroresModelo(data).map((item) => item.message).filter(Boolean)
+  const modelo = erroresModelo(data).map((item) => item.message).filter(Boolean)
+  if (modelo.length > 0) return modelo
+  const texto = [data.mensaje, data.Mensaje, data.message, data.Message, data.Detail, data.detail].find(
+    (item) => typeof item === 'string' && item.trim(),
+  )
+  return texto ? [String(texto).trim()] : []
 }
 
 const CODIGOS_TLS = new Set([
@@ -608,7 +613,7 @@ export class SisproMuvService {
           },
           clave: settings.clave,
           nit: settings.nit,
-          tipoUsuario: 'PIN',
+          tipoUsuario: settings.tipoUsuario,
           appVersion: settings.appVersion,
           tipoMecanismoValidacion: settings.tipoMecanismoValidacion,
         },
@@ -706,6 +711,9 @@ export class SisproMuvService {
           httpStatus: wrapped.httpStatus ?? null,
           durationMs,
           message: wrapped.message,
+          detalle: Array.isArray(wrapped.errors)
+            ? wrapped.errors.map((item) => item?.message).filter(Boolean)
+            : [],
           nativeCode: nativo?.code ?? null,
           nativeMessage: nativo?.message ?? null,
         },
