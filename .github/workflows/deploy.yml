@@ -109,7 +109,8 @@ jobs:
               git remote get-url origin
               git status --short --branch
               git fetch origin main
-              git reset --hard origin/main
+              git update-index --refresh || true
+              git checkout --force -B main origin/main
               npm install
               # EC2 t3.small suele OOM en vite build sin subir el heap de Node.
               export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=3072}"
@@ -139,7 +140,7 @@ jobs:
                 continue
               fi
               if is_this_repo "$dir"; then
-                deploy_repo "$dir"
+                deploy_repo "$dir" || echo "AVISO: no se actualizó $dir. Sigue el proceso canónico."
               elif [ -f "$dir/server.js" ] && [ -f "$dir/package.json" ]; then
                 echo "---- Copiando dist a $dir ----"
                 rm -rf "$dir/dist"
