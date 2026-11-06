@@ -16,6 +16,7 @@ echo "---- Código ----"
 git remote get-url origin
 git status --short --branch
 git fetch origin main
+git add -A
 git reset --hard origin/main
 
 echo "---- Dependencias y build (el proceso actual sigue sirviendo) ----"

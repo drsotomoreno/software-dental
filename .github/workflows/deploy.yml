@@ -105,16 +105,28 @@ jobs:
             deploy_repo() {
               local dir="$1"
               echo "---- Desplegando $dir ----"
-              cd "$dir"
-              git remote get-url origin
-              git status --short --branch
-              git fetch origin main
-              git update-index --refresh || true
-              git checkout --force -B main origin/main
-              npm install
+              cd "$dir" || return 1
+              git remote get-url origin || return 1
+              git status --short --branch || true
+              git fetch origin main || return 1
+              # Si el índice no coincide con el archivo, checkout y reset
+              # abortan con "Entry not uptodate" y el build sigue en el
+              # commit viejo. git add alinea el índice; reset --hard deja
+              # el directorio exactamente en origin/main.
+              git add -A || return 1
+              git reset --hard origin/main || return 1
+              local head origin_rev
+              head=$(git rev-parse HEAD)
+              origin_rev=$(git rev-parse origin/main)
+              echo "Commit: $head (origin/main $origin_rev)"
+              if [ "$head" != "$origin_rev" ]; then
+                echo "El directorio no quedó en origin/main."
+                return 1
+              fi
+              npm install || return 1
               # EC2 t3.small suele OOM en vite build sin subir el heap de Node.
               export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=3072}"
-              npm run build
+              npm run build || return 1
               echo "Bundle:"
               grep -o 'assets/index-[^"]*' dist/index.html || true
             }
@@ -130,7 +142,7 @@ jobs:
               esac
             }
 
-            deploy_repo "$CANONICAL"
+            deploy_repo "$CANONICAL" || exit 1
 
             pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);const seen=new Set();for(const app of apps){const cwd=app.pm2_env&&app.pm2_env.pm_cwd;if(cwd&&!seen.has(cwd)){seen.add(cwd);console.log(cwd);}}});' > /tmp/pm2-cwds.txt
 
@@ -140,7 +152,13 @@ jobs:
                 continue
               fi
               if is_this_repo "$dir"; then
-                deploy_repo "$dir" || echo "AVISO: no se actualizó $dir. Sigue el proceso canónico."
+                if ! deploy_repo "$dir"; then
+                  echo "AVISO: $dir no compiló origin/main. Se copia el dist canónico (es el que sirve PM2)."
+                  rm -rf "$dir/dist"
+                  cp -a "$CANONICAL/dist" "$dir/dist"
+                  echo "Bundle copiado:"
+                  grep -o 'assets/index-[^"]*' "$dir/dist/index.html" || true
+                fi
               elif [ -f "$dir/server.js" ] && [ -f "$dir/package.json" ]; then
                 echo "---- Copiando dist a $dir ----"
                 rm -rf "$dir/dist"
