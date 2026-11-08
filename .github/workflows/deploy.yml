@@ -1,67 +1,24 @@
 # Despliegue automático a AWS EC2 (mihistoriadental.com).
 #
-# Se dispara en cada push a `main`. El runner de GitHub abre SSH contra la
-# instancia y, ya dentro, actualiza el código, instala dependencias, construye
-# el frontend y reinicia Node y nginx.
+# Se dispara en cada push a `main`. El runner abre SSH, construye en el
+# clon canónico y SIEMPRE sincroniza ese build al cwd real de PM2.
+# Si el smoke del kiosco/Socket.IO falla, el job sale con error.
 #
 # ---------------------------------------------------------------------------
-# Cómo configurar los GitHub Secrets
+# Secretos (Settings → Secrets and variables → Actions)
 # ---------------------------------------------------------------------------
-# En el repositorio de GitHub:
-#   Settings → Secrets and variables → Actions → New repository secret
-#
-# Crea estos tres secretos. El nombre distingue mayúsculas y minúsculas y
-# tiene que coincidir exactamente con el que usa este workflow.
-#
-#   EC2_HOST
-#     IP pública o DNS público de la instancia EC2.
-#     Ejemplos: 18.xxx.xxx.xxx
-#               ec2-18-xxx-xxx-xxx.compute.amazonaws.com
-#     También puede ser un hostname que resuelva a esa instancia
-#     (por ejemplo mihistoriadental.com), siempre que el puerto 22 llegue
-#     hasta ella.
-#
-#   EC2_USER
-#     Usuario del sistema con el que se entra por SSH.
-#     En Amazon Linux suele ser ec2-user; en Ubuntu, ubuntu.
-#
-#   EC2_SSH_KEY
-#     Clave privada completa que corresponde a la clave pública autorizada
-#     en la instancia (~/.ssh/authorized_keys del usuario EC2_USER).
-#     Pega el archivo entero, con los saltos de línea y las líneas de inicio
-#     y fin, por ejemplo:
-#       -----BEGIN OPENSSH PRIVATE KEY-----
-#       ...
-#       -----END OPENSSH PRIVATE KEY-----
-#     Este valor solo vive en el secreto. No lo subas al repositorio ni lo
-#     dejes en el historial de git.
-#
-# Generar el par de claves (en tu máquina, fuera del repo) si aún no existe:
-#   ssh-keygen -t ed25519 -C "github-actions-deploy" -f ./ec2_deploy -N ""
-#   La pública (ec2_deploy.pub) se agrega a authorized_keys de la instancia.
-#   La privada (ec2_deploy) es el valor del secreto EC2_SSH_KEY.
-#   Borra ambos archivos locales cuando el secreto ya esté guardado.
-#
-# El security group de la instancia tiene que permitir SSH (puerto 22) desde
-# GitHub Actions. Para no dejar el puerto abierto a 0.0.0.0/0, limita el
-# origen a los rangos de la API meta de GitHub (clave "actions") o entra
-# por un bastion.
+#   EC2_HOST      IP o DNS público de la instancia
+#   EC2_USER      ubuntu | ec2-user
+#   EC2_SSH_KEY   clave privada completa (authorized_keys en la instancia)
 #
 # ---------------------------------------------------------------------------
-# Preparación de la instancia (una vez, antes del primer despliegue)
+# Preparación de la instancia (una vez)
 # ---------------------------------------------------------------------------
-# - El repositorio ya está clonado en /var/www/mihistoriadental y `origin`
-#   apunta a este repo. Si es privado, esa copia necesita su propio deploy
-#   key de solo lectura (distinto de EC2_SSH_KEY) para que `git pull` funcione.
-# - Si nginx apunta a otro proceso PM2 (por ejemplo software-dental) cuyo
-#   directorio no es /var/www/mihistoriadental, el script también actualiza
-#   esa copia. Si no, el build nuevo no es el que ve el sitio.
-# - Node.js y npm están instalados. El proceso ya está registrado en PM2:
-#     pm2 start server.js --name mihistoriadental && pm2 save
-# - nginx está instalado y EC2_USER puede recargarlo sin contraseña.
-#   En /etc/sudoers.d/deploy, una línea como esta (cambia el usuario):
-#     ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl reload nginx
-# - Si el clone no vive en /var/www/mihistoriadental, cambia la ruta del `cd`.
+# - Clon en /var/www/mihistoriadental con origin = este repo
+# - .env con DATABASE_URL (RDS), PORT, NODE_ENV=production, JWT/KIOSK secrets
+# - PM2: pm2 start server.js --name software-dental && pm2 save
+# - nginx con proxy a Node y Upgrade para /socket.io/
+# - sudoers: usuario ALL=(ALL) NOPASSWD: /bin/systemctl reload nginx
 
 name: Deploy to EC2
 
@@ -70,12 +27,10 @@ on:
     branches:
       - main
 
-# Un despliegue a la vez. El siguiente espera a que termine el que está en curso.
 concurrency:
   group: deploy-ec2-main
   cancel-in-progress: false
 
-# Este job no lee el código en el runner: el pull ocurre en la instancia.
 permissions:
   contents: none
 
@@ -83,7 +38,7 @@ jobs:
   deploy:
     name: Desplegar en EC2
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Conectar por SSH y desplegar
@@ -92,9 +47,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          # Corta el job si algún comando remoto termina con error.
-          script_stop: true
-          command_timeout: 15m
+          command_timeout: 20m
           script: |
             set -euo pipefail
             CANONICAL="/var/www/mihistoriadental"
@@ -102,23 +55,18 @@ jobs:
             echo "Procesos PM2:"
             pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};console.log([app.name,env.status,env.pm_cwd,env.pm_exec_path,env.PORT||""].join(" | "));}});'
 
-            deploy_repo() {
+            force_main() {
               local dir="$1"
-              echo "---- Desplegando $dir ----"
               cd "$dir" || return 1
-              git remote get-url origin || return 1
-              git status --short --branch || true
               git fetch origin main || return 1
-              # "Entry not uptodate" deja el proceso de PM2 en un server.js
-              # viejo. Borrar el archivo bloqueado permite que reset --hard
-              # deje el directorio en origin/main.
-              git update-index --no-skip-worktree server/services/fevRipsService.js || true
+              git update-index --no-skip-worktree server/services/fevRipsService.js 2>/dev/null || true
               local attempt
               for attempt in 1 2 3; do
+                git add -A >/dev/null 2>&1 || true
                 if git reset --hard origin/main; then
                   break
                 fi
-                echo "Intento $attempt: reset bloqueado. Se quitan archivos que git no puede pisar."
+                echo "Intento $attempt: reset bloqueado; se eliminan paths conflictivos."
                 git diff --name-only HEAD origin/main 2>/dev/null | while IFS= read -r path; do
                   [ -n "$path" ] && rm -f "$path"
                 done
@@ -128,16 +76,38 @@ jobs:
               head=$(git rev-parse HEAD)
               origin_rev=$(git rev-parse origin/main)
               echo "Commit: $head (origin/main $origin_rev)"
-              if [ "$head" != "$origin_rev" ]; then
-                echo "El directorio no quedó en origin/main."
-                return 1
-              fi
-              npm install || return 1
-              # EC2 t3.small suele OOM en vite build sin subir el heap de Node.
+              [ "$head" = "$origin_rev" ] || return 1
+            }
+
+            deploy_canonical() {
+              echo "---- Desplegando canónico $CANONICAL ----"
+              cd "$CANONICAL" || exit 1
+              git remote get-url origin || exit 1
+              git status --short --branch || true
+              force_main "$CANONICAL" || exit 1
+              chmod +x scripts/*.sh 2>/dev/null || true
+              npm install || exit 1
               export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=3072}"
-              npm run build || return 1
-              echo "Bundle:"
+              npm run build || exit 1
+              echo "Bundle canónico:"
               grep -o 'assets/index-[^"]*' dist/index.html || true
+
+              # Guardas de regresión: sin estas rutas vuelve el timeout/404 del kiosco.
+              test -f server/socket/kioskSocket.js || { echo "Falta kioskSocket.js"; exit 1; }
+              test -f server/controllers/kioskSignature.controller.js || { echo "Falta kioskSignature.controller.js"; exit 1; }
+              test -f server/controllers/kioskLan.controller.js || { echo "Falta kioskLan.controller.js"; exit 1; }
+              grep -q "maxHttpBufferSize" server/socket/kioskSocket.js || { echo "kioskSocket sin buffer ampliado"; exit 1; }
+              grep -q "createKioskSignature\|/signature" server/routes/kiosk.routes.js || { echo "Ruta /signature ausente"; exit 1; }
+              if ! grep -Rql "kiosk/signature" dist/assets --include='*.js'; then
+                echo "El bundle del kiosco no incluye el respaldo HTTP de firma."
+                exit 1
+              fi
+            }
+
+            sync_pm2_cwd() {
+              local dir="$1"
+              echo "---- Sincronizando PM2 cwd $dir ← canónico ----"
+              bash "$CANONICAL/scripts/sync-pm2-from-canonical.sh" "$CANONICAL" "$dir"
             }
 
             is_this_repo() {
@@ -151,37 +121,49 @@ jobs:
               esac
             }
 
-            deploy_repo "$CANONICAL" || exit 1
+            resolve_app_port() {
+              local port=""
+              port=$(pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{try{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};const p=env.PORT||env.env&&env.env.PORT;if(p){console.log(String(p));return;}}}catch(e){}console.log("");});' || true)
+              if [ -z "$port" ] && [ -f "$CANONICAL/.env" ]; then
+                port=$(grep -E '^PORT=' "$CANONICAL/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+              fi
+              echo "${port:-3000}"
+            }
+
+            deploy_canonical
 
             pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);const seen=new Set();for(const app of apps){const cwd=app.pm2_env&&app.pm2_env.pm_cwd;if(cwd&&!seen.has(cwd)){seen.add(cwd);console.log(cwd);}}});' > /tmp/pm2-cwds.txt
 
+            SYNCED_ANY=0
             while IFS= read -r dir; do
               [ -n "$dir" ] || continue
               if [ "$dir" = "$CANONICAL" ]; then
+                SYNCED_ANY=1
                 continue
               fi
-              if is_this_repo "$dir"; then
-                if ! deploy_repo "$dir"; then
-                  echo "AVISO: $dir no compiló origin/main. Se copia el servidor y el dist canónicos (se conserva .env)."
-                  tar -C "$CANONICAL" --exclude .env --exclude node_modules --exclude dist --exclude .git -cf - . | tar -C "$dir" -xf -
-                  rm -rf "$dir/dist"
-                  cp -a "$CANONICAL/dist" "$dir/dist"
-                  (cd "$dir" && npm install)
-                  echo "Bundle en ejecución:"
-                  grep -o 'assets/index-[^"]*' "$dir/dist/index.html" || true
-                fi
-              elif [ -f "$dir/server.js" ] && [ -f "$dir/package.json" ]; then
-                echo "---- Copiando servidor y dist a $dir (se conserva .env) ----"
-                tar -C "$CANONICAL" --exclude .env --exclude node_modules --exclude dist --exclude .git -cf - . | tar -C "$dir" -xf -
-                rm -rf "$dir/dist"
-                cp -a "$CANONICAL/dist" "$dir/dist"
-                (cd "$dir" && npm install)
-                echo "Bundle copiado:"
-                grep -o 'assets/index-[^"]*' "$dir/dist/index.html" || true
+              if is_this_repo "$dir" || { [ -f "$dir/server.js" ] && [ -f "$dir/package.json" ]; }; then
+                # Siempre: no confiar en git reset del clon sucio (fevRipsService, etc.).
+                sync_pm2_cwd "$dir" || exit 1
+                SYNCED_ANY=1
               else
                 echo "Se omite $dir: no es este proyecto."
               fi
             done < /tmp/pm2-cwds.txt
 
-            pm2 restart all
-            sudo systemctl reload nginx
+            if [ "$SYNCED_ANY" -eq 0 ]; then
+              echo "Ningún cwd de PM2 coincide con este proyecto." >&2
+              exit 1
+            fi
+
+            echo "---- Reinicio ----"
+            pm2 restart all --update-env
+            sleep 3
+            sudo systemctl reload nginx || true
+
+            APP_PORT="$(resolve_app_port)"
+            echo "Puerto smoke: $APP_PORT"
+            bash "$CANONICAL/scripts/post-deploy-smoke.sh" "$APP_PORT"
+
+            echo "---- Estado final ----"
+            pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};console.log([app.name,env.status,env.pm_cwd].join(" | "));}});'
+            echo "Despliegue OK."

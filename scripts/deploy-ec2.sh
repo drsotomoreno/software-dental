@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Actualiza mihistoriadental.com en la EC2 sin apagar nginx.
-# Ejecutar DENTRO de la instancia, en el clon del repo:
+# Ejecutar DENTRO de la instancia:
 #   bash scripts/deploy-ec2.sh
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/var/www/mihistoriadental}"
-cd "$APP_DIR"
+CANONICAL="${APP_DIR:-/var/www/mihistoriadental}"
+cd "$CANONICAL"
 
 if [[ ! -f .env ]]; then
-  echo "Falta $APP_DIR/.env con DATABASE_URL (RDS), PORT y NODE_ENV=production." >&2
+  echo "Falta $CANONICAL/.env con DATABASE_URL (RDS), PORT y NODE_ENV=production." >&2
   exit 1
 fi
 
@@ -18,31 +18,42 @@ git status --short --branch
 git fetch origin main
 git add -A
 git reset --hard origin/main
+chmod +x scripts/*.sh 2>/dev/null || true
 
-echo "---- Dependencias y build (el proceso actual sigue sirviendo) ----"
+echo "---- Dependencias y build ----"
 npm install
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=3072}"
 npm run build
 grep -o 'assets/index-[^"]*' dist/index.html || true
 
-restart_pm2() {
-  local name="$1"
-  if pm2 describe "$name" >/dev/null 2>&1; then
-    pm2 restart "$name" --update-env
-    return 0
+echo "---- Sincronizar cwd de PM2 (evita server.js viejo) ----"
+pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);const seen=new Set();for(const app of apps){const cwd=app.pm2_env&&app.pm2_env.pm_cwd;if(cwd&&!seen.has(cwd)){seen.add(cwd);console.log(cwd);}}});' > /tmp/pm2-cwds.txt
+
+while IFS= read -r dir; do
+  [ -n "$dir" ] || continue
+  if [ "$dir" = "$CANONICAL" ]; then
+    continue
   fi
-  return 1
-}
+  if [ -f "$dir/server.js" ] && [ -f "$dir/package.json" ]; then
+    bash "$CANONICAL/scripts/sync-pm2-from-canonical.sh" "$CANONICAL" "$dir"
+  fi
+done < /tmp/pm2-cwds.txt
 
 echo "---- Reinicio PM2 ----"
-if restart_pm2 mihistoriadental; then
-  :
-elif restart_pm2 software-dental; then
-  :
+if pm2 describe mihistoriadental >/dev/null 2>&1; then
+  pm2 restart mihistoriadental --update-env
+elif pm2 describe software-dental >/dev/null 2>&1; then
+  pm2 restart software-dental --update-env
 else
   pm2 restart all --update-env
 fi
 pm2 save
-sudo systemctl reload nginx
+sleep 3
+sudo systemctl reload nginx || true
+
+PORT="$(grep -E '^PORT=' .env | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+PORT="${PORT:-3000}"
+bash "$CANONICAL/scripts/post-deploy-smoke.sh" "$PORT"
+
 pm2 status
-echo "Listo. Socket.IO queda en el mismo dominio, ruta /socket.io."
+echo "Listo. Socket.IO en /socket.io · firma kiosco con ack liviano + HTTP /api/v1/kiosk/signature."
