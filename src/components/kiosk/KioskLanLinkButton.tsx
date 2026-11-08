@@ -94,7 +94,7 @@ export function KioskLanLinkButton() {
         onClick={() => {
           void openLink()
         }}
-        className="inline-flex h-12 items-center gap-2 rounded-lg border border-slate-200 px-3 text-xl font-bold text-slate-700 hover:bg-slate-50"
+        className="inline-flex h-12 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
       >
         <Tablet className="h-6 w-6 text-teal-700" aria-hidden />
         Tableta

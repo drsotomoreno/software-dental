@@ -47,8 +47,8 @@ export function TopNavbar() {
       <div className="flex w-full items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
         <div className="flex min-w-0 items-center gap-4">
           <Link to={DASHBOARD_PATH} className="inline-flex items-baseline leading-none">
-            <span className="text-xl font-bold text-slate-800">mihistoriadental</span>
-            <span className="text-xl font-bold text-blue-600">.com</span>
+            <span className="text-xl font-semibold text-blue-700">mihistoriadental</span>
+            <span className="text-xl font-normal text-gray-500">.com</span>
           </Link>
 
           {!onDashboard && (
@@ -76,7 +76,7 @@ export function TopNavbar() {
               aria-haspopup="true"
               aria-label="Menú de cuenta"
             >
-              <span className="max-w-[22rem] truncate text-xl font-bold text-slate-700">
+              <span className="max-w-[22rem] truncate text-sm font-medium text-gray-700">
                 {displayName}
               </span>
               <svg
