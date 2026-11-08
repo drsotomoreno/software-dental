@@ -16,9 +16,9 @@ function Pill({
   className: string
 }) {
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${className}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xl font-bold ${className}`}>
       <span>{count}</span>
-      <span className="font-medium">{label}</span>
+      <span>{label}</span>
     </span>
   )
 }
@@ -65,12 +65,12 @@ export function RipsStatusWidget() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-10 items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-4 text-left hover:bg-white"
+        className="flex h-12 items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-4 text-left hover:bg-white"
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`RIPS: ${summary.listos} listos para enviar, ${summary.sincronizadosHoy} sincronizados hoy, ${summary.conErrores} con errores`}
       >
-        <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-bold tracking-wide text-white">
+        <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-xl font-bold tracking-wide text-white">
           RIPS
         </span>
         <span className="flex items-center gap-2">
@@ -83,7 +83,7 @@ export function RipsStatusWidget() {
         type="button"
         onClick={enviar}
         disabled={running}
-        className="inline-flex h-10 items-center rounded-full bg-dental-600 px-4 text-sm font-semibold text-white hover:bg-dental-700 disabled:opacity-60"
+        className="inline-flex h-12 items-center rounded-full bg-dental-600 px-4 text-xl font-bold text-white hover:bg-dental-700 disabled:opacity-60"
         aria-label="Cierre de Jornada / Enviar RIPS del Día"
         title="Cierre de Jornada / Enviar RIPS del Día"
       >
