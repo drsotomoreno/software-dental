@@ -28,7 +28,7 @@ type TriggerUiState = 'idle' | 'sending' | 'waiting' | 'signed' | 'error'
 
 /** La evolución se muestra en la tableta; no se pide firma del paciente. */
 function patientMaySignOnTablet(type: KioskActionType) {
-  return type === 'INTAKE' || type === 'CONSENT'
+  return type === 'INTAKE' || type === 'CONSENT' || type === 'PLAN'
 }
 
 /**
@@ -134,7 +134,7 @@ export function KioskRemoteTrigger({
   const waitingLabel = maySign
     ? 'Enviado a tableta (Esperando firma del paciente…)'
     : 'Visible en la tableta (solo lectura)'
-  const idleLabel = maySign ? 'Enviar a Tableta' : 'Mostrar en tableta'
+  const idleLabel = maySign ? 'Enviar a la tableta' : 'Mostrar en tableta'
 
   return (
     <div className={`space-y-1 ${className}`}>

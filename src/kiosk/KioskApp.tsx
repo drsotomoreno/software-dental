@@ -19,6 +19,7 @@ import type {
   KioskTriggerPayload,
 } from './kioskTypes'
 import { useKioskWakeLock } from './useKioskWakeLock'
+import { MIN_SIGNATURE_STROKES } from '@/types/signature'
 
 const SUCCESS_HOLD_MS = 3000
 /** Sin interacción tras recibir una acción → alerta «¿Sigue ahí?» */
@@ -30,11 +31,17 @@ function screenForAction(actionType: string): KioskScreenState {
   if (actionType === 'INTAKE') return 'SHOW_INTAKE'
   if (actionType === 'EVOLUTION') return 'SHOW_EVOLUTION'
   if (actionType === 'CONSENT') return 'SHOW_CONSENT'
+  if (actionType === 'PLAN') return 'SHOW_PLAN'
   return 'IDLE'
 }
 
 function isActiveFormScreen(screen: KioskScreenState) {
-  return screen === 'SHOW_INTAKE' || screen === 'SHOW_EVOLUTION' || screen === 'SHOW_CONSENT'
+  return (
+    screen === 'SHOW_INTAKE' ||
+    screen === 'SHOW_EVOLUTION' ||
+    screen === 'SHOW_CONSENT' ||
+    screen === 'SHOW_PLAN'
+  )
 }
 
 function ConnectionBadge({
@@ -194,7 +201,7 @@ function EvolutionReadScreen({
 function DocumentSignScreen({
   title,
   contentText,
-  showAcceptBoxes,
+  acceptLabels,
   signerIsGuardian,
   guardianName,
   guardianDocument,
@@ -207,23 +214,34 @@ function DocumentSignScreen({
 }: {
   title: string
   contentText: string
-  showAcceptBoxes: boolean
+  /** Cada texto es una casilla que el paciente debe marcar antes de firmar. */
+  acceptLabels: string[]
   signerIsGuardian: boolean
   guardianName: string
   guardianDocument: string
   busy: boolean
   error: string | null
   onActivity: () => void
-  onSubmit: (signatureBase64: string, accepted: boolean) => void
+  onSubmit: (input: {
+    signatureBase64: string
+    accepted: boolean
+    signatureMeta: {
+      signatureMethod: 'canvas_biometric'
+      strokeCount: number
+      captureStartedAt: string
+      captureEndedAt: string
+      canvasWidth: number
+      canvasHeight: number
+    }
+  }) => void
   signatureDataUrl?: string | null
   onSignatureSnapshot?: (dataUrl: string | null) => void
 }) {
   const signatureRef = useRef<SignaturePadHandle>(null)
-  const [acceptedText, setAcceptedText] = useState(false)
-  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false)
+  const [accepted, setAccepted] = useState<boolean[]>(() => acceptLabels.map(() => false))
   const [localError, setLocalError] = useState<string | null>(null)
 
-  const canSign = !showAcceptBoxes || (acceptedText && acceptedPrivacy)
+  const canSign = acceptLabels.length === 0 || accepted.every(Boolean)
   const guardianReady = !signerIsGuardian || (guardianName.trim() && guardianDocument.trim())
   const signatureHeading = signerIsGuardian
     ? 'Firma del acudiente / representante legal'
@@ -244,38 +262,32 @@ function DocumentSignScreen({
         </h1>
       </header>
 
-      <article className="mb-6 max-h-[40vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
+      <article className="mb-6 max-h-[50vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
         <pre className="whitespace-pre-wrap font-sans text-base leading-relaxed text-slate-800">
           {contentText || 'Sin contenido.'}
         </pre>
       </article>
 
-      {showAcceptBoxes ? (
+      {acceptLabels.length > 0 ? (
         <div className="mb-6 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <label className="flex items-start gap-3 text-base text-slate-800">
-            <input
-              type="checkbox"
-              className="mt-1 h-5 w-5"
-              checked={acceptedText}
-              onChange={(event) => {
-                onActivity()
-                setAcceptedText(event.target.checked)
-              }}
-            />
-            <span>He leído y acepto el texto del consentimiento informado.</span>
-          </label>
-          <label className="flex items-start gap-3 text-base text-slate-800">
-            <input
-              type="checkbox"
-              className="mt-1 h-5 w-5"
-              checked={acceptedPrivacy}
-              onChange={(event) => {
-                onActivity()
-                setAcceptedPrivacy(event.target.checked)
-              }}
-            />
-            <span>Autorizo el tratamiento de mis datos personales con fines clínicos.</span>
-          </label>
+          {acceptLabels.map((label, index) => (
+            <label key={label} className="flex items-start gap-3 text-base text-slate-800">
+              <input
+                type="checkbox"
+                className="mt-1 h-5 w-5"
+                checked={accepted[index] === true}
+                onChange={(event) => {
+                  onActivity()
+                  setAccepted((current) => {
+                    const next = acceptLabels.map((_, item) => current[item] === true)
+                    next[index] = event.target.checked
+                    return next
+                  })
+                }}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
         </div>
       ) : null}
 
@@ -299,6 +311,9 @@ function DocumentSignScreen({
       {guardianReady ? (
         <div className="mb-4" onPointerDown={onActivity}>
           <p className="mb-2 text-lg font-medium text-slate-800">{signatureHeading}</p>
+          <p className="mb-2 text-sm text-slate-500">
+            Trace al menos {MIN_SIGNATURE_STROKES} trazos con el dedo o el lápiz.
+          </p>
           <SignaturePad
             ref={signatureRef}
             height={220}
@@ -325,16 +340,33 @@ function DocumentSignScreen({
             setLocalError('El acudiente debe identificarse con nombre y cédula antes de firmar.')
             return
           }
-          if (showAcceptBoxes && !canSign) {
+          if (acceptLabels.length > 0 && !canSign) {
             setLocalError('Marque las casillas de aceptación antes de firmar.')
             return
           }
-          const signatureBase64 = signatureRef.current?.toDataURL() ?? null
-          if (!signatureBase64) {
+          const capture = signatureRef.current?.getCapture() ?? null
+          if (!capture) {
             setLocalError('Por favor firme en el recuadro antes de continuar.')
             return
           }
-          onSubmit(signatureBase64, canSign)
+          if (capture.strokeCount < MIN_SIGNATURE_STROKES) {
+            setLocalError(
+              `La firma debe realizarse trazando al menos ${MIN_SIGNATURE_STROKES} trazos en el recuadro.`,
+            )
+            return
+          }
+          onSubmit({
+            signatureBase64: capture.dataUrl,
+            accepted: canSign,
+            signatureMeta: {
+              signatureMethod: 'canvas_biometric',
+              strokeCount: capture.strokeCount,
+              captureStartedAt: capture.captureStartedAt,
+              captureEndedAt: capture.captureEndedAt,
+              canvasWidth: capture.canvasWidth,
+              canvasHeight: capture.canvasHeight,
+            },
+          })
         }}
       >
         {busy ? 'Enviando…' : 'Firmar y Enviar'}
@@ -680,17 +712,34 @@ export default function KioskApp() {
     )
   }
 
-  if (screen === 'SHOW_CONSENT') {
+  if (screen === 'SHOW_CONSENT' || screen === 'SHOW_PLAN') {
     const form = (active?.payload?.formData || {}) as Record<string, unknown>
     const signerIsGuardian = form.esMenorDeEdad === true
+    const isPlan = screen === 'SHOW_PLAN'
+    const acceptLabels = isPlan
+      ? [
+          signerIsGuardian
+            ? 'Como representante legal, he leído y acepto el plan de tratamiento y el presupuesto.'
+            : 'He leído y acepto el plan de tratamiento y el presupuesto.',
+        ]
+      : [
+          signerIsGuardian
+            ? 'Como representante legal, he leído y acepto el texto del consentimiento informado.'
+            : 'He leído y acepto el texto del consentimiento informado.',
+          'Autorizo el tratamiento de mis datos personales con fines clínicos.',
+        ]
     return (
       <div className="relative" onPointerDown={bumpActivity} onKeyDown={bumpActivity} onInput={bumpActivity}>
         {connectionBadge}
         {stillThereOverlay}
         <DocumentSignScreen
-          title={active?.payload?.title || 'Consentimiento informado'}
+          key={`${active?.actionType || screen}:${active?.payload?.documentId || ''}`}
+          title={
+            active?.payload?.title ||
+            (isPlan ? 'Plan de tratamiento y presupuesto' : 'Consentimiento informado')
+          }
           contentText={active?.payload?.contentText || ''}
-          showAcceptBoxes
+          acceptLabels={acceptLabels}
           signerIsGuardian={signerIsGuardian}
           guardianName={String(form.guardianName || '')}
           guardianDocument={String(form.guardianDocument || '')}
@@ -701,7 +750,7 @@ export default function KioskApp() {
             signatureMemoryRef.current = dataUrl
           }}
           onActivity={bumpActivity}
-          onSubmit={(signatureBase64, accepted) => {
+          onSubmit={({ signatureBase64, accepted, signatureMeta }) => {
             setBusy(true)
             setSubmitError(null)
             void persistSignature({
@@ -709,6 +758,7 @@ export default function KioskApp() {
               formData: {
                 ...(active?.payload?.formData || {}),
                 accepted,
+                signatureMeta,
               },
             })
               .then(() => markSuccessThenIdle())

@@ -7,9 +7,20 @@ import {
   useState,
 } from 'react'
 
+export interface SignaturePadCapture {
+  dataUrl: string
+  strokeCount: number
+  captureStartedAt: string
+  captureEndedAt: string
+  canvasWidth: number
+  canvasHeight: number
+}
+
 export interface SignaturePadHandle {
   /** PNG Base64 (`data:image/png;base64,...`) o `null` si el lienzo está vacío. */
   toDataURL: () => string | null
+  /** Trazo real del lienzo, con conteo de trazos para la historia clínica. */
+  getCapture: () => SignaturePadCapture | null
   clear: () => void
   isEmpty: () => boolean
 }
@@ -50,6 +61,8 @@ const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
     const lastPointRef = useRef<Point | null>(null)
     const emptyRef = useRef(!initialDataUrl)
     const snapshotRef = useRef<string | null>(initialDataUrl)
+    const strokeCountRef = useRef(0)
+    const captureStartedAtRef = useRef<string | null>(null)
     /** true solo después de pintar un trazo real; el lienzo virgen no se lee. */
     const bitmapReadyRef = useRef(false)
     const onSnapshotRef = useRef(onSnapshot)
@@ -143,6 +156,10 @@ const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
         const canvas = canvasRef.current
         if (!canvas) return
         drawingRef.current = true
+        if (!captureStartedAtRef.current) {
+          captureStartedAtRef.current = new Date().toISOString()
+        }
+        strokeCountRef.current += 1
         lastPointRef.current = getPoint(canvas, clientX, clientY)
       },
       [],
@@ -187,6 +204,8 @@ const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
       ctx.fillRect(0, 0, width, cssHeight)
       emptyRef.current = true
       bitmapReadyRef.current = false
+      strokeCountRef.current = 0
+      captureStartedAtRef.current = null
       setIsEmpty(true)
       drawingRef.current = false
       lastPointRef.current = null
@@ -199,6 +218,18 @@ const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
         toDataURL: () => {
           if (emptyRef.current || !canvasRef.current) return null
           return canvasRef.current.toDataURL('image/png')
+        },
+        getCapture: () => {
+          const canvas = canvasRef.current
+          if (emptyRef.current || !canvas) return null
+          return {
+            dataUrl: canvas.toDataURL('image/png'),
+            strokeCount: strokeCountRef.current,
+            captureStartedAt: captureStartedAtRef.current ?? new Date().toISOString(),
+            captureEndedAt: new Date().toISOString(),
+            canvasWidth: canvas.clientWidth,
+            canvasHeight: canvas.clientHeight,
+          }
         },
         clear,
         isEmpty: () => emptyRef.current,

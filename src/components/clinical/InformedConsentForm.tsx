@@ -25,6 +25,7 @@ import {
   patientOrGuardianSignatureHeading,
 } from '@/components/clinical/MinorPatientAuthorizationFields'
 import { KioskRemoteTrigger } from '@/components/kiosk/KioskRemoteTrigger'
+import { signatureMetaFromKioskForm } from '@/utils/kioskSignatureMeta'
 import { findLedgerConsentSignatures } from '@/services/signatureService'
 import type { SignatureCaptureResult } from '@/types/signature'
 import { listPatientClinicalRecords } from '@/utils/clinicalRecordSnapshot'
@@ -248,14 +249,17 @@ export function InformedConsentForm({
         )}
       </h3>
 
-      {!disabled && guardianOk && (activeConsentId || selectedIds.length > 0) && (
+      {!disabled && (
         <div className="mb-4">
           <KioskRemoteTrigger
             type="CONSENT"
             documentId={consentDocumentId}
             patientId={patientId || 'borrador'}
+            disabled={!guardianOk || selectedIds.length === 0}
             dataToSign={{
-              title: activeTemplate?.label || getConsentLabel(activeConsentId || selectedIds[0]),
+              title:
+                activeTemplate?.label ||
+                (selectedIds[0] ? getConsentLabel(selectedIds[0]) : 'Consentimiento informado'),
               contentText: consentContent,
               formData: {
                 selectedConsentIds: selectedIds,
@@ -265,11 +269,13 @@ export function InformedConsentForm({
                 esMenorDeEdad: esMenor,
               },
             }}
-            onSigned={({ signatureBase64 }) => {
+            onSigned={({ signatureBase64, formData }) => {
               if (!guardianOk) return
+              const meta = signatureMetaFromKioskForm(formData)
               const professionalReady = Boolean(data.professionalSignatureDataUrl?.trim())
               update({
                 patientSignatureDataUrl: signatureBase64,
+                ...(meta ? { patientSignatureMeta: meta } : {}),
                 textAccepted: true,
                 ...(professionalReady
                   ? { signedAt: data.signedAt?.trim() || new Date().toISOString() }
@@ -277,12 +283,16 @@ export function InformedConsentForm({
               })
             }}
           />
+          <p className="mt-1 text-xs text-slate-500">
+            {selectedIds.length === 0
+              ? 'Seleccione un consentimiento para enviarlo a la tableta.'
+              : esMenor && !guardianOk
+                ? 'Complete nombre y cédula del acudiente antes de enviar el consentimiento a la tableta.'
+                : esMenor
+                  ? 'El acudiente lee el consentimiento en la tableta y firma ahí. La firma del odontólogo se hace en este equipo.'
+                  : 'El paciente lee el consentimiento en la tableta y firma ahí. La firma del odontólogo se hace en este equipo.'}
+          </p>
         </div>
-      )}
-      {!disabled && patientId && esMenor && !guardianOk && (activeConsentId || selectedIds.length > 0) && (
-        <p className="mb-4 text-xs text-amber-700">
-          Complete los datos del acudiente antes de enviar el consentimiento a la tableta.
-        </p>
       )}
 
       {signedStatusReady && signedLabels.length === 0 ? (

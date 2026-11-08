@@ -11,7 +11,7 @@ const MIGRATION_FILE = join(
   '../db/migrations/20261030180000_kiosk_signatures.sql',
 )
 
-const ACTION_TYPES = new Set(['INTAKE', 'EVOLUTION', 'CONSENT'])
+const ACTION_TYPES = new Set(['INTAKE', 'EVOLUTION', 'CONSENT', 'PLAN'])
 const MINOR_DOCUMENT_TYPES = new Set(['TI', 'RC'])
 
 const EVOLUTION_PATIENT_SIGNATURE_MESSAGE =
@@ -32,7 +32,7 @@ function guardianFields(form) {
 /** TI y registro civil identifican a un menor. El flag explícito también. */
 export function kioskFormRequiresGuardian(documentType, formData) {
   const type = normalizeKioskActionType(documentType)
-  if (type !== 'INTAKE' && type !== 'CONSENT') return false
+  if (type !== 'INTAKE' && type !== 'CONSENT' && type !== 'PLAN') return false
   const form = asRecord(formData)
   const datos = asRecord(form.datosBasicos)
   if (form.esMenorDeEdad === true || datos.esMenorDeEdad === true) return true
@@ -41,7 +41,7 @@ export function kioskFormRequiresGuardian(documentType, formData) {
 }
 
 /**
- * INTAKE y CONSENT admiten firma del paciente o, si es menor, del acudiente.
+ * INTAKE, CONSENT y PLAN admiten firma del paciente o, si es menor, del acudiente.
  * EVOLUTION nunca admite firma en la tableta.
  */
 export function assertKioskPatientSignatureAllowed({ documentType, formData }) {

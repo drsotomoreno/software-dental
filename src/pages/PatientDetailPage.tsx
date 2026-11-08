@@ -31,6 +31,7 @@ import {
   KIOSK_SIGNATURE_APPLIED_EVENT,
   type KioskSignatureAppliedDetail,
 } from '@/services/kioskSignatureApply'
+import { createEmptyTreatmentPlanAuthorization } from '@/types/treatmentPlanAuthorization'
 import {
   DEFAULT_PATIENT_PHASE,
   isCompletedPatient,
@@ -226,6 +227,34 @@ export function PatientDetailPage() {
         (patient?.syncId != null && detail.patientId === patient.syncId)
       if (!samePatient) return
 
+      if (detail.documentType === 'PLAN') {
+        setClinicalData((prev) => {
+          if (!prev) return prev
+          const current =
+            prev.treatmentPlanAuthorization ?? createEmptyTreatmentPlanAuthorization()
+          const professionalReady = Boolean(current.professionalSignatureDataUrl?.trim())
+          return {
+            ...prev,
+            treatmentPlanAuthorization: {
+              ...current,
+              patientSignatureDataUrl: detail.signatureBase64,
+              ...(detail.signatureMeta ? { patientSignatureMeta: detail.signatureMeta } : {}),
+              textAccepted: true,
+              ...(professionalReady
+                ? { signedAt: current.signedAt?.trim() || detail.signedAt }
+                : {}),
+              ...(detail.signerIsGuardian
+                ? {
+                    guardianName: detail.signerName,
+                    guardianDocument: detail.signerDocument,
+                  }
+                : {}),
+            },
+          }
+        })
+        return
+      }
+
       if (detail.documentType === 'INTAKE') {
         setPatientForm((prev) =>
           prev
@@ -253,6 +282,7 @@ export function PatientDetailPage() {
           informedConsent: {
             ...prev.informedConsent,
             patientSignatureDataUrl: detail.signatureBase64,
+            ...(detail.signatureMeta ? { patientSignatureMeta: detail.signatureMeta } : {}),
             textAccepted: true,
             signedAt: detail.signedAt,
             kioskDeviceId: detail.kioskDeviceId || undefined,

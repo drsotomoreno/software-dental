@@ -46,6 +46,37 @@ test('el intake con tarjeta de identidad exige acudiente', () => {
   )
 })
 
+test('el plan de tratamiento de un menor exige nombre y cédula del acudiente', () => {
+  assert.throws(
+    () =>
+      assertKioskPatientSignatureAllowed({
+        documentType: 'PLAN',
+        formData: { esMenorDeEdad: true },
+      }),
+    (error) => error.code === 'GUARDIAN_REQUIRED',
+  )
+
+  assert.doesNotThrow(() =>
+    assertKioskPatientSignatureAllowed({
+      documentType: 'PLAN',
+      formData: {
+        esMenorDeEdad: true,
+        guardianName: 'Ana Pérez',
+        guardianDocument: '1234567890',
+      },
+    }),
+  )
+})
+
+test('el plan de un adulto admite la firma del paciente', () => {
+  assert.doesNotThrow(() =>
+    assertKioskPatientSignatureAllowed({
+      documentType: 'PLAN',
+      formData: { esMenorDeEdad: false },
+    }),
+  )
+})
+
 test('el intake de un adulto no exige acudiente', () => {
   assert.doesNotThrow(() =>
     assertKioskPatientSignatureAllowed({

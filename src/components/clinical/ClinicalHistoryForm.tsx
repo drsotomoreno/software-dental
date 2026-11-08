@@ -22,6 +22,7 @@ import {
 } from '@/utils/budget'
 import { collapseLegacyRehabBudgetVisualLines } from '@/utils/rehabAnnexBudget'
 import { collapseTreatmentPlanByProcedure } from '@/utils/treatmentPlanCollapse'
+import { buildTreatmentPlanAuthorizationText } from '@/utils/treatmentPlanTabletText'
 import { syncRehabPlanItemsIntoGeneralBudget } from '@/utils/treatmentPlanAnnexImport'
 
 
@@ -641,7 +642,16 @@ export function ClinicalHistoryForm({
           form.treatmentPlanAuthorization ??
           createEmptyTreatmentPlanAuthorization(professionalLicense)
         }
+        patientId={patientId}
         patientBirthDate={patientBirthDate}
+        tabletContent={buildTreatmentPlanAuthorizationText({
+          treatmentPlan: form.treatmentPlan,
+          treatmentPlanNotes: form.treatmentPlanNotes,
+          budgetItems: form.budgetItems,
+          orthodonticsBudget: form.orthodonticsBudget,
+          dentalImplantsBudget: form.dentalImplantsBudget,
+          budget: form.budget,
+        })}
         disabled={livingLocked}
         onChange={(treatmentPlanAuthorization: TreatmentPlanAuthorization) =>
           update({ treatmentPlanAuthorization })

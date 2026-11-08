@@ -3,16 +3,18 @@
 /**
  * INTAKE: datos + anamnesis + firma del paciente (o acudiente si es menor).
  * CONSENT: texto legal + casillas + firma del paciente o acudiente.
+ * PLAN: plan de tratamiento y presupuesto + firma del paciente o acudiente.
  * EVOLUTION: solo lectura en la tableta. La firma es exclusiva del odontólogo
  * (Resolución 1995 de 1999): no hay SignaturePad ni firma de paciente.
  */
-export type KioskActionType = 'INTAKE' | 'EVOLUTION' | 'CONSENT'
+export type KioskActionType = 'INTAKE' | 'EVOLUTION' | 'CONSENT' | 'PLAN'
 
 export type KioskScreenState =
   | 'IDLE'
   | 'SHOW_INTAKE'
   | 'SHOW_EVOLUTION'
   | 'SHOW_CONSENT'
+  | 'SHOW_PLAN'
   | 'SUCCESS'
 
 export interface KioskTriggerPayload {
@@ -49,10 +51,10 @@ export interface KioskSignatureReceived {
   intake?: { id?: string; syncId?: string } | null
 }
 
-/** La evolución no admite firma del paciente. Intake y consentimiento sí. */
+/** La evolución no admite firma del paciente. Intake, consentimiento y plan sí. */
 export function acceptsKioskPatientSignature(documentType: string): boolean {
   const type = String(documentType || '').trim().toUpperCase()
-  return type === 'INTAKE' || type === 'CONSENT'
+  return type === 'INTAKE' || type === 'CONSENT' || type === 'PLAN'
 }
 
 export interface KioskSubmitSignatureInput {

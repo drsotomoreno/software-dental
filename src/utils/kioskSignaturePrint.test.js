@@ -7,6 +7,7 @@ test('la evolución no recibe firma de paciente desde el kiosco', () => {
   assert.equal(acceptsKioskPatientSignature('EVOLUTION'), false)
   assert.equal(acceptsKioskPatientSignature('INTAKE'), true)
   assert.equal(acceptsKioskPatientSignature('CONSENT'), true)
+  assert.equal(acceptsKioskPatientSignature('PLAN'), true)
 })
 
 test('sin firma, el PDF muestra el pendiente', () => {

@@ -11,7 +11,9 @@ import {
 import type { InformedConsent } from '@/types/consent'
 import { normalizeConsent } from '@/types/consent'
 import type { KioskIntakeSignature } from '@/types/patient'
-import type { DigitalSignature } from '@/types/signature'
+import type { DigitalSignature, SignatureCaptureMetadata } from '@/types/signature'
+import { normalizeTreatmentPlanAuthorization } from '@/types/treatmentPlanAuthorization'
+import { signatureMetaFromKioskForm } from '@/utils/kioskSignatureMeta'
 import { getLatestClinicalRecord, listPatientClinicalRecords } from '@/utils/clinicalRecordSnapshot'
 import { getPatientByRouteId, toPatientForeignKey } from '@/utils/patientId'
 import { getPatientClinicalDraft, savePatientClinicalDraft } from '@/utils/patientClinicalDraft'
@@ -19,7 +21,7 @@ import { getPatientClinicalDraft, savePatientClinicalDraft } from '@/utils/patie
 export const KIOSK_SIGNATURE_APPLIED_EVENT = 'mhd:kiosk-signature-applied'
 
 export interface KioskSignatureAppliedDetail {
-  documentType: 'INTAKE' | 'CONSENT'
+  documentType: 'INTAKE' | 'CONSENT' | 'PLAN'
   patientId: string
   signatureBase64: string
   signedAt: string
@@ -28,6 +30,7 @@ export interface KioskSignatureAppliedDetail {
   signerName: string
   signerDocument: string
   signerIsGuardian: boolean
+  signatureMeta?: SignatureCaptureMetadata
 }
 
 function text(value: unknown): string {
@@ -78,14 +81,15 @@ function signerFromEvent(
   }
 }
 
-async function rememberConsentLedger(
+async function rememberKioskLedger(
   recordId: string,
   signature: string,
   detail: KioskSignatureAppliedDetail,
+  recordType: 'consent' | 'budget',
 ): Promise<void> {
   const row: DigitalSignature = {
     recordId,
-    recordType: 'consent',
+    recordType,
     signatureDataUrl: signature,
     signedBy: detail.signerName,
     signedByDocument: detail.signerDocument,
@@ -114,13 +118,16 @@ export async function applyKioskSignature(
   const patientDocument = patient ? `${patient.documentType} ${patient.documentNumber}`.trim() : ''
   const signer = signerFromEvent(event, patientName, patientDocument)
   const signedAt = stampTime(event)
+  const documentType =
+    event.documentType === 'INTAKE' ? 'INTAKE' : event.documentType === 'PLAN' ? 'PLAN' : 'CONSENT'
   const detail: KioskSignatureAppliedDetail = {
-    documentType: event.documentType === 'INTAKE' ? 'INTAKE' : 'CONSENT',
+    documentType,
     patientId: routeId,
     signatureBase64: signature,
     signedAt,
     ipAddress: text(event.ipAddress),
     kioskDeviceId: text(event.kioskDeviceId),
+    signatureMeta: signatureMetaFromKioskForm(event.formData),
     ...signer,
   }
 
@@ -157,17 +164,52 @@ export async function applyKioskSignature(
     null
 
   const draft = await getPatientClinicalDraft(toPatientForeignKey(routeId))
+  const guardianPatch = detail.signerIsGuardian
+    ? { guardianName: detail.signerName, guardianDocument: detail.signerDocument }
+    : {}
+
+  if (detail.documentType === 'PLAN') {
+    const baseAuth = normalizeTreatmentPlanAuthorization(
+      draft?.clinicalDraft?.treatmentPlanAuthorization ?? record?.treatmentPlanAuthorization,
+    )
+    const nextAuth = {
+      ...baseAuth,
+      patientSignatureDataUrl: signature,
+      ...(detail.signatureMeta ? { patientSignatureMeta: detail.signatureMeta } : {}),
+      textAccepted: true,
+      signedAt: baseAuth.professionalSignatureDataUrl?.trim()
+        ? baseAuth.signedAt?.trim() || signedAt
+        : baseAuth.signedAt,
+      ...guardianPatch,
+    }
+    if (record?.id != null) {
+      await db.clinicalRecords.update(record.id, {
+        treatmentPlanAuthorization: nextAuth,
+        updatedAt: signedAt,
+      })
+      await rememberKioskLedger(String(record.id), signature, detail, 'budget')
+    }
+    if (draft?.clinicalDraft) {
+      await savePatientClinicalDraft(
+        routeId,
+        { ...draft.clinicalDraft, treatmentPlanAuthorization: nextAuth },
+        draft.odontogramDraft,
+      )
+    }
+    window.dispatchEvent(new CustomEvent(KIOSK_SIGNATURE_APPLIED_EVENT, { detail }))
+    return detail
+  }
+
   const baseConsent = draft?.clinicalDraft?.informedConsent ?? record?.informedConsent
   const nextConsent: InformedConsent = {
     ...normalizeConsent(baseConsent),
     patientSignatureDataUrl: signature,
+    ...(detail.signatureMeta ? { patientSignatureMeta: detail.signatureMeta } : {}),
     textAccepted: true,
     signedAt,
     kioskDeviceId: detail.kioskDeviceId || undefined,
     signatureIp: detail.ipAddress || undefined,
-    ...(detail.signerIsGuardian
-      ? { guardianName: detail.signerName, guardianDocument: detail.signerDocument }
-      : {}),
+    ...guardianPatch,
   }
 
   if (record?.id != null) {
@@ -175,7 +217,7 @@ export async function applyKioskSignature(
       informedConsent: nextConsent,
       updatedAt: signedAt,
     })
-    await rememberConsentLedger(String(record.id), signature, detail)
+    await rememberKioskLedger(String(record.id), signature, detail, 'consent')
   }
 
   if (draft?.clinicalDraft) {

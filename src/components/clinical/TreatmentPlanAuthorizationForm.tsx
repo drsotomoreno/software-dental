@@ -5,7 +5,9 @@ import {
   MinorPatientAuthorizationFields,
   patientOrGuardianSignatureHeading,
 } from '@/components/clinical/MinorPatientAuthorizationFields'
+import { KioskRemoteTrigger } from '@/components/kiosk/KioskRemoteTrigger'
 import type { SignatureCaptureResult } from '@/types/signature'
+import { signatureMetaFromKioskForm } from '@/utils/kioskSignatureMeta'
 import {
   esMenorDeEdad,
   guardianAuthorizationComplete,
@@ -17,6 +19,10 @@ interface TreatmentPlanAuthorizationFormProps {
   onChange: (data: TreatmentPlanAuthorization) => void
   /** Fecha de nacimiento del paciente actual (`birthDate` / fechaNacimiento). */
   patientBirthDate?: string
+  /** Paciente de la historia abierta. */
+  patientId?: string
+  /** Plan y presupuesto que el paciente lee en la tableta. */
+  tabletContent?: string
   disabled?: boolean
 }
 
@@ -24,6 +30,8 @@ export function TreatmentPlanAuthorizationForm({
   data,
   onChange,
   patientBirthDate = '',
+  patientId = '',
+  tabletContent = '',
   disabled = false,
 }: TreatmentPlanAuthorizationFormProps) {
   const menor = useMemo(() => esMenorDeEdad(patientBirthDate), [patientBirthDate])
@@ -69,6 +77,46 @@ export function TreatmentPlanAuthorizationForm({
         Firma conjunta del odontólogo y del paciente (o representante legal si es menor de 18).
         Requerida para validar el plan y el presupuesto (Res. 1995/1999).
       </p>
+
+      {!disabled && (
+        <div className="mb-4">
+          <KioskRemoteTrigger
+            type="PLAN"
+            documentId={`plan:${patientId || 'borrador'}`}
+            patientId={patientId || 'borrador'}
+            disabled={!guardianOk}
+            dataToSign={{
+              title: 'Autorización del Plan de Tratamiento / Presupuesto',
+              contentText: tabletContent,
+              formData: {
+                esMenorDeEdad: menor,
+                guardianName: data.guardianName ?? '',
+                guardianDocument: data.guardianDocument ?? '',
+              },
+            }}
+            onSigned={({ signatureBase64, formData }) => {
+              if (!guardianOk) return
+              const meta = signatureMetaFromKioskForm(formData)
+              const professionalReady = Boolean(data.professionalSignatureDataUrl?.trim())
+              update({
+                patientSignatureDataUrl: signatureBase64,
+                ...(meta ? { patientSignatureMeta: meta } : {}),
+                textAccepted: true,
+                ...(professionalReady
+                  ? { signedAt: data.signedAt?.trim() || new Date().toISOString() }
+                  : {}),
+              })
+            }}
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            {menor && !guardianOk
+              ? 'Complete nombre y cédula del acudiente antes de enviar el plan a la tableta.'
+              : menor
+                ? 'El acudiente lee el plan y el presupuesto en la tableta y firma ahí. La firma del odontólogo se hace en este equipo.'
+                : 'El paciente lee el plan y el presupuesto en la tableta y firma ahí. La firma del odontólogo se hace en este equipo.'}
+          </p>
+        </div>
+      )}
 
       <label className="mb-6 flex items-start gap-2">
         <input
