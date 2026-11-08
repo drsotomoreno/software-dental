@@ -70,51 +70,50 @@ export function LandingPage() {
         </div>
       </header>
 
-      <section className="border-b border-dental-100 bg-gradient-to-br from-white via-dental-50/70 to-slate-50">
-        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:py-20">
-          <div className="grid grid-cols-1 items-center gap-10 md:grid-cols-2 md:gap-14">
-            <div>
-              <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-dental-600">
-                {APP_SHORT_NAME}
-              </p>
-              <h1 className="text-3xl font-bold leading-tight text-dental-800 sm:text-4xl lg:text-5xl">
-                El Software de Historia Clínica Odontológica con Dictado por Voz
-              </h1>
-              <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600 sm:text-lg">
-                Recupera tu tiempo clínico. Dicta la atención, gestiona todo 100% en la nube y
-                exporta los RIPS sin reescribir datos.
-              </p>
-              <div className="mt-8 flex flex-col gap-3">
-                <div>
-                  <Link
-                    to="/login"
-                    className="btn-primary h-auto w-full max-w-xl whitespace-normal px-5 py-4 text-left text-sm font-semibold leading-relaxed sm:text-base"
-                  >
-                    Quiero mi software de Historia Dental cumpliendo toda la normatividad vigente con
-                    RIPS automáticos, Dictado por Voz, Mensajes de WhatsApp, Sin depender del
-                    Internet y con Facturación Electrónica. Todo por $50.000 al mes.
-                  </Link>
-                  <p className="mt-2 max-w-xl text-xs leading-relaxed text-gray-500">
-                    Requiere validación con número ReTHUS real. Incluye habilitación de dictado por
-                    voz por paciente.
-                  </p>
-                </div>
-                <a
-                  href="#planes"
-                  className="btn-secondary w-fit px-6 py-3 text-center text-base"
-                >
-                  Ver Planes
-                </a>
-              </div>
-            </div>
+      <section className="border-b border-slate-200 bg-white">
+        <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:py-10">
+          <h1 className="sr-only">
+            mihistoriadental: el software que soluciona tu gestión de historias sin afectar tu
+            rentabilidad
+          </h1>
+          {/*
+            El titular y la bajada ya van impresos en la fotografía.
+            <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-dental-600">
+              {APP_SHORT_NAME}
+            </p>
+            <h1 className="text-3xl font-bold leading-tight text-dental-800 sm:text-4xl lg:text-5xl">
+              El Software de Historia Clínica Odontológica con Dictado por Voz
+            </h1>
+            <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600 sm:text-lg">
+              Recupera tu tiempo clínico. Dicta la atención, gestiona todo 100% en la nube y
+              exporta los RIPS sin reescribir datos.
+            </p>
+          */}
+          <img
+            src="/hero-mihistoriadental.jpg"
+            alt="mihistoriadental: el software que soluciona tu gestión de historias sin afectar tu rentabilidad"
+            width={1024}
+            height={572}
+            fetchPriority="high"
+            className="h-auto w-full rounded-2xl object-cover object-center"
+          />
 
-            <div className="flex justify-center md:justify-end">
-              <img
-                src="/image_f3e509.png"
-                alt="Historia Clínica Odontológica Dictada por Voz"
-                className="h-auto w-full max-w-lg rounded-2xl bg-white object-contain"
-              />
+          <div className="mx-auto mt-8 flex max-w-xl flex-col gap-3">
+            <div>
+              <Link
+                to="/login"
+                className="btn-primary w-full px-6 py-4 text-center text-base font-semibold"
+              >
+                Inicia Prueba Gratuita
+              </Link>
+              <p className="mt-2 text-xs leading-relaxed text-gray-500">
+                Requiere validación con número ReTHUS real. Incluye habilitación de dictado por
+                voz por paciente.
+              </p>
             </div>
+            <a href="#planes" className="btn-secondary w-fit px-6 py-3 text-center text-base">
+              Ver Planes
+            </a>
           </div>
         </div>
       </section>
