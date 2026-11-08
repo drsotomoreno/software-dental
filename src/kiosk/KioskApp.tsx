@@ -487,6 +487,12 @@ export default function KioskApp() {
       setReconnecting(true)
     }
     const onReconnectAttempt = () => {
+      // Conserva el JWT del enlace QR en cada reintento.
+      socket.auth = {
+        token,
+        mode: 'kiosk',
+        clinicName: clinicNameParam || '',
+      }
       setReconnecting(true)
       setConnected(false)
     }

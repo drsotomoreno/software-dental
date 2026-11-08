@@ -263,8 +263,12 @@ export default function KioskIntake({
         /* respuesta no JSON */
       }
       setSubmitError(message)
-    } catch {
-      setSubmitError('Sin conexión. Verifique la red e intente otra vez.')
+    } catch (error) {
+      const detail =
+        error instanceof Error && error.message.trim()
+          ? error.message.trim()
+          : 'Sin conexión. Verifique la red e intente otra vez.'
+      setSubmitError(detail)
     }
   })
 

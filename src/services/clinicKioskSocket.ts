@@ -34,12 +34,24 @@ export function getClinicKioskSocket(): Socket | null {
 
   connectingToken = token
   const origin = resolveSocketOrigin()
-  clinicalSocket = io(origin, {
+  const authPayload = { token, mode: 'clinical' as const }
+  clinicalSocket = io(origin || undefined, {
     path: '/socket.io',
-    transports: ['websocket', 'polling'],
-    auth: { token, mode: 'clinical' },
+    transports: ['polling', 'websocket'],
+    upgrade: true,
+    withCredentials: true,
+    auth: (cb: (data: typeof authPayload) => void) => {
+      cb({ ...authPayload, token: connectingToken || token })
+    },
     autoConnect: true,
     reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 800,
+    reconnectionDelayMax: 5000,
+    timeout: 20_000,
+  })
+  clinicalSocket.on('reconnect_attempt', () => {
+    clinicalSocket!.auth = { token: connectingToken || token, mode: 'clinical' }
   })
 
   return clinicalSocket

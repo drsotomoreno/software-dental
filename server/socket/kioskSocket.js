@@ -77,20 +77,36 @@ function extractMode(socket) {
   return ''
 }
 
+function logKiosk(level, message, detail) {
+  const prefix = '[Kiosco]'
+  if (detail !== undefined) {
+    console[level](prefix, message, detail)
+  } else {
+    console[level](prefix, message)
+  }
+}
+
 async function authenticateSocket(socket) {
   const token = extractToken(socket)
+  const modeHint = extractMode(socket)
+  const origin = socket.handshake.headers?.origin || ''
+  const ip = clientIpAddress(socket)
+
   if (!token) {
+    logKiosk('warn', `AUTH rechazado (sin token) mode=${modeHint || '?'} ip=${ip} origin=${origin}`)
     const error = new Error('Falta el token de autenticación.')
     error.data = { code: 'AUTH_REQUIRED' }
     throw error
   }
 
-  const modeHint = extractMode(socket)
-
   if (modeHint !== 'clinical') {
     try {
       const payload = verifyKioskToken(token)
       if (payload.role === 'kiosk' && payload.clinicId) {
+        logKiosk(
+          'info',
+          `AUTH ok kiosk clinicId=${payload.clinicId} ip=${ip} origin=${origin || '(sin origin)'}`,
+        )
         return {
           role: 'kiosk',
           clinicId: String(payload.clinicId).trim(),
@@ -98,6 +114,10 @@ async function authenticateSocket(socket) {
         }
       }
     } catch (error) {
+      logKiosk(
+        'warn',
+        `AUTH kiosk JWT falló: ${error instanceof Error ? error.message : error} mode=${modeHint || '?'} ip=${ip}`,
+      )
       if (modeHint === 'kiosk') throw error
     }
   }
@@ -108,16 +128,22 @@ async function authenticateSocket(socket) {
     body: {},
   }))
   if (!session?.user) {
+    logKiosk('warn', `AUTH sesión clínica inválida mode=${modeHint || '?'} ip=${ip}`)
     const error = new Error('Sesión inválida o expirada.')
     error.data = { code: 'SESSION_INVALID' }
     throw error
   }
   const scope = clinicSyncAliasIds(session.user)
   if (!scope.canonical) {
+    logKiosk('warn', `AUTH sin clínica user=${session.user.id || '?'}`)
     const error = new Error('La sesión no tiene clínica asociada.')
     error.data = { code: 'NO_CLINIC' }
     throw error
   }
+  logKiosk(
+    'info',
+    `AUTH ok clinical user=${session.user.id || '?'} clinicId=${scope.canonical} ip=${ip}`,
+  )
   return {
     role: 'clinical',
     clinicId: scope.canonical,
@@ -135,13 +161,29 @@ export function attachKioskSocket(httpServer) {
 
   io = new Server(httpServer, {
     path: '/socket.io',
+    // Firmas PNG en tabletas retina + formData superan el default 1 MB.
+    maxHttpBufferSize: 12 * 1024 * 1024,
+    pingInterval: 20_000,
+    pingTimeout: 25_000,
     cors: {
       origin(origin, callback) {
-        callback(null, corsOriginAllowed(origin))
+        const allowed = corsOriginAllowed(origin)
+        if (!allowed) {
+          logKiosk('warn', `CORS rechazado origin=${origin}`)
+        }
+        callback(null, allowed)
       },
       methods: ['GET', 'POST'],
       credentials: true,
     },
+    allowEIO3: true,
+  })
+
+  io.engine.on('connection_error', (error) => {
+    logKiosk('warn', `Engine connection_error: ${error?.message || error}`, {
+      code: error?.code,
+      context: error?.context,
+    })
   })
 
   io.use(async (socket, next) => {
@@ -149,6 +191,7 @@ export function attachKioskSocket(httpServer) {
       const identity = await authenticateSocket(socket)
       const room = clinicKioskRoom(identity.clinicId)
       if (!room) {
+        logKiosk('warn', 'AUTH clinicId inválido → sala vacía')
         return next(new Error('clinicId inválido.'))
       }
       socket.data.identity = identity
@@ -161,7 +204,14 @@ export function attachKioskSocket(httpServer) {
 
   io.on('connection', (socket) => {
     const { identity, room } = socket.data
+    const transport = socket.conn?.transport?.name || '?'
     void socket.join(room)
+
+    logKiosk(
+      'info',
+      `CONECTADO id=${socket.id} role=${identity.role} room=${room} transport=${transport} ip=${clientIpAddress(socket)}`,
+    )
+
     socket.emit('kiosk:ready', {
       role: identity.role,
       clinicId: identity.clinicId,
@@ -169,11 +219,29 @@ export function attachKioskSocket(httpServer) {
       room,
     })
 
+    socket.conn?.on?.('upgrade', (upgraded) => {
+      logKiosk(
+        'info',
+        `UPGRADE id=${socket.id} → ${upgraded?.name || socket.conn?.transport?.name || 'websocket'}`,
+      )
+    })
+
+    socket.on('disconnect', (reason) => {
+      logKiosk(
+        'info',
+        `DESCONECTADO id=${socket.id} role=${identity.role} room=${room} reason=${reason}`,
+      )
+    })
+
     socket.on('kiosk:trigger_action', async (raw, ack) => {
+      const respond = (payload) => {
+        if (typeof ack === 'function') ack(payload)
+      }
       try {
         if (identity.role !== 'clinical') {
           const message = 'Solo la app clínica puede enviar acciones a la tableta.'
-          if (typeof ack === 'function') ack({ ok: false, message })
+          logKiosk('warn', `RECHAZO trigger_action id=${socket.id}: ${message}`)
+          respond({ ok: false, message })
           return
         }
         const body = raw && typeof raw === 'object' ? raw : {}
@@ -181,7 +249,8 @@ export function attachKioskSocket(httpServer) {
         const payload = body.payload && typeof body.payload === 'object' ? body.payload : {}
         if (!actionType) {
           const message = 'actionType inválido.'
-          if (typeof ack === 'function') ack({ ok: false, message })
+          logKiosk('warn', `RECHAZO trigger_action id=${socket.id}: ${message}`)
+          respond({ ok: false, message })
           return
         }
         const roomSockets = await io.in(room).fetchSockets()
@@ -189,7 +258,8 @@ export function attachKioskSocket(httpServer) {
         if (kioskCount === 0) {
           const message =
             'No hay una tableta conectada en esta clínica. Abra el QR de «Tableta» en la tablet y vuelva a enviar.'
-          if (typeof ack === 'function') ack({ ok: false, message })
+          logKiosk('warn', `RECHAZO trigger_action ${actionType} room=${room}: sin tabletas`)
+          respond({ ok: false, message })
           return
         }
         const event = {
@@ -208,23 +278,44 @@ export function attachKioskSocket(httpServer) {
           fromUserId: identity.userId || null,
         }
         socket.to(room).emit('kiosk:trigger_action', event)
-        console.log(`[Kiosco] ${actionType} enviado a ${kioskCount} tableta(s) en ${room}`)
-        if (typeof ack === 'function') ack({ ok: true, event })
+        logKiosk(
+          'info',
+          `EMIT trigger_action ${actionType} → ${kioskCount} tableta(s) room=${room} from=${identity.userId || '?'}`,
+        )
+        respond({ ok: true, event })
       } catch (error) {
         const message = error instanceof Error ? error.message : 'No se pudo enviar a la tableta.'
-        if (typeof ack === 'function') ack({ ok: false, message })
+        logKiosk('error', `ERROR trigger_action id=${socket.id}: ${message}`)
+        respond({ ok: false, message })
       }
     })
 
     socket.on('kiosk:submit_signature', async (raw, ack) => {
+      const respond = (payload) => {
+        if (typeof ack === 'function') ack(payload)
+      }
       try {
         if (identity.role !== 'kiosk') {
           const message = 'Solo la tableta kiosco puede enviar firmas.'
-          if (typeof ack === 'function') ack({ ok: false, message })
+          logKiosk('warn', `RECHAZO submit_signature id=${socket.id}: ${message}`)
+          respond({ ok: false, message })
           return
         }
         const body = raw && typeof raw === 'object' ? raw : {}
         const documentType = normalizeKioskActionType(body.documentType || body.actionType)
+        const sigLen = String(body.signatureBase64 || '').length
+        logKiosk(
+          'info',
+          `RECV submit_signature id=${socket.id} type=${documentType || '?'} bytes≈${sigLen} room=${room}`,
+        )
+
+        if (!documentType) {
+          const message = 'documentType inválido.'
+          logKiosk('warn', `RECHAZO submit_signature id=${socket.id}: ${message}`)
+          respond({ ok: false, message })
+          return
+        }
+
         const saved = await saveKioskSignature({
           clinicId: identity.clinicId,
           documentType,
@@ -250,27 +341,37 @@ export function attachKioskSocket(httpServer) {
           intake: saved.intake,
         }
         io.to(room).emit('kiosk:signature_received', received)
-        if (typeof ack === 'function') ack({ ok: true, received })
+        logKiosk(
+          'info',
+          `OK submit_signature id=${socket.id} savedId=${saved.id} type=${saved.documentType} room=${room}`,
+        )
+        respond({ ok: true, received })
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'No se pudo guardar la firma del kiosco.'
-        if (typeof ack === 'function') ack({ ok: false, message })
+        logKiosk('error', `ERROR submit_signature id=${socket.id}: ${message}`)
+        respond({ ok: false, message })
         socket.emit('kiosk:error', { message })
       }
     })
 
     socket.on('kiosk:cancelled', (raw, ack) => {
+      const respond = (payload) => {
+        if (typeof ack === 'function') ack(payload)
+      }
       try {
         if (identity.role !== 'kiosk') {
           const message = 'Solo la tableta kiosco puede cancelar una acción.'
-          if (typeof ack === 'function') ack({ ok: false, message })
+          logKiosk('warn', `RECHAZO cancelled id=${socket.id}: ${message}`)
+          respond({ ok: false, message })
           return
         }
         const body = raw && typeof raw === 'object' ? raw : {}
         const actionType = normalizeKioskActionType(body.actionType)
         if (!actionType) {
           const message = 'actionType inválido.'
-          if (typeof ack === 'function') ack({ ok: false, message })
+          logKiosk('warn', `RECHAZO cancelled id=${socket.id}: ${message}`)
+          respond({ ok: false, message })
           return
         }
         const event = {
@@ -282,16 +383,21 @@ export function attachKioskSocket(httpServer) {
             body.cancelledAt != null ? String(body.cancelledAt) : new Date().toISOString(),
         }
         socket.to(room).emit('kiosk:cancelled', event)
-        if (typeof ack === 'function') ack({ ok: true, event })
+        logKiosk(
+          'info',
+          `EMIT cancelled ${actionType} reason=${event.reason} room=${room} id=${socket.id}`,
+        )
+        respond({ ok: true, event })
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'No se pudo notificar la cancelación.'
-        if (typeof ack === 'function') ack({ ok: false, message })
+        logKiosk('error', `ERROR cancelled id=${socket.id}: ${message}`)
+        respond({ ok: false, message })
       }
     })
   })
 
-  console.log('[Kiosk Socket] Socket.IO listo en /socket.io (salas clinic_*)')
+  console.log('[Kiosk Socket] Socket.IO listo en /socket.io (salas clinic_*, buffer 12MB, CORS LAN+dominio)')
   return io
 }
 

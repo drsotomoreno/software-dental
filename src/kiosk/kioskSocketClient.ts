@@ -14,25 +14,59 @@ import type {
 
 export type KioskSocket = Socket
 
+type KioskAuthPayload = {
+  token: string
+  mode: 'kiosk'
+  clinicName: string
+}
+
+function buildAuth(input: { token: string; clinicName?: string }): KioskAuthPayload {
+  return {
+    token: String(input.token || '').trim(),
+    mode: 'kiosk',
+    clinicName: input.clinicName || '',
+  }
+}
+
+/**
+ * Conecta la tableta. El origen sale de la URL actual (IP LAN o dominio).
+ * El token se reinyecta en cada intento de reconexión vía `auth` callback.
+ */
 export function connectKioskSocket(input: {
   token: string
   clinicName?: string
 }): KioskSocket {
   const origin = resolveSocketOrigin()
-  const socket = io(origin, {
+  const authPayload = buildAuth(input)
+
+  const socket = io(origin || undefined, {
     path: '/socket.io',
-    transports: ['websocket', 'polling'],
-    auth: {
-      token: input.token,
-      mode: 'kiosk',
-      clinicName: input.clinicName || '',
+    // Polling primero: en nginx sin Upgrade el websocket falla y
+    // el usuario ve «Sin conexión» al enviar la firma.
+    transports: ['polling', 'websocket'],
+    upgrade: true,
+    withCredentials: true,
+    // Función: Socket.IO la vuelve a llamar en cada reconnect.
+    auth: (cb: (data: KioskAuthPayload) => void) => {
+      cb({ ...authPayload })
     },
     autoConnect: true,
     reconnection: true,
     reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,
+    reconnectionDelay: 800,
     reconnectionDelayMax: 5000,
+    timeout: 20_000,
   })
+
+  socket.on('reconnect_attempt', () => {
+    // Refuerzo por si alguna versión no vuelve a pedir el callback auth.
+    socket.auth = { ...authPayload }
+  })
+
+  if (typeof console !== 'undefined') {
+    console.info('[Kiosco] Socket origen:', origin || '(mismo host)')
+  }
+
   return socket
 }
 
@@ -47,23 +81,29 @@ export function onKioskTrigger(
   }
 }
 
-function waitUntilConnected(socket: KioskSocket, timeoutMs = 15_000): Promise<boolean> {
+function waitUntilConnected(socket: KioskSocket, timeoutMs = 20_000): Promise<boolean> {
   if (socket.connected) return Promise.resolve(true)
+
   return new Promise((resolve) => {
-    const timer = window.setTimeout(() => {
-      cleanup()
-      resolve(false)
-    }, timeoutMs)
-    const onConnect = () => {
-      cleanup()
-      resolve(true)
-    }
-    const cleanup = () => {
+    let settled = false
+    const finish = (ok: boolean) => {
+      if (settled) return
+      settled = true
       window.clearTimeout(timer)
       socket.off('connect', onConnect)
+      socket.off('reconnect', onConnect)
+      resolve(ok)
     }
+    const timer = window.setTimeout(() => finish(false), timeoutMs)
+    const onConnect = () => finish(true)
     socket.on('connect', onConnect)
-    if (!socket.active) socket.connect()
+    socket.on('reconnect', onConnect)
+    // Fuerza un intento si el cliente quedó pausado tras un disconnect.
+    if (!socket.active) {
+      socket.connect()
+    } else if (!socket.connected) {
+      socket.connect()
+    }
   })
 }
 
@@ -73,26 +113,48 @@ export async function submitKioskSignature(
 ): Promise<{ ok: boolean; message?: string; received?: KioskSignatureReceived }> {
   const online = await waitUntilConnected(socket)
   if (!online) {
-    return { ok: false, message: 'Sin conexión con la clínica. Reintentando…' }
+    return {
+      ok: false,
+      message:
+        'Sin conexión con el servidor. Verifique Wi-Fi o recargue el enlace de la tableta.',
+    }
   }
 
-  return new Promise((resolve) => {
-    socket.timeout(20_000).emit('kiosk:submit_signature', payload, (err: Error | null, response?: {
-      ok?: boolean
-      message?: string
-      received?: KioskSignatureReceived
-    }) => {
-      if (err) {
-        resolve({ ok: false, message: err.message || 'Tiempo de espera agotado al enviar la firma.' })
-        return
-      }
-      resolve({
-        ok: Boolean(response?.ok),
-        message: response?.message,
-        received: response?.received,
-      })
+  const emitOnce = () =>
+    new Promise<{ ok: boolean; message?: string; received?: KioskSignatureReceived }>((resolve) => {
+      socket.timeout(25_000).emit(
+        'kiosk:submit_signature',
+        payload,
+        (err: Error | null, response?: {
+          ok?: boolean
+          message?: string
+          received?: KioskSignatureReceived
+        }) => {
+          if (err) {
+            resolve({
+              ok: false,
+              message: err.message || 'Tiempo de espera agotado al enviar la firma.',
+            })
+            return
+          }
+          resolve({
+            ok: Boolean(response?.ok),
+            message: response?.message,
+            received: response?.received,
+          })
+        },
+      )
     })
-  })
+
+  let result = await emitOnce()
+  // Un disconnect a mitad del emit: reintenta una vez tras reconectar.
+  if (!result.ok && /timeout|disconnect|transport|xhr|websocket/i.test(String(result.message || ''))) {
+    const reconnected = await waitUntilConnected(socket, 15_000)
+    if (reconnected) {
+      result = await emitOnce()
+    }
+  }
+  return result
 }
 
 export function emitKioskCancelled(
