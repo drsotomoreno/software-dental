@@ -9,6 +9,7 @@ import { SuperAdminLayout } from '@/components/superadmin/SuperAdminLayout'
 import {
   HomePage,
   LandingPage,
+  DemoPage,
   LoginPage,
   ForgotPasswordPage,
   ResetPasswordPage,
@@ -65,6 +66,7 @@ export default function ClinicalApp() {
       <KioskSignatureBridge />
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/demo" element={<DemoPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
