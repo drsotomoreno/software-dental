@@ -12,7 +12,7 @@ export function DemoStepPatientName({ value, onChange }: DemoStepPatientNameProp
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-      <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 1 de 10</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 1 de 9</p>
       <h2 className="mt-1 text-2xl font-semibold text-slate-800">Nombre del paciente</h2>
       <p className="mt-2 text-sm text-slate-500">
         Escriba el nombre o pulse el micrófono para dictarlo. La transcripción se guarda en la guía.

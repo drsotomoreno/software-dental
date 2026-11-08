@@ -7,7 +7,7 @@ import {
   DEMO_PRESTADOR_REPS,
 } from '@/constants/rips'
 import {
-  DEMO_CIE10_DIAGNOSES,
+  demoMarkedToothIds,
   demoTreatmentTotal,
   type DemoFormData,
 } from './demoTypes'
@@ -32,7 +32,7 @@ function compactCie10(code: string | null | undefined): string {
 export function buildDemoRipsJson(form: DemoFormData): object {
   const now = new Date()
   const fechaAtencion = formatRipsDateTime(now)
-  const diagnosis = DEMO_CIE10_DIAGNOSES.find((item) => item.code === form.selectedDiagnosisCode)
+  const diagnosis = form.selectedDiagnosis
   const cie10 = compactCie10(diagnosis?.code) || 'K021'
   const treatment = form.treatmentRow
   const vrServicio = treatment ? demoTreatmentTotal(treatment) : 0
@@ -74,7 +74,7 @@ export function buildDemoRipsJson(form: DemoFormData): object {
           fechaInicioAtencion: fechaAtencion,
           idMIPRES: null,
           numAutorizacion: null,
-          codProcedimiento: '997301',
+          codProcedimiento: treatment.cupsCode.replace(/\D/g, '').padStart(6, '0').slice(-6) || '997301',
           viaIngresoServicioSalud: '01',
           modalidadGrupoServicioTecSal: '01',
           grupoServicios: '04',
@@ -141,6 +141,7 @@ export function buildDemoRipsJson(form: DemoFormData): object {
         : null,
       procedimiento: treatment
         ? {
+            cups: treatment.cupsCode,
             nombre: treatment.procedureName,
             cantidad: treatment.quantity,
             costoUnitario: treatment.unitCost,
@@ -155,8 +156,16 @@ export function buildDemoRipsJson(form: DemoFormData): object {
           }
         : null,
       notaEvolucion: form.evolutionNote || null,
-      piezasOdontograma: form.selectedTeeth,
-      firmaCapturada: Boolean(form.signatureDataUrl),
+      firmaProfesionalEvolucion: form.evolutionProfessionalSignature
+        ? {
+            profesional: form.evolutionProfessionalName || null,
+            rethus: form.evolutionRethus || null,
+            firmadoEn: form.evolutionSignedAt,
+          }
+        : null,
+      piezasOdontograma: demoMarkedToothIds(form.odontogramMarks),
+      odontogramaDemo: form.odontogramMarks,
+      firmaPacienteConsentimiento: Boolean(form.signatureDataUrl),
     },
   }
 

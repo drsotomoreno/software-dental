@@ -6,6 +6,7 @@ export interface DemoDiagnosis {
 
 /** Única fila de plan de tratamiento permitida en la demo. */
 export interface DemoTreatmentRow {
+  cupsCode: string
   procedureName: string
   quantity: number
   unitCost: number
@@ -18,44 +19,99 @@ export interface DemoPayment {
   note: string
 }
 
+/** Estado de superficie en el odontograma de la demo (azul / rojo). */
+export type DemoFaceState = 'sano' | 'obturado' | 'caries'
+
+export type DemoToothFace = 'vestibular' | 'mesial' | 'oclusal' | 'distal' | 'lingual'
+
+export type DemoToothGlobalState = 'presente' | 'ausente' | 'exodoncia_indicada'
+
+export type DemoOdontogramToolId =
+  | 'buen_estado'
+  | 'diente_ausente'
+  | 'exodoncia_indicada'
+  | 'patologia'
+
+export interface DemoToothFaces {
+  vestibular: DemoFaceState
+  mesial: DemoFaceState
+  oclusal: DemoFaceState
+  distal: DemoFaceState
+  lingual: DemoFaceState
+}
+
+/** Hallazgo por pieza FDI en la demo. */
+export interface DemoToothMark {
+  globalState: DemoToothGlobalState
+  faces: DemoToothFaces
+}
+
+export type DemoOdontogramMarks = Record<string, DemoToothMark>
+
+export const EMPTY_DEMO_FACES: DemoToothFaces = {
+  vestibular: 'sano',
+  mesial: 'sano',
+  oclusal: 'sano',
+  distal: 'sano',
+  lingual: 'sano',
+}
+
+export function createEmptyDemoToothMark(): DemoToothMark {
+  return { globalState: 'presente', faces: { ...EMPTY_DEMO_FACES } }
+}
+
+/** Piezas con algún hallazgo (superficie o X). */
+export function demoMarkedToothIds(marks: DemoOdontogramMarks): string[] {
+  return Object.entries(marks)
+    .filter(([, mark]) => {
+      if (mark.globalState !== 'presente') return true
+      return Object.values(mark.faces).some((face) => face !== 'sano')
+    })
+    .map(([toothId]) => toothId)
+    .sort()
+}
+
 /** Estado global de la demo interactiva (cascarón + pasos). */
 export interface DemoFormData {
   patientName: string
   chiefComplaint: string
-  /** Piezas FDI seleccionadas en el odontograma simplificado. */
-  selectedTeeth: string[]
-  /** Código CIE-10 único seleccionado (null = ninguno). */
-  selectedDiagnosisCode: string | null
+  /** Odontograma de la demo: superficies azul/rojo y X azul/roja. */
+  odontogramMarks: DemoOdontogramMarks
+  /** Diagnóstico CIE-10 único del catálogo odontológico (null = ninguno). */
+  selectedDiagnosis: DemoDiagnosis | null
   /** Máximo una fila de procedimiento en la demo. */
   treatmentRow: DemoTreatmentRow | null
   /** Firma digital guardada (PNG data URL) o null. */
   signatureDataUrl: string | null
-  /** Abono al presupuesto (Paso 8). */
+  /** Abono al presupuesto (Paso 7). */
   payment: DemoPayment | null
-  /** Nota de evolución clínica (Paso 9). */
+  /** Nota de evolución clínica (Paso 8). */
   evolutionNote: string
-  /** JSON RIPS generado en el Paso 10 (texto pretty-printed). */
+  /** Firma exclusiva del odontólogo en la evolución (Res. 1995/1999). */
+  evolutionProfessionalName: string
+  evolutionRethus: string
+  evolutionProfessionalSignature: string | null
+  /** Timestamp inmutable al guardar la firma profesional. */
+  evolutionSignedAt: string | null
+  /** JSON RIPS generado en el Paso 9 (texto pretty-printed). */
   generatedRipsJson: string | null
 }
 
 export const EMPTY_DEMO_FORM: DemoFormData = {
   patientName: '',
   chiefComplaint: '',
-  selectedTeeth: [],
-  selectedDiagnosisCode: null,
+  odontogramMarks: {},
+  selectedDiagnosis: null,
   treatmentRow: null,
   signatureDataUrl: null,
   payment: null,
   evolutionNote: '',
+  evolutionProfessionalName: '',
+  evolutionRethus: '',
+  evolutionProfessionalSignature: null,
+  evolutionSignedAt: null,
   generatedRipsJson: null,
 }
-
-/** Lista quemada de diagnósticos dentales comunes para el Paso 4. */
-export const DEMO_CIE10_DIAGNOSES: DemoDiagnosis[] = [
-  { code: 'K02.1', description: 'Caries de la dentina' },
-  { code: 'K04.0', description: 'Pulpitis' },
-  { code: 'K05.1', description: 'Gingivitis crónica' },
-]
 
 export function demoTreatmentTotal(row: DemoTreatmentRow): number {
   return Math.max(0, row.quantity) * Math.max(0, row.unitCost)

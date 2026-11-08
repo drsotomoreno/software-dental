@@ -8,7 +8,7 @@ interface DemoStepRipsProps {
   onGenerated: (json: string) => void
 }
 
-/** Paso 10 — Generación y descarga del JSON RIPS (simulación Res. 2275). */
+/** Paso 9 — Generación y descarga del JSON RIPS (simulación Res. 2275). */
 export function DemoStepRips({ formData, generatedRipsJson, onGenerated }: DemoStepRipsProps) {
   const handleGenerate = () => {
     onGenerated(stringifyDemoRips(formData))
@@ -16,7 +16,7 @@ export function DemoStepRips({ formData, generatedRipsJson, onGenerated }: DemoS
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-      <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 10 de 10</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 9 de 9</p>
       <h2 className="mt-1 text-2xl font-semibold text-slate-800">Generación de RIPS</h2>
       <p className="mt-2 text-sm text-slate-500">
         Genere un JSON estructurado que simula la estructura técnica de la Resolución 2275

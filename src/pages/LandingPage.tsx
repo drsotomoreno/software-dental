@@ -101,7 +101,7 @@ export function LandingPage() {
           <div className="mx-auto mt-8 flex max-w-xl flex-col gap-3">
             <div>
               <Link
-                to="/login"
+                to="/registro"
                 className="btn-primary w-full px-6 py-4 text-center text-base font-semibold"
               >
                 Inicia Prueba Gratuita

@@ -13,12 +13,19 @@ export { DemoSignatureCanvas } from './DemoSignatureCanvas'
 export { DemoMicButton } from './DemoMicButton'
 export { buildDemoRipsJson, stringifyDemoRips, downloadDemoRipsJson } from './buildDemoRipsJson'
 export {
+  openDemoPaymentDocument,
+  type DemoPaymentDocumentKind,
+} from './buildDemoPaymentDocuments'
+export {
   EMPTY_DEMO_FORM,
-  DEMO_CIE10_DIAGNOSES,
   demoTreatmentTotal,
   demoBudgetBalance,
+  demoMarkedToothIds,
+  createEmptyDemoToothMark,
   type DemoFormData,
   type DemoDiagnosis,
   type DemoTreatmentRow,
   type DemoPayment,
+  type DemoOdontogramMarks,
+  type DemoToothMark,
 } from './demoTypes'

@@ -1,12 +1,25 @@
 import { useState } from 'react'
 import { APP_INITIALS, APP_NAME } from '@/constants/branding'
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import { userNeedsWelcome } from '@/utils/subscriptionAccess'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 
 type AuthMode = 'login' | 'register' | 'verify'
+
+function initialAuthMode(pathname: string, searchParams: URLSearchParams): AuthMode {
+  const modeParam = (searchParams.get('mode') || searchParams.get('modo') || '').toLowerCase()
+  if (
+    pathname === '/registro' ||
+    modeParam === 'register' ||
+    modeParam === 'registro' ||
+    modeParam === 'signup'
+  ) {
+    return 'register'
+  }
+  return 'login'
+}
 
 async function postJson(url: string, body: Record<string, string>) {
   const response = await fetch(url, {
@@ -22,11 +35,14 @@ export function LoginPage() {
   const { user, login, isLoading } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   const from = (location.state as { from?: string } | null)?.from ?? '/app'
   const apiAuth = getStoredApiAuth()
   const isSuperAdmin = localStorage.getItem('doctorSEO_rol') === 'superadmin'
 
-  const [mode, setMode] = useState<AuthMode>('login')
+  const [mode, setMode] = useState<AuthMode>(() =>
+    initialAuthMode(location.pathname, searchParams),
+  )
   const [nombre, setNombre] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -37,7 +53,13 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false)
 
   const afterLogin =
-    !from || from === '/' || from === '/login' || from === '/welcome-trial' ? '/app' : from
+    !from ||
+    from === '/' ||
+    from === '/login' ||
+    from === '/registro' ||
+    from === '/welcome-trial'
+      ? '/app'
+      : from
   const storedUser = apiAuth?.user
   const sendToWelcome = Boolean(storedUser && userNeedsWelcome(storedUser) && !isSuperAdmin)
 
@@ -107,22 +129,38 @@ export function LoginPage() {
     setError('')
     setInfo('')
     setSubmitting(true)
+    const registerEmail = email.trim().toLowerCase()
+    const registerPassword = password.trim()
     try {
       const { response, payload } = await postJson('/api/auth/register/verify', {
-        email: email.trim().toLowerCase(),
+        email: registerEmail,
         code: code.replace(/\D/g, ''),
-        password,
+        password: registerPassword,
       })
       if (!response.ok) {
         setError(payload.error || 'No se pudo verificar el código.')
         return
       }
+
+      // Tras verificar el correo, entra a la prueba gratuita sin volver al login.
+      const result = await login(registerEmail, registerPassword)
+      if (!result.ok) {
+        setMode('login')
+        setPassword('')
+        setConfirmPassword('')
+        setCode('')
+        setError(
+          'Cuenta creada, pero no se pudo iniciar sesión automáticamente. Inicie sesión para continuar a la prueba gratuita.',
+        )
+        setInfo('Cuenta verificada. Use su correo y contraseña para acceder.')
+        return
+      }
+
       setPassword('')
       setConfirmPassword('')
       setCode('')
       setNombre('')
-      setMode('login')
-      setInfo('Cuenta creada. Inicie sesión para elegir un plan o la prueba gratuita de 7 días.')
+      navigate('/welcome-trial', { replace: true })
     } catch {
       setError('No se pudo conectar con el servidor. Intente de nuevo.')
     } finally {

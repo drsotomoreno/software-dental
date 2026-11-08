@@ -1,54 +1,63 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Search } from 'lucide-react'
-import { DEMO_CIE10_DIAGNOSES } from './demoTypes'
+import { CIE10_DATA } from '@/data/cie10Data'
+import { getDefaultCie10SearchEngine } from '@/services/Cie10SearchEngine'
+import type { DemoDiagnosis } from './demoTypes'
 
 interface DemoStepDiagnosisProps {
-  selectedDiagnosisCode: string | null
-  onChange: (code: string | null) => void
+  selectedDiagnosis: DemoDiagnosis | null
+  onChange: (diagnosis: DemoDiagnosis | null) => void
 }
 
 const LIMIT_MESSAGE =
   'Límite alcanzado en la demo. En la versión paga los diagnósticos son ilimitados.'
 
-/** Paso 4 — Buscador CIE-10 con selección única (demo limitada). */
-export function DemoStepDiagnosis({
-  selectedDiagnosisCode,
-  onChange,
-}: DemoStepDiagnosisProps) {
+const SUGGESTED_CODES = ['K02.1', 'K04.0', 'K05.1', 'K05.3', 'K07.6', 'K08.1', 'S02.5', 'Z01.20']
+
+function findCie10Entry(code: string): DemoDiagnosis | null {
+  const entry = CIE10_DATA.find((item) => item.code === code)
+  return entry ? { code: entry.code, description: entry.description } : null
+}
+
+const SUGGESTED_DIAGNOSES: DemoDiagnosis[] = SUGGESTED_CODES.map(findCie10Entry).filter(
+  (item): item is DemoDiagnosis => Boolean(item),
+)
+
+/** Paso 4 — Buscador del catálogo CIE-10 odontológico (selección única). */
+export function DemoStepDiagnosis({ selectedDiagnosis, onChange }: DemoStepDiagnosisProps) {
   const [query, setQuery] = useState('')
   const [showLimitWarning, setShowLimitWarning] = useState(false)
+  const engine = useMemo(() => getDefaultCie10SearchEngine(), [])
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return DEMO_CIE10_DIAGNOSES
-    return DEMO_CIE10_DIAGNOSES.filter(
-      (item) =>
-        item.code.toLowerCase().includes(q) || item.description.toLowerCase().includes(q),
-    )
-  }, [query])
+    const q = query.trim()
+    if (!q) return SUGGESTED_DIAGNOSES
+    return engine.search(q, 40)
+  }, [engine, query])
 
-  const handleSelect = (code: string) => {
-    if (selectedDiagnosisCode === code) {
+  const handleSelect = (item: DemoDiagnosis) => {
+    if (selectedDiagnosis?.code === item.code) {
       onChange(null)
       setShowLimitWarning(false)
       return
     }
 
-    if (selectedDiagnosisCode && selectedDiagnosisCode !== code) {
+    if (selectedDiagnosis && selectedDiagnosis.code !== item.code) {
       setShowLimitWarning(true)
       return
     }
 
-    onChange(code)
+    onChange(item)
     setShowLimitWarning(false)
   }
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-      <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 4 de 10</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 4 de 9</p>
       <h2 className="mt-1 text-2xl font-semibold text-slate-800">Diagnóstico CIE-10</h2>
       <p className="mt-2 text-sm text-slate-500">
-        Busque y seleccione un diagnóstico dental. En esta demo solo puede elegir uno.
+        Busque cualquier diagnóstico del catálogo CIE odontológico. En esta demo solo puede
+        seleccionar un código.
       </p>
 
       <div className="relative mt-8">
@@ -60,26 +69,32 @@ export function DemoStepDiagnosis({
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Buscar por código o descripción (ej. K02, caries…)"
+          placeholder="Buscar en el catálogo CIE-10 (ej. K02, caries, pulpitis, ATM…)"
           className="input-field pl-10"
           aria-label="Buscar diagnóstico CIE-10"
         />
       </div>
 
-      <ul className="mt-4 divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+      <p className="mt-2 text-xs text-slate-500">
+        {query.trim()
+          ? `${filtered.length} resultado${filtered.length === 1 ? '' : 's'} del catálogo`
+          : `Sugerencias frecuentes · ${CIE10_DATA.length} códigos disponibles en el catálogo`}
+      </p>
+
+      <ul className="mt-3 max-h-80 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
         {filtered.length === 0 ? (
           <li className="px-4 py-6 text-center text-sm text-slate-500">
-            No hay coincidencias en la lista de demostración.
+            No hay coincidencias en el catálogo CIE odontológico.
           </li>
         ) : (
           filtered.map((item) => {
-            const selected = selectedDiagnosisCode === item.code
-            const blocked = Boolean(selectedDiagnosisCode && !selected)
+            const selected = selectedDiagnosis?.code === item.code
+            const blocked = Boolean(selectedDiagnosis && !selected)
             return (
               <li key={item.code}>
                 <button
                   type="button"
-                  onClick={() => handleSelect(item.code)}
+                  onClick={() => handleSelect(item)}
                   aria-pressed={selected}
                   className={[
                     'flex w-full items-start gap-3 px-4 py-3 text-left transition',
@@ -99,9 +114,7 @@ export function DemoStepDiagnosis({
                     ].join(' ')}
                     aria-hidden
                   >
-                    {selected ? (
-                      <span className="h-2 w-2 rounded-full bg-white" />
-                    ) : null}
+                    {selected ? <span className="h-2 w-2 rounded-full bg-white" /> : null}
                   </span>
                   <span className="min-w-0">
                     <span className="block text-sm font-semibold text-slate-800">{item.code}</span>
@@ -124,12 +137,11 @@ export function DemoStepDiagnosis({
         </div>
       )}
 
-      {selectedDiagnosisCode && !showLimitWarning && (
+      {selectedDiagnosis && !showLimitWarning && (
         <p className="mt-4 text-sm text-slate-500">
           Seleccionado:{' '}
           <span className="font-medium text-slate-700">
-            {DEMO_CIE10_DIAGNOSES.find((d) => d.code === selectedDiagnosisCode)?.code} —{' '}
-            {DEMO_CIE10_DIAGNOSES.find((d) => d.code === selectedDiagnosisCode)?.description}
+            {selectedDiagnosis.code} — {selectedDiagnosis.description}
           </span>
           . Pulse de nuevo para quitarlo.
         </p>

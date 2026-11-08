@@ -51,17 +51,15 @@ export function DemoShell() {
       case 3:
         return (
           <DemoStepOdontogram
-            selectedTeeth={formData.selectedTeeth}
-            onChange={(selectedTeeth) => updateField('selectedTeeth', selectedTeeth)}
+            marks={formData.odontogramMarks}
+            onChange={(odontogramMarks) => updateField('odontogramMarks', odontogramMarks)}
           />
         )
       case 4:
         return (
           <DemoStepDiagnosis
-            selectedDiagnosisCode={formData.selectedDiagnosisCode}
-            onChange={(selectedDiagnosisCode) =>
-              updateField('selectedDiagnosisCode', selectedDiagnosisCode)
-            }
+            selectedDiagnosis={formData.selectedDiagnosis}
+            onChange={(selectedDiagnosis) => updateField('selectedDiagnosis', selectedDiagnosis)}
           />
         )
       case 5:
@@ -71,28 +69,42 @@ export function DemoShell() {
             onChange={(treatmentRow) => updateField('treatmentRow', treatmentRow)}
           />
         )
-      case 7:
+      case 6:
         return (
           <DemoStepConsentSignature
             signatureDataUrl={formData.signatureDataUrl}
             onChange={(signatureDataUrl) => updateField('signatureDataUrl', signatureDataUrl)}
           />
         )
-      case 8:
+      case 7:
         return (
           <DemoStepPayments
             formData={formData}
             onChange={(payment) => updateField('payment', payment)}
           />
         )
-      case 9:
+      case 8:
         return (
           <DemoStepEvolution
-            value={formData.evolutionNote}
-            onChange={(evolutionNote) => updateField('evolutionNote', evolutionNote)}
+            note={formData.evolutionNote}
+            professionalName={formData.evolutionProfessionalName}
+            rethus={formData.evolutionRethus}
+            signatureDataUrl={formData.evolutionProfessionalSignature}
+            signedAt={formData.evolutionSignedAt}
+            onNoteChange={(evolutionNote) => updateField('evolutionNote', evolutionNote)}
+            onProfessionalNameChange={(evolutionProfessionalName) =>
+              updateField('evolutionProfessionalName', evolutionProfessionalName)
+            }
+            onRethusChange={(evolutionRethus) => updateField('evolutionRethus', evolutionRethus)}
+            onSignatureChange={(evolutionProfessionalSignature) =>
+              updateField('evolutionProfessionalSignature', evolutionProfessionalSignature)
+            }
+            onSignedAtChange={(evolutionSignedAt) =>
+              updateField('evolutionSignedAt', evolutionSignedAt)
+            }
           />
         )
-      case 10:
+      case 9:
         return (
           <DemoStepRips
             formData={formData}

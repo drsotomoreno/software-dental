@@ -9,7 +9,7 @@ export function DemoStepPlaceholder({ step }: DemoStepPlaceholderProps) {
   return (
     <div className="flex h-full min-h-[22rem] flex-col justify-center rounded-xl border border-dashed border-dental-200 bg-white px-6 py-10 text-center shadow-sm sm:px-10">
       <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">
-        Paso {step.id} de 10
+        Paso {step.id} de 9
       </p>
       <h2 className="mt-2 text-2xl font-semibold text-slate-800">{step.title}</h2>
       <p className="mx-auto mt-3 max-w-xl text-sm text-slate-500">{step.description}</p>

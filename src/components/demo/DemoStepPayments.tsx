@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Wallet } from 'lucide-react'
+import { FileText, Receipt, Wallet } from 'lucide-react'
 import { formatCurrency } from '@/utils/crypto'
+import { openDemoPaymentDocument } from './buildDemoPaymentDocuments'
 import {
   demoBudgetBalance,
   demoTreatmentTotal,
@@ -15,7 +16,7 @@ interface DemoStepPaymentsProps {
 
 const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Tarjeta', 'PSE'] as const
 
-/** Paso 8 — Registro de un abono al presupuesto del Paso 5. */
+/** Paso 7 — Registro de un abono al presupuesto del Paso 5. */
 export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) {
   const budget = formData.treatmentRow
   const balance = demoBudgetBalance(formData)
@@ -25,6 +26,9 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
   const [method, setMethod] = useState(formData.payment?.method ?? PAYMENT_METHODS[0])
   const [note, setNote] = useState(formData.payment?.note ?? '')
   const [error, setError] = useState('')
+  const [docMessage, setDocMessage] = useState('')
+
+  const canGenerateDocuments = Boolean(formData.payment && formData.treatmentRow)
 
   const handleRegister = () => {
     if (!budget) {
@@ -42,14 +46,30 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
     }
     onChange({ amount: value, method, note: note.trim() })
     setError('')
+    setDocMessage('Abono guardado. Ya puede generar el recibo o la factura electrónica.')
+  }
+
+  const handleGenerateDocument = (kind: 'recibo_interno' | 'fev') => {
+    const result = openDemoPaymentDocument(formData, kind)
+    if (!result.ok) {
+      setError(result.error)
+      setDocMessage('')
+      return
+    }
+    setError('')
+    setDocMessage(
+      kind === 'recibo_interno'
+        ? 'Recibo interno de caja generado en una nueva ventana.'
+        : 'Factura Electrónica de Venta (simulación) generada en una nueva ventana.',
+    )
   }
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-      <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 8 de 10</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 7 de 9</p>
       <h2 className="mt-1 text-2xl font-semibold text-slate-800">Pagos</h2>
       <p className="mt-2 text-sm text-slate-500">
-        Registre un abono al presupuesto creado en el Paso 5.
+        Registre un abono al presupuesto creado en el Paso 5 y genere el documento de soporte.
       </p>
 
       <div className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3">
@@ -150,6 +170,7 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
                 setAmount('')
                 setNote('')
                 setError('')
+                setDocMessage('')
               }}
               className="btn-secondary"
             >
@@ -157,6 +178,40 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
             </button>
           ) : null}
         </div>
+      </div>
+
+      <div className="mt-6 space-y-3 rounded-xl border border-slate-200 p-4 sm:p-5">
+        <p className="text-sm font-semibold text-slate-700">Documentos de soporte</p>
+        <p className="text-sm text-slate-500">
+          Genere el recibo interno de caja o una simulación de Factura Electrónica de Venta con los
+          datos del abono.
+        </p>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={() => handleGenerateDocument('recibo_interno')}
+            disabled={!canGenerateDocuments}
+            className="btn-secondary flex-1 gap-2 disabled:cursor-not-allowed"
+          >
+            <Receipt className="h-4 w-4" aria-hidden />
+            Generar recibo interno de caja
+          </button>
+          <button
+            type="button"
+            onClick={() => handleGenerateDocument('fev')}
+            disabled={!canGenerateDocuments}
+            className="btn-primary flex-1 gap-2 disabled:cursor-not-allowed"
+          >
+            <FileText className="h-4 w-4" aria-hidden />
+            Generar Factura Electrónica de Venta
+          </button>
+        </div>
+        {docMessage ? <p className="text-sm text-dental-700">{docMessage}</p> : null}
+        {!canGenerateDocuments ? (
+          <p className="text-xs text-slate-500">
+            Guarde un abono (y un procedimiento en el Paso 5) para habilitar estos botones.
+          </p>
+        ) : null}
       </div>
     </div>
   )

@@ -68,6 +68,7 @@ export default function ClinicalApp() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/demo" element={<DemoPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/registro" element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
