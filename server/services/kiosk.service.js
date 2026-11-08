@@ -116,7 +116,8 @@ export async function saveKioskIntake({ clinicId, datosBasicos, anamnesis, signa
   })
 
   // Firma solo en PostgreSQL (TEXT). El pull recibe demografía + anamnesis.
-  await pushClinicSnapshot(canonicalClinicId, {
+  // No bloquear el ack de la tableta si el snapshot tarda (cola de sync).
+  void pushClinicSnapshot(canonicalClinicId, {
     patients: [
       {
         syncId,
@@ -125,6 +126,11 @@ export async function saveKioskIntake({ clinicId, datosBasicos, anamnesis, signa
         payload: patientPayload,
       },
     ],
+  }).catch((error) => {
+    console.error(
+      '[Kiosco] pushClinicSnapshot diferido falló:',
+      error instanceof Error ? error.message : error,
+    )
   })
 
   return {

@@ -327,6 +327,27 @@ export function attachKioskSocket(httpServer) {
           formData: body.formData,
         })
 
+        // Ack liviano YA: si devolvemos la PNG completa el timeout del cliente
+        // salta ("operation has timed out") aunque el guardado haya ido bien.
+        respond({
+          ok: true,
+          received: {
+            documentType: saved.documentType,
+            documentId: saved.documentId,
+            patientId: saved.patientId,
+            savedId: saved.id,
+            createdAt: saved.createdAt,
+            signedAt: asIsoTimestamp(saved.createdAt),
+            formData: saved.formData,
+            intake: saved.intake,
+            signatureBase64: '',
+          },
+        })
+        logKiosk(
+          'info',
+          `OK submit_signature id=${socket.id} savedId=${saved.id} type=${saved.documentType} room=${room}`,
+        )
+
         const received = {
           documentType: saved.documentType,
           documentId: saved.documentId,
@@ -341,11 +362,6 @@ export function attachKioskSocket(httpServer) {
           intake: saved.intake,
         }
         io.to(room).emit('kiosk:signature_received', received)
-        logKiosk(
-          'info',
-          `OK submit_signature id=${socket.id} savedId=${saved.id} type=${saved.documentType} room=${room}`,
-        )
-        respond({ ok: true, received })
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'No se pudo guardar la firma del kiosco.'
