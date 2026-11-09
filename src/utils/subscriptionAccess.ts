@@ -14,6 +14,12 @@ export function userNeedsWelcome(user?: ApiSubscriptionUser | null): boolean {
   return !isSubscriptionCurrent(user)
 }
 
+/** Destino post-login/registro: sin plan solo demo; con plan el consultorio. */
+export function postAuthDestination(user?: ApiSubscriptionUser | null, fallback = '/app'): string {
+  if (userNeedsWelcome(user)) return '/demo'
+  return fallback
+}
+
 export function userHasTrialLimits(user?: ApiSubscriptionUser | null): boolean {
   if (!user || isApiSuperAdmin(user)) return false
   if (user.trialLimited === true) return isSubscriptionCurrent(user)

@@ -3,10 +3,9 @@ import { APP_INITIALS, APP_NAME } from '@/constants/branding'
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { clearStoredApiAuth, getStoredApiAuth, isApiSuperAdmin } from '@/services/apiAuthService'
-import { userNeedsWelcome } from '@/utils/subscriptionAccess'
+import { postAuthDestination, userNeedsWelcome } from '@/utils/subscriptionAccess'
 import {
   clearExpressRegisterFlag,
-  hasExpressRegisterBypass,
   markExpressRegisterComplete,
 } from '@/utils/expressRegister'
 import { validateColombiaMobile } from '@/utils/phoneValidation'
@@ -64,18 +63,16 @@ export function LoginPage() {
     from === '/' ||
     from === '/login' ||
     from === '/registro' ||
-    from === '/welcome-trial'
+    from === '/welcome-trial' ||
+    from === '/demo'
       ? '/app'
       : from
   const storedUser = apiAuth?.user
-  const skipWelcomeAfterExpressRegister = hasExpressRegisterBypass()
-  const sendToWelcome = Boolean(
-    storedUser && userNeedsWelcome(storedUser) && !isSuperAdmin && !skipWelcomeAfterExpressRegister,
-  )
-
   // Solo redirigir con sesión real. Nunca por doctorSEO_rol suelto en localStorage.
   if (!isLoading && (user || (apiAuth?.token && apiAuth.user))) {
-    return <Navigate to={sendToWelcome ? '/welcome-trial' : afterLogin} replace />
+    const dest =
+      storedUser && !isSuperAdmin ? postAuthDestination(storedUser, afterLogin) : afterLogin
+    return <Navigate to={dest} replace />
   }
 
   const switchMode = (next: AuthMode) => {
@@ -95,7 +92,8 @@ export function LoginPage() {
       setError(result.error)
       return
     }
-    navigate(result.requiresSubscription ? '/welcome-trial' : afterLogin, { replace: true })
+    const sessionUser = getStoredApiAuth()?.user
+    navigate(postAuthDestination(sessionUser, afterLogin), { replace: true })
   }
 
   const requestCode = async () => {
@@ -201,7 +199,8 @@ export function LoginPage() {
       setCode('')
       setNombre('')
       setPhoneNumber('')
-      navigate(afterLogin, { replace: true })
+      // Sin plan adquirido: únicamente la versión demo (no historia clínica).
+      navigate('/demo', { replace: true })
     } catch {
       setError('No se pudo conectar con el servidor. Intente de nuevo.')
     } finally {
@@ -211,7 +210,7 @@ export function LoginPage() {
 
   const subtitle =
     mode === 'register'
-      ? 'Registro express — correo y WhatsApp en segundo plano'
+      ? 'Registro express — sin plan entra a la versión demo'
       : mode === 'verify'
         ? `Ingrese el código enviado a ${email.trim().toLowerCase() || 'su correo'}`
         : 'Acceso seguro — cédula y contraseña de su clínica'

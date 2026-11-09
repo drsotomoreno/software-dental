@@ -1,6 +1,11 @@
+/**
+ * Registro express sin plan: el usuario solo puede usar /demo hasta activar
+ * prueba o comprar. Ya no existe bypass hacia /app.
+ */
+
 const FLAG_KEY = 'mhd_express_register'
 
-/** Marca registro express: el Dashboard no debe bloquearse por welcome-trial. */
+/** Marca que acaba de registrarse; la UI puede orientar a la demo. */
 export function markExpressRegisterComplete(): void {
   try {
     sessionStorage.setItem(FLAG_KEY, '1')
@@ -17,7 +22,12 @@ export function clearExpressRegisterFlag(): void {
   }
 }
 
+/** @deprecated No abre el consultorio. Conservado por compatibilidad de imports. */
 export function hasExpressRegisterBypass(): boolean {
+  return false
+}
+
+export function justFinishedExpressRegister(): boolean {
   try {
     return sessionStorage.getItem(FLAG_KEY) === '1'
   } catch {

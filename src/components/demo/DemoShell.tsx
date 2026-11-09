@@ -1,6 +1,9 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Info } from 'lucide-react'
 import { DEMO_STEPS, getDemoStep } from '@/constants/demoSteps'
+import { getStoredApiAuth } from '@/services/apiAuthService'
+import { userNeedsWelcome } from '@/utils/subscriptionAccess'
 import { DemoStepChiefComplaint } from './DemoStepChiefComplaint'
 import { DemoStepConsentSignature } from './DemoStepConsentSignature'
 import { DemoStepDiagnosis } from './DemoStepDiagnosis'
@@ -19,6 +22,7 @@ export function DemoShell() {
   const step = getDemoStep(currentStep) ?? DEMO_STEPS[0]
   const isFirst = currentStep <= 1
   const isLast = currentStep >= DEMO_STEPS.length
+  const needsPlan = userNeedsWelcome(getStoredApiAuth()?.user)
 
   const goToStep = (stepId: number) => {
     if (stepId < 1 || stepId > DEMO_STEPS.length) return
@@ -120,13 +124,25 @@ export function DemoShell() {
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 text-slate-800">
-      {/* Banner fijo de versión de prueba */}
+      {/* Banner fijo de versión demo (sin plan = solo esta experiencia) */}
       <div className="sticky top-0 z-40 border-b border-amber-300 bg-gradient-to-r from-amber-400 via-amber-300 to-sky-300 shadow-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-center gap-2 px-4 py-3 text-center sm:px-6">
-          <Info className="hidden h-5 w-5 shrink-0 text-amber-950 sm:block" aria-hidden />
-          <p className="text-sm font-semibold text-amber-950 sm:text-base">
-            Esta es una versión de prueba reducida. Sigue nuestra guía paso a paso.
-          </p>
+        <div className="mx-auto flex max-w-7xl flex-col items-center justify-center gap-2 px-4 py-3 text-center sm:flex-row sm:gap-4 sm:px-6">
+          <div className="flex items-center justify-center gap-2">
+            <Info className="hidden h-5 w-5 shrink-0 text-amber-950 sm:block" aria-hidden />
+            <p className="text-sm font-semibold text-amber-950 sm:text-base">
+              {needsPlan
+                ? 'Cuenta registrada sin plan: solo puede usar esta versión demo. Active una prueba o plan para abrir la historia clínica.'
+                : 'Esta es una versión de prueba reducida. Sigue nuestra guía paso a paso.'}
+            </p>
+          </div>
+          {needsPlan ? (
+            <Link
+              to="/welcome-trial"
+              className="shrink-0 rounded-lg bg-amber-950 px-3 py-1.5 text-xs font-semibold text-amber-50 hover:bg-amber-900 sm:text-sm"
+            >
+              Activar prueba o plan
+            </Link>
+          ) : null}
         </div>
       </div>
 

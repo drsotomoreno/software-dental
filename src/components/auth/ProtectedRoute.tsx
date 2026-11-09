@@ -6,7 +6,6 @@ import { LandingPage } from '@/pages/LandingPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 import { clearStoredApiAuth, getStoredApiAuth, isApiSuperAdmin } from '@/services/apiAuthService'
-import { hasExpressRegisterBypass } from '@/utils/expressRegister'
 import { userNeedsWelcome } from '@/utils/subscriptionAccess'
 
 function normalizePath(pathname: string) {
@@ -57,15 +56,18 @@ export function ProtectedRoute() {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }
 
-  const welcomePath = path === '/welcome-trial' || path === '/subscription-plans'
-  const bypassWelcome = hasExpressRegisterBypass()
+  // Sin plan/prueba: solo demo (pública) o pantallas para activar/comprar.
+  // Nunca historia clínica completa (/app, pacientes, etc.).
+  const unpaidAllowed =
+    path === '/welcome-trial' ||
+    path === '/subscription-plans' ||
+    path === '/suscripcion'
   if (
     userNeedsWelcome(apiAuth?.user) &&
-    !welcomePath &&
-    !bypassWelcome &&
+    !unpaidAllowed &&
     !isApiSuperAdmin(apiAuth?.user)
   ) {
-    return <Navigate to="/welcome-trial" replace />
+    return <Navigate to="/demo" replace />
   }
 
   return <Outlet />
