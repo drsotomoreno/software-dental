@@ -131,7 +131,7 @@ export function DemoShell() {
 
       <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:gap-6 lg:py-6">
         {/* Stepper lateral */}
-        <aside className="w-full shrink-0 lg:w-64">
+        <aside className="w-full shrink-0 lg:w-72">
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-20">
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-dental-600">
               MiHistoriaDental
@@ -148,7 +148,7 @@ export function DemoShell() {
                     type="button"
                     onClick={() => goToStep(item.id)}
                     className={[
-                      'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition',
+                      'flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition',
                       isActive
                         ? 'bg-dental-600 text-white shadow-sm'
                         : isDone
@@ -159,7 +159,7 @@ export function DemoShell() {
                   >
                     <span
                       className={[
-                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+                        'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
                         isActive
                           ? 'bg-white text-dental-700'
                           : isDone
@@ -169,7 +169,7 @@ export function DemoShell() {
                     >
                       {item.id}
                     </span>
-                    <span className="min-w-0 truncate font-medium">{item.shortTitle}</span>
+                    <span className="min-w-0 leading-snug font-medium">{item.title}</span>
                   </button>
                 )
               })}
