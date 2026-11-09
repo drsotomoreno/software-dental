@@ -146,6 +146,12 @@ export function buildDemoRipsJson(form: DemoFormData): object {
             cantidad: treatment.quantity,
             costoUnitario: treatment.unitCost,
             total: vrServicio,
+            diagnosticoVinculado: treatment.diagnosisCode
+              ? {
+                  codigo: treatment.diagnosisCode,
+                  descripcion: treatment.diagnosisDescription ?? null,
+                }
+              : null,
           }
         : null,
       abono: form.payment

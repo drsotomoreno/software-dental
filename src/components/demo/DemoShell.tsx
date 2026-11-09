@@ -65,6 +65,7 @@ export function DemoShell() {
       case 5:
         return (
           <DemoStepTreatmentPlan
+            selectedDiagnosis={formData.selectedDiagnosis}
             treatmentRow={formData.treatmentRow}
             onChange={(treatmentRow) => updateField('treatmentRow', treatmentRow)}
           />

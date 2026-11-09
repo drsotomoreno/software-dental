@@ -10,6 +10,9 @@ export interface DemoTreatmentRow {
   procedureName: string
   quantity: number
   unitCost: number
+  /** Diagnóstico CIE-10 importado desde el Paso 4. */
+  diagnosisCode?: string
+  diagnosisDescription?: string
 }
 
 /** Abono registrado contra el presupuesto del Paso 5. */

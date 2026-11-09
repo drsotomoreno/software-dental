@@ -1,10 +1,15 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, Calculator, Info, Search, Trash2 } from 'lucide-react'
+import { AlertTriangle, Calculator, Info, Search, Stethoscope, Trash2 } from 'lucide-react'
 import { CUPS_ODONTOLOGIA, type CupsOdontologyEntry } from '@/constants/cupsOdontologyData'
 import { formatCurrency } from '@/utils/crypto'
-import { demoTreatmentTotal, type DemoTreatmentRow } from './demoTypes'
+import {
+  demoTreatmentTotal,
+  type DemoDiagnosis,
+  type DemoTreatmentRow,
+} from './demoTypes'
 
 interface DemoStepTreatmentPlanProps {
+  selectedDiagnosis: DemoDiagnosis | null
   treatmentRow: DemoTreatmentRow | null
   onChange: (row: DemoTreatmentRow | null) => void
 }
@@ -48,7 +53,11 @@ function searchCupsCatalog(query: string, limit = 40): CupsOdontologyEntry[] {
 }
 
 /** Paso 5 — Plan de tratamiento desde catálogo CUPS (máx. 1 procedimiento). */
-export function DemoStepTreatmentPlan({ treatmentRow, onChange }: DemoStepTreatmentPlanProps) {
+export function DemoStepTreatmentPlan({
+  selectedDiagnosis,
+  treatmentRow,
+  onChange,
+}: DemoStepTreatmentPlanProps) {
   const [query, setQuery] = useState('')
   const [quantity, setQuantity] = useState('1')
   const [unitCost, setUnitCost] = useState('')
@@ -60,8 +69,10 @@ export function DemoStepTreatmentPlan({ treatmentRow, onChange }: DemoStepTreatm
   const cost = Number(unitCost.replace(/,/g, '.')) || 0
   const previewTotal = Math.max(0, qty) * Math.max(0, cost)
   const hasRow = treatmentRow !== null
+  const hasDiagnosis = Boolean(selectedDiagnosis)
 
   const handlePick = (entry: CupsOdontologyEntry) => {
+    if (!hasDiagnosis) return
     if (hasRow) {
       setShowLimitWarning(true)
       return
@@ -76,12 +87,14 @@ export function DemoStepTreatmentPlan({ treatmentRow, onChange }: DemoStepTreatm
       setShowLimitWarning(true)
       return
     }
-    if (!pending || qty <= 0 || cost < 0) return
+    if (!selectedDiagnosis || !pending || qty <= 0 || cost < 0) return
     onChange({
       cupsCode: pending.codigo,
       procedureName: pending.descripcion,
       quantity: qty,
       unitCost: cost,
+      diagnosisCode: selectedDiagnosis.code,
+      diagnosisDescription: selectedDiagnosis.description,
     })
     setPending(null)
     setQuantity('1')
@@ -105,6 +118,33 @@ export function DemoStepTreatmentPlan({ treatmentRow, onChange }: DemoStepTreatm
         <p>En la versión paga, los procedimientos y calculadoras de presupuesto son ilimitados.</p>
       </div>
 
+      <div
+        className={[
+          'mt-6 rounded-xl border px-4 py-3',
+          hasDiagnosis
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
+            : 'border-amber-300 bg-amber-50 text-amber-950',
+        ].join(' ')}
+      >
+        <div className="flex items-start gap-2">
+          <Stethoscope className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">Diagnóstico importado del Paso 4</p>
+            {selectedDiagnosis ? (
+              <p className="mt-1 text-sm">
+                <span className="font-semibold">{selectedDiagnosis.code}</span>
+                {' — '}
+                {selectedDiagnosis.description}
+              </p>
+            ) : (
+              <p className="mt-1 text-sm">
+                Seleccione un diagnóstico CIE-10 en el Paso 4 para vincularlo al plan de tratamiento.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="relative mt-6">
         <Search
           className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
@@ -115,7 +155,7 @@ export function DemoStepTreatmentPlan({ treatmentRow, onChange }: DemoStepTreatm
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Buscar CUPS odontológico (ej. 890203, obturación, exodoncia…)"
-          disabled={hasRow}
+          disabled={hasRow || !hasDiagnosis}
           className="input-field pl-10 disabled:bg-slate-100 disabled:text-slate-500"
           aria-label="Buscar procedimiento CUPS"
         />
@@ -127,7 +167,7 @@ export function DemoStepTreatmentPlan({ treatmentRow, onChange }: DemoStepTreatm
           : `Sugerencias frecuentes · ${CUPS_ODONTOLOGIA.length} códigos CUPS disponibles`}
       </p>
 
-      {!hasRow && (
+      {!hasRow && hasDiagnosis && (
         <ul className="mt-3 max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
           {filtered.length === 0 ? (
             <li className="px-4 py-6 text-center text-sm text-slate-500">
@@ -179,9 +219,19 @@ export function DemoStepTreatmentPlan({ treatmentRow, onChange }: DemoStepTreatm
             Calculadora básica
           </div>
 
-          <div className="mb-4 rounded-lg border border-dental-100 bg-white px-3 py-2 text-sm">
-            <p className="font-semibold text-dental-800">{formatCupsDisplay(pending.codigo)}</p>
-            <p className="text-slate-600">{pending.descripcion}</p>
+          <div className="mb-4 space-y-2 rounded-lg border border-dental-100 bg-white px-3 py-2 text-sm">
+            <div>
+              <p className="font-semibold text-dental-800">{formatCupsDisplay(pending.codigo)}</p>
+              <p className="text-slate-600">{pending.descripcion}</p>
+            </div>
+            {selectedDiagnosis ? (
+              <p className="border-t border-slate-100 pt-2 text-xs text-slate-600">
+                CIE-10 vinculado:{' '}
+                <span className="font-semibold text-slate-800">
+                  {selectedDiagnosis.code} — {selectedDiagnosis.description}
+                </span>
+              </p>
+            ) : null}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -249,6 +299,7 @@ export function DemoStepTreatmentPlan({ treatmentRow, onChange }: DemoStepTreatm
             <tr>
               <th className="px-4 py-2 font-medium">CUPS</th>
               <th className="px-4 py-2 font-medium">Procedimiento</th>
+              <th className="px-4 py-2 font-medium">CIE-10</th>
               <th className="px-4 py-2 font-medium">Cant.</th>
               <th className="px-4 py-2 font-medium">Unitario</th>
               <th className="px-4 py-2 font-medium">Total</th>
@@ -260,7 +311,7 @@ export function DemoStepTreatmentPlan({ treatmentRow, onChange }: DemoStepTreatm
           <tbody>
             {!treatmentRow ? (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
+                <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
                   Aún no hay procedimientos en el plan.
                 </td>
               </tr>
@@ -270,6 +321,18 @@ export function DemoStepTreatmentPlan({ treatmentRow, onChange }: DemoStepTreatm
                   {formatCupsDisplay(treatmentRow.cupsCode)}
                 </td>
                 <td className="px-4 py-3 text-slate-700">{treatmentRow.procedureName}</td>
+                <td className="px-4 py-3 text-slate-600">
+                  {treatmentRow.diagnosisCode ? (
+                    <span>
+                      <span className="font-semibold text-slate-800">{treatmentRow.diagnosisCode}</span>
+                      {treatmentRow.diagnosisDescription
+                        ? ` — ${treatmentRow.diagnosisDescription}`
+                        : ''}
+                    </span>
+                  ) : (
+                    '—'
+                  )}
+                </td>
                 <td className="px-4 py-3 text-slate-600">{treatmentRow.quantity}</td>
                 <td className="px-4 py-3 text-slate-600">
                   {formatCurrency(treatmentRow.unitCost)}
