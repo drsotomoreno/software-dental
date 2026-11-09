@@ -3,7 +3,7 @@ import {
   createEmailVerification,
   verifyEmailAndRegister,
 } from '../services/subscriptionAuthStore.js'
-import { queueSendWelcomeWhatsAppInBackground } from '../services/whatsapp.service.js'
+import { voidSendWelcomeWhatsAppInBackground } from '../services/whatsapp.service.js'
 
 export async function requestRegisterCode(req, res) {
   try {

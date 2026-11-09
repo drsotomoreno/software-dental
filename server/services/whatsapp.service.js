@@ -121,7 +121,7 @@ async function persistWhatsAppStatusPostgres({ userId, email, phoneNumber, whats
 /**
  * Envío en segundo plano tras res.status(201). No lanza hacia el request HTTP.
  */
-export function queueSendWelcomeWhatsAppInBackground({
+export function voidSendWelcomeWhatsAppInBackground({
   userId,
   email,
   phoneNumber,
