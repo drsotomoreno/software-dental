@@ -24,6 +24,7 @@ import { readDurableJson, writeDurableJson } from './durableStore.js'
 import {
   ensureMasterUsuarioRow,
   syncAllAuthUsersToTenantTables,
+  syncAuthUserToTenantTables,
 } from './tenantRbacStore.js'
 import { splitPersonName, composeLegalName } from '../../shared/personName.js'
 import { formatNitInput, validateProviderNit } from '../../shared/nit.js'
@@ -461,13 +462,14 @@ export async function ensureSuperAdmin() {
 
 
 
-export async function registerSubscriptionUser({ nombre, email, password }) {
+export async function registerSubscriptionUser({ nombre, email, password, phone_number, phone }) {
 
   const store = await loadStore()
 
   const normalizedEmail = normalizeEmail(email)
 
   const name = String(nombre ?? '').trim()
+  const phoneNumber = normalizeColombiaPhoneNumber(phone_number ?? phone)
 
 
 
@@ -517,6 +519,14 @@ export async function registerSubscriptionUser({ nombre, email, password }) {
 
     passwordHash: hashPasswordSha256(password),
 
+    phone: phoneNumber || '',
+
+    phone_number: phoneNumber || '',
+
+    whatsapp_verified: false,
+
+    whatsapp_status: phoneNumber ? 'pending' : 'skipped',
+
     rol: 'admin',
 
     estado_pago: 'pendiente',
@@ -534,6 +544,7 @@ export async function registerSubscriptionUser({ nombre, email, password }) {
   store.users.push(user)
 
   await saveStore(store)
+  void syncAuthUserToTenantTables(user)
 
 
 
@@ -1101,10 +1112,20 @@ function normalizeOtp(code) {
   return String(code ?? '').replace(/\D/g, '').slice(0, 6)
 }
 
-export async function createEmailVerification({ nombre, email, password }) {
+/** Celular Colombia (+57): 10 dígitos locales o 12 con indicativo. */
+export function normalizeColombiaPhoneNumber(raw) {
+  const digits = String(raw ?? '').replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits.startsWith('57') && digits.length === 12 && digits[2] === '3') return digits
+  if (digits.length === 10 && digits[0] === '3') return `57${digits}`
+  return ''
+}
+
+export async function createEmailVerification({ nombre, email, password, phone_number, phone }) {
   const store = await loadStore()
   const normalizedEmail = normalizeEmail(email)
   const name = String(nombre ?? '').trim()
+  const phoneNumber = normalizeColombiaPhoneNumber(phone_number ?? phone)
 
   if (normalizedEmail === SUPERADMIN_EMAIL) {
     return { ok: false, status: 403, error: 'Este correo está reservado para el administrador del sistema.' }
@@ -1114,6 +1135,13 @@ export async function createEmailVerification({ nombre, email, password }) {
   }
   if (!normalizedEmail) {
     return { ok: false, status: 400, error: 'El correo es obligatorio.' }
+  }
+  if (!phoneNumber) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Indique un celular colombiano válido (+57), por ejemplo 3001234567.',
+    }
   }
   const passwordValue = String(password ?? '').trim()
   if (!passwordValue || passwordValue.length < 6) {
@@ -1138,6 +1166,7 @@ export async function createEmailVerification({ nombre, email, password }) {
   store.emailVerifications.push({
     email: normalizedEmail,
     nombre: name,
+    phone_number: phoneNumber,
     passwordHash: hashPasswordSha256(passwordValue),
     code,
     codeHash: hashPasswordSha256(code),
@@ -1147,15 +1176,16 @@ export async function createEmailVerification({ nombre, email, password }) {
   })
   await saveStore(store)
 
-  return { ok: true, email: normalizedEmail, code }
+  return { ok: true, email: normalizedEmail, code, phone_number: phoneNumber }
 }
 
-export async function verifyEmailAndRegister({ email, code, password }) {
+export async function verifyEmailAndRegister({ email, code, password, phone_number, phone }) {
   const store = await loadStore()
   const normalizedEmail = normalizeEmail(email)
   const rawCode = normalizeOtp(code)
   const now = Date.now()
   const index = (store.emailVerifications ?? []).findIndex((item) => item.email === normalizedEmail)
+  const overridePhone = normalizeColombiaPhoneNumber(phone_number ?? phone)
 
   if (rawCode.length !== 6) {
     return { ok: false, status: 400, error: 'El código debe tener 6 dígitos, sin espacios.' }
@@ -1211,11 +1241,20 @@ export async function verifyEmailAndRegister({ email, code, password }) {
     perfilFiscal: DEFAULT_PERFIL_FISCAL,
   }
 
+  const phoneNumber =
+    overridePhone ||
+    normalizeColombiaPhoneNumber(pending.phone_number) ||
+    normalizeColombiaPhoneNumber(existing?.phone_number || existing?.phone)
+
   if (existing) {
     const updated = {
       ...existing,
       nombre: pending.nombre || existing.nombre,
       passwordHash,
+      phone: phoneNumber || existing.phone || '',
+      phone_number: phoneNumber || existing.phone_number || existing.phone || '',
+      whatsapp_verified: existing.whatsapp_verified === true,
+      whatsapp_status: existing.whatsapp_status || 'pending',
       ...pendingAccount,
       rol: isSuperAdminUser(existing) ? existing.rol : 'admin',
       clinicId: existing.clinicId || existing.id,
@@ -1226,6 +1265,7 @@ export async function verifyEmailAndRegister({ email, code, password }) {
     store.users[existingIndex] = updated
     store.emailVerifications.splice(index, 1)
     await saveStore(store)
+    void syncAuthUserToTenantTables(updated)
     return { ok: true, user: sanitizeUser(updated) }
   }
 
@@ -1234,6 +1274,10 @@ export async function verifyEmailAndRegister({ email, code, password }) {
     nombre: pending.nombre,
     email: normalizedEmail,
     passwordHash,
+    phone: phoneNumber || '',
+    phone_number: phoneNumber || '',
+    whatsapp_verified: false,
+    whatsapp_status: phoneNumber ? 'pending' : 'skipped',
     rol: 'admin',
     clinicId: null,
     accessEnabled: true,
@@ -1246,8 +1290,52 @@ export async function verifyEmailAndRegister({ email, code, password }) {
   store.users.push(user)
   store.emailVerifications.splice(index, 1)
   await saveStore(store)
+  void syncAuthUserToTenantTables(user)
 
   return { ok: true, user: sanitizeUser(user) }
+}
+
+/**
+ * Actualiza campos WhatsApp tras el envío asíncrono (setImmediate).
+ */
+export async function updateUserWhatsAppFields({
+  userId,
+  email,
+  phone_number,
+  whatsapp_verified,
+  whatsapp_status,
+}) {
+  const store = await loadStore()
+  const normalizedEmail = normalizeEmail(email)
+  const index = store.users.findIndex(
+    (user) =>
+      (userId && String(user.id) === String(userId)) ||
+      (normalizedEmail && user.email === normalizedEmail),
+  )
+  if (index === -1) return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+
+  const current = store.users[index]
+  const phoneNumber =
+    phone_number !== undefined
+      ? normalizeColombiaPhoneNumber(phone_number) || String(phone_number || '').replace(/\D/g, '')
+      : current.phone_number || current.phone || ''
+
+  const updated = {
+    ...current,
+    phone: phoneNumber,
+    phone_number: phoneNumber,
+    whatsapp_verified:
+      whatsapp_verified === undefined ? Boolean(current.whatsapp_verified) : Boolean(whatsapp_verified),
+    whatsapp_status:
+      whatsapp_status === undefined
+        ? current.whatsapp_status || 'pending'
+        : String(whatsapp_status || 'pending'),
+    updatedAt: new Date().toISOString(),
+  }
+  store.users[index] = updated
+  await saveStore(store)
+  void syncAuthUserToTenantTables(updated)
+  return { ok: true, user: sanitizeUser(updated) }
 }
 
 function sanitizeUser(user) {
@@ -1291,7 +1379,10 @@ function sanitizeUser(user) {
     clinicId: user.clinicId || user.id,
     isClinicOwner: String(user.clinicId || user.id) === String(user.id),
     accessEnabled: user.accessEnabled !== false && Boolean(user.passwordHash),
-    phone: user.phone ?? '',
+    phone: user.phone_number || user.phone || '',
+    phone_number: user.phone_number || user.phone || '',
+    whatsapp_verified: user.whatsapp_verified === true,
+    whatsapp_status: user.whatsapp_status || 'pending',
     perfilFiscal: normalizePerfilFiscal(user.perfilFiscal),
     providerNit: user.providerNit ?? '',
     repsCode: user.repsCode ?? '',

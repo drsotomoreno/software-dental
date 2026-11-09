@@ -33,6 +33,7 @@ import {
   updateClinicUser,
   updateSubscriptionProfile,
 } from '../services/subscriptionAuthStore.js'
+import { voidSendWelcomeWhatsAppInBackground } from '../services/whatsapp.service.js'
 import {
   aislarClinica,
   soloSuperAdmin,
@@ -88,7 +89,12 @@ router.post('/registro', async (req, res) => {
       })
     }
 
-    const result = await registerSubscriptionUser({ nombre, email, password })
+    const result = await registerSubscriptionUser({
+      nombre,
+      email,
+      password,
+      phone_number: body.phone_number ?? body.phone,
+    })
 
     if (!result.ok) {
       return res.status(result.status).json({
@@ -98,19 +104,29 @@ router.post('/registro', async (req, res) => {
       })
     }
 
-    return res.status(201).json({
+    const user = result.user
+    res.status(201).json({
       success: true,
       ok: true,
-      message: 'Registro exitoso. Realice el pago para activar su acceso.',
-      user: result.user,
+      message: 'Registro exitoso. La bienvenida por WhatsApp se envía en segundo plano.',
+      user,
+    })
+
+    voidSendWelcomeWhatsAppInBackground({
+      userId: user?.id,
+      email: user?.email,
+      phoneNumber: user?.phone_number || user?.phone || body.phone_number || body.phone,
+      nombre: user?.nombre || nombre,
     })
   } catch (error) {
     console.error('[Auth] Error en /registro:', error)
-    return res.status(500).json({
-      success: false,
-      ok: false,
-      error: 'No se pudo completar el registro. Intente de nuevo.',
-    })
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        ok: false,
+        error: 'No se pudo completar el registro. Intente de nuevo.',
+      })
+    }
   }
 })
 

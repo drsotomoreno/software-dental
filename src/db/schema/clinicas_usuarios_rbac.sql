@@ -23,12 +23,17 @@ CREATE TABLE IF NOT EXISTS usuarios (
     is_superadmin BOOLEAN NOT NULL DEFAULT FALSE,
     rol VARCHAR(50) NOT NULL DEFAULT 'odontologo',
     estado VARCHAR(20) NOT NULL DEFAULT 'activo',
+    phone_number VARCHAR(32),
+    whatsapp_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    whatsapp_status VARCHAR(32) NOT NULL DEFAULT 'pending',
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT usuarios_superadmin_email_chk CHECK (
       is_superadmin = FALSE
       OR lower(email) = 'doctormauriciosoto@gmail.com'
     )
 );
+
+-- Ver también: server/db/migrations/20261108190000_usuarios_whatsapp.sql
 
 CREATE INDEX IF NOT EXISTS idx_usuarios_clinica ON usuarios (clinica_id);
 CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios (email);

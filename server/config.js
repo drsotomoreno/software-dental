@@ -93,6 +93,20 @@ export const config = {
     process.env.KIOSK_JWT_SECRET ||
     process.env.JWT_SECRET ||
     'dev-kiosk-jwt-secret-change-me',
+  /** Evolution API — plantilla de bienvenida WhatsApp (registro express, asíncrono). */
+  evolutionWhatsapp: {
+    baseUrl: (process.env.EVOLUTION_API_URL || process.env.EVOLUTION_BASE_URL || '').replace(
+      /\/$/,
+      '',
+    ),
+    apiKey: process.env.EVOLUTION_API_KEY || '',
+    instance: process.env.EVOLUTION_INSTANCE || process.env.EVOLUTION_INSTANCE_NAME || '',
+    templateName:
+      process.env.EVOLUTION_WELCOME_TEMPLATE ||
+      process.env.EVOLUTION_TEMPLATE_NAME ||
+      'bienvenida_mihistoriadental',
+    templateLanguage: process.env.EVOLUTION_TEMPLATE_LANGUAGE || 'es',
+  },
 }
 
 /** Credenciales completas para modo producción contra el API del ministerio. */

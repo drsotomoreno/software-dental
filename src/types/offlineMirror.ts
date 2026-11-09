@@ -55,6 +55,9 @@ export interface OfflineUsuario {
   is_superadmin?: boolean
   rol?: string
   estado?: string
+  phone_number?: string | null
+  whatsapp_verified?: boolean
+  whatsapp_status?: string
   updated_at?: string
 }
 

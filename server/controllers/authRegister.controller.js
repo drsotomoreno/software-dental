@@ -3,6 +3,7 @@ import {
   createEmailVerification,
   verifyEmailAndRegister,
 } from '../services/subscriptionAuthStore.js'
+import { queueSendWelcomeWhatsAppInBackground } from '../services/whatsapp.service.js'
 
 export async function requestRegisterCode(req, res) {
   try {
@@ -12,6 +13,7 @@ export async function requestRegisterCode(req, res) {
       nombre: body.nombre,
       email,
       password: body.password,
+      phone_number: body.phone_number ?? body.phone,
     })
 
     if (!result.ok) {
@@ -59,6 +61,7 @@ export async function requestRegisterCode(req, res) {
       success: true,
       ok: true,
       email: recipient,
+      phone_number: result.phone_number,
       message: `Enviamos un código de 6 dígitos a ${recipient}. Escríbalo seguido, sin espacios. Si llega más de un correo, use el más reciente.`,
     })
   } catch (error) {
@@ -71,6 +74,9 @@ export async function requestRegisterCode(req, res) {
   }
 }
 
+/**
+ * Registro express: responde 201 al instante y dispara WhatsApp (Evolution) en setImmediate.
+ */
 export async function verifyRegisterCode(req, res) {
   try {
     const body = req.body && typeof req.body === 'object' ? req.body : {}
@@ -78,6 +84,7 @@ export async function verifyRegisterCode(req, res) {
       email: String(body.email ?? '').trim().toLowerCase(),
       code: body.code,
       password: body.password,
+      phone_number: body.phone_number ?? body.phone,
     })
 
     if (!result.ok) {
@@ -88,18 +95,30 @@ export async function verifyRegisterCode(req, res) {
       })
     }
 
-    return res.status(201).json({
+    const user = result.user
+    // Respuesta inmediata: el envío de WhatsApp no bloquea el registro ni el redirect al Dashboard.
+    res.status(201).json({
       success: true,
       ok: true,
-      message: 'Correo verificado. Cuenta creada. Inicie sesión para continuar.',
-      user: result.user,
+      message:
+        'Correo verificado. Cuenta creada. La bienvenida por WhatsApp se envía en segundo plano.',
+      user,
+    })
+
+    voidSendWelcomeWhatsAppInBackground({
+      userId: user?.id,
+      email: user?.email,
+      phoneNumber: user?.phone_number || user?.phone || body.phone_number || body.phone,
+      nombre: user?.nombre || body.nombre,
     })
   } catch (error) {
     console.error('[Auth] Error en /auth/register/verify:', error)
-    return res.status(500).json({
-      success: false,
-      ok: false,
-      error: 'No se pudo verificar el código.',
-    })
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        ok: false,
+        error: 'No se pudo verificar el código.',
+      })
+    }
   }
 }

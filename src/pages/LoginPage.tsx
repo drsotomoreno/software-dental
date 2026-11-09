@@ -4,6 +4,12 @@ import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react
 import { useAuth } from '@/contexts/AuthContext'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import { userNeedsWelcome } from '@/utils/subscriptionAccess'
+import {
+  clearExpressRegisterFlag,
+  hasExpressRegisterBypass,
+  markExpressRegisterComplete,
+} from '@/utils/expressRegister'
+import { validateColombiaMobile } from '@/utils/phoneValidation'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 
 type AuthMode = 'login' | 'register' | 'verify'
@@ -45,6 +51,7 @@ export function LoginPage() {
   )
   const [nombre, setNombre] = useState('')
   const [email, setEmail] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [code, setCode] = useState('')
@@ -61,7 +68,10 @@ export function LoginPage() {
       ? '/app'
       : from
   const storedUser = apiAuth?.user
-  const sendToWelcome = Boolean(storedUser && userNeedsWelcome(storedUser) && !isSuperAdmin)
+  const skipWelcomeAfterExpressRegister = hasExpressRegisterBypass()
+  const sendToWelcome = Boolean(
+    storedUser && userNeedsWelcome(storedUser) && !isSuperAdmin && !skipWelcomeAfterExpressRegister,
+  )
 
   if (!isLoading && (user || apiAuth?.token || isSuperAdmin)) {
     return <Navigate to={sendToWelcome ? '/welcome-trial' : afterLogin} replace />
@@ -94,17 +104,24 @@ export function LoginPage() {
       setError('Las contraseñas no coinciden.')
       return false
     }
+    const phoneCheck = validateColombiaMobile(phoneNumber)
+    if (!phoneCheck.ok) {
+      setError(phoneCheck.error || 'Celular colombiano inválido.')
+      return false
+    }
     setSubmitting(true)
     try {
       const { response, payload } = await postJson('/api/auth/register/request-code', {
         nombre: nombre.trim(),
         email: email.trim().toLowerCase(),
+        phone_number: phoneCheck.digits,
         password,
       })
       if (!response.ok) {
         setError(payload.error || 'No se pudo enviar el código.')
         return false
       }
+      setPhoneNumber(phoneCheck.digits)
       setInfo(
         payload.message ||
           `Enviamos un código de 6 dígitos a ${email.trim().toLowerCase()}.`,
@@ -131,26 +148,30 @@ export function LoginPage() {
     setSubmitting(true)
     const registerEmail = email.trim().toLowerCase()
     const registerPassword = password.trim()
+    const phoneCheck = validateColombiaMobile(phoneNumber)
     try {
       const { response, payload } = await postJson('/api/auth/register/verify', {
         email: registerEmail,
         code: code.replace(/\D/g, ''),
         password: registerPassword,
+        phone_number: phoneCheck.ok ? phoneCheck.digits : phoneNumber.replace(/\D/g, ''),
       })
       if (!response.ok) {
         setError(payload.error || 'No se pudo verificar el código.')
         return
       }
 
-      // Tras verificar el correo, entra a la prueba gratuita sin volver al login.
+      // Registro express: sesión inmediata y Dashboard sin esperar WhatsApp.
+      markExpressRegisterComplete()
       const result = await login(registerEmail, registerPassword)
       if (!result.ok) {
+        clearExpressRegisterFlag()
         setMode('login')
         setPassword('')
         setConfirmPassword('')
         setCode('')
         setError(
-          'Cuenta creada, pero no se pudo iniciar sesión automáticamente. Inicie sesión para continuar a la prueba gratuita.',
+          'Cuenta creada, pero no se pudo iniciar sesión automáticamente. Inicie sesión para continuar al Dashboard.',
         )
         setInfo('Cuenta verificada. Use su correo y contraseña para acceder.')
         return
@@ -160,7 +181,8 @@ export function LoginPage() {
       setConfirmPassword('')
       setCode('')
       setNombre('')
-      navigate('/welcome-trial', { replace: true })
+      setPhoneNumber('')
+      navigate(afterLogin, { replace: true })
     } catch {
       setError('No se pudo conectar con el servidor. Intente de nuevo.')
     } finally {
@@ -170,7 +192,7 @@ export function LoginPage() {
 
   const subtitle =
     mode === 'register'
-      ? 'Cree su cuenta — verificaremos su correo'
+      ? 'Registro express — correo y WhatsApp en segundo plano'
       : mode === 'verify'
         ? `Ingrese el código enviado a ${email.trim().toLowerCase() || 'su correo'}`
         : 'Acceso seguro — cédula y contraseña de su clínica'
@@ -278,6 +300,23 @@ export function LoginPage() {
                 className="input-field"
                 placeholder="usuario@clinica.co"
               />
+            </div>
+            <div>
+              <label className="label-field">Celular (WhatsApp Colombia)</label>
+              <input
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                required
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                className="input-field"
+                placeholder="300 123 4567"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Indicativo +57. La bienvenida por WhatsApp se envía en segundo plano tras crear la
+                cuenta.
+              </p>
             </div>
             <div>
               <label className="label-field">Contraseña</label>

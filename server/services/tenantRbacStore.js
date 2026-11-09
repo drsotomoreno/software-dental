@@ -10,10 +10,16 @@ import { config } from '../config.js'
 import { withPgClient } from './durableStore.js'
 import { splitSqlStatements } from './consultasRepository.js'
 
-const MIGRATION_FILE = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '../db/migrations/20261102143000_clinicas_usuarios_rbac.sql',
-)
+const MIGRATION_FILES = [
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    '../db/migrations/20261102143000_clinicas_usuarios_rbac.sql',
+  ),
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    '../db/migrations/20261108190000_usuarios_whatsapp.sql',
+  ),
+]
 
 export const MASTER_EMAIL = 'doctormauriciosoto@gmail.com'
 
@@ -59,9 +65,11 @@ function repsOrNull(value) {
 export async function ensureTenantRbacSchema() {
   if (!schemaReady) {
     schemaReady = withPgClient(async (client) => {
-      const sql = await readFile(MIGRATION_FILE, 'utf8')
-      for (const statement of splitSqlStatements(sql)) {
-        await client.query(statement)
+      for (const migrationFile of MIGRATION_FILES) {
+        const sql = await readFile(migrationFile, 'utf8')
+        for (const statement of splitSqlStatements(sql)) {
+          await client.query(statement)
+        }
       }
     }).catch((error) => {
       schemaReady = null
@@ -177,12 +185,22 @@ export async function syncAuthUserToTenantTables(user) {
         user.accessEnabled === false || user.estado_pago === 'pendiente' ? 'inactivo' : 'activo'
       const rethus = String(user.rethusNumber ?? '').trim() || null
 
+      const phoneNumber =
+        String(user.phone_number || user.phone || '')
+          .replace(/\D/g, '')
+          .trim() || null
+      const whatsappStatus = String(user.whatsapp_status || 'pending').trim() || 'pending'
+      const whatsappVerified = user.whatsapp_verified === true
+
       await client.query(
         `INSERT INTO usuarios (
            id, clinica_id, email, password_hash, nombre_completo,
-           registro_rethus, is_superadmin, rol, estado
+           registro_rethus, is_superadmin, rol, estado,
+           phone_number, whatsapp_verified, whatsapp_status
          ) VALUES (
-           $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9
+           $1::uuid, $2::uuid, $3::text, $4::text, $5::text,
+           $6::text, $7::boolean, $8::text, $9::text,
+           $10::text, $11::boolean, $12::text
          )
          ON CONFLICT (email) DO UPDATE SET
            clinica_id = EXCLUDED.clinica_id,
@@ -191,7 +209,10 @@ export async function syncAuthUserToTenantTables(user) {
            registro_rethus = EXCLUDED.registro_rethus,
            is_superadmin = EXCLUDED.is_superadmin,
            rol = EXCLUDED.rol,
-           estado = EXCLUDED.estado`,
+           estado = EXCLUDED.estado,
+           phone_number = COALESCE(EXCLUDED.phone_number, usuarios.phone_number),
+           whatsapp_verified = EXCLUDED.whatsapp_verified,
+           whatsapp_status = EXCLUDED.whatsapp_status`,
         [
           userId,
           isSuper ? null : clinicaId,
@@ -202,6 +223,9 @@ export async function syncAuthUserToTenantTables(user) {
           isSuper,
           rol,
           estado,
+          phoneNumber,
+          whatsappVerified,
+          whatsappStatus,
         ],
       )
 

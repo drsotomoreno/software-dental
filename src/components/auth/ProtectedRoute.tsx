@@ -6,6 +6,7 @@ import { LandingPage } from '@/pages/LandingPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 import { clearStoredApiAuth, getStoredApiAuth, isApiSuperAdmin } from '@/services/apiAuthService'
+import { hasExpressRegisterBypass } from '@/utils/expressRegister'
 import { userNeedsWelcome } from '@/utils/subscriptionAccess'
 
 function normalizePath(pathname: string) {
@@ -57,7 +58,14 @@ export function ProtectedRoute() {
   }
 
   const welcomePath = path === '/welcome-trial' || path === '/subscription-plans'
-  if (userNeedsWelcome(apiAuth?.user) && !welcomePath && !isApiSuperAdmin(apiAuth?.user) && !hasSuperAdminRole) {
+  const bypassWelcome = hasExpressRegisterBypass()
+  if (
+    userNeedsWelcome(apiAuth?.user) &&
+    !welcomePath &&
+    !bypassWelcome &&
+    !isApiSuperAdmin(apiAuth?.user) &&
+    !hasSuperAdminRole
+  ) {
     return <Navigate to="/welcome-trial" replace />
   }
 
