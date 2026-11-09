@@ -41,8 +41,11 @@ export function DemoStepEvolution({
       <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 8 de 9</p>
       <h2 className="mt-1 text-2xl font-semibold text-slate-800">Notas de evolución</h2>
       <p className="mt-2 text-sm text-slate-500">
-        Redacte la nota y fírmela como odontólogo tratante. La evolución es de autoría exclusiva del
-        profesional: requiere ReTHUS y marca de tiempo, sin firma del paciente.
+        La suscripción paga de mihistoriadental optimiza la práctica clínica al permitir el
+        diligenciamiento de notas de evolución 100% por dictado de voz, integrando la firma digital
+        del odontólogo con plena validez jurídica, inalterabilidad y valor probatorio para
+        garantizar un registro ágil, seguro y en cumplimiento estricto de la Ley 527 de 1999, la
+        Resolución 1995 de 1999 y la Ley 2015 de 2020.
       </p>
 
       <div className="mt-8 space-y-2">

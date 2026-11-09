@@ -15,7 +15,9 @@ export function DemoStepPatientName({ value, onChange }: DemoStepPatientNameProp
       <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 1 de 9</p>
       <h2 className="mt-1 text-2xl font-semibold text-slate-800">Nombre del paciente</h2>
       <p className="mt-2 text-sm text-slate-500">
-        Escriba el nombre o pulse el micrófono para dictarlo. La transcripción se guarda en la guía.
+        Historia clínica 100% por voz: cero contacto, máxima bioseguridad e independencia total.
+        Escriba el nombre o pulse el micrófono para dictarlo. La transcripción se guarda en la
+        Historia.
       </p>
 
       <div className="mt-8 space-y-2">

@@ -19,8 +19,13 @@ export function DemoStepRips({ formData, generatedRipsJson, onGenerated }: DemoS
       <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 9 de 9</p>
       <h2 className="mt-1 text-2xl font-semibold text-slate-800">Generación de RIPS</h2>
       <p className="mt-2 text-sm text-slate-500">
-        Genere un JSON estructurado que simula la estructura técnica de la Resolución 2275
-        (FEV-RIPS), usando nombre, motivo, diagnóstico y procedimiento de esta demo.
+        mihistoriadental automatiza la generación de RIPS en formato JSON y su articulación con la
+        Factura Electrónica de Venta (FEV) según lo exigido por la Resolución 2275 de 2023 del
+        Ministerio de Salud, la Resolución 2333 de 2023 (CUPS) y la Resolución 000165 de 2023 de la
+        DIAN. El sistema ejecuta una pre-validación diagnóstica inteligente que audita
+        visualmente inconsistencias entre la codificación CIE-10/CUPS y la factura antes del envío
+        formal a la plataforma ministerial, garantizando una validación inmediata y eliminando
+        devoluciones o rechazos fiscales y de auditoría.
       </p>
 
       <button

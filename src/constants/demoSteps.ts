@@ -47,9 +47,9 @@ export const DEMO_STEPS: DemoStep[] = [
   },
   {
     id: 7,
-    title: 'Pagos',
-    shortTitle: 'Pagos',
-    description: 'Registre un abono al presupuesto del plan de tratamiento.',
+    title: 'Facturación y Pagos',
+    shortTitle: 'Facturación',
+    description: 'Registre un abono y genere recibo interno o Factura Electrónica de Venta.',
   },
   {
     id: 8,

@@ -94,8 +94,10 @@ export function DemoStepTreatmentPlan({ treatmentRow, onChange }: DemoStepTreatm
       <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 5 de 9</p>
       <h2 className="mt-1 text-2xl font-semibold text-slate-800">Plan de tratamiento</h2>
       <p className="mt-2 text-sm text-slate-500">
-        Elija un procedimiento del catálogo CUPS odontológico y calcule su costo. En esta demo solo
-        se permite un código.
+        mihistoriadental integra la codificación oficial CUPS en sus planes de tratamiento para
+        asegurar la estandarización de los procedimientos odontológicos, cumplir rigurosamente con
+        las Resoluciones 2333 de 2023, 2275 de 2023 y 3100 de 2019, y automatizar la generación de
+        RIPS JSON y facturación electrónica DIAN sin rechazos ni inconsistencias.
       </p>
 
       <div className="mt-6 flex items-start gap-2 rounded-lg border border-dental-200 bg-dental-50 px-4 py-3 text-sm text-dental-900">

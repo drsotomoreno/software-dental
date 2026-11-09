@@ -56,8 +56,10 @@ export function DemoStepDiagnosis({ selectedDiagnosis, onChange }: DemoStepDiagn
       <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 4 de 9</p>
       <h2 className="mt-1 text-2xl font-semibold text-slate-800">Diagnóstico CIE-10</h2>
       <p className="mt-2 text-sm text-slate-500">
-        Busque cualquier diagnóstico del catálogo CIE odontológico. En esta demo solo puede
-        seleccionar un código.
+        mihistoriadental integra odontograma e historia clínica con la clasificación CIE-10 para
+        asegurar el cumplimiento normativo de RIPS ante el Ministerio de Salud, agilizar la
+        facturación electrónica DIAN y optimizar la consulta mediante la indexación inmediata de
+        diagnósticos precisos por voz o clic.
       </p>
 
       <div className="relative mt-8">

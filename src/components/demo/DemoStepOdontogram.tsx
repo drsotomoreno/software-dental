@@ -314,7 +314,9 @@ export function DemoStepOdontogram({ marks, onChange }: DemoStepOdontogramProps)
       <h2 className="mt-1 text-2xl font-semibold text-slate-800">Odontograma</h2>
       <p className="mt-2 text-sm text-slate-500">
         Elija una herramienta y marque la superficie (V, M, O, D, L). Use X Azul o X Roja para el
-        diente completo.
+        diente completo. ¡En la versión paga podrás dictar todos los hallazgos del odontograma por
+        voz! y la transcripción se guarda en la Historia. Odontograma 100% computable y alineado con
+        la Resolución 3100: pasa tu visita de habilitación sin contratiempos.
       </p>
 
       <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-3">

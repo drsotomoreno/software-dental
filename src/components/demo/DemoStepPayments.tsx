@@ -67,9 +67,17 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
       <p className="text-xs font-semibold uppercase tracking-wider text-dental-600">Paso 7 de 9</p>
-      <h2 className="mt-1 text-2xl font-semibold text-slate-800">Pagos</h2>
+      <h2 className="mt-1 text-2xl font-semibold text-slate-800">Facturación y Pagos</h2>
       <p className="mt-2 text-sm text-slate-500">
-        Registre un abono al presupuesto creado en el Paso 5 y genere el documento de soporte.
+        mihistoriadental optimiza la administración de tu clínica mediante un doble flujo de
+        facturación: emite recibos internos numerados para recaudos particulares diarios cuando no
+        se requiere soporte fiscal o los ingresos brutos son inferiores a 3.500 UVT
+        (~$187.900.000 COP), y genera Facturas Electrónicas de Venta en Salud (FEV) articuladas con
+        RIPS JSON cuando el paciente lo exige, se opera como IPS o se superan los topes
+        normativos 3.500 UVT (~$187.900.000 COP), garantizando un cumplimiento riguroso del Estatuto
+        Tributario, la Resolución 000165 de 2023 de la DIAN y la Resolución 2275 de 2023 del
+        Ministerio de Salud. Contamos con un semáforo que te avisa cuando se están superando los
+        topes que te eximen de generar Factura Electrónica.
       </p>
 
       <div className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3">
