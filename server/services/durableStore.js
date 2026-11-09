@@ -263,10 +263,12 @@ export function mergeDurableStores(primary, secondary, { primaryUserWins = false
     merged.passwordResets = mergeByKey(secondary.passwordResets, primary.passwordResets, 'tokenHash', primaryUserWins)
   }
   if (Array.isArray(primary.emailVerifications) || Array.isArray(secondary.emailVerifications)) {
+    // OTP viven en almacén dedicado; este arreglo es legado.
+    // Siempre fusionar por email: un save concurrente con lista vacía NO debe borrar OTPs.
     merged.emailVerifications = mergeByKey(
       secondary.emailVerifications,
       primary.emailVerifications,
-      'tokenHash',
+      'email',
       primaryUserWins,
     )
   }
@@ -310,6 +312,65 @@ export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
     }
   } catch (error) {
     markPostgresUnavailable(error)
+  }
+}
+
+/**
+ * Lectura/escritura de un documento JSON aislado en app_json_store (una fila por clave).
+ * Ideal para OTP de registro: no se mezclan con subscription-users ni se pierden en merges.
+ */
+export async function readJsonDocument(storeKey) {
+  if (postgresCoolingDown()) return null
+  return readPostgresJson(storeKey)
+}
+
+export async function writeJsonDocument(storeKey, value) {
+  if (postgresCoolingDown()) {
+    const error = new Error('PostgreSQL en enfriamiento; no se pudo persistir el documento.')
+    error.code = 'PG_COOLDOWN'
+    throw error
+  }
+  const db = getPool()
+  if (!db) {
+    const error = new Error('PostgreSQL no está configurado.')
+    error.code = 'PG_UNAVAILABLE'
+    throw error
+  }
+  try {
+    const client = await db.connect()
+    try {
+      await ensureTable(client)
+      await client.query(
+        `INSERT INTO app_json_store (key, value, updated_at)
+         VALUES ($1::text, $2::jsonb, now())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+        [storeKey, JSON.stringify(value)],
+      )
+    } finally {
+      client.release()
+    }
+  } catch (error) {
+    markPostgresUnavailable(error)
+    throw error
+  }
+}
+
+export async function deleteJsonDocument(storeKey) {
+  if (postgresCoolingDown()) return false
+  const db = getPool()
+  if (!db) return false
+  try {
+    const client = await db.connect()
+    try {
+      await ensureTable(client)
+      await client.query('DELETE FROM app_json_store WHERE key = $1::text', [storeKey])
+      return true
+    } finally {
+      client.release()
+    }
+  } catch (error) {
+    markPostgresUnavailable(error)
+    return false
   }
 }
 

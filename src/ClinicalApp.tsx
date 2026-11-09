@@ -32,8 +32,8 @@ import {
   InvoicesAccountsPage,
   WelcomeTrialPage,
   AdminSubscriptionUsersPage,
-  RegisteredUsersAdminPage,
   SuperAdminDashboardPage,
+  SuperAdminRegistrationsPage,
   SuperAdminClinicsPage,
   SuperAdminSubscriptionsPage,
   SuperAdminMonitoringPage,
@@ -78,6 +78,7 @@ export default function ClinicalApp() {
           <Route element={<RequireSuperAdmin />}>
             <Route element={<SuperAdminLayout />}>
               <Route path="superadmin" element={<SuperAdminDashboardPage />} />
+              <Route path="superadmin/registros" element={<SuperAdminRegistrationsPage />} />
               <Route path="superadmin/clinicas" element={<SuperAdminClinicsPage />} />
               <Route path="superadmin/suscripciones" element={<SuperAdminSubscriptionsPage />} />
               <Route path="superadmin/monitoreo" element={<SuperAdminMonitoringPage />} />
@@ -129,7 +130,10 @@ export default function ClinicalApp() {
             </Route>
             <Route path="admin/usuarios" element={<AdminSubscriptionUsersPage />} />
             <Route element={<PermissionRoute permission="admin.registered_users" />}>
-              <Route path="admin/usuarios-registrados" element={<RegisteredUsersAdminPage />} />
+              <Route
+                path="admin/usuarios-registrados"
+                element={<Navigate to="/superadmin/registros" replace />}
+              />
             </Route>
           </Route>
         </Route>

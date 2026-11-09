@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Settings,
   Stethoscope,
+  UserPlus,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -18,6 +19,7 @@ type Item = {
 
 const ITEMS: Item[] = [
   { label: 'Dashboard', to: '/superadmin', icon: LayoutDashboard, end: true },
+  { label: 'Registros / Ventas', to: '/superadmin/registros', icon: UserPlus },
   { label: 'Clínicas (Tenants)', to: '/superadmin/clinicas', icon: Building2 },
   { label: 'Suscripciones', to: '/superadmin/suscripciones', icon: CreditCard },
   { label: 'Monitoreo DIAN/RIPS', to: '/superadmin/monitoreo', icon: Activity },

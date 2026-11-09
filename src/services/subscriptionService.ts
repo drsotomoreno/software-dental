@@ -306,6 +306,7 @@ export type RegisteredSubscriptionUser = ApiSubscriptionUser & {
   trialStartedAt?: string | null
   trialUsedAt?: string | null
   emailVerifiedAt?: string | null
+  registrationComplete?: boolean
 }
 
 /** Listado global de cuentas. Solo responde si la sesión es superadmin. */

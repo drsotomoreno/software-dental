@@ -77,3 +77,56 @@ test('una cédula nueva reemplaza la anterior', () => {
   )
   assert.equal(merged.users[0].documentNumber, OTRA)
 })
+
+test('los OTP de registro se fusionan por email (no por tokenHash)', () => {
+  const pending = {
+    email: 'delassostore@gmail.com',
+    code: '259519',
+    codeHash: 'abc',
+    createdAt: '2026-11-09T19:00:00.000Z',
+    expiresAt: '2026-11-09T19:15:00.000Z',
+  }
+  const merged = mergeDurableStores(
+    { emailVerifications: [pending] },
+    { emailVerifications: [] },
+  )
+  assert.equal(merged.emailVerifications.length, 1)
+  assert.equal(merged.emailVerifications[0].email, 'delassostore@gmail.com')
+  assert.equal(merged.emailVerifications[0].code, '259519')
+})
+
+test('un save concurrente con lista vacía no borra OTP pendientes', () => {
+  const pending = {
+    email: 'delassostore@gmail.com',
+    code: '020822',
+    codeHash: 'def',
+    createdAt: '2026-11-09T19:00:00.000Z',
+    expiresAt: '2026-11-09T19:15:00.000Z',
+  }
+  const merged = mergeDurableStores(
+    { emailVerifications: [] },
+    { emailVerifications: [pending] },
+    { primaryUserWins: true },
+  )
+  assert.equal(merged.emailVerifications.length, 1)
+  assert.equal(merged.emailVerifications[0].code, '020822')
+})
+
+test('en lectura, el OTP más reciente del mismo correo gana', () => {
+  const older = {
+    email: 'delassostore@gmail.com',
+    code: '259519',
+    createdAt: '2026-11-09T19:00:00.000Z',
+  }
+  const newer = {
+    email: 'delassostore@gmail.com',
+    code: '413204',
+    createdAt: '2026-11-09T19:05:00.000Z',
+  }
+  const merged = mergeDurableStores(
+    { emailVerifications: [newer] },
+    { emailVerifications: [older] },
+  )
+  assert.equal(merged.emailVerifications.length, 1)
+  assert.equal(merged.emailVerifications[0].code, '413204')
+})

@@ -22,6 +22,12 @@ import {
 import { readClinicAssistantLimit } from './clinicAssistantLimit.js'
 import { readDurableJson, writeDurableJson } from './durableStore.js'
 import {
+  deleteEmailOtp,
+  loadEmailOtp,
+  saveEmailOtp,
+  touchEmailOtp,
+} from './emailOtpStore.js'
+import {
   ensureMasterUsuarioRow,
   syncAllAuthUsersToTenantTables,
   syncAuthUserToTenantTables,
@@ -1152,18 +1158,16 @@ export async function createEmailVerification({ nombre, email, password, phone_n
   }
 
   const now = Date.now()
-  const pending = (store.emailVerifications ?? []).find(
+  const pendingDedicated = await loadEmailOtp(normalizedEmail)
+  const pendingLegacy = (store.emailVerifications ?? []).find(
     (item) =>
       item.email === normalizedEmail &&
       new Date(item.expiresAt).getTime() > now &&
       normalizeOtp(item.code).length === 6,
   )
+  const pending = pendingDedicated || pendingLegacy
   const code = pending ? normalizeOtp(pending.code) : generateNumericCode()
-
-  store.emailVerifications = (store.emailVerifications ?? []).filter(
-    (item) => item.email !== normalizedEmail && new Date(item.expiresAt).getTime() > now,
-  )
-  store.emailVerifications.push({
+  const otpRecord = {
     email: normalizedEmail,
     nombre: name,
     phone_number: phoneNumber,
@@ -1173,8 +1177,31 @@ export async function createEmailVerification({ nombre, email, password, phone_n
     createdAt: pending?.createdAt ?? new Date().toISOString(),
     expiresAt: new Date(now + EMAIL_CODE_TTL_MS).toISOString(),
     attempts: 0,
-  })
-  await saveStore(store)
+  }
+
+  const saved = await saveEmailOtp(otpRecord)
+  if (!saved.ok) {
+    console.error('[Auth] OTP de registro no persistió:', normalizedEmail, saved.error)
+    return {
+      ok: false,
+      status: 503,
+      error: 'No se pudo guardar el código de verificación. Intente de nuevo en unos segundos.',
+    }
+  }
+
+  // Espejo legado (best-effort). El almacén dedicado es la fuente de verdad.
+  try {
+    store.emailVerifications = (store.emailVerifications ?? []).filter(
+      (item) => item.email !== normalizedEmail && new Date(item.expiresAt).getTime() > now,
+    )
+    store.emailVerifications.push(otpRecord)
+    await saveStore(store)
+  } catch (error) {
+    console.error(
+      '[Auth] Espejo legado de OTP falló (el dedicado sigue válido):',
+      error instanceof Error ? error.message : error,
+    )
+  }
 
   return { ok: true, email: normalizedEmail, code, phone_number: phoneNumber }
 }
@@ -1184,27 +1211,39 @@ export async function verifyEmailAndRegister({ email, code, password, phone_numb
   const normalizedEmail = normalizeEmail(email)
   const rawCode = normalizeOtp(code)
   const now = Date.now()
-  const index = (store.emailVerifications ?? []).findIndex((item) => item.email === normalizedEmail)
   const overridePhone = normalizeColombiaPhoneNumber(phone_number ?? phone)
+  const legacyIndex = (store.emailVerifications ?? []).findIndex(
+    (item) => item.email === normalizedEmail,
+  )
 
   if (rawCode.length !== 6) {
     return { ok: false, status: 400, error: 'El código debe tener 6 dígitos, sin espacios.' }
   }
 
-  if (index === -1) {
+  let pending = await loadEmailOtp(normalizedEmail)
+  if (!pending && legacyIndex !== -1) {
+    pending = store.emailVerifications[legacyIndex]
+  }
+
+  if (!pending) {
     return { ok: false, status: 400, error: 'Solicite un código de verificación primero.' }
   }
 
-  const pending = store.emailVerifications[index]
   if (new Date(pending.expiresAt).getTime() <= now) {
-    store.emailVerifications.splice(index, 1)
-    await saveStore(store)
+    await deleteEmailOtp(normalizedEmail)
+    if (legacyIndex !== -1) {
+      store.emailVerifications.splice(legacyIndex, 1)
+      await saveStore(store)
+    }
     return { ok: false, status: 400, error: 'El código expiró. Solicite uno nuevo.' }
   }
 
   if ((pending.attempts ?? 0) >= 5) {
-    store.emailVerifications.splice(index, 1)
-    await saveStore(store)
+    await deleteEmailOtp(normalizedEmail)
+    if (legacyIndex !== -1) {
+      store.emailVerifications.splice(legacyIndex, 1)
+      await saveStore(store)
+    }
     return { ok: false, status: 400, error: 'Demasiados intentos. Solicite un código nuevo.' }
   }
 
@@ -1213,16 +1252,26 @@ export async function verifyEmailAndRegister({ email, code, password, phone_numb
   const plainMatches = expected.length === 6 && expected === rawCode
   if (!hashMatches && !plainMatches) {
     pending.attempts = (pending.attempts ?? 0) + 1
-    store.emailVerifications[index] = pending
-    await saveStore(store)
-    return { ok: false, status: 400, error: 'El código no es válido. Use el de 6 dígitos del correo más reciente, sin espacios.' }
+    await touchEmailOtp(pending)
+    if (legacyIndex !== -1) {
+      store.emailVerifications[legacyIndex] = pending
+      await saveStore(store)
+    }
+    return {
+      ok: false,
+      status: 400,
+      error: 'El código no es válido. Use el de 6 dígitos del correo más reciente, sin espacios.',
+    }
   }
 
   const existingIndex = store.users.findIndex((user) => user.email === normalizedEmail)
   const existing = existingIndex === -1 ? null : store.users[existingIndex]
   if (existing && existing.estado_pago !== 'pendiente') {
-    store.emailVerifications.splice(index, 1)
-    await saveStore(store)
+    await deleteEmailOtp(normalizedEmail)
+    if (legacyIndex !== -1) {
+      store.emailVerifications.splice(legacyIndex, 1)
+      await saveStore(store)
+    }
     return { ok: false, status: 409, error: 'Ya existe una cuenta con este correo.' }
   }
 
@@ -1230,7 +1279,11 @@ export async function verifyEmailAndRegister({ email, code, password, phone_numb
   const passwordHash =
     passwordValue.length >= 6 ? hashPasswordSha256(passwordValue) : pending.passwordHash
   if (!passwordHash) {
-    return { ok: false, status: 400, error: 'No se encontró la contraseña del registro. Solicite un código nuevo.' }
+    return {
+      ok: false,
+      status: 400,
+      error: 'No se encontró la contraseña del registro. Solicite un código nuevo.',
+    }
   }
 
   const createdAt = new Date().toISOString()
@@ -1245,6 +1298,12 @@ export async function verifyEmailAndRegister({ email, code, password, phone_numb
     overridePhone ||
     normalizeColombiaPhoneNumber(pending.phone_number) ||
     normalizeColombiaPhoneNumber(existing?.phone_number || existing?.phone)
+
+  const clearOtp = async () => {
+    await deleteEmailOtp(normalizedEmail)
+    const idx = (store.emailVerifications ?? []).findIndex((item) => item.email === normalizedEmail)
+    if (idx !== -1) store.emailVerifications.splice(idx, 1)
+  }
 
   if (existing) {
     const updated = {
@@ -1263,7 +1322,7 @@ export async function verifyEmailAndRegister({ email, code, password, phone_numb
       updatedAt: createdAt,
     }
     store.users[existingIndex] = updated
-    store.emailVerifications.splice(index, 1)
+    await clearOtp()
     await saveStore(store)
     void syncAuthUserToTenantTables(updated)
     return { ok: true, user: sanitizeUser(updated) }
@@ -1288,7 +1347,7 @@ export async function verifyEmailAndRegister({ email, code, password, phone_numb
   }
   user.clinicId = user.id
   store.users.push(user)
-  store.emailVerifications.splice(index, 1)
+  await clearOtp()
   await saveStore(store)
   void syncAuthUserToTenantTables(user)
 
@@ -1894,17 +1953,30 @@ export async function startRethusTrial({ token, documentNumber, rethusNumber, hi
 
 export async function listAllSubscriptionUsers() {
   const store = await loadStore()
-  return store.users.map((user) => {
-    const refreshed = refreshPaymentStatus(user)
-    const safe = sanitizeUser(refreshed)
-    return {
-      ...safe,
-      planName: planDisplayName(safe.plan, safe.estado_pago),
-      trialStartedAt: refreshed.trialStartedAt ?? null,
-      trialUsedAt: refreshed.trialUsedAt ?? null,
-      emailVerifiedAt: refreshed.emailVerifiedAt ?? null,
-    }
-  })
+  return store.users
+    .map((user) => {
+      const refreshed = refreshPaymentStatus(user)
+      const safe = sanitizeUser(refreshed)
+      const phone = safe.phone_number || safe.phone || ''
+      return {
+        ...safe,
+        planName: planDisplayName(safe.plan, safe.estado_pago),
+        trialStartedAt: refreshed.trialStartedAt ?? null,
+        trialUsedAt: refreshed.trialUsedAt ?? null,
+        emailVerifiedAt: refreshed.emailVerifiedAt ?? null,
+        // Campos explícitos para el panel de ventas del Superadmin.
+        phone,
+        phone_number: phone,
+        whatsapp_verified: safe.whatsapp_verified === true,
+        whatsapp_status: safe.whatsapp_status || (phone ? 'pending' : 'skipped'),
+        registrationComplete: Boolean(refreshed.emailVerifiedAt || refreshed.passwordHash),
+      }
+    })
+    .sort((a, b) => {
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0
+      return bTime - aTime
+    })
 }
 
 function clinicIdOf(user) {

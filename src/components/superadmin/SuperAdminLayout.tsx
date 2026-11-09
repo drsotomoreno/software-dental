@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { SuperAdminSidebar } from './SuperAdminSidebar'
 
 const TITLES: Record<string, string> = {
+  '/superadmin/registros': 'Registros / Ventas',
   '/superadmin/clinicas': 'Clínicas (Tenants)',
   '/superadmin/suscripciones': 'Suscripciones',
   '/superadmin/monitoreo': 'Monitoreo DIAN/RIPS',

@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Building2, CircleDollarSign, Users } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Building2, CircleDollarSign, UserPlus, Users } from 'lucide-react'
 import { InfraStatusCards } from '@/components/superadmin/InfraStatusCards'
 import { MetricCard } from '@/components/superadmin/MetricCard'
 import { ServiceStatusCard } from '@/components/superadmin/ServiceStatusCard'
@@ -114,14 +115,23 @@ export function SuperAdminDashboardPage() {
             RDS responde. El ingreso recurrente sigue en demostración hasta la tabla de suscripciones.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void handleGlobalSync()}
-          disabled={syncing}
-          className="inline-flex shrink-0 items-center justify-center rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
-        >
-          {syncing ? 'Sincronizando...' : 'Forzar Sincronización Global'}
-        </button>
+        <div className="flex flex-col gap-2 sm:items-end">
+          <Link
+            to="/superadmin/registros"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-sky-200 bg-white px-4 py-2.5 text-sm font-semibold text-sky-800 hover:bg-sky-50"
+          >
+            <UserPlus className="h-4 w-4" aria-hidden />
+            Registros / Ventas
+          </Link>
+          <button
+            type="button"
+            onClick={() => void handleGlobalSync()}
+            disabled={syncing}
+            className="inline-flex shrink-0 items-center justify-center rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
+          >
+            {syncing ? 'Sincronizando...' : 'Forzar Sincronización Global'}
+          </button>
+        </div>
       </div>
       {syncNotice ? (
         <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">

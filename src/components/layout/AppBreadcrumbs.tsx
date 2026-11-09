@@ -54,7 +54,11 @@ const ROUTE_CRUMBS: RouteCrumbDef[] = [
   { pattern: '/usuarios', crumbs: [{ label: 'Gestión de Usuarios' }] },
   {
     pattern: '/admin/usuarios-registrados',
-    crumbs: [{ label: 'Gestión de Usuarios' }],
+    crumbs: [{ label: 'Registros / Ventas' }],
+  },
+  {
+    pattern: '/superadmin/registros',
+    crumbs: [{ label: 'Panel Superadmin' }, { label: 'Registros / Ventas' }],
   },
   { pattern: '/admin/usuarios', crumbs: [{ label: 'Usuarios (suscripción)' }] },
   { pattern: '/perfil', crumbs: [{ label: 'Editar Perfil' }] },

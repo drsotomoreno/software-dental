@@ -45,9 +45,14 @@ export interface ApiSubscriptionUser {
   isClinicOwner?: boolean
   accessEnabled?: boolean
   phone?: string
+  /** Celular Colombia (+57) capturado en el registro express. */
+  phone_number?: string
+  whatsapp_verified?: boolean
+  whatsapp_status?: string
   providerType?: 'institucion' | 'profesional_independiente'
   perfilFiscal?: import('@/utils/fiscalProfile').FiscalProfile
   prestadorVerifiedAt?: string | null
+  emailVerifiedAt?: string | null
   trialLimited?: boolean
   trialLimits?: { maxPatients: number; maxVoiceNotesPerField: number } | null
   messagePackages?: Array<{

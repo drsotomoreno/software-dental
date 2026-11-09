@@ -123,8 +123,8 @@ const DASHBOARD_CARDS: DashCard[] = [
     accent: 'admin',
     actions: [
       {
-        label: 'Gestión de Usuarios',
-        to: '/admin/usuarios-registrados',
+        label: 'Registros / Ventas',
+        to: '/superadmin/registros',
         superAdminOnly: true,
         icon: Users,
       },
