@@ -1,4 +1,6 @@
 import { db } from '@/db/database'
+import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
+import { getCurrentClinicId } from '@/services/clinicalSyncState'
 import type { RipsSubmission } from '@/types/ripsSubmission'
 import { generateId } from '@/utils'
 
@@ -9,6 +11,7 @@ export interface RegistrarRadicacionRipsInput {
   /** Objeto RIPS tal como se envió. Se clona antes de persistir. */
   payload_json: unknown
   fecha_radicacion?: string
+  clinicId?: string | null
 }
 
 function clonarPayloadJson(payload: unknown): unknown {
@@ -39,6 +42,7 @@ export function contarAtencionesEnviadas(payload: unknown): number {
 export async function registrarRadicacionRips(
   input: RegistrarRadicacionRipsInput,
 ): Promise<string> {
+  const clinicId = String(input.clinicId || getCurrentClinicId() || '').trim()
   const row: RipsSubmission = {
     id: generateId(),
     fecha_radicacion: input.fecha_radicacion ?? new Date().toISOString(),
@@ -46,6 +50,7 @@ export async function registrarRadicacionRips(
     cantidad_historias: input.cantidad_historias,
     estado: input.estado,
     payload_json: clonarPayloadJson(input.payload_json),
+    ...(clinicId ? { clinicId } : {}),
   }
   await db.rips_submissions.add(row)
   return row.id
@@ -58,6 +63,7 @@ export function guardarHistorialRadicacionRips(input: RegistrarRadicacionRipsInp
   })
 }
 
-export function listarRadicacionesRips(): Promise<RipsSubmission[]> {
-  return db.rips_submissions.orderBy('fecha_radicacion').reverse().toArray()
+export async function listarRadicacionesRips(): Promise<RipsSubmission[]> {
+  const rows = await db.rips_submissions.orderBy('fecha_radicacion').reverse().toArray()
+  return rows.filter((row) => belongsToCurrentClinic(row))
 }

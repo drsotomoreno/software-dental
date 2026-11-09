@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link } from 'react-router-dom'
 import { db } from '@/db/database'
@@ -8,6 +8,7 @@ import {
   contarAtencionesEnviadas,
   guardarHistorialRadicacionRips,
 } from '@/db/ripsSubmissionsStore'
+import { belongsToCurrentClinic, ensureClinicLocalIsolation } from '@/services/clinicLocalIsolation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import type { Patient } from '@/types/patient'
@@ -20,6 +21,7 @@ import { saveTemporaryRips } from '@/services/ripsTemporalService'
 import { idsNotaDeFuentes } from '@/utils/ripsCuvNota'
 import {
   atencionEnPeriodo,
+  atencionRipsYaRadicada,
   etiquetaAtencionRips,
   listRipsExportAttentions,
   type RipsExportAttention,
@@ -44,9 +46,23 @@ import {
 export function RipsExportPage() {
   const { user } = useAuth()
   const { audit } = useAudit()
-  const patients = useLiveQuery(() => db.patients.toArray())
-  const records = useLiveQuery(() => db.clinicalRecords.toArray())
-  const drafts = useLiveQuery(() => db.patientClinicalDrafts.toArray())
+  const patients = useLiveQuery(async () => {
+    const all = await db.patients.toArray()
+    return all.filter((patient) => belongsToCurrentClinic(patient))
+  })
+  const records = useLiveQuery(async () => {
+    const all = await db.clinicalRecords.toArray()
+    return all.filter((record) => belongsToCurrentClinic(record))
+  })
+  const drafts = useLiveQuery(async () => {
+    const allowed = new Set(
+      (await db.patients.toArray())
+        .filter((patient) => belongsToCurrentClinic(patient))
+        .map((patient) => String(patient.id ?? '')),
+    )
+    const all = await db.patientClinicalDrafts.toArray()
+    return all.filter((draft) => allowed.has(String(draft.patientId ?? '')))
+  })
 
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -56,6 +72,10 @@ export function RipsExportPage() {
   const [exportMessage, setExportMessage] = useState('')
   const [exportFailed, setExportFailed] = useState(false)
   const [formReset, setFormReset] = useState(0)
+
+  useEffect(() => {
+    void ensureClinicLocalIsolation()
+  }, [user?.clinicId, user?.id])
 
   const patientMap = useMemo(() => {
     const map = new Map<string, Patient>()
@@ -67,10 +87,16 @@ export function RipsExportPage() {
     return map
   }, [patients])
 
-  const attentions = useMemo(
-    () => listRipsExportAttentions({ records: records ?? [], drafts: drafts ?? [] }),
-    [records, drafts],
-  )
+  const attentions = useMemo(() => {
+    const allowed = new Set([...patientMap.keys()])
+    const scopedRecords = (records ?? []).filter((record) =>
+      allowed.has(String(record.patientId ?? '')),
+    )
+    const scopedDrafts = (drafts ?? []).filter((draft) =>
+      allowed.has(String(draft.patientId ?? '')),
+    )
+    return listRipsExportAttentions({ records: scopedRecords, drafts: scopedDrafts })
+  }, [records, drafts, patientMap])
 
   const filteredAttentions = useMemo(
     () =>
@@ -78,10 +104,25 @@ export function RipsExportPage() {
     [attentions, dateFrom, dateTo],
   )
 
+  // Si una atención pasa a radicada (CUV), se quita de la selección.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev
+      const next = new Set(
+        [...prev].filter((id) => {
+          const attention = attentions.find((item) => item.id === id)
+          return Boolean(attention) && !atencionRipsYaRadicada(attention!)
+        }),
+      )
+      return next.size === prev.size ? prev : next
+    })
+  }, [attentions])
+
   const sources: RipsSourceRecord[] = useMemo(() => {
     const result: RipsSourceRecord[] = []
     for (const attention of filteredAttentions) {
       if (!selectedIds.has(attention.id)) continue
+      if (atencionRipsYaRadicada(attention)) continue
       const patient = patientMap.get(attention.patientId)
       if (!patient) continue
       result.push({ record: attention.record, patient })
@@ -96,6 +137,8 @@ export function RipsExportPage() {
   }
 
   const toggleRecord = (id: string) => {
+    const attention = filteredAttentions.find((item) => item.id === id)
+    if (attention && atencionRipsYaRadicada(attention)) return
     limpiarAvisoExportacion()
     setSelectedIds((prev) => {
       const next = new Set(prev)
@@ -107,7 +150,13 @@ export function RipsExportPage() {
 
   const selectAll = () => {
     limpiarAvisoExportacion()
-    setSelectedIds(new Set(filteredAttentions.map((attention) => attention.id)))
+    setSelectedIds(
+      new Set(
+        filteredAttentions
+          .filter((attention) => !atencionRipsYaRadicada(attention))
+          .map((attention) => attention.id),
+      ),
+    )
   }
 
   const clearSelection = () => {
@@ -116,7 +165,7 @@ export function RipsExportPage() {
   }
 
   const exportarAtencion = async (attention: RipsExportAttention) => {
-    if (!user || exportingId) return
+    if (!user || exportingId || atencionRipsYaRadicada(attention)) return
     const patient = patientMap.get(attention.patientId)
     if (!patient) return
 
@@ -214,6 +263,7 @@ export function RipsExportPage() {
           cantidad_historias: contadas > 0 ? contadas : 1,
           estado: 'radicado',
           payload_json: JSON.parse(JSON.stringify(rips)) as unknown,
+          clinicId: user.clinicId || user.id,
         })
       } catch (error) {
         console.error('No se pudo guardar el CUV en el historial local de RIPS.', error)
@@ -399,10 +449,11 @@ function RecordRow({
   onToggle: () => void
   onExport: () => void
 }) {
+  const yaRadicada = atencionRipsYaRadicada(attention)
   const estado = etiquetaAtencionRips(attention)
   const estadoClass =
-    attention.ripsEstado === 'enviado_ok'
-      ? 'text-emerald-800'
+    yaRadicada
+      ? 'font-semibold text-emerald-700'
       : attention.ripsEstado === 'error'
         ? 'text-red-700'
         : attention.ripsEstado === 'preparado'
@@ -410,9 +461,16 @@ function RecordRow({
           : 'text-slate-600'
 
   return (
-    <tr className={checked ? 'bg-dental-50/40' : undefined}>
+    <tr className={checked ? 'bg-dental-50/40' : yaRadicada ? 'bg-slate-50/60' : undefined}>
       <td className="px-3 py-2">
-        <input type="checkbox" checked={checked} onChange={onToggle} />
+        <input
+          type="checkbox"
+          checked={checked && !yaRadicada}
+          onChange={onToggle}
+          disabled={yaRadicada}
+          title={yaRadicada ? 'Esta atención ya fue radicada y no se puede volver a exportar' : undefined}
+          aria-label={yaRadicada ? 'Atención ya radicada' : 'Seleccionar atención'}
+        />
       </td>
       <td className="px-3 py-2 whitespace-nowrap">
         {attention.occurredAt ? formatDate(attention.occurredAt) : '—'}
@@ -434,7 +492,7 @@ function RecordRow({
       <td className="px-3 py-2" title={attention.ripsErrorLog ?? undefined}>
         <div className="flex flex-col items-start gap-2">
           <span className={estadoClass}>{estado}</span>
-          {patient && (
+          {patient && !yaRadicada && (
             <button
               type="button"
               className="btn-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Copy } from 'lucide-react'
 import { db } from '@/db/database'
+import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import type { RipsSubmission } from '@/types/ripsSubmission'
 import { formatDate } from '@/utils'
 
@@ -81,9 +82,10 @@ function CeldaCuv({ cuv }: { cuv: string }) {
  * Tarjeta 3 de Exportación RIPS: historial local ordenado por fecha de radicación.
  */
 export function RipsSubmissionsHistory() {
-  const submissions = useLiveQuery(() =>
-    db.rips_submissions.orderBy('fecha_radicacion').reverse().toArray(),
-  )
+  const submissions = useLiveQuery(async () => {
+    const rows = await db.rips_submissions.orderBy('fecha_radicacion').reverse().toArray()
+    return rows.filter((row) => belongsToCurrentClinic(row))
+  })
 
   return (
     <div className="card space-y-4">

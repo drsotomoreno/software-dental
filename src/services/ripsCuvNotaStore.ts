@@ -3,7 +3,7 @@ import { notasConCuv } from '@/utils/ripsCuvNota'
 
 /**
  * Deja el CUV en cada copia de la nota (historia y borradores).
- * La fila de exportación lee esa metadata para pasar de «Listo para exportar» a «Transmitido».
+ * La fila de exportación lee esa metadata para pasar de «Listo para exportar» a «Radicado».
  */
 export async function guardarCuvEnNotas(
   noteIds: string[],

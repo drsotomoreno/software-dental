@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { db } from '@/db/database'
 import { RequirePermission } from '@/components/auth/RequirePermission'
 import { FhirExportForm } from '@/components/fhir'
+import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import type { ClinicalRecord } from '@/types/clinicalRecord'
@@ -14,10 +15,14 @@ import { formatDate } from '@/utils'
 export function FhirExportPage() {
   const { user } = useAuth()
   const { audit } = useAudit()
-  const patients = useLiveQuery(() => db.patients.toArray())
-  const records = useLiveQuery(() =>
-    db.clinicalRecords.filter((r) => r.isLocked).toArray(),
-  )
+  const patients = useLiveQuery(async () => {
+    const all = await db.patients.toArray()
+    return all.filter((patient) => belongsToCurrentClinic(patient))
+  })
+  const records = useLiveQuery(async () => {
+    const all = await db.clinicalRecords.filter((r) => r.isLocked).toArray()
+    return all.filter((record) => belongsToCurrentClinic(record))
+  })
 
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')

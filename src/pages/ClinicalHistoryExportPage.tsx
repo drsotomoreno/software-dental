@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { RequirePermission } from '@/components/auth/RequirePermission'
 import { ClinicalHistoryExportPanel } from '@/components/portability'
 import { db } from '@/db/database'
+import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import type { ClinicalHistoryExportFormat } from '@/types/portability'
@@ -14,7 +15,10 @@ import { CLINICAL_HISTORY_PAGE_TITLE_CLASS } from '@/constants/clinicalHistorySe
 export function ClinicalHistoryExportPage() {
   const { user } = useAuth()
   const { audit } = useAudit()
-  const patients = useLiveQuery(() => db.patients.toArray())
+  const patients = useLiveQuery(async () => {
+    const all = await db.patients.toArray()
+    return all.filter((patient) => belongsToCurrentClinic(patient))
+  })
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
 

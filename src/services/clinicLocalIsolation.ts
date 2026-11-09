@@ -65,7 +65,9 @@ export async function wipeLocalClinicalData(): Promise<void> {
       db.diagnosticAidBlobs.clear(),
       db.patientClinicalDrafts.clear(),
       db.syncQueue.clear(),
+      db.rips_submissions.clear(),
     ]
+    if (db.rips_queue) clears.push(db.rips_queue.clear())
     if (db.pacientes) clears.push(db.pacientes.clear())
     if (db.historias_clinicas) clears.push(db.historias_clinicas.clear())
     if (db.sync_queue) clears.push(db.sync_queue.clear())
@@ -112,36 +114,78 @@ export async function ensureClinicLocalIsolation(clinicId = getCurrentClinicId()
   }
 }
 
+async function deleteIfForeign(
+  table: { delete: (key: string | number) => Promise<unknown> },
+  id: string | number | undefined | null,
+  rowClinicId: string | null | undefined,
+  clinicId: string,
+): Promise<void> {
+  if (id == null) return
+  // Sin clinicId = huérfano de otro tenant (p. ej. Superadmin legacy). No conservar.
+  if (!clinicIdsMatch(rowClinicId, clinicId)) {
+    await table.delete(id)
+  }
+}
+
 /** Borra de Dexie filas cuyo clinicId no coincide con la sesión. */
 export async function purgeForeignClinicRecords(clinicId = getCurrentClinicId()): Promise<void> {
   if (!clinicId) return
   await withRemotePullLock(async () => {
     const patients = await db.patients.toArray()
+    const keptPatientIds = new Set<string>()
     for (const row of patients) {
       if (row.id == null) continue
       if (!clinicIdsMatch(row.clinicId, clinicId)) {
         await db.patients.delete(row.id)
+        continue
       }
+      keptPatientIds.add(String(row.id))
+      if (row.syncId) keptPatientIds.add(String(row.syncId))
     }
+
     const appointments = await db.appointments.toArray()
     for (const row of appointments) {
-      if (row.id == null) continue
-      if (!clinicIdsMatch(row.clinicId, clinicId)) {
-        await db.appointments.delete(row.id)
-      }
+      await deleteIfForeign(db.appointments, row.id, row.clinicId, clinicId)
     }
+
     const records = await db.clinicalRecords.toArray()
     for (const row of records) {
       if (row.id == null) continue
-      if (row.clinicId && !clinicIdsMatch(row.clinicId, clinicId)) {
+      const patientOk = keptPatientIds.has(String(row.patientId ?? ''))
+      if (!clinicIdsMatch(row.clinicId, clinicId) || !patientOk) {
         await db.clinicalRecords.delete(row.id)
       }
     }
+
     const odontograms = await db.odontograms.toArray()
     for (const row of odontograms) {
       if (row.id == null) continue
-      if (row.clinicId && !clinicIdsMatch(row.clinicId, clinicId)) {
+      const patientOk = keptPatientIds.has(String(row.patientId ?? ''))
+      if (!clinicIdsMatch(row.clinicId, clinicId) || !patientOk) {
         await db.odontograms.delete(row.id)
+      }
+    }
+
+    const aids = await db.diagnosticAids.toArray()
+    for (const row of aids) {
+      if (row.id == null) continue
+      const patientOk = keptPatientIds.has(String(row.patientId ?? ''))
+      if (!clinicIdsMatch(row.clinicId, clinicId) || !patientOk) {
+        await db.diagnosticAids.delete(row.id)
+      }
+    }
+
+    const drafts = await db.patientClinicalDrafts.toArray()
+    for (const row of drafts) {
+      if (!keptPatientIds.has(String(row.patientId ?? ''))) {
+        await db.patientClinicalDrafts.delete(row.patientId)
+      }
+    }
+
+    const submissions = await db.rips_submissions.toArray()
+    for (const row of submissions) {
+      if (!clinicIdsMatch(row.clinicId, clinicId)) {
+        await db.rips_submissions.delete(row.id)
       }
     }
   })

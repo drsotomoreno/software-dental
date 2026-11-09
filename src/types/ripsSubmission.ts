@@ -21,4 +21,6 @@ export interface RipsSubmission {
    * No indexado: se conserva para auditoría y no entra al esquema de índices.
    */
   payload_json: unknown
+  /** Clínica dueña del historial (aislamiento multi-tenant en el mismo navegador). */
+  clinicId?: string
 }

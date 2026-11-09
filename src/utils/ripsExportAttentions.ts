@@ -254,11 +254,18 @@ function tiempo(value: string): number {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
+/** Atención ya radicada ante MinSalud (tiene CUV / `enviado_ok`). No debe reexportarse. */
+export function atencionRipsYaRadicada(
+  attention: Pick<RipsExportAttention, 'ripsEstado'>,
+): boolean {
+  return attention.ripsEstado === 'enviado_ok'
+}
+
 export function etiquetaAtencionRips(
   attention: Pick<RipsExportAttention, 'kind' | 'ripsEstado'>,
 ): string {
   if (attention.kind === 'historia') return 'Historia firmada'
-  if (attention.ripsEstado === 'enviado_ok') return 'Transmitido'
+  if (attention.ripsEstado === 'enviado_ok') return 'Radicado'
   if (attention.ripsEstado === 'error') return 'Error de envío'
   return 'Listo para exportar'
 }

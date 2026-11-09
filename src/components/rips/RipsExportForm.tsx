@@ -341,6 +341,7 @@ export function RipsExportForm({
         cantidad_historias: contadas,
         estado: 'radicado',
         payload_json: JSON.parse(JSON.stringify(rips)) as unknown,
+        clinicId: professional.clinicId || professional.id,
       })
     } catch (error) {
       console.error('No se pudo guardar el CUV en el historial local de RIPS.', error)
@@ -449,6 +450,7 @@ export function RipsExportForm({
             contarAtencionesEnviadas(result.rips) || sources.length,
           estado: 'radicado',
           payload_json: JSON.parse(JSON.stringify(result.rips)) as unknown,
+          clinicId: professional.clinicId || professional.id,
         })
       } catch (error) {
         console.error('No se pudo guardar el CUV en el historial local de RIPS.', error)

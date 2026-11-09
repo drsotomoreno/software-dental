@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { etiquetaAtencionRips, listRipsExportAttentions } from './ripsExportAttentions.ts'
+import {
+  atencionRipsYaRadicada,
+  etiquetaAtencionRips,
+  listRipsExportAttentions,
+} from './ripsExportAttentions.ts'
 
 function nota(id, estado, extra = {}) {
   const { ripsMetadata, ...rest } = extra
@@ -138,7 +142,7 @@ test('el borrador más reciente gana sobre la copia sin preparar de la historia'
   assert.equal(record.evolutionNotes[0].ripsMetadata.ripsEstado, 'sin_preparar')
 })
 
-test('transmitido y error también son RIPS generados de la cuenta', () => {
+test('radicado y error también son RIPS generados de la cuenta', () => {
   const lista = listRipsExportAttentions({
     records: [],
     drafts: [
@@ -160,10 +164,12 @@ test('transmitido y error también son RIPS generados de la cuenta', () => {
   assert.deepEqual(
     lista.map((item) => [item.id, etiquetaAtencionRips(item)]),
     [
-      ['nota:nota-ok', 'Transmitido'],
+      ['nota:nota-ok', 'Radicado'],
       ['nota:nota-error', 'Error de envío'],
     ],
   )
+  assert.equal(atencionRipsYaRadicada(lista[0]), true)
+  assert.equal(atencionRipsYaRadicada(lista[1]), false)
   assert.equal(lista[1].ripsErrorLog, 'RVC091')
 })
 

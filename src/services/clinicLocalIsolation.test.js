@@ -35,6 +35,26 @@ test('clinicIdsMatch aísla Superadmin de un registro nuevo', () => {
   assert.equal(clinicIdsMatch('', 'clinic:nuevo'), false)
 })
 
+test('purge elimina historias/RIPS huérfanos sin clinicId (fuga Exportación RIPS)', async () => {
+  const src = await readFile(join(here, 'clinicLocalIsolation.ts'), 'utf8')
+  assert.match(src, /Sin clinicId = huérfano/)
+  assert.match(src, /db\.rips_submissions\.clear/)
+  assert.match(src, /rips_submissions\.toArray/)
+  assert.match(src, /patientClinicalDrafts/)
+  // No debe quedar el patrón que conservaba clinicalRecords sin clinicId.
+  assert.doesNotMatch(
+    src,
+    /if \(row\.clinicId && !clinicIdsMatch\(row\.clinicId, clinicId\)\) \{\s*await db\.clinicalRecords\.delete/,
+  )
+})
+
+test('RipsExportPage filtra por clínica antes de listar atenciones', async () => {
+  const page = await readFile(join(here, '../pages/RipsExportPage.tsx'), 'utf8')
+  assert.match(page, /belongsToCurrentClinic/)
+  assert.match(page, /ensureClinicLocalIsolation/)
+  assert.match(page, /allowed\.has\(String\(record\.patientId/)
+})
+
 test('pullCompleteClinicOnLogin aísla caché por clínica', async () => {
   const src = await readFile(join(here, 'clinicalSyncService.ts'), 'utf8')
   assert.match(src, /ensureClinicLocalIsolation/)
