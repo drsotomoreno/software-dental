@@ -191,16 +191,25 @@ router.post('/login', async (req, res) => {
     }
 
     const user = result.user
-    const isSuperAdmin = email === MASTER_EMAIL || user?.rol === 'superadmin'
+    // God Mode solo por correo maestro. Nunca por user.rol === 'superadmin'.
+    const isSuperAdmin = email === MASTER_EMAIL && String(user?.email || '').toLowerCase() === MASTER_EMAIL
+
+    if (user?.rol === 'superadmin' && !isSuperAdmin) {
+      return res.status(403).json({
+        success: false,
+        ok: false,
+        error: 'Sesión rechazada: privilegio de superadministrador no autorizado.',
+      })
+    }
 
     return res.json({
       success: true,
       ok: true,
       token: result.token,
       user: isSuperAdmin
-        ? { ...user, rol: 'superadmin', estado_pago: 'exento', email: user.email }
-        : user,
-      rol: isSuperAdmin ? 'superadmin' : user.rol,
+        ? { ...user, rol: 'superadmin', estado_pago: 'exento', email: MASTER_EMAIL }
+        : { ...user, rol: user.rol === 'superadmin' ? 'admin' : user.rol },
+      rol: isSuperAdmin ? 'superadmin' : user.rol === 'superadmin' ? 'admin' : user.rol,
       expiresAt: result.expiresAt,
       unlimitedAccess: isSuperAdmin || result.unlimitedAccess === true,
       requiresSubscription: isSuperAdmin ? false : result.requiresSubscription === true,

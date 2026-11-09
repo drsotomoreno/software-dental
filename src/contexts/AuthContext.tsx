@@ -60,30 +60,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useClinicalPullSync(Boolean(user) && !isLoading)
 
   const loadSession = useCallback(async () => {
-    const storedRole = localStorage.getItem('doctorSEO_rol')
-    const storedToken = localStorage.getItem('doctorSEO_token')
     let apiAuth = getStoredApiAuth()
 
-    if (!apiAuth && storedToken && storedRole === 'superadmin') {
-      const fallbackUser = {
-        id: 'superadmin-session',
-        nombre: 'Dr. Mauricio Soto',
-        firstName: 'Mauricio',
-        lastName: 'Soto',
-        email: SUPERADMIN_EMAIL,
-        rol: 'superadmin' as const,
-        estado_pago: 'exento' as const,
-        fecha_vencimiento: null,
+    // Nunca fabricar una sesión Superadmin solo porque localStorage diga
+    // doctorSEO_rol=superadmin. Eso filtraba privilegios tras un registro.
+
+    if (apiAuth) {
+      // Si el JSON local dice superadmin pero el correo no es el maestro, limpiar.
+      if (apiAuth.user?.rol === 'superadmin' && !isApiSuperAdmin(apiAuth.user)) {
+        clearStoredApiAuth()
+        apiAuth = null
       }
-      setStoredApiAuth(storedToken, fallbackUser)
-      apiAuth = { token: storedToken, user: fallbackUser }
     }
 
     if (apiAuth) {
       let validation = await validateApiSession(apiAuth.token)
+      // Restaurar maestro solo si el correo almacenado YA es la cuenta maestra.
       if (!validation.ok && isApiSuperAdmin(apiAuth.user)) {
-        const restored = await restoreMasterApiSession()
-        if (restored) {
+        const restored = await restoreMasterApiSession(apiAuth.user.email)
+        if (restored && isApiSuperAdmin(restored.user)) {
           validation = {
             ok: true as const,
             user: restored.user,
@@ -94,6 +89,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (validation.ok) {
+        // Rechazar respuesta de servidor que eleve a maestro sin serlo el cliente esperado.
+        if (
+          isApiSuperAdmin(validation.user) &&
+          !isApiSuperAdmin(apiAuth.user) &&
+          String(apiAuth.user?.email || '').toLowerCase() !== SUPERADMIN_EMAIL
+        ) {
+          clearStoredApiAuth()
+          setUser(null)
+          setIsLoading(false)
+          return
+        }
         setStoredApiAuth(apiAuth.token, validation.user)
         await pullCompleteClinicOnLogin()
         setUser(await sessionUserFromApi(validation.user, apiAuth.token))
@@ -104,12 +110,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setStoredApiAuth(apiAuth.token, validation.user)
         await pullCompleteClinicOnLogin()
         setUser(await sessionUserFromApi(validation.user, apiAuth.token))
-        setIsLoading(false)
-        return
-      }
-      if (isApiSuperAdmin(apiAuth.user)) {
-        await pullCompleteClinicOnLogin()
-        setUser(await sessionUserFromApi(apiAuth.user, apiAuth.token))
         setIsLoading(false)
         return
       }
@@ -161,11 +161,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { ok: true as const, requiresSubscription: userNeedsWelcome(sessionUser) }
     }
 
-    if (masterLogin) {
-      localStorage.setItem('doctorSEO_rol', 'superadmin')
-      document.documentElement.dataset.superadmin = 'true'
-    }
-
     try {
       const response = await fetch('/api/login', {
         method: 'POST',
@@ -179,10 +174,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const payload = await response.json().catch(() => ({}))
 
       if (masterLogin) {
+        if (!response.ok || !payload.token || !payload.user) {
+          return { ok: false as const, error: 'No se pudo autenticar al superadministrador.' }
+        }
+        // Solo aceptar sesión maestra si el servidor confirma el correo maestro.
+        if (!isApiSuperAdmin(payload.user)) {
+          return { ok: false as const, error: 'Credenciales de superadministrador rechazadas.' }
+        }
         const granted = grantMasterLocalSession(payload.token)
-        const sessionUser = payload.user
-          ? { ...payload.user, rol: 'superadmin' as const, estado_pago: 'exento' as const, email: SUPERADMIN_EMAIL }
-          : granted.user
+        const sessionUser = {
+          ...payload.user,
+          rol: 'superadmin' as const,
+          estado_pago: 'exento' as const,
+          email: SUPERADMIN_EMAIL,
+        }
         return completeApiLogin(granted.token, sessionUser)
       }
 
@@ -192,10 +197,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         payload.user &&
         (payload.success === true || payload.ok === true || payload.success === undefined)
       ) {
+        // Un login de clínica nunca puede devolver/activar God Mode.
+        if (isApiSuperAdmin(payload.user) || payload.user.rol === 'superadmin') {
+          return { ok: false as const, error: 'Respuesta de sesión inválida. Intente de nuevo.' }
+        }
         return completeApiLogin(payload.token, payload.user)
       }
 
       if (response.status === 402 && payload.user && payload.token) {
+        if (isApiSuperAdmin(payload.user) || payload.user.rol === 'superadmin') {
+          return { ok: false as const, error: 'Respuesta de sesión inválida. Intente de nuevo.' }
+        }
         return completeApiLogin(payload.token, payload.user)
       }
 
@@ -221,33 +233,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch {
-      if (masterLogin) {
-        const granted = grantMasterLocalSession()
-        await pullCompleteClinicOnLogin()
-        const authUser = await sessionUserFromApi(granted.user, granted.token)
-        try {
-          await seedUserCredentials(authUser.id, passwordValue)
-        } catch (error) {
-          console.error('[auth] No se pudo guardar la clave para firmar en este equipo:', error)
-        }
-        setUser(authUser)
-        window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
-        return { ok: true as const }
-      }
+      // Sin bypass local de God Mode si el API no responde.
+      return { ok: false as const, error: 'No se pudo conectar con el servidor.' }
     }
 
     if (masterLogin) {
-      const granted = grantMasterLocalSession()
-      await pullCompleteClinicOnLogin()
-      const authUser = await sessionUserFromApi(granted.user, granted.token)
-      try {
-        await seedUserCredentials(authUser.id, passwordValue)
-      } catch (error) {
-        console.error('[auth] No se pudo guardar la clave para firmar en este equipo:', error)
-      }
-      setUser(authUser)
-      window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
-      return { ok: true as const }
+      return { ok: false as const, error: 'No se pudo autenticar al superadministrador.' }
     }
 
     const result = await authenticateUser(isEmail ? normalizedEmail : documentNumber, passwordValue)
@@ -324,7 +315,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshSessionUser,
       applySessionUser,
       can: (permission) => {
-        if (typeof localStorage !== 'undefined' && localStorage.getItem('doctorSEO_rol') === 'superadmin') {
+        // God Mode solo por correo maestro de la sesión, nunca por localStorage.
+        if (isApiSuperAdmin(getStoredApiAuth()?.user) || isApiSuperAdmin(user as ApiSubscriptionUser)) {
           return true
         }
         if (permission === 'users.manage') {
@@ -333,6 +325,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return canWithEffectiveRole(permission, user?.role)
       },
       hasRole: (role) => {
+        if (role === 'superadmin') {
+          return isApiSuperAdmin(getStoredApiAuth()?.user) || isApiSuperAdmin(user as ApiSubscriptionUser)
+        }
         const effective = getEffectiveRole(user?.role)
         return effective ? normalizeRole(effective) === normalizeRole(role) : false
       },

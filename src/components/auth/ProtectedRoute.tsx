@@ -18,10 +18,10 @@ export function ProtectedRoute() {
   const location = useLocation()
   const path = normalizePath(location.pathname)
   const apiAuth = getStoredApiAuth()
-  const hasSuperAdminRole = localStorage.getItem('doctorSEO_rol') === 'superadmin'
   const hasStoredToken = Boolean(localStorage.getItem('doctorSEO_token'))
-  const hasApiSession = Boolean(apiAuth?.token && (isApiSuperAdmin(apiAuth.user) || apiAuth.user))
-  const hasAccess = Boolean(user || hasApiSession || hasSuperAdminRole)
+  const hasApiSession = Boolean(apiAuth?.token && apiAuth.user)
+  // Nunca autenticar solo por doctorSEO_rol=superadmin en localStorage.
+  const hasAccess = Boolean(user || hasApiSession)
 
   if (path === '/') {
     return <LandingPage />
@@ -63,8 +63,7 @@ export function ProtectedRoute() {
     userNeedsWelcome(apiAuth?.user) &&
     !welcomePath &&
     !bypassWelcome &&
-    !isApiSuperAdmin(apiAuth?.user) &&
-    !hasSuperAdminRole
+    !isApiSuperAdmin(apiAuth?.user)
   ) {
     return <Navigate to="/welcome-trial" replace />
   }

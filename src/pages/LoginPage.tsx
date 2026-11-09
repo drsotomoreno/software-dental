@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { APP_INITIALS, APP_NAME } from '@/constants/branding'
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
-import { getStoredApiAuth } from '@/services/apiAuthService'
+import { clearStoredApiAuth, getStoredApiAuth, isApiSuperAdmin } from '@/services/apiAuthService'
 import { userNeedsWelcome } from '@/utils/subscriptionAccess'
 import {
   clearExpressRegisterFlag,
@@ -44,7 +44,7 @@ export function LoginPage() {
   const [searchParams] = useSearchParams()
   const from = (location.state as { from?: string } | null)?.from ?? '/app'
   const apiAuth = getStoredApiAuth()
-  const isSuperAdmin = localStorage.getItem('doctorSEO_rol') === 'superadmin'
+  const isSuperAdmin = isApiSuperAdmin(apiAuth?.user)
 
   const [mode, setMode] = useState<AuthMode>(() =>
     initialAuthMode(location.pathname, searchParams),
@@ -73,7 +73,8 @@ export function LoginPage() {
     storedUser && userNeedsWelcome(storedUser) && !isSuperAdmin && !skipWelcomeAfterExpressRegister,
   )
 
-  if (!isLoading && (user || apiAuth?.token || isSuperAdmin)) {
+  // Solo redirigir con sesión real. Nunca por doctorSEO_rol suelto en localStorage.
+  if (!isLoading && (user || (apiAuth?.token && apiAuth.user))) {
     return <Navigate to={sendToWelcome ? '/welcome-trial' : afterLogin} replace />
   }
 
@@ -161,9 +162,27 @@ export function LoginPage() {
         return
       }
 
-      // Registro express: sesión inmediata y Dashboard sin esperar WhatsApp.
+      // Limpiar cualquier sesión previa (p. ej. Superadmin en el mismo navegador)
+      // antes de iniciar sesión con la cuenta recién creada.
+      clearStoredApiAuth()
       markExpressRegisterComplete()
       const result = await login(registerEmail, registerPassword)
+      if (result.ok) {
+        const session = getStoredApiAuth()
+        if (isApiSuperAdmin(session?.user) || session?.user?.email !== registerEmail) {
+          clearStoredApiAuth()
+          clearExpressRegisterFlag()
+          setMode('login')
+          setPassword('')
+          setConfirmPassword('')
+          setCode('')
+          setError(
+            'La cuenta se creó, pero la sesión quedó inválida por seguridad. Inicie sesión con su correo y contraseña.',
+          )
+          setInfo('Cuenta verificada. Use el correo del registro para entrar a la versión demo.')
+          return
+        }
+      }
       if (!result.ok) {
         clearExpressRegisterFlag()
         setMode('login')

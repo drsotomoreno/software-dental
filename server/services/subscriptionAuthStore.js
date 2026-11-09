@@ -924,19 +924,30 @@ export async function resolveSubscriptionSession(token, hint = {}) {
     null
 
   if (!session) {
-    let user = hint.userId
-      ? store.users.find((item) => item.id === hint.userId)
-      : null
-    if (!user && hint.documentNumber && String(hint.documentNumber).replace(/\D/g, '').length >= 6) {
-      const digits = String(hint.documentNumber).replace(/\D/g, '')
-      user = store.users.find((item) => normalizeDocumentNumber(item.documentNumber) === digits) || null
-    }
-    if (!user && (isPlaceholderUserId(hint.userId) || normalizeEmail(hint.email) === MASTER_EMAIL || isRestorableMasterToken(token))) {
+    // Solo rehidratar Superadmin con tokens locales/JWT de maestro explícitos.
+    // Un hint de email/userId de clínica NUNCA adopta la cuenta maestra.
+    const mayRestoreMaster =
+      isRestorableMasterToken(token) ||
+      isPlaceholderUserId(hint.userId) ||
+      normalizeEmail(hint.email) === MASTER_EMAIL
+
+    let user = null
+    if (mayRestoreMaster) {
       await ensureSuperAdmin()
       const refreshed = await loadStore()
       store.users = refreshed.users
       store.sessions = refreshed.sessions
       user = findSuperAdminUser(store)
+    } else if (hint.userId) {
+      user = store.users.find((item) => item.id === hint.userId) || null
+      // Un id de cliente no puede apuntar al maestro por spoofing de cabeceras.
+      if (user && isSuperAdminUser(user)) user = null
+    }
+    if (!user && hint.documentNumber && String(hint.documentNumber).replace(/\D/g, '').length >= 6) {
+      const digits = String(hint.documentNumber).replace(/\D/g, '')
+      const byDoc =
+        store.users.find((item) => normalizeDocumentNumber(item.documentNumber) === digits) || null
+      user = byDoc && !isSuperAdminUser(byDoc) ? byDoc : null
     }
     if (user) {
       session = await adoptSessionToken(store, lookupToken, user)
@@ -949,12 +960,25 @@ export async function resolveSubscriptionSession(token, hint = {}) {
 
   let userIndex = store.users.findIndex((item) => item.id === session.userId)
 
+  // NUNCA escalar una sesión huérfana a Superadmin. Eso convertía cualquier
+  // token de registro/clínica en God Mode (p. ej. delassostore → panel maestro).
   if (userIndex === -1) {
-    const superAdmin = findSuperAdminUser(store)
-    if (!superAdmin) return null
-    session = await adoptSessionToken(store, lookupToken, superAdmin)
-    userIndex = store.users.findIndex((item) => item.id === superAdmin.id)
-    if (userIndex === -1) return null
+    store.sessions = store.sessions.filter(
+      (item) => item.token !== lookupToken && item.jwt !== token && item.token !== session.token,
+    )
+    liveSessions.delete(lookupToken)
+    liveSessions.delete(token)
+    liveSessions.delete(session.token)
+    try {
+      await saveStore(store)
+    } catch {
+      // la sesión ya quedó invalidada en memoria
+    }
+    console.error(
+      '[Auth] Sesión inválida: userId ausente en el almacén. Token invalidado (sin escalada a Superadmin).',
+      String(session.userId || ''),
+    )
+    return null
   }
 
 

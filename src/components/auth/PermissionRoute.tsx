@@ -10,10 +10,8 @@ interface PermissionRouteProps {
 export function PermissionRoute({ permission }: PermissionRouteProps) {
   const { can } = useAuth()
   const apiAuth = getStoredApiAuth()
-  const isSuperAdmin =
-    localStorage.getItem('doctorSEO_rol') === 'superadmin' || isApiSuperAdmin(apiAuth?.user)
-
-  if (isSuperAdmin || can(permission)) {
+  // Solo correo maestro. Un rol localStorage "superadmin" no abre rutas privilegiadas.
+  if (isApiSuperAdmin(apiAuth?.user) || can(permission)) {
     return <Outlet />
   }
 

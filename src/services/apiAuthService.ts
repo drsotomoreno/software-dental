@@ -192,10 +192,18 @@ export function setStoredApiAuth(token: string, user: ApiSubscriptionUser): void
   localStorage.setItem(API_AUTH_USER_KEY, JSON.stringify(user))
   localStorage.setItem(LEGACY_TOKEN_KEY, token)
   localStorage.setItem(LEGACY_USER_KEY, JSON.stringify(user))
+  // God Mode solo por correo maestro. Nunca por rol local inventado.
   if (isApiSuperAdmin(user)) {
     localStorage.setItem(API_ROLE_KEY, 'superadmin')
+    if (typeof document !== 'undefined') {
+      document.documentElement.dataset.superadmin = 'true'
+    }
   } else {
-    localStorage.setItem(API_ROLE_KEY, user.rol)
+    const safeRole = user.rol === 'superadmin' ? 'admin' : user.rol
+    localStorage.setItem(API_ROLE_KEY, safeRole)
+    if (typeof document !== 'undefined') {
+      delete document.documentElement.dataset.superadmin
+    }
   }
 }
 
@@ -205,6 +213,9 @@ export function clearStoredApiAuth(): void {
   localStorage.removeItem(API_ROLE_KEY)
   localStorage.removeItem(LEGACY_TOKEN_KEY)
   localStorage.removeItem(LEGACY_USER_KEY)
+  if (typeof document !== 'undefined') {
+    delete document.documentElement.dataset.superadmin
+  }
 }
 
 export async function validateApiSession(token: string) {
