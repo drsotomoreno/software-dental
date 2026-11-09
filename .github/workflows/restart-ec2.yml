@@ -1,0 +1,50 @@
+# Reinicio rápido de PM2 en EC2 (sin rebuild).
+# Uso: Actions → Restart EC2 app → Run workflow
+name: Restart EC2 app
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ec2-main
+  cancel-in-progress: false
+
+permissions:
+  contents: none
+
+jobs:
+  restart:
+    name: Reiniciar PM2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: SSH restart + smoke
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            CANONICAL="/var/www/mihistoriadental"
+            echo "---- Estado PM2 antes ----"
+            pm2 status || true
+
+            if pm2 describe software-dental >/dev/null 2>&1; then
+              pm2 restart software-dental --update-env
+            elif pm2 describe mihistoriadental >/dev/null 2>&1; then
+              pm2 restart mihistoriadental --update-env
+            else
+              cd "$CANONICAL"
+              pm2 start server.js --name software-dental --update-env || pm2 restart all --update-env
+            fi
+            pm2 save || true
+            sleep 3
+            sudo systemctl reload nginx || true
+
+            PORT="$(grep -E '^PORT=' "$CANONICAL/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+            PORT="${PORT:-3000}"
+            bash "$CANONICAL/scripts/post-deploy-smoke.sh" "$PORT"
+            pm2 status
+            echo "Reinicio OK."

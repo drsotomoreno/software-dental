@@ -87,11 +87,15 @@ jobs:
               force_main "$CANONICAL" || exit 1
               chmod +x scripts/*.sh 2>/dev/null || true
               npm install || exit 1
-              # Liberar RAM: Vite + PM2 juntos suelen matar el build (OOM) en instancias chicas.
-              echo "---- Pausando PM2 durante el build ----"
-              pm2 stop all || true
-              export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
-              npm run build || { pm2 restart all --update-env || true; exit 1; }
+              # Evitar 502: primero construir con PM2 en línea. Solo si OOM, pausar y reintentar.
+              echo "---- Build (PM2 en línea) ----"
+              export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}"
+              if ! npm run build; then
+                echo "Build falló; reintento liberando RAM (PM2 pause breve)."
+                pm2 stop all || true
+                export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
+                npm run build || { pm2 restart all --update-env || true; exit 1; }
+              fi
               echo "Bundle canónico:"
               grep -o 'assets/index-[^"]*' dist/index.html || true
 
@@ -159,7 +163,14 @@ jobs:
             fi
 
             echo "---- Reinicio ----"
-            pm2 restart all --update-env
+            if pm2 describe software-dental >/dev/null 2>&1; then
+              pm2 restart software-dental --update-env || pm2 start software-dental --update-env
+            elif pm2 describe mihistoriadental >/dev/null 2>&1; then
+              pm2 restart mihistoriadental --update-env || pm2 start mihistoriadental --update-env
+            else
+              pm2 restart all --update-env || pm2 resurrect || true
+            fi
+            pm2 save || true
             sleep 3
             sudo systemctl reload nginx || true
 

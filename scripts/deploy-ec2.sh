@@ -22,11 +22,15 @@ chmod +x scripts/*.sh 2>/dev/null || true
 
 echo "---- Dependencias y build ----"
 npm install
-# Liberar RAM: Vite + PM2 juntos suelen matar el build (OOM) en instancias chicas.
-echo "---- Pausando PM2 durante el build ----"
-pm2 stop all || true
-export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
-npm run build || { pm2 restart all --update-env || true; exit 1; }
+# Evitar 502: primero construir con PM2 en línea. Solo si OOM, pausar y reintentar.
+echo "---- Build (PM2 en línea) ----"
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}"
+if ! npm run build; then
+  echo "Build falló; reintento liberando RAM (PM2 pause breve)."
+  pm2 stop all || true
+  export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
+  npm run build || { pm2 restart all --update-env || true; exit 1; }
+fi
 grep -o 'assets/index-[^"]*' dist/index.html || true
 
 echo "---- Sincronizar cwd de PM2 (evita server.js viejo) ----"
