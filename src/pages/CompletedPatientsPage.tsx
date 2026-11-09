@@ -5,6 +5,7 @@ import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import { PatientListSearch } from '@/components/patients/PatientListSearch'
+import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import { isCompletedPatient } from '@/types/patient'
 import { patientMatchesQuery } from '@/utils/patientListSearch'
 
@@ -16,7 +17,7 @@ export function CompletedPatientsPage() {
 
   const patients = useLiveQuery(async () => {
     const all = await db.patients.orderBy('lastName').reverse().toArray()
-    return all.filter(isCompletedPatient)
+    return all.filter((patient) => belongsToCurrentClinic(patient) && isCompletedPatient(patient))
   })
 
   const filteredPatients = useMemo(

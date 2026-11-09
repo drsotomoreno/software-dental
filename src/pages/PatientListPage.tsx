@@ -9,6 +9,7 @@ import { isActivePatient } from '@/types/patient'
 import { SeedTestDataPanel } from '@/components/dev/SeedTestDataPanel'
 import { PatientListSearch } from '@/components/patients/PatientListSearch'
 import { forzarSincronizacionLocal } from '@/services/clinicalSyncService'
+import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import { patientMatchesQuery } from '@/utils/patientListSearch'
 
 export function PatientListPage() {
@@ -21,7 +22,7 @@ export function PatientListPage() {
 
   const patients = useLiveQuery(async () => {
     const all = await db.patients.orderBy('lastName').reverse().toArray()
-    return all.filter(isActivePatient)
+    return all.filter((patient) => belongsToCurrentClinic(patient) && isActivePatient(patient))
   })
 
   const filteredPatients = useMemo(

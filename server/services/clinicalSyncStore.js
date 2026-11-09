@@ -311,6 +311,24 @@ function replicateAliases(store, canonical, clinic, aliasIds) {
   }
 }
 
+/**
+ * Vacía el cubo clínico de una clínica (y aliases).
+ * Evita que un registro nuevo herede pacientes empujados por error desde otro tenant.
+ */
+export async function resetClinicClinicalBucket(clinicId, aliasIds = []) {
+  const canonical = String(clinicId || '').trim()
+  if (!canonical) return { ok: false, error: 'clinicId vacío' }
+  return enqueueWrite(async () => {
+    const store = await loadStore()
+    const empty = emptyClinic()
+    for (const key of scopeIds(canonical, aliasIds)) {
+      store.clinics[key] = cloneClinic(empty)
+    }
+    await saveStore(store)
+    return { ok: true, clinicId: canonical }
+  })
+}
+
 function mergeIncomingMap(target, incoming, clinicId, acceptedKey, accepted) {
   let count = 0
   for (const raw of Array.isArray(incoming) ? incoming : []) {

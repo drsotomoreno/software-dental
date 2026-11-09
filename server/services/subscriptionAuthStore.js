@@ -27,6 +27,8 @@ import {
   saveEmailOtp,
   touchEmailOtp,
 } from './emailOtpStore.js'
+import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
+import { resetClinicClinicalBucket } from './clinicalSyncStore.js'
 import {
   ensureMasterUsuarioRow,
   syncAllAuthUsersToTenantTables,
@@ -693,6 +695,25 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
   await saveStore(store)
 
   const active = superAdminAccess || isSubscriptionActive(billingUser)
+
+  // Cuentas pendientes (sin prueba/plan): forzar cubo clínico vacío.
+  // Limpia contaminación si un navegador compartido empujó pacientes ajenos.
+  if (
+    !masterLogin &&
+    !isSuperAdminUser(currentUser) &&
+    currentUser.estado_pago === 'pendiente' &&
+    !currentUser.trialStartedAt
+  ) {
+    try {
+      const scope = clinicSyncAliasIds(currentUser)
+      await resetClinicClinicalBucket(scope.canonical, scope.aliases)
+    } catch (error) {
+      console.error(
+        '[Auth] No se pudo resetear cubo clínico de cuenta pendiente:',
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
 
   return {
 
@@ -1374,6 +1395,16 @@ export async function verifyEmailAndRegister({ email, code, password, phone_numb
   await clearOtp()
   await saveStore(store)
   void syncAuthUserToTenantTables(user)
+  // Clínica nueva = cubo clínico vacío (nunca heredar sync local de otro tenant).
+  try {
+    const scope = clinicSyncAliasIds(user)
+    await resetClinicClinicalBucket(scope.canonical, scope.aliases)
+  } catch (error) {
+    console.error(
+      '[Auth] No se pudo inicializar cubo clínico vacío para registro nuevo:',
+      error instanceof Error ? error.message : error,
+    )
+  }
 
   return { ok: true, user: sanitizeUser(user) }
 }

@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
+import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import type { Patient } from '@/types/patient'
 
 function normalizeSearch(value: string): string {
@@ -50,11 +51,13 @@ export function searchPatients(patients: Patient[], query: string, limit = 12): 
 export function usePatientsList() {
   const patients = useLiveQuery(async () => {
     const all = await db.patients.orderBy('lastName').toArray()
-    return all.sort((a, b) => {
-      const nameA = `${a.lastName} ${a.firstName}`.toLowerCase()
-      const nameB = `${b.lastName} ${b.firstName}`.toLowerCase()
-      return nameA.localeCompare(nameB, 'es')
-    })
+    return all
+      .filter((patient) => belongsToCurrentClinic(patient))
+      .sort((a, b) => {
+        const nameA = `${a.lastName} ${a.firstName}`.toLowerCase()
+        const nameB = `${b.lastName} ${b.firstName}`.toLowerCase()
+        return nameA.localeCompare(nameB, 'es')
+      })
   }, [])
 
   return {

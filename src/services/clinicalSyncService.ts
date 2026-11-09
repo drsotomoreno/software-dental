@@ -207,31 +207,50 @@ async function withPatientSyncId(row: Appointment): Promise<Appointment> {
   return { ...row, patientSyncId: patient.syncId }
 }
 
-/** Asigna syncId/clinicId a lo local sin marcarlo pending (el snapshot sube todo). */
+/**
+ * Completa syncId solo en registros YA de esta clínica.
+ * NUNCA reasigna clinicId ajeno (fuga multi-tenant / Superadmin → clínica nueva).
+ */
 async function adoptLocalRecords(clinicId: string): Promise<void> {
+  const { clinicIdsMatch } = await import('@/services/clinicLocalIsolation')
   await withRemotePullLock(async () => {
     const patients = await db.patients.toArray()
     for (const row of patients) {
       if (row.id == null) continue
+      if (row.clinicId && !clinicIdsMatch(row.clinicId, clinicId)) continue
       const patch: Partial<Patient> = {}
       if (!row.syncId) patch.syncId = generateId()
-      if (row.clinicId !== clinicId) patch.clinicId = clinicId
+      if (!row.clinicId) patch.clinicId = clinicId
       if (Object.keys(patch).length > 0) await db.patients.update(row.id, patch)
     }
     const appointments = await db.appointments.toArray()
     for (const row of appointments) {
       if (row.id == null) continue
+      if (row.clinicId && !clinicIdsMatch(row.clinicId, clinicId)) continue
       const patch: Partial<Appointment> = {}
       if (!row.syncId) patch.syncId = generateId()
-      if (row.clinicId !== clinicId) patch.clinicId = clinicId
+      if (!row.clinicId) patch.clinicId = clinicId
       if (Object.keys(patch).length > 0) await db.appointments.update(row.id, patch)
     }
   })
 }
 
 async function pushAllLocal(clinicId: string): Promise<boolean> {
+  const { clinicIdsMatch, ensureClinicLocalIsolation } = await import(
+    '@/services/clinicLocalIsolation'
+  )
+  await ensureClinicLocalIsolation(clinicId)
   await adoptLocalRecords(clinicId)
-  const [patients, appointments] = await Promise.all([db.patients.toArray(), db.appointments.toArray()])
+  const [patientsRaw, appointmentsRaw] = await Promise.all([
+    db.patients.toArray(),
+    db.appointments.toArray(),
+  ])
+  const patients = patientsRaw.filter(
+    (row) => !row.clinicId || clinicIdsMatch(row.clinicId, clinicId),
+  )
+  const appointments = appointmentsRaw.filter(
+    (row) => !row.clinicId || clinicIdsMatch(row.clinicId, clinicId),
+  )
 
   const patientRecords = patients
     .map((row) => toSyncRecord({ ...row, clinicId }, clinicId))
@@ -308,17 +327,29 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
   const auth = getStoredApiAuth()
   if (!auth?.token) return false
   try {
+    const clinicId = getCurrentClinicId()
+    if (clinicId) {
+      const { ensureClinicLocalIsolation } = await import('@/services/clinicLocalIsolation')
+      await ensureClinicLocalIsolation(clinicId)
+    }
+
     if (typeof window !== 'undefined' && typeof window.__doctorSEOForceClinicPull === 'function') {
       const forced = await window.__doctorSEOForceClinicPull(auth.token, auth.user)
       if (forced) {
+        // Solo aplicar caché si pertenece a ESTA clínica (evita mezcla Superadmin → nuevo registro).
         const cached = await readCachedClinicPull()
-        if (cached) await applyFullClinicPull(cached)
+        if (cached && clinicId && cached.clinicId && cached.clinicId === clinicId) {
+          await applyFullClinicPull(cached)
+        }
         return true
       }
     }
     const cached = await readCachedClinicPull()
-    if (cached) await applyFullClinicPull(cached)
-    if (!getCurrentClinicId()) return Boolean(cached)
+    if (cached && clinicId && (!cached.clinicId || cached.clinicId === clinicId)) {
+      // Si el caché no trae clinicId (legacy), no aplicarlo: forzar pull remoto limpio.
+      if (cached.clinicId) await applyFullClinicPull(cached)
+    }
+    if (!clinicId) return false
     const merged = await pullAndMerge(true)
     await syncCitasToLocalStorage()
     renderCitas()

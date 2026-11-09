@@ -160,9 +160,15 @@ export function LoginPage() {
         return
       }
 
-      // Limpiar cualquier sesión previa (p. ej. Superadmin en el mismo navegador)
+      // Limpiar sesión y datos clínicos locales previos (p. ej. Superadmin en este navegador)
       // antes de iniciar sesión con la cuenta recién creada.
       clearStoredApiAuth()
+      try {
+        const { clearClinicIsolationOnLogout } = await import('@/services/clinicLocalIsolation')
+        await clearClinicIsolationOnLogout()
+      } catch {
+        /* ignore */
+      }
       markExpressRegisterComplete()
       const result = await login(registerEmail, registerPassword)
       if (result.ok) {

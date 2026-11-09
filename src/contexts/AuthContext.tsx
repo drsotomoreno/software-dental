@@ -291,6 +291,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     clearStoredApiAuth()
     await logoutSession(user?.sessionId ?? (await getStoredSessionToken()))
+    try {
+      const { clearClinicIsolationOnLogout } = await import('@/services/clinicLocalIsolation')
+      await clearClinicIsolationOnLogout()
+    } catch (error) {
+      console.error('[auth] No se pudo limpiar IndexedDB al cerrar sesión:', error)
+    }
     setUser(null)
   }, [user])
 

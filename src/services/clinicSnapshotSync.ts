@@ -523,8 +523,25 @@ export async function applyClinicSnapshot(
 }
 
 export async function readCachedClinicPull(): Promise<ClinicalSyncPullResponse | null> {
-  const fromWindow = (window as Window & { __doctorSEOClinicPull?: ClinicalSyncPullResponse }).__doctorSEOClinicPull
-  if (fromWindow && typeof fromWindow === 'object') return fromWindow
+  const { getCurrentClinicId } = await import('@/services/clinicalSyncState')
+  const { clinicIdsMatch, readCachedPullKey } = await import('@/services/clinicLocalIsolation')
+  const clinicId = getCurrentClinicId()
+
+  const fromWindow = (window as Window & { __doctorSEOClinicPull?: ClinicalSyncPullResponse })
+    .__doctorSEOClinicPull
+  if (
+    fromWindow &&
+    typeof fromWindow === 'object' &&
+    clinicId &&
+    fromWindow.clinicId &&
+    clinicIdsMatch(fromWindow.clinicId, clinicId)
+  ) {
+    return fromWindow
+  }
+
+  if (!clinicId) return null
+  const cacheKey = readCachedPullKey(clinicId)
+
   return new Promise((resolve) => {
     try {
       const req = indexedDB.open(PULL_CACHE_DB, 1)
@@ -542,10 +559,16 @@ export async function readCachedClinicPull(): Promise<ClinicalSyncPullResponse |
           return
         }
         const tx = idb.transaction(PULL_CACHE_STORE, 'readonly')
-        const getReq = tx.objectStore(PULL_CACHE_STORE).get('latest')
+        // Solo la clave de esta clínica. Nunca 'latest' global (mezcla tenants).
+        const getReq = tx.objectStore(PULL_CACHE_STORE).get(cacheKey)
         getReq.onsuccess = () => {
           idb.close()
-          resolve((getReq.result as ClinicalSyncPullResponse) || null)
+          const value = (getReq.result as ClinicalSyncPullResponse) || null
+          if (value?.clinicId && !clinicIdsMatch(value.clinicId, clinicId)) {
+            resolve(null)
+            return
+          }
+          resolve(value)
         }
         getReq.onerror = () => {
           idb.close()
