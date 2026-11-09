@@ -87,8 +87,11 @@ jobs:
               force_main "$CANONICAL" || exit 1
               chmod +x scripts/*.sh 2>/dev/null || true
               npm install || exit 1
-              export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=3072}"
-              npm run build || exit 1
+              # Liberar RAM: Vite + PM2 juntos suelen matar el build (OOM) en instancias chicas.
+              echo "---- Pausando PM2 durante el build ----"
+              pm2 stop all || true
+              export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
+              npm run build || { pm2 restart all --update-env || true; exit 1; }
               echo "Bundle canónico:"
               grep -o 'assets/index-[^"]*' dist/index.html || true
 

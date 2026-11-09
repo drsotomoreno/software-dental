@@ -22,8 +22,11 @@ chmod +x scripts/*.sh 2>/dev/null || true
 
 echo "---- Dependencias y build ----"
 npm install
-export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=3072}"
-npm run build
+# Liberar RAM: Vite + PM2 juntos suelen matar el build (OOM) en instancias chicas.
+echo "---- Pausando PM2 durante el build ----"
+pm2 stop all || true
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
+npm run build || { pm2 restart all --update-env || true; exit 1; }
 grep -o 'assets/index-[^"]*' dist/index.html || true
 
 echo "---- Sincronizar cwd de PM2 (evita server.js viejo) ----"
