@@ -22,13 +22,14 @@ import {
   normalizeCustomMaxAssistants,
 } from '../../shared/subscriptionPlans.js'
 import { readClinicAssistantLimit } from './clinicAssistantLimit.js'
-import { readDurableJson, writeDurableJson } from './durableStore.js'
+import { readDurableJson, writeDurableJson, withPgClient } from './durableStore.js'
 import {
   deleteEmailOtp,
   loadEmailOtp,
   saveEmailOtp,
   touchEmailOtp,
 } from './emailOtpStore.js'
+import { deletePhoneOtp } from './phoneOtpStore.js'
 import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
 import { applyStoredAccessPolicy, clinicalAccessTier } from '../../shared/clinicalAccess.js'
 import { resetClinicClinicalBucket } from './clinicalSyncStore.js'
@@ -2212,6 +2213,77 @@ export async function listAllSubscriptionUsers() {
       const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0
       return bTime - aTime
     })
+}
+
+/**
+ * Borra por completo una cuenta de registro (store + OTP + Postgres usuarios).
+ * No permite tocar la cuenta maestra.
+ */
+export async function deleteSubscriptionUserByEmail(email) {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) {
+    return { ok: false, status: 400, error: 'Indique el correo a eliminar.' }
+  }
+  if (normalizedEmail === MASTER_EMAIL) {
+    return { ok: false, status: 403, error: 'La cuenta del superadministrador no puede eliminarse.' }
+  }
+
+  const store = await loadStore()
+  const index = store.users.findIndex((user) => user.email === normalizedEmail)
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'No hay una cuenta con ese correo.' }
+  }
+
+  const removed = store.users[index]
+  if (isSuperAdminUser(removed) || isMasterAccountEmail(removed.email)) {
+    return { ok: false, status: 403, error: 'La cuenta del superadministrador no puede eliminarse.' }
+  }
+
+  store.users.splice(index, 1)
+  store.sessions = (store.sessions || []).filter(
+    (item) => String(item.userId) !== String(removed.id) && normalizeEmail(item.email) !== normalizedEmail,
+  )
+  store.emailVerifications = (store.emailVerifications || []).filter(
+    (item) => item.email !== normalizedEmail,
+  )
+  await saveStore(store)
+
+  await deleteEmailOtp(normalizedEmail)
+  const phone = normalizeColombiaPhoneNumber(removed.phone_number || removed.phone)
+  if (phone) {
+    await deletePhoneOtp(phone)
+  }
+
+  try {
+    await withPgClient(async (client) => {
+      await client.query(`DELETE FROM usuarios WHERE lower(email) = lower($1::text)`, [
+        normalizedEmail,
+      ])
+    })
+  } catch (error) {
+    if (error?.code !== 'PG_UNAVAILABLE') {
+      console.error(
+        '[Auth] No se pudo borrar el usuario en Postgres:',
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
+
+  try {
+    const scope = clinicSyncAliasIds(removed)
+    await resetClinicClinicalBucket(scope.canonical, scope.aliases)
+  } catch (error) {
+    console.error(
+      '[Auth] No se pudo limpiar el cubo clínico al borrar el registro:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+
+  return {
+    ok: true,
+    email: normalizedEmail,
+    id: removed.id,
+  }
 }
 
 function clinicIdOf(user) {

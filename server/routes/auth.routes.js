@@ -25,6 +25,7 @@ import {
   deleteClinicUser,
   ensureSuperAdmin,
   isMasterCredentials,
+  deleteSubscriptionUserByEmail,
   listAllSubscriptionUsers,
   listClinicUsers,
   loginSubscriptionUser,
@@ -226,6 +227,31 @@ router.get('/admin/users', verificarToken, soloSuperAdmin, async (req, res) => {
   } catch (error) {
     console.error('[Auth] Error en GET /admin/users:', error)
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo listar los usuarios.' })
+  }
+})
+
+/** Borrado total de una cuenta de registro (pruebas / limpieza comercial). */
+router.delete('/admin/users/by-email/:email', verificarToken, soloSuperAdmin, async (req, res) => {
+  try {
+    const email = decodeURIComponent(String(req.params.email || '')).trim().toLowerCase()
+    const result = await deleteSubscriptionUserByEmail(email)
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({
+      success: true,
+      ok: true,
+      message: `Cuenta eliminada: ${result.email}`,
+      email: result.email,
+      id: result.id,
+    })
+  } catch (error) {
+    console.error('[Auth] Error en DELETE /admin/users/by-email:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo eliminar la cuenta.',
+    })
   }
 })
 
