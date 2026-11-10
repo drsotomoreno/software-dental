@@ -581,11 +581,21 @@ export async function getElectronicInvoice(id: string): Promise<ElectronicInvoic
 }
 
 export async function listElectronicInvoices(): Promise<ElectronicInvoice[]> {
-  return db.electronicInvoices.orderBy('issueDate').reverse().toArray()
+  const { getCurrentClinicId } = await import('@/services/clinicalSyncState')
+  const clinicId = getCurrentClinicId()
+  if (!clinicId) return []
+  return db.electronicInvoices.where('clinicId').equals(clinicId).reverse().sortBy('issueDate')
 }
 
 export async function listPatientElectronicInvoices(patientId: string): Promise<ElectronicInvoice[]> {
-  return db.electronicInvoices.where('patientId').equals(patientId).sortBy('issueDate')
+  const { getCurrentClinicId } = await import('@/services/clinicalSyncState')
+  const clinicId = getCurrentClinicId()
+  const rows = await db.electronicInvoices.where('patientId').equals(patientId).sortBy('issueDate')
+  if (!clinicId) return rows
+  return rows.filter((row) => {
+    const rowClinic = (row as ElectronicInvoice & { clinicId?: string }).clinicId
+    return !rowClinic || rowClinic === clinicId
+  })
 }
 
 /** Re-exporta buildRipsFromRecords para compatibilidad con flujos existentes. */

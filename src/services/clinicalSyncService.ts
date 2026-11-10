@@ -112,11 +112,23 @@ function applyPayload<T extends Patient | Appointment>(
 }
 
 async function findLocalPatient(remote: ClinicalSyncRecord): Promise<Patient | undefined> {
+  const { clinicIdsMatch } = await import('@/services/clinicLocalIsolation')
+  const remoteClinicId = String(remote.clinicId || getCurrentClinicId() || '').trim()
+
   const bySync = await db.patients.where('syncId').equals(remote.syncId).first()
-  if (bySync) return bySync
+  if (bySync) {
+    if (!remoteClinicId || !bySync.clinicId || clinicIdsMatch(bySync.clinicId, remoteClinicId)) {
+      return bySync
+    }
+  }
+
   const documentNumber = String(remote.payload.documentNumber ?? '').trim()
   if (!documentNumber) return undefined
-  return db.patients.where('documentNumber').equals(documentNumber).first()
+
+  // Merge solo si coincide la tupla (documentNumber, clinicaId).
+  const candidates = await db.patients.where('documentNumber').equals(documentNumber).toArray()
+  if (!remoteClinicId) return candidates[0]
+  return candidates.find((patient) => clinicIdsMatch(patient.clinicId, remoteClinicId))
 }
 
 async function findLocalAppointment(remote: ClinicalSyncRecord): Promise<Appointment | undefined> {
@@ -328,6 +340,8 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
   if (!auth?.token) return false
   try {
     const clinicId = getCurrentClinicId()
+    const { ensureDentalDatabaseForAuth } = await import('@/db/database')
+    await ensureDentalDatabaseForAuth(auth.user?.id, clinicId || auth.user?.clinicId || auth.user?.id)
     if (clinicId) {
       const { ensureClinicLocalIsolation } = await import('@/services/clinicLocalIsolation')
       await ensureClinicLocalIsolation(clinicId)

@@ -1,8 +1,20 @@
 import { db } from '@/db/database'
+import { getStoredApiAuth } from '@/services/apiAuthService'
+import { getCurrentClinicId } from '@/services/clinicalSyncState'
 import type { Appointment, CreateAppointmentInput } from '@/types/appointment'
 import { isActiveAppointment } from '@/types/appointment'
 
-export const CITAS_STORAGE_KEY = 'citas_dental'
+/** Legacy global key — se limpia en wipe; ya no se escribe. */
+export const CITAS_STORAGE_KEY_LEGACY = 'citas_dental'
+
+/** @deprecated Use citasStorageKey() — se mantiene por compatibilidad de imports. */
+export const CITAS_STORAGE_KEY = CITAS_STORAGE_KEY_LEGACY
+
+export function citasStorageKey(userId?: string | null): string {
+  const authId = userId || getStoredApiAuth()?.user?.id || 'anon'
+  const safe = String(authId).trim().replace(/[^a-zA-Z0-9._@-]+/g, '_') || 'anon'
+  return `citas_dental_${safe}`
+}
 
 export const AGENDA_RENDER_EVENT = 'agenda:render-citas'
 export const AGENDA_REASIGNAR_EVENT = 'agenda:reasignar-cita'
@@ -10,7 +22,9 @@ export const AGENDA_REASIGNAR_EVENT = 'agenda:reasignar-cita'
 export function getCitasFromStorage(): Appointment[] {
   if (typeof window === 'undefined') return []
   try {
-    const raw = localStorage.getItem(CITAS_STORAGE_KEY)
+    const raw =
+      localStorage.getItem(citasStorageKey()) ||
+      localStorage.getItem(CITAS_STORAGE_KEY_LEGACY)
     if (!raw) return []
     const parsed = JSON.parse(raw) as Appointment[]
     return Array.isArray(parsed) ? parsed : []
@@ -21,12 +35,21 @@ export function getCitasFromStorage(): Appointment[] {
 
 export function saveCitasToStorage(citas: Appointment[]): void {
   if (typeof window === 'undefined') return
-  localStorage.setItem(CITAS_STORAGE_KEY, JSON.stringify(citas))
+  localStorage.setItem(citasStorageKey(), JSON.stringify(citas))
+  try {
+    localStorage.removeItem(CITAS_STORAGE_KEY_LEGACY)
+  } catch {
+    /* ignore */
+  }
 }
 
-/** Sincroniza IndexedDB → localStorage (clave citas_dental). */
+/** Sincroniza IndexedDB → localStorage (clave citas_dental_${userId}). */
 export async function syncCitasToLocalStorage(): Promise<Appointment[]> {
-  const all = (await db.appointments.orderBy('startTime').toArray()).filter(isActiveAppointment)
+  const clinicId = getCurrentClinicId()
+  const rows = clinicId
+    ? await db.appointments.where('clinicId').equals(clinicId).sortBy('startTime')
+    : []
+  const all = rows.filter(isActiveAppointment)
   saveCitasToStorage(all)
   return all
 }

@@ -57,9 +57,11 @@ export async function saveTemporaryRips(input: SaveTemporaryRipsInput): Promise<
 }
 
 export async function listTemporaryRips(clinicId?: string): Promise<TemporaryRipsRecord[]> {
-  const rows = clinicId
-    ? await db.ripsTemporales.where('clinicId').equals(clinicId).toArray()
-    : await db.ripsTemporales.toArray()
+  const { getCurrentClinicId } = await import('@/services/clinicalSyncState')
+  const scope = String(clinicId || getCurrentClinicId() || '').trim()
+  const rows = scope
+    ? await db.ripsTemporales.where('clinicId').equals(scope).toArray()
+    : []
   return rows.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
 }
 

@@ -63,6 +63,32 @@ import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
   assertElectronicInvoiceMutableUpdate,
 } from '@/services/invoiceImmutabilityService'
+import { getStoredApiAuth } from '@/services/apiAuthService'
+
+function sanitizeDentalDbSegment(value: string | null | undefined): string {
+  const cleaned = String(value ?? '')
+    .trim()
+    .replace(/^clinic:/i, '')
+    .replace(/[^a-zA-Z0-9._@-]+/g, '_')
+    .slice(0, 80)
+  return cleaned || 'anon'
+}
+
+/** Nombre IndexedDB particionado: DentalEMR_${userId}_${clinicaId} */
+export function resolveDentalEmrDbName(
+  userId?: string | null,
+  clinicaId?: string | null,
+): string {
+  let authUser: { id?: string; clinicId?: string } | null = null
+  try {
+    authUser = getStoredApiAuth()?.user ?? null
+  } catch {
+    authUser = null
+  }
+  const uid = sanitizeDentalDbSegment(userId || authUser?.id || 'anon')
+  const cid = sanitizeDentalDbSegment(clinicaId || authUser?.clinicId || authUser?.id || 'none')
+  return `DentalEMR_${uid}_${cid}`
+}
 
 export class DentalDatabase extends Dexie {
   patients!: EntityTable<Patient, 'id'>
@@ -110,8 +136,8 @@ export class DentalDatabase extends Dexie {
   /** Cola genérica de mutaciones offline hacia Postgres. Distinta de syncQueue (adjuntos). */
   sync_queue!: EntityTable<OfflineSyncQueueItem, 'id'>
 
-  constructor() {
-    super('DentalEMR')
+  constructor(dbName = resolveDentalEmrDbName()) {
+    super(dbName)
 
     this.version(1).stores({
       patients: '++id, documentNumber, lastName, createdAt',
@@ -855,10 +881,57 @@ export class DentalDatabase extends Dexie {
     this.version(34).stores({
       rips_submissions: 'id, fecha_radicacion',
     })
+
+    // v35 — clinicId defensivo en cola RIPS / facturas / citas.
+    this.version(35).stores({
+      rips_queue: '++id, &evolutionId, patientId, type, status, [status+type], updatedAt, clinicId',
+      electronicInvoices:
+        'id, patientId, invoiceNumber, status, issueDate, professionalId, createdAt, clinicId',
+      appointments:
+        '++id, patientId, professionalId, unitId, columnId, startTime, status, procedureType, syncId, clinicId, pendingSync',
+    })
   }
 }
 
-export const db = new DentalDatabase()
+/** Instancia activa. Se recrea al cambiar user/clínica. */
+export let db: DentalDatabase = new DentalDatabase()
+
+const hookedDatabases = new WeakSet<DentalDatabase>()
+
+export async function ensureDentalDatabaseForAuth(
+  userId?: string | null,
+  clinicaId?: string | null,
+): Promise<DentalDatabase> {
+  const nextName = resolveDentalEmrDbName(userId, clinicaId)
+  if (db.name === nextName) {
+    registerDentalDatabaseHooks(db)
+    return db
+  }
+  try {
+    db.close()
+  } catch {
+    /* ignore */
+  }
+  db = new DentalDatabase(nextName)
+  registerDentalDatabaseHooks(db)
+  return db
+}
+
+export async function deleteAndResetDentalDatabase(): Promise<void> {
+  const previousName = db.name
+  try {
+    db.close()
+  } catch {
+    /* ignore */
+  }
+  try {
+    await Dexie.delete(previousName)
+  } catch {
+    /* ignore */
+  }
+  db = new DentalDatabase(resolveDentalEmrDbName('anon', 'none'))
+  registerDentalDatabaseHooks(db)
+}
 
 /** Permite vaciar tablas inmutables (FEV / NC / outbox) en restauración o limpieza de prueba. */
 let backupRestoreUnlock = false
@@ -872,13 +945,17 @@ export async function withBackupRestoreUnlock<T>(fn: () => Promise<T>): Promise<
   }
 }
 
-db.electronicInvoices.hook('deleting', (_primKey, _obj, transaction) => {
+function registerDentalDatabaseHooks(database: DentalDatabase): void {
+  if (hookedDatabases.has(database)) return
+  hookedDatabases.add(database)
+
+database.electronicInvoices.hook('deleting', (_primKey, _obj, transaction) => {
   if (backupRestoreUnlock) return
   transaction.abort()
   throw new Error(CREDIT_NOTE_IMMUTABILITY_MESSAGE)
 })
 
-db.electronicInvoices.hook('updating', (mods, _primKey, obj, transaction) => {
+database.electronicInvoices.hook('updating', (mods, _primKey, obj, transaction) => {
   if (backupRestoreUnlock) return
   const previous = obj as ElectronicInvoice
   const next = { ...previous, ...(mods as Partial<ElectronicInvoice>) }
@@ -890,19 +967,19 @@ db.electronicInvoices.hook('updating', (mods, _primKey, obj, transaction) => {
   }
 })
 
-db.electronicCreditNotes.hook('deleting', (_primKey, _obj, transaction) => {
+database.electronicCreditNotes.hook('deleting', (_primKey, _obj, transaction) => {
   if (backupRestoreUnlock) return
   transaction.abort()
   throw new Error(CREDIT_NOTE_IMMUTABILITY_MESSAGE)
 })
 
-db.electronicCreditNotes.hook('updating', (_mods, _primKey, _obj, transaction) => {
+database.electronicCreditNotes.hook('updating', (_mods, _primKey, _obj, transaction) => {
   if (backupRestoreUnlock) return
   transaction.abort()
   throw new Error('Las notas crédito electrónicas son inmutables tras su emisión.')
 })
 
-db.syncOutbox.hook('deleting', (_primKey, obj, transaction) => {
+database.syncOutbox.hook('deleting', (_primKey, obj, transaction) => {
   if (backupRestoreUnlock) return
   const entry = obj as SyncOutboxEntry
   if (
@@ -914,7 +991,7 @@ db.syncOutbox.hook('deleting', (_primKey, obj, transaction) => {
   }
 })
 
-db.syncOutbox.hook('updating', (_mods, _primKey, obj, transaction) => {
+database.syncOutbox.hook('updating', (_mods, _primKey, obj, transaction) => {
   if (backupRestoreUnlock) return
   const previous = obj as SyncOutboxEntry
   if (
@@ -959,19 +1036,19 @@ function stampClinicalSyncOnUpdate(
   if (mods.pendingSync === true) notifyClinicalRecordDirty()
 }
 
-db.patients.hook('creating', (_primKey, obj) => {
+database.patients.hook('creating', (_primKey, obj) => {
   stampClinicalSyncOnCreate(obj as Patient)
 })
 
-db.patients.hook('updating', (mods, _primKey, obj) => {
+database.patients.hook('updating', (mods, _primKey, obj) => {
   stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as Patient)
 })
 
-db.appointments.hook('creating', (_primKey, obj) => {
+database.appointments.hook('creating', (_primKey, obj) => {
   stampClinicalSyncOnCreate(obj as Appointment)
 })
 
-db.appointments.hook('updating', (mods, _primKey, obj) => {
+database.appointments.hook('updating', (mods, _primKey, obj) => {
   const appointment = obj as Appointment
   const next = mods as Partial<Appointment> & Record<string, unknown>
   stampClinicalSyncOnUpdate(next, appointment)
@@ -984,11 +1061,11 @@ db.appointments.hook('updating', (mods, _primKey, obj) => {
   return undefined
 })
 
-db.clinicalRecords.hook('creating', (_primKey, obj) => {
+database.clinicalRecords.hook('creating', (_primKey, obj) => {
   stampClinicalSyncOnCreate(obj as ClinicalRecord)
 })
 
-db.clinicalRecords.hook('updating', (mods, _primKey, obj) => {
+database.clinicalRecords.hook('updating', (mods, _primKey, obj) => {
   const previous = obj as ClinicalRecord
   const patch = mods as Partial<ClinicalRecord>
   if (Array.isArray(patch.evolutionNotes)) {
@@ -1006,23 +1083,42 @@ db.clinicalRecords.hook('updating', (mods, _primKey, obj) => {
   stampClinicalSyncOnUpdate(mods as Record<string, unknown>, previous)
 })
 
-db.odontograms.hook('creating', (_primKey, obj) => {
+database.odontograms.hook('creating', (_primKey, obj) => {
   stampClinicalSyncOnCreate(obj as OdontogramData)
 })
 
-db.odontograms.hook('updating', (mods, _primKey, obj) => {
+database.odontograms.hook('updating', (mods, _primKey, obj) => {
   stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as OdontogramData)
 })
 
-db.diagnosticAids.hook('creating', (_primKey, obj) => {
+database.diagnosticAids.hook('creating', (_primKey, obj) => {
   stampClinicalSyncOnCreate(obj as DiagnosticAid)
 })
 
-db.diagnosticAids.hook('updating', (mods, _primKey, obj) => {
+database.diagnosticAids.hook('updating', (mods, _primKey, obj) => {
   stampClinicalSyncOnUpdate(mods as Record<string, unknown>, obj as DiagnosticAid)
 })
 
+  database.rips_queue.hook('creating', (_primKey, obj) => {
+    const row = obj as RipsQueueEntry & { clinicId?: string }
+    if (!row.clinicId) {
+      const clinicId = getCurrentClinicId()
+      if (clinicId) row.clinicId = clinicId
+    }
+  })
+  database.electronicInvoices.hook('creating', (_primKey, obj) => {
+    const row = obj as ElectronicInvoice & { clinicId?: string }
+    if (!row.clinicId) {
+      const clinicId = getCurrentClinicId()
+      if (clinicId) row.clinicId = clinicId
+    }
+  })
+}
+
+registerDentalDatabaseHooks(db)
+
 async function seedDefaultColumns(): Promise<void> {
+
   const count = await db.scheduleColumns.count()
   if (count > 0) return
 
@@ -1162,3 +1258,4 @@ async function seedDemoDentalServices(): Promise<void> {
     createdAt: now,
   })
 }
+

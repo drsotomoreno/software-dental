@@ -81,6 +81,8 @@ export interface InvoiceItem {
 /** Factura electrónica de venta en salud (FEV) */
 export interface ElectronicInvoice {
   id: string
+  /** Tenant / clinica dueña de la FEV (aislamiento IndexedDB). */
+  clinicId?: string
   /** Número completo FEV (prefijo + consecutivo o número único) */
   invoiceNumber: string
   invoicePrefix?: string

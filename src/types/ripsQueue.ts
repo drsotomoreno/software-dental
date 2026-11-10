@@ -50,6 +50,8 @@ export interface RipsQueuePayload extends Omit<RipsTransaction, 'usuarios'> {
 
 export interface RipsQueueEntry {
   id?: number
+  /** Tenant / clinica dueña de la fila (aislamiento IndexedDB). */
+  clinicId?: string
   evolutionId: string
   patientId: string
   type: RipsQueueFlowType

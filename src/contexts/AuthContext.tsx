@@ -143,6 +143,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const completeApiLogin = async (token: string, sessionUser: ApiSubscriptionUser) => {
       setStoredApiAuth(token, sessionUser)
+      const { ensureDentalDatabaseForAuth } = await import('@/db/database')
+      await ensureDentalDatabaseForAuth(sessionUser.id, sessionUser.clinicId || sessionUser.id)
       await pullCompleteClinicOnLogin()
       const authUser = await sessionUserFromApi(sessionUser, token)
       try {

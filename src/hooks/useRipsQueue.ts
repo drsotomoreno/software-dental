@@ -19,9 +19,18 @@ export type { CloseEvolutionResult, RipsEvolutionCloseData } from '@/db/ripsQueu
  */
 export function useRipsQueue(patientId?: string) {
   const entries = useLiveQuery(async (): Promise<RipsQueueEntry[]> => {
-    if (patientId) return listRipsQueueByPatient(patientId)
-    const rows = await db.rips_queue.orderBy('updatedAt').reverse().toArray()
-    return rows
+    const { getCurrentClinicId } = await import('@/services/clinicalSyncState')
+    const clinicId = getCurrentClinicId()
+    if (patientId) {
+      const rows = await listRipsQueueByPatient(patientId)
+      if (!clinicId) return rows
+      return rows.filter((row) => {
+        const rowClinic = (row as RipsQueueEntry & { clinicId?: string }).clinicId
+        return !rowClinic || rowClinic === clinicId
+      })
+    }
+    if (!clinicId) return []
+    return db.rips_queue.where('clinicId').equals(clinicId).reverse().sortBy('updatedAt')
   }, [patientId])
 
   const [lastResult, setLastResult] = useState<CloseEvolutionResult | null>(null)

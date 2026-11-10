@@ -1,17 +1,41 @@
 /**
  * Aislamiento multi-tenant en IndexedDB.
  *
- * Bug crítico corregido: al iniciar sesión, `adoptLocalRecords` reasignaba
- * TODOS los pacientes locales (p. ej. del Superadmin o seed demo) a la clínica
- * nueva. Un registro fresco veía historias ajenas.
+ * Cada sesión usa `DentalEMR_${userId}_${clinicaId}`. Al cambiar de cuenta/clínica
+ * se vacían todas las tablas y se invalidan claves de storage globales/scoped.
  */
-import { db } from '@/db/database'
+import {
+  db,
+  deleteAndResetDentalDatabase,
+  ensureDentalDatabaseForAuth,
+  resolveDentalEmrDbName,
+} from '@/db/database'
+import { getStoredApiAuth } from '@/services/apiAuthService'
 import { getCurrentClinicId, withRemotePullLock } from '@/services/clinicalSyncState'
-import { CITAS_STORAGE_KEY } from '@/utils/agendaStorage'
+import { citasStorageKey, CITAS_STORAGE_KEY_LEGACY } from '@/utils/agendaStorage'
 
 const LAST_CLINIC_KEY = 'doctorSEO_lastClinicSyncId'
+const LAST_DB_KEY = 'doctorSEO_lastDentalEmrDb'
 const PULL_CACHE_DB = 'ClinicSyncPullCache'
-const PULL_CACHE_STORE = 'snapshots'
+
+/** Claves legacy o compartidas que no deben sobrevivir un switch de cuenta. */
+const GLOBAL_LOCAL_STORAGE_KEYS = [
+  CITAS_STORAGE_KEY_LEGACY,
+  'citas_dental',
+  'agenda-slot-notes-v1',
+  'dental_emr_billing_modality',
+  'dental_emr_payment_invoice_seq',
+  'dental_emr_payment_invoice_prefix',
+  'dental_emr_credit_note_seq',
+  'dental_emr_credit_note_prefix',
+  'dental_emr_backup_settings',
+  'dental_emr_scheduled_passphrase',
+  'doctorSEO_trial_voice_notes',
+  'dental.diagnosticAidOpeners',
+  'mihistoriadental.ripsDailyBatch',
+] as const
+
+const GLOBAL_SESSION_STORAGE_KEYS = ['mihistoriadental.ripsDailyBatch'] as const
 
 export function normalizeClinicKey(value?: string | null): string {
   const raw = String(value ?? '').trim()
@@ -53,62 +77,98 @@ async function clearPullCache(): Promise<void> {
   })
 }
 
-/** Vacía datos clínicos locales (no borra users/credenciales del dispositivo). */
-export async function wipeLocalClinicalData(): Promise<void> {
-  await withRemotePullLock(async () => {
-    const clears: Array<Promise<unknown>> = [
-      db.patients.clear(),
-      db.appointments.clear(),
-      db.clinicalRecords.clear(),
-      db.odontograms.clear(),
-      db.diagnosticAids.clear(),
-      db.diagnosticAidBlobs.clear(),
-      db.patientClinicalDrafts.clear(),
-      db.syncQueue.clear(),
-      db.rips_submissions.clear(),
-    ]
-    if (db.rips_queue) clears.push(db.rips_queue.clear())
-    if (db.pacientes) clears.push(db.pacientes.clear())
-    if (db.historias_clinicas) clears.push(db.historias_clinicas.clear())
-    if (db.sync_queue) clears.push(db.sync_queue.clear())
-    await Promise.all(clears)
-  })
-  await clearPullCache()
+function clearTenantWebStorage(): void {
+  if (typeof window === 'undefined') return
+  const auth = getStoredApiAuth()
+  const userId = String(auth?.user?.id || '').trim()
+
   try {
-    localStorage.removeItem(CITAS_STORAGE_KEY)
+    for (const key of GLOBAL_LOCAL_STORAGE_KEYS) {
+      localStorage.removeItem(key)
+    }
+    if (userId) {
+      localStorage.removeItem(citasStorageKey(userId))
+      localStorage.removeItem(`citas_dental_${userId}`)
+      localStorage.removeItem(`agenda-slot-notes-v1_${userId}`)
+      localStorage.removeItem(`dental_emr_billing_modality_${userId}`)
+    }
+    const toRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i)
+      if (!key) continue
+      if (
+        key.startsWith('citas_dental_') ||
+        key.startsWith('agenda-slot-notes-v1_') ||
+        key.startsWith('dental_emr_billing_modality_')
+      ) {
+        toRemove.push(key)
+      }
+    }
+    for (const key of toRemove) localStorage.removeItem(key)
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    for (const key of GLOBAL_SESSION_STORAGE_KEYS) {
+      sessionStorage.removeItem(key)
+    }
+    if (userId) {
+      sessionStorage.removeItem(`mihistoriadental.ripsDailyBatch_${userId}`)
+    }
   } catch {
     /* ignore */
   }
 }
 
+/** Vacía TODAS las tablas Dexie de la instancia activa + storage asociado. */
+export async function wipeLocalClinicalData(): Promise<void> {
+  await withRemotePullLock(async () => {
+    const clears = db.tables.map((table) => table.clear())
+    await Promise.all(clears)
+  })
+  await clearPullCache()
+  clearTenantWebStorage()
+}
+
 /**
- * Antes de pull/push: si cambió la clínica de sesión, limpia IndexedDB.
- * También elimina registros ajenos que hayan quedado en el dispositivo.
+ * Antes de pull/push: abre el cubo IndexedDB del tenant y limpia si cambió la clínica.
  */
 export async function ensureClinicLocalIsolation(clinicId = getCurrentClinicId()): Promise<void> {
-  if (!clinicId) return
+  const auth = getStoredApiAuth()
+  const userId = auth?.user?.id || null
+  const nextDbName = resolveDentalEmrDbName(userId, clinicId || auth?.user?.clinicId || userId)
 
-  let previous = ''
+  let previousClinic = ''
+  let previousDb = ''
   try {
-    previous = String(localStorage.getItem(LAST_CLINIC_KEY) || '').trim()
+    previousClinic = String(localStorage.getItem(LAST_CLINIC_KEY) || '').trim()
+    previousDb = String(localStorage.getItem(LAST_DB_KEY) || '').trim()
   } catch {
-    previous = ''
+    previousClinic = ''
+    previousDb = ''
   }
 
-  if (previous && !clinicIdsMatch(previous, clinicId)) {
+  const clinicChanged = Boolean(previousClinic && clinicId && !clinicIdsMatch(previousClinic, clinicId))
+  const dbChanged = Boolean(previousDb && previousDb !== nextDbName)
+
+  if (clinicChanged || dbChanged) {
     console.warn(
-      '[Tenant] Cambio de clínica en este navegador; se limpia IndexedDB local.',
-      previous,
-      '→',
-      clinicId,
+      '[Tenant] Cambio de clínica/cuenta en este navegador; se limpia IndexedDB local.',
+      { previousClinic, clinicId, previousDb, nextDbName },
     )
     await wipeLocalClinicalData()
-  } else {
+  }
+
+  await ensureDentalDatabaseForAuth(userId, clinicId || auth?.user?.clinicId || userId)
+
+  if (!clinicChanged && !dbChanged && clinicId) {
     await purgeForeignClinicRecords(clinicId)
   }
 
   try {
-    localStorage.setItem(LAST_CLINIC_KEY, normalizeClinicKey(clinicId))
+    if (clinicId) localStorage.setItem(LAST_CLINIC_KEY, normalizeClinicKey(clinicId))
+    localStorage.setItem(LAST_DB_KEY, nextDbName)
   } catch {
     /* ignore */
   }
@@ -121,7 +181,6 @@ async function deleteIfForeign(
   clinicId: string,
 ): Promise<void> {
   if (id == null) return
-  // Sin clinicId = huérfano de otro tenant (p. ej. Superadmin legacy). No conservar.
   if (!clinicIdsMatch(rowClinicId, clinicId)) {
     await table.delete(id)
   }
@@ -143,13 +202,11 @@ export async function purgeForeignClinicRecords(clinicId = getCurrentClinicId())
       if (row.syncId) keptPatientIds.add(String(row.syncId))
     }
 
-    const appointments = await db.appointments.toArray()
-    for (const row of appointments) {
+    for (const row of await db.appointments.toArray()) {
       await deleteIfForeign(db.appointments, row.id, row.clinicId, clinicId)
     }
 
-    const records = await db.clinicalRecords.toArray()
-    for (const row of records) {
+    for (const row of await db.clinicalRecords.toArray()) {
       if (row.id == null) continue
       const patientOk = keptPatientIds.has(String(row.patientId ?? ''))
       if (!clinicIdsMatch(row.clinicId, clinicId) || !patientOk) {
@@ -157,8 +214,7 @@ export async function purgeForeignClinicRecords(clinicId = getCurrentClinicId())
       }
     }
 
-    const odontograms = await db.odontograms.toArray()
-    for (const row of odontograms) {
+    for (const row of await db.odontograms.toArray()) {
       if (row.id == null) continue
       const patientOk = keptPatientIds.has(String(row.patientId ?? ''))
       if (!clinicIdsMatch(row.clinicId, clinicId) || !patientOk) {
@@ -166,8 +222,7 @@ export async function purgeForeignClinicRecords(clinicId = getCurrentClinicId())
       }
     }
 
-    const aids = await db.diagnosticAids.toArray()
-    for (const row of aids) {
+    for (const row of await db.diagnosticAids.toArray()) {
       if (row.id == null) continue
       const patientOk = keptPatientIds.has(String(row.patientId ?? ''))
       if (!clinicIdsMatch(row.clinicId, clinicId) || !patientOk) {
@@ -175,26 +230,53 @@ export async function purgeForeignClinicRecords(clinicId = getCurrentClinicId())
       }
     }
 
-    const drafts = await db.patientClinicalDrafts.toArray()
-    for (const row of drafts) {
+    for (const row of await db.patientClinicalDrafts.toArray()) {
       if (!keptPatientIds.has(String(row.patientId ?? ''))) {
         await db.patientClinicalDrafts.delete(row.patientId)
       }
     }
 
-    const submissions = await db.rips_submissions.toArray()
-    for (const row of submissions) {
+    for (const row of await db.rips_submissions.toArray()) {
       if (!clinicIdsMatch(row.clinicId, clinicId)) {
         await db.rips_submissions.delete(row.id)
+      }
+    }
+
+    for (const row of await db.ripsTemporales.toArray()) {
+      if (!clinicIdsMatch(row.clinicId, clinicId)) {
+        await db.ripsTemporales.delete(row.id)
+      }
+    }
+
+    for (const row of await db.electronicInvoices.toArray()) {
+      const invoiceClinic = (row as { clinicId?: string }).clinicId
+      if (invoiceClinic && !clinicIdsMatch(invoiceClinic, clinicId)) {
+        await withBackupUnlockInvoiceDelete(row.id)
+      }
+    }
+
+    for (const row of await db.rips_queue.toArray()) {
+      const queueClinic = (row as { clinicId?: string }).clinicId
+      if (queueClinic && !clinicIdsMatch(queueClinic, clinicId)) {
+        await db.rips_queue.delete(row.id!)
       }
     }
   })
 }
 
+async function withBackupUnlockInvoiceDelete(id: string): Promise<void> {
+  const { withBackupRestoreUnlock } = await import('@/db/database')
+  await withBackupRestoreUnlock(async () => {
+    await db.electronicInvoices.delete(id)
+  })
+}
+
 export async function clearClinicIsolationOnLogout(): Promise<void> {
   await wipeLocalClinicalData()
+  await deleteAndResetDentalDatabase()
   try {
     localStorage.removeItem(LAST_CLINIC_KEY)
+    localStorage.removeItem(LAST_DB_KEY)
   } catch {
     /* ignore */
   }
