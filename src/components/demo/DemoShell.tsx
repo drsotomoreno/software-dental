@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Info } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Info, Sparkles } from 'lucide-react'
 import { DEMO_STEPS, getDemoStep } from '@/constants/demoSteps'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import { userNeedsWelcome } from '@/utils/subscriptionAccess'
+import { PAID_PLANS } from '../../../shared/subscriptionPlans.js'
 import { DemoStepChiefComplaint } from './DemoStepChiefComplaint'
 import { DemoStepConsentSignature } from './DemoStepConsentSignature'
 import { DemoStepDiagnosis } from './DemoStepDiagnosis'
@@ -244,6 +245,110 @@ export function DemoShell() {
           </div>
         </section>
       </div>
+
+      <section
+        id="demo-tarifas-pionero"
+        className="border-t border-cyan-200 bg-gradient-to-b from-cyan-50 via-white to-slate-50"
+      >
+        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:py-14">
+          <div className="relative overflow-hidden rounded-3xl border-2 border-amber-300 bg-gradient-to-br from-amber-400 via-orange-300 to-cyan-400 p-1 shadow-xl shadow-amber-200/60">
+            <div className="rounded-[1.35rem] bg-slate-950 px-6 py-8 text-center sm:px-10 sm:py-10">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-400 text-slate-950">
+                <Sparkles className="h-6 w-6" aria-hidden />
+              </div>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-300">
+                Oferta de pionero · cupos limitados
+              </p>
+              <h2 className="mx-auto mt-3 max-w-4xl text-2xl font-extrabold leading-snug text-white sm:text-3xl lg:text-4xl">
+                ¡Te gustó <span className="text-amber-300">mihistoriadental</span>! No pierdas la
+                oportunidad de asegurar tu tarifa preferencial de pionero: un beneficio exclusivo
+                para los primeros 100 especialistas en dar el salto digital con nosotros.
+              </h2>
+              <p className="mx-auto mt-4 max-w-2xl text-sm text-slate-300 sm:text-base">
+                Elige el plan que mejor se adapte a tu consulta y activa tu acceso con la tarifa de
+                lanzamiento.
+              </p>
+              <Link
+                to={needsPlan ? '/welcome-trial' : '/registro'}
+                className="mt-6 inline-flex items-center justify-center rounded-xl bg-amber-400 px-6 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-amber-500/30 transition hover:bg-amber-300"
+              >
+                Asegurar mi tarifa de pionero
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-10">
+            <h3 className="text-center text-2xl font-bold text-slate-900">
+              Tarifas preferenciales de pionero
+            </h3>
+            <p className="mx-auto mt-2 max-w-2xl text-center text-sm text-slate-600 sm:text-base">
+              Precios en pesos colombianos. Empieza con lo esencial y escala cuando tu consulta lo
+              necesite.
+            </p>
+
+            <div className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+              {PAID_PLANS.map((plan) => (
+                <article
+                  key={plan.id}
+                  className={`relative flex flex-col rounded-2xl border p-6 shadow-sm ${
+                    plan.featured
+                      ? 'border-dental-800 bg-dental-800 text-white shadow-dental-900/20 xl:-translate-y-2'
+                      : 'border-slate-200 bg-white text-slate-800'
+                  }`}
+                >
+                  {plan.featured ? (
+                    <p className="mb-4 inline-flex self-start rounded-full bg-amber-400 px-3 py-1 text-xs font-semibold text-dental-950">
+                      ★ El más elegido
+                    </p>
+                  ) : null}
+                  <h4 className="text-xl font-bold">{plan.name}</h4>
+                  <p
+                    className={`mt-1 text-sm ${plan.featured ? 'text-dental-100' : 'text-slate-600'}`}
+                  >
+                    {plan.blurb}
+                  </p>
+                  <p className="mt-5 flex items-end gap-1">
+                    <span className="text-3xl font-bold tracking-tight">{plan.priceLabel}</span>
+                    {plan.period ? (
+                      <span
+                        className={`mb-1 text-sm font-medium ${
+                          plan.featured ? 'text-dental-100' : 'text-slate-500'
+                        }`}
+                      >
+                        {plan.period}
+                      </span>
+                    ) : null}
+                  </p>
+                  <ul className="mt-6 flex-1 space-y-2.5 text-sm">
+                    {plan.features.map((feature) => (
+                      <li key={feature} className="flex gap-2">
+                        <span
+                          className={`mt-0.5 ${plan.featured ? 'text-sky-200' : 'text-dental-600'}`}
+                        >
+                          ✓
+                        </span>
+                        <span className={plan.featured ? 'text-dental-50' : 'text-slate-600'}>
+                          {feature}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <Link
+                    to={needsPlan ? '/welcome-trial' : '/registro'}
+                    className={`mt-8 inline-flex w-full items-center justify-center rounded-lg px-4 py-2.5 text-sm font-medium transition ${
+                      plan.featured
+                        ? 'bg-white text-dental-800 hover:bg-dental-50'
+                        : 'bg-dental-600 text-white hover:bg-dental-700'
+                    }`}
+                  >
+                    {plan.cta}
+                  </Link>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }
