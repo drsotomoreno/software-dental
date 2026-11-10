@@ -4,6 +4,7 @@ import {
   sessionHintFromRequest,
 } from '../services/subscriptionAuthStore.js'
 import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
+import { countDistinctClinicalPatients, TRIAL_MAX_PATIENTS } from '../../shared/clinicalAccess.js'
 import {
   findClinicAttachment,
   pullClinicSnapshot,
@@ -58,6 +59,55 @@ async function requireClinicSession(req, res) {
   return { session, ...scope }
 }
 
+function denyWithoutClinicalAccess(auth, res) {
+  const tier = auth.session.accessTier
+  if (tier === 'full' || tier === 'trial') return false
+  res.status(402).json({
+    success: false,
+    ok: false,
+    error:
+      'Sin suscripción pagada no puede consultar ni guardar historias clínicas. Active la prueba gratuita o adquiera un plan.',
+    requiresSubscription: true,
+    accessTier: 'none',
+  })
+  return true
+}
+
+function denyTrialOverflow(auth, body, res) {
+  if (auth.session.accessTier !== 'trial') return false
+  if (countDistinctClinicalPatients(body) <= TRIAL_MAX_PATIENTS) return false
+  res.status(403).json({
+    success: false,
+    ok: false,
+    error: 'La prueba gratuita permite un solo paciente. Adquiera un plan para gestionar más historias.',
+    accessTier: 'trial',
+  })
+  return true
+}
+
+function capTrialSnapshot(tier, snapshot) {
+  if (tier !== 'trial' || !snapshot || !Array.isArray(snapshot.patients) || snapshot.patients.length <= 1) {
+    return snapshot
+  }
+  const patients = snapshot.patients.slice(0, TRIAL_MAX_PATIENTS)
+  const allowedId = String(patients[0]?.id ?? '')
+  const keep = (row) => {
+    const id = row?.patientId ?? row?.patientSyncId ?? row?.patient_id
+    return id != null && id !== '' && String(id) === allowedId
+  }
+  const filter = (list) => (Array.isArray(list) ? list.filter(keep) : list)
+  return {
+    ...snapshot,
+    patients,
+    appointments: filter(snapshot.appointments),
+    clinicalRecords: filter(snapshot.clinicalRecords),
+    odontograms: filter(snapshot.odontograms),
+    diagnosticAids: filter(snapshot.diagnosticAids),
+    attachments: filter(snapshot.attachments),
+    drafts: filter(snapshot.drafts),
+  }
+}
+
 function snapshotResponse(auth, snapshot) {
   return {
     success: true,
@@ -80,10 +130,14 @@ router.get('/clinical', async (req, res) => {
   try {
     const auth = await requireClinicSession(req, res)
     if (!auth) return
+    if (denyWithoutClinicalAccess(auth, res)) return
 
     const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
     const includeBlobs = booleanQuery(req.query?.includeBlobs ?? req.query?.full, false)
-    const snapshot = await pullClinicSnapshot(auth.canonical, aliases, { includeBlobs })
+    const snapshot = capTrialSnapshot(
+      auth.session.accessTier,
+      await pullClinicSnapshot(auth.canonical, aliases, { includeBlobs }),
+    )
     return res.json({
       ...snapshotResponse(auth, snapshot),
       patients: snapshot.patients,
@@ -99,10 +153,14 @@ router.get('/pull', async (req, res) => {
   try {
     const auth = await requireClinicSession(req, res)
     if (!auth) return
+    if (denyWithoutClinicalAccess(auth, res)) return
 
     const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
     const includeBlobs = booleanQuery(req.query?.includeBlobs ?? req.query?.full, true)
-    const snapshot = await pullClinicSnapshot(auth.canonical, aliases, { includeBlobs })
+    const snapshot = capTrialSnapshot(
+      auth.session.accessTier,
+      await pullClinicSnapshot(auth.canonical, aliases, { includeBlobs }),
+    )
     return res.json(snapshotResponse(auth, snapshot))
   } catch (error) {
     console.error('[Sync] Error en GET /api/sync/pull:', error)
@@ -118,8 +176,10 @@ router.post('/clinical', async (req, res) => {
   try {
     const auth = await requireClinicSession(req, res)
     if (!auth) return
+    if (denyWithoutClinicalAccess(auth, res)) return
 
     const body = req.body && typeof req.body === 'object' ? req.body : {}
+    if (denyTrialOverflow(auth, body, res)) return
     const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
     const hasExtended =
       Array.isArray(body.clinicalRecords) ||
@@ -166,8 +226,10 @@ router.post('/push', async (req, res) => {
   try {
     const auth = await requireClinicSession(req, res)
     if (!auth) return
+    if (denyWithoutClinicalAccess(auth, res)) return
 
     const body = req.body && typeof req.body === 'object' ? req.body : {}
+    if (denyTrialOverflow(auth, body, res)) return
     const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
     const result = await pushClinicSnapshot(auth.canonical, body, aliases)
     return res.json({
@@ -188,6 +250,7 @@ router.get('/attachment', async (req, res) => {
   try {
     const auth = await requireClinicSession(req, res)
     if (!auth) return
+    if (denyWithoutClinicalAccess(auth, res)) return
 
     const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
     const query = req.query && typeof req.query === 'object' ? req.query : {}
@@ -227,6 +290,7 @@ router.get('/files/:fileId', async (req, res) => {
   try {
     const auth = await requireClinicSession(req, res)
     if (!auth) return
+    if (denyWithoutClinicalAccess(auth, res)) return
 
     const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
     const query = {

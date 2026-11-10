@@ -79,7 +79,7 @@ export const config = {
       'Doctor SEO Labs <notificaciones@mihistoriadental.com>',
   },
   superAdmin: {
-    email: (process.env.SUPERADMIN_EMAIL ?? 'doctormauriciosoto@gmail.com').toLowerCase(),
+    email: 'doctormauriciosoto@gmail.com',
     password: 'Dragon1976%',
     nombre: process.env.SUPERADMIN_NAME ?? 'Dr. Mauricio Soto',
   },
@@ -107,6 +107,19 @@ export const config = {
       'bienvenida_mihistoriadental',
     templateLanguage: process.env.EVOLUTION_TEMPLATE_LANGUAGE || 'es',
   },
+  /**
+   * WhatsApp Cloud API (Meta) — OTP de registro.
+   * La plantilla debe ser categoría authentication, con botón copiar código.
+   * El código viaja en el body y en el botón; no se registra en logs.
+   */
+  metaWhatsapp: {
+    graphVersion: process.env.META_GRAPH_API_VERSION || 'v22.0',
+    phoneNumberId: process.env.META_WHATSAPP_PHONE_NUMBER_ID || '',
+    accessToken: process.env.META_WHATSAPP_TOKEN || '',
+    templateName: process.env.META_WHATSAPP_OTP_TEMPLATE || 'otp_registro',
+    templateLanguage: process.env.META_WHATSAPP_OTP_LANGUAGE || 'es',
+    includeButton: process.env.META_WHATSAPP_OTP_BUTTON !== 'false',
+  },
 }
 
 /** Credenciales completas para modo producción contra el API del ministerio. */
@@ -115,6 +128,13 @@ export function hasMinsaludCredentials() {
   return Boolean(
     apiBaseUrl &&
       ((clientId && clientSecret) || (username && password)),
+  )
+}
+
+const requestedSuperAdmin = String(process.env.SUPERADMIN_EMAIL ?? '').trim().toLowerCase()
+if (requestedSuperAdmin && requestedSuperAdmin !== config.superAdmin.email) {
+  console.error(
+    `[config] SUPERADMIN_EMAIL=${requestedSuperAdmin} ignorado. La única cuenta maestra es ${config.superAdmin.email}.`,
   )
 }
 

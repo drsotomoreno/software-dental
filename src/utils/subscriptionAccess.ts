@@ -1,27 +1,28 @@
-import { isApiSuperAdmin, type ApiSubscriptionUser } from '@/services/apiAuthService'
+import type { ApiSubscriptionUser } from '@/services/apiAuthService'
+import {
+  clinicalAccessTier,
+  type ClinicalAccessTier,
+} from '../../shared/clinicalAccess.js'
+
+export function accessTier(user?: ApiSubscriptionUser | null): ClinicalAccessTier {
+  return clinicalAccessTier(user)
+}
 
 export function isSubscriptionCurrent(user?: ApiSubscriptionUser | null): boolean {
-  if (!user) return false
-  if (isApiSuperAdmin(user) || user.estado_pago === 'exento') return true
-  if (user.estado_pago !== 'activo' && user.estado_pago !== 'prueba') return false
-  if (!user.fecha_vencimiento) return user.estado_pago === 'activo'
-  return new Date(user.fecha_vencimiento).getTime() > Date.now()
+  return accessTier(user) !== 'none'
 }
 
 export function userNeedsWelcome(user?: ApiSubscriptionUser | null): boolean {
   if (!user) return false
-  if (isApiSuperAdmin(user) || user.estado_pago === 'exento') return false
-  return !isSubscriptionCurrent(user)
+  return accessTier(user) === 'none'
 }
 
-/** Destino post-login/registro: sin plan solo demo; con plan el consultorio. */
+/** Destino post-login/registro: sin plan solo demo; con prueba o plan el consultorio. */
 export function postAuthDestination(user?: ApiSubscriptionUser | null, fallback = '/app'): string {
   if (userNeedsWelcome(user)) return '/demo'
   return fallback
 }
 
 export function userHasTrialLimits(user?: ApiSubscriptionUser | null): boolean {
-  if (!user || isApiSuperAdmin(user)) return false
-  if (user.trialLimited === true) return isSubscriptionCurrent(user)
-  return user.estado_pago === 'prueba' && isSubscriptionCurrent(user)
+  return accessTier(user) === 'trial'
 }

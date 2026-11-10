@@ -5,8 +5,8 @@ import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { LandingPage } from '@/pages/LandingPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
-import { clearStoredApiAuth, getStoredApiAuth, isApiSuperAdmin } from '@/services/apiAuthService'
-import { userNeedsWelcome } from '@/utils/subscriptionAccess'
+import { clearStoredApiAuth, getStoredApiAuth } from '@/services/apiAuthService'
+import { accessTier } from '@/utils/subscriptionAccess'
 
 function normalizePath(pathname: string) {
   return pathname.replace(/\/+$/, '') || '/'
@@ -56,16 +56,10 @@ export function ProtectedRoute() {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }
 
-  // Sin plan/prueba: solo demo (pública) o pantallas para activar/comprar.
-  // Nunca historia clínica completa (/app, pacientes, etc.).
-  const unpaidAllowed =
-    path === '/welcome-trial' ||
-    path === '/suscripcion'
-  if (
-    userNeedsWelcome(apiAuth?.user) &&
-    !unpaidAllowed &&
-    !isApiSuperAdmin(apiAuth?.user)
-  ) {
+  // Sin prueba vigente ni plan pagado: no hay historias clínicas.
+  // El estado guardado en el navegador no abre el consultorio por sí solo.
+  const unpaidAllowed = path === '/welcome-trial' || path === '/suscripcion'
+  if (accessTier(apiAuth?.user) === 'none' && !unpaidAllowed) {
     return <Navigate to="/demo" replace />
   }
 

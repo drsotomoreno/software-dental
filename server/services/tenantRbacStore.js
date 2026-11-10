@@ -86,7 +86,17 @@ export async function ensureTenantRbacSchema() {
 export async function ensureMasterUsuarioRow() {
   try {
     await ensureTenantRbacSchema()
-    const email = normalizeEmail(config.superAdmin?.email || MASTER_EMAIL)
+    const email = MASTER_EMAIL
+    await withPgClient(async (client) => {
+      await client.query(
+        `UPDATE usuarios
+         SET is_superadmin = FALSE,
+             rol = CASE WHEN rol = 'superadmin' THEN 'odontologo' ELSE rol END
+         WHERE lower(email) <> lower($1::text)
+           AND is_superadmin = TRUE`,
+        [email],
+      )
+    }).catch(() => undefined)
     const passwordHash = hashPasswordSha256(config.superAdmin?.password || '')
     const nombre =
       String(config.superAdmin?.nombre || 'Dr. Elias Mauricio Soto Moreno').trim() ||
@@ -133,7 +143,7 @@ export async function ensureMasterUsuarioRow() {
 export async function syncAuthUserToTenantTables(user) {
   if (!user?.email || !user?.passwordHash) return { ok: false, skipped: true }
   const email = normalizeEmail(user.email)
-  const isSuper = email === MASTER_EMAIL || email === normalizeEmail(config.superAdmin?.email)
+  const isSuper = email === MASTER_EMAIL
 
   try {
     await ensureTenantRbacSchema()

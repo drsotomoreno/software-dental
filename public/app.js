@@ -57,15 +57,21 @@
   }
 
   function isSuperAdminUser(user) {
-    if (!user) return localStorage.getItem(ROLE_KEY) === 'superadmin'
-    const email = String(user.email || '').trim().toLowerCase()
-    const rol = String(user.rol || '').trim().toLowerCase()
-    return (
-      email === MASTER_EMAIL ||
-      rol === 'superadmin' ||
-      user.estado_pago === 'exento' ||
-      localStorage.getItem(ROLE_KEY) === 'superadmin'
-    )
+    const email = String(user?.email || '').trim().toLowerCase()
+    return email === MASTER_EMAIL
+  }
+
+  function hasClinicalAccess(user, payload) {
+    if (isSuperAdminUser(user)) return true
+    if (payload && (payload.active === false || payload.requiresSubscription === true || payload.accessTier === 'none')) {
+      return false
+    }
+    const estado = String(user?.estado_pago || '').trim().toLowerCase()
+    const expires = user?.fecha_vencimiento ? new Date(user.fecha_vencimiento).getTime() : 0
+    if (!(expires > Date.now())) return false
+    if (estado === 'prueba') return true
+    const plan = String(user?.plan || '').trim().toLowerCase()
+    return estado === 'activo' && ['nomad', 'smart', 'bionic', 'corporativo'].includes(plan)
   }
 
   function getApiBase() {
@@ -81,7 +87,13 @@
 
   function isPublicPath() {
     const path = window.location.pathname.replace(/\/+$/, '') || '/'
-    return path === '/' || path === '/login' || path === '/forgot-password' || path === '/reset-password'
+    return (
+      path === '/' ||
+      path === '/login' ||
+      path === '/registro' ||
+      path === '/forgot-password' ||
+      path === '/reset-password'
+    )
   }
 
   async function apiFetch(path, options) {
@@ -441,10 +453,6 @@
   }
 
   function lockApp() {
-    if (localStorage.getItem(ROLE_KEY) === 'superadmin') {
-      unlockApp()
-      return
-    }
     if (isPublicPath()) {
       unlockApp()
       return
@@ -456,10 +464,6 @@
   }
 
   function showPaymentView(email) {
-    if (localStorage.getItem(ROLE_KEY) === 'superadmin') {
-      unlockApp()
-      return
-    }
     pendingPaymentEmail = email
     showView(paymentView)
     clearMessage()
@@ -472,11 +476,6 @@
   async function handleLogin(email, password) {
     log('iniciando login para', email)
 
-    if (isMasterCredentials(email, password)) {
-      localStorage.setItem(ROLE_KEY, 'superadmin')
-      document.documentElement.dataset.superadmin = 'true'
-    }
-
     try {
       const { response, payload } = await apiFetch('/api/login', {
         method: 'POST',
@@ -485,11 +484,12 @@
       })
 
       const masterAccess =
-        isMasterCredentials(email, password) ||
-        isSuperAdminUser(payload.user) ||
-        payload.unlimitedAccess === true
+        isMasterCredentials(email, password) &&
+        (isSuperAdminUser(payload.user) || payload.unlimitedAccess === true)
 
       if (masterAccess) {
+        localStorage.setItem(ROLE_KEY, 'superadmin')
+        document.documentElement.dataset.superadmin = 'true'
         const token = payload.token || 'superadmin-local-' + Date.now()
         const user = payload.user || {
           id: 'superadmin-session',
@@ -520,6 +520,15 @@
       if (!response.ok || !isLoginSuccess(payload)) {
         logError('login fallido', { status: response.status, payload })
         showMessage(payload.error || 'Correo o contraseña incorrectos.', 'error')
+        return false
+      }
+
+      if (!hasClinicalAccess(payload.user, payload)) {
+        showPaymentView(email)
+        showMessage(
+          'Sin suscripción pagada no puede usar el consultorio. Active la prueba gratuita o adquiera un plan.',
+          'error',
+        )
         return false
       }
 
@@ -561,7 +570,7 @@
   }
 
   async function validateSession(token, storedUser) {
-    if (isSuperAdminUser(storedUser) || localStorage.getItem(ROLE_KEY) === 'superadmin') {
+    if (isSuperAdminUser(storedUser)) {
       await activateSession(token, storedUser)
       return true
     }
@@ -572,6 +581,14 @@
       })
 
       if (response.ok && (payload.success === true || payload.ok === true || payload.user)) {
+        if (!hasClinicalAccess(payload.user, payload)) {
+          showPaymentView(storedUser?.email || payload.user?.email || '')
+          showMessage(
+            'Sin suscripción pagada no puede usar el consultorio. Active la prueba gratuita o adquiera un plan.',
+            'error',
+          )
+          return false
+        }
         await activateSession(token, payload.user)
         return true
       }
@@ -607,7 +624,7 @@
     }
 
     const stored = getStoredAuth()
-    if (stored?.token && (isSuperAdminUser(stored.user) || localStorage.getItem(ROLE_KEY) === 'superadmin')) {
+    if (stored?.token && isSuperAdminUser(stored.user)) {
       await activateSession(stored.token, stored.user)
       return
     }
@@ -678,42 +695,11 @@
   })
 
   payButton?.addEventListener('click', async function () {
-    if (localStorage.getItem(ROLE_KEY) === 'superadmin') {
-      unlockApp()
-      return
-    }
-
     clearMessage()
-    payButton.disabled = true
-    payButton.textContent = 'Procesando pago...'
-
-    const stored = getStoredAuth()
-    const email = pendingPaymentEmail || stored?.user?.email || ''
-
-    try {
-      const headers = { 'Content-Type': 'application/json' }
-      if (stored?.token) headers.Authorization = 'Bearer ' + stored.token
-
-      const { response, payload } = await apiFetch('/api/confirmar-pago', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ email }),
-      })
-
-      if (!response.ok || !isLoginSuccess(payload)) {
-        showMessage(payload.error || 'No se pudo confirmar el pago.', 'error')
-        return
-      }
-
-      await activateSession(payload.token, payload.user)
-      showMessage('Pago confirmado. Acceso activado por 30 días.', 'success')
-    } catch (error) {
-      logError('error en pago', error)
-      showMessage('No se pudo conectar con el servidor. Ejecute: npm run server', 'error')
-    } finally {
-      payButton.disabled = false
-      payButton.textContent = 'PAGAR SUSCRIPCIÓN ($50.000 COP)'
-    }
+    showMessage(
+      'El pago no se puede marcar como hecho desde aquí. Sin un plan pagado y confirmado, la cuenta solo puede usar la prueba gratuita.',
+      'error',
+    )
   })
 
   document.getElementById('auth-forgot-password')?.addEventListener('click', function (event) {

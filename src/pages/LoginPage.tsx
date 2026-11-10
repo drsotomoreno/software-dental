@@ -152,7 +152,7 @@ export function LoginPage() {
     const registerPassword = password.trim()
     const phoneCheck = validateColombiaMobile(phoneNumber)
     try {
-      const { response, payload } = await postJson('/api/auth/register/verify', {
+      const { response, payload } = await postJson('/api/auth/register/whatsapp/verify', {
         email: registerEmail,
         code: code.replace(/\D/g, ''),
         password: registerPassword,
@@ -221,7 +221,7 @@ export function LoginPage() {
     mode === 'register'
       ? 'Registro express — sin plan entra a la versión demo'
       : mode === 'verify'
-        ? `Ingrese el código enviado a ${email.trim().toLowerCase() || 'su correo'}`
+        ? `Ingrese el código enviado por WhatsApp al ${phoneNumber.trim() || 'celular'}`
         : 'Acceso seguro — cédula y contraseña de su clínica'
 
   return (
@@ -341,8 +341,8 @@ export function LoginPage() {
                 placeholder="300 123 4567"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Indicativo +57. La bienvenida por WhatsApp se envía en segundo plano tras crear la
-                cuenta.
+                Indicativo +57. Le enviaremos un código de 6 dígitos por WhatsApp para confirmar que
+                el celular es real.
               </p>
             </div>
             <div>

@@ -1,10 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import {
-  authenticateUser,
   getStoredSessionToken,
   logoutSession,
   refreshSession,
-  resolveAuthUser,
   seedUserCredentials,
 } from '@/services/authService'
 import {
@@ -28,7 +26,7 @@ import type { AuthUser } from '@/types/auth'
 import type { Permission } from '@/utils/permissions'
 import { canManageClinicTeam, normalizeRole } from '@/utils/permissions'
 import type { UserRole } from '@/types/user'
-import { userHasTrialLimits, userNeedsWelcome } from '@/utils/subscriptionAccess'
+import { accessTier, userHasTrialLimits, userNeedsWelcome } from '@/utils/subscriptionAccess'
 import { useClinicalPullSync } from '@/hooks/useClinicalPullSync'
 import { recoverMissingProfessionalDocument } from '@/services/professionalDocumentMemory'
 
@@ -57,7 +55,7 @@ async function sessionUserFromApi(apiUser: ApiSubscriptionUser, token: string) {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  useClinicalPullSync(Boolean(user) && !isLoading)
+  useClinicalPullSync(Boolean(user) && !isLoading && accessTier(getStoredApiAuth()?.user) !== 'none')
 
   const loadSession = useCallback(async () => {
     let apiAuth = getStoredApiAuth()
@@ -101,14 +99,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return
         }
         setStoredApiAuth(apiAuth.token, validation.user)
-        await pullCompleteClinicOnLogin()
+        if (accessTier(validation.user) !== 'none') {
+          await pullCompleteClinicOnLogin()
+        }
         setUser(await sessionUserFromApi(validation.user, apiAuth.token))
         setIsLoading(false)
         return
       }
       if (validation.requiresPayment && validation.user) {
         setStoredApiAuth(apiAuth.token, validation.user)
-        await pullCompleteClinicOnLogin()
         setUser(await sessionUserFromApi(validation.user, apiAuth.token))
         setIsLoading(false)
         return
@@ -116,9 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearStoredApiAuth()
     }
 
-    const token = await getStoredSessionToken()
-    const authUser = await resolveAuthUser(token)
-    setUser(authUser ? await recoverMissingProfessionalDocument(authUser) : null)
+    setUser(null)
     setIsLoading(false)
   }, [])
 
@@ -145,7 +142,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setStoredApiAuth(token, sessionUser)
       const { ensureDentalDatabaseForAuth } = await import('@/db/database')
       await ensureDentalDatabaseForAuth(sessionUser.id, sessionUser.clinicId || sessionUser.id)
-      await pullCompleteClinicOnLogin()
+      if (accessTier(sessionUser) !== 'none') {
+        await pullCompleteClinicOnLogin()
+      }
       const authUser = await sessionUserFromApi(sessionUser, token)
       try {
         await seedUserCredentials(authUser.id, passwordValue)
@@ -239,36 +238,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { ok: false as const, error: 'No se pudo conectar con el servidor.' }
     }
 
-    if (masterLogin) {
-      return { ok: false as const, error: 'No se pudo autenticar al superadministrador.' }
+    return {
+      ok: false as const,
+      error: masterLogin
+        ? 'No se pudo autenticar al superadministrador.'
+        : 'No se pudo verificar la suscripción. Sin un plan pagado solo está disponible la prueba gratuita.',
     }
-
-    const result = await authenticateUser(isEmail ? normalizedEmail : documentNumber, passwordValue)
-    if (!result) {
-      await logAuditEvent({
-        action: 'LOGIN_FAILED',
-        resourceType: 'session',
-        details: `Intento fallido: ${raw.toLowerCase()}`,
-        success: false,
-        user: null,
-      })
-      return { ok: false as const, error: 'Documento o contraseña incorrectos.' }
-    }
-
-    const authUser = await recoverMissingProfessionalDocument({
-      ...result.user,
-      sessionId: result.session.id,
-    })
-    setUser(authUser)
-
-    await logAuditEvent({
-      action: 'LOGIN_SUCCESS',
-      resourceType: 'session',
-      resourceId: result.session.id,
-      user: authUser,
-    })
-
-    return { ok: true as const }
   }, [])
 
   const refreshSessionUser = useCallback(async () => {

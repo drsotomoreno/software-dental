@@ -2,7 +2,11 @@ import { randomBytes } from 'node:crypto'
 import { Router } from 'express'
 import { config } from '../config.js'
 import { forgotPassword, resetPassword } from '../controllers/authPassword.controller.js'
-import { requestRegisterCode, verifyRegisterCode } from '../controllers/authRegister.controller.js'
+import {
+  requestRegisterCode,
+  verifyRegisterCode,
+  verifyWhatsAppRegistration,
+} from '../controllers/authRegister.controller.js'
 import { getMailSettings, updateMailSettings } from '../controllers/authMailSettings.controller.js'
 import {
   buyTitularMessagePackage,
@@ -25,7 +29,6 @@ import {
   loginSubscriptionUser,
   issueMasterSessionToken,
   MASTER_EMAIL,
-  registerSubscriptionUser,
   rememberProfessionalDocument,
   resetClinicUserPassword,
   resolveSubscriptionSession,
@@ -33,7 +36,6 @@ import {
   updateClinicUser,
   updateSubscriptionProfile,
 } from '../services/subscriptionAuthStore.js'
-import { voidSendWelcomeWhatsAppInBackground } from '../services/whatsapp.service.js'
 import {
   aislarClinica,
   soloSuperAdmin,
@@ -64,70 +66,13 @@ function masterUserPayload(user) {
 
 const router = Router()
 
-router.post('/registro', async (req, res) => {
-  try {
-    await ensureSuperAdmin()
-
-    const body = req.body && typeof req.body === 'object' ? req.body : {}
-    const email = String(body.email ?? '').trim().toLowerCase()
-    const password = String(body.password ?? '')
-    const nombre = String(body.nombre ?? '').trim() || email.split('@')[0] || 'Usuario'
-
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        ok: false,
-        error: 'Correo y contraseña son obligatorios.',
-      })
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        ok: false,
-        error: 'La contraseña debe tener al menos 6 caracteres.',
-      })
-    }
-
-    const result = await registerSubscriptionUser({
-      nombre,
-      email,
-      password,
-      phone_number: body.phone_number ?? body.phone,
-    })
-
-    if (!result.ok) {
-      return res.status(result.status).json({
-        success: false,
-        ok: false,
-        error: result.error,
-      })
-    }
-
-    const user = result.user
-    res.status(201).json({
-      success: true,
-      ok: true,
-      message: 'Registro exitoso. La bienvenida por WhatsApp se envía en segundo plano.',
-      user,
-    })
-
-    voidSendWelcomeWhatsAppInBackground({
-      userId: user?.id,
-      email: user?.email,
-      phoneNumber: user?.phone_number || user?.phone || body.phone_number || body.phone,
-      nombre: user?.nombre || nombre,
-    })
-  } catch (error) {
-    console.error('[Auth] Error en /registro:', error)
-    if (!res.headersSent) {
-      return res.status(500).json({
-        success: false,
-        ok: false,
-        error: 'No se pudo completar el registro. Intente de nuevo.',
-      })
-    }
-  }
+router.post('/registro', (_req, res) => {
+  return res.status(400).json({
+    success: false,
+    ok: false,
+    error:
+      'El registro exige un celular verificado por WhatsApp. Solicite el código de 6 dígitos en el formulario de registro.',
+  })
 })
 
 router.post('/login', async (req, res) => {
@@ -237,6 +182,8 @@ router.post('/confirmar-pago', async (req, res) => {
     const result = await confirmSubscriptionPayment({
       email,
       token: bearerToken,
+      planId: body.planId || body.plan,
+      hint: sessionHintFromRequest(req),
     })
 
     if (!result.ok) {
@@ -266,6 +213,7 @@ router.post('/auth/forgot-password', forgotPassword)
 router.post('/auth/reset-password', resetPassword)
 router.post('/auth/register/request-code', requestRegisterCode)
 router.post('/auth/register/verify', verifyRegisterCode)
+router.post('/auth/register/whatsapp/verify', verifyWhatsAppRegistration)
 router.get('/auth/mail-settings', getMailSettings)
 router.put('/auth/mail-settings', updateMailSettings)
 router.get('/subscription', getSubscriptionStatus)
@@ -562,6 +510,7 @@ router.get('/sesion', async (req, res) => {
       unlimitedAccess: session.unlimitedAccess === true,
       requiresSubscription: session.requiresSubscription === true || session.active === false,
       active: session.active !== false,
+      accessTier: session.accessTier ?? (session.active === false ? 'none' : undefined),
     })
   } catch (error) {
     console.error('[Auth] Error en /sesion:', error)

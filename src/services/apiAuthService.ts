@@ -256,9 +256,19 @@ export async function validateApiSession(token: string) {
   }
 
   const payload = await response.json()
+  const user = payload.user as ApiSubscriptionUser | undefined
+  const unpaid = payload.active === false || payload.requiresSubscription === true || payload.accessTier === 'none'
+  if (unpaid && !isApiSuperAdmin(user)) {
+    return {
+      ok: false as const,
+      requiresPayment: true,
+      user,
+      error: payload.error as string | undefined,
+    }
+  }
   return {
     ok: true as const,
-    user: payload.user as ApiSubscriptionUser,
+    user: user as ApiSubscriptionUser,
     expiresAt: payload.expiresAt as string,
     rol: payload.rol as ApiSubscriptionUser['rol'] | undefined,
   }

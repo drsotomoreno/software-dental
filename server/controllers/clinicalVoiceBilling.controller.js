@@ -61,6 +61,16 @@ export async function processDictatedEvolution(req, res, next) {
         error: 'Sesión inválida o expirada.',
       })
     }
+    if (session.accessTier !== 'full' && session.accessTier !== 'trial') {
+      return res.status(402).json({
+        success: false,
+        ok: false,
+        error:
+          'Sin suscripción pagada no puede cerrar ni guardar la evolución. Active la prueba gratuita o adquiera un plan.',
+        requiresSubscription: true,
+        accessTier: 'none',
+      })
+    }
 
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     const perfilFiscal = normalizePerfilFiscal(session.user.perfilFiscal)

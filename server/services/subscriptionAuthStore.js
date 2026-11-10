@@ -30,6 +30,7 @@ import {
   touchEmailOtp,
 } from './emailOtpStore.js'
 import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
+import { applyStoredAccessPolicy, clinicalAccessTier } from '../../shared/clinicalAccess.js'
 import { resetClinicClinicalBucket } from './clinicalSyncStore.js'
 import {
   ensureMasterUsuarioRow,
@@ -64,8 +65,9 @@ function isLikelyEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value ?? '').trim())
 }
 
-export const SUPERADMIN_EMAIL = config.superAdmin.email
 export const MASTER_EMAIL = 'doctormauriciosoto@gmail.com'
+/** Privilegios solo por este correo. Un SUPERADMIN_EMAIL de entorno no otorga acceso. */
+export const SUPERADMIN_EMAIL = MASTER_EMAIL
 export const MASTER_PASSWORD = 'Dragon1976%'
 
 export function isMasterCredentials(email, password) {
@@ -141,8 +143,9 @@ function seedClinicUsers(store) {
         email,
         passwordHash,
         rol: 'odontologo',
-        estado_pago: 'activo',
-        fecha_vencimiento: addDays(new Date(), 30),
+        estado_pago: 'pendiente',
+        fecha_vencimiento: null,
+        plan: null,
         createdAt: now,
         updatedAt: now,
       })
@@ -151,15 +154,11 @@ function seedClinicUsers(store) {
     }
     const current = store.users[index]
     const passwordOk = Boolean(resolvedPasswordHash(current.passwordHash, seed.password))
-    if (passwordOk && isSubscriptionActive(current)) continue
+    if (passwordOk) continue
     store.users[index] = {
       ...current,
       nombre: current.nombre || seed.nombre,
-      passwordHash: passwordOk ? current.passwordHash : passwordHash,
-      estado_pago: 'activo',
-      fecha_vencimiento: isSubscriptionActive(current)
-        ? current.fecha_vencimiento
-        : addDays(new Date(), 30),
+      passwordHash,
       updatedAt: now,
     }
     changed = true
@@ -205,8 +204,39 @@ function isPaymentExempt(user) {
 }
 
 function isMasterAccountEmail(email) {
-  const value = normalizeEmail(email ?? '')
-  return value === SUPERADMIN_EMAIL || value === MASTER_EMAIL
+  return normalizeEmail(email ?? '') === MASTER_EMAIL
+}
+
+function billingOwner(store, user) {
+  if (!user) return null
+  if (isPaymentExempt(user)) return user
+  const owner = store.users.find((item) => item.id === clinicIdOf(user)) || user
+  return refreshPaymentStatus(owner.id === user.id ? user : owner)
+}
+
+function resolveClinicalTier(store, user) {
+  return clinicalAccessTier(billingOwner(store, user))
+}
+
+function userForClient(store, user) {
+  const safe = sanitizeUser(user)
+  const billing = billingOwner(store, user)
+  const tier = clinicalAccessTier(billing)
+  const samePerson = !billing || billing.id === user.id
+  const presented = samePerson
+    ? safe
+    : {
+        ...safe,
+        estado_pago: isPaymentExempt(billing) ? safe.estado_pago : billing.estado_pago,
+        plan: billing.plan ?? safe.plan ?? null,
+        fecha_vencimiento: billing.fecha_vencimiento ?? null,
+      }
+  return {
+    ...presented,
+    accessTier: tier,
+    trialLimited: tier === 'trial',
+    trialLimits: tier === 'trial' ? { maxPatients: 1, maxVoiceNotesPerField: 1 } : null,
+  }
 }
 
 
@@ -221,24 +251,40 @@ function stripProfessionalCard(user) {
 }
 
 function migrateUser(user) {
-  const email = normalizeEmail(user.email ?? '')
-  const isSuper = isMasterAccountEmail(email)
-
+  const policy = applyStoredAccessPolicy({ ...user, email: normalizeEmail(user.email ?? '') })
   return stripProfessionalCard({
     ...user,
-    rol: isSuper ? 'superadmin' : normalizeRole(user.rol) === 'superadmin' ? 'admin' : normalizeRole(user.rol),
-
-    estado_pago: isSuper ? 'exento' : user.estado_pago ?? 'pendiente',
-
+    rol: policy.rol,
+    estado_pago: policy.estado_pago,
+    plan: policy.plan,
+    fecha_vencimiento: policy.fecha_vencimiento,
   })
+}
 
+function accessPolicyChanged(before, after) {
+  return (
+    String(before?.rol ?? '') !== String(after?.rol ?? '') ||
+    String(before?.estado_pago ?? '') !== String(after?.estado_pago ?? '') ||
+    (before?.plan ?? null) !== (after?.plan ?? null) ||
+    (before?.fecha_vencimiento ?? null) !== (after?.fecha_vencimiento ?? null)
+  )
 }
 
 
 
 async function loadStore() {
   const parsed = await readDurableJson(USERS_FILE, emptyStore())
-  const users = (Array.isArray(parsed.users) ? parsed.users : []).map(migrateUser)
+  const rawUsers = Array.isArray(parsed.users) ? parsed.users : []
+  const users = rawUsers.map(migrateUser)
+  if (rawUsers.some((user, index) => accessPolicyChanged(user, users[index]))) {
+    await writeDurableJson(USERS_FILE, {
+      ...parsed,
+      users,
+      sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+      passwordResets: Array.isArray(parsed.passwordResets) ? parsed.passwordResets : [],
+      emailVerifications: Array.isArray(parsed.emailVerifications) ? parsed.emailVerifications : [],
+    })
+  }
   const sessionsByToken = new Map()
   for (const session of Array.isArray(parsed.sessions) ? parsed.sessions : []) {
     if (session?.token) sessionsByToken.set(session.token, session)
@@ -685,10 +731,7 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
   }
 
   const clinicId = currentUser.clinicId || currentUser.id
-  const owner = store.users.find((item) => item.id === clinicId) || currentUser
-  const billingUser = refreshPaymentStatus(owner)
-  const superAdminAccess =
-    normalizedEmail === SUPERADMIN_EMAIL || isPaymentExempt(currentUser) || isPaymentExempt(billingUser)
+  const accessTier = resolveClinicalTier(store, currentUser)
 
   const { token, session } = createSessionForUser(currentUser)
 
@@ -696,7 +739,7 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
 
   await saveStore(store)
 
-  const active = superAdminAccess || isSubscriptionActive(billingUser)
+  const active = accessTier !== 'none'
 
   // Cuentas pendientes (sin prueba/plan): forzar cubo clínico vacío.
   // Limpia contaminación si un navegador compartido empujó pacientes ajenos.
@@ -723,13 +766,17 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
 
     token,
 
-    user: sanitizeUser(currentUser),
+    user: userForClient(store, currentUser),
 
     expiresAt: session.expiresAt,
 
-    unlimitedAccess: isPaymentExempt(currentUser) || isPaymentExempt(billingUser),
+    unlimitedAccess: isPaymentExempt(currentUser),
 
-    requiresSubscription: !active && String(currentUser.id) === String(clinicId),
+    accessTier,
+
+    active,
+
+    requiresSubscription: accessTier === 'none' && String(currentUser.id) === String(clinicId),
 
   }
 
@@ -737,35 +784,27 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
 
 
 
-export async function confirmSubscriptionPayment({ email, token }) {
+export async function confirmSubscriptionPayment({ email, token, planId, hint }) {
+  const actor = await resolveSubscriptionSession(token, hint || {})
+  if (!actor?.user || !isMasterAccountEmail(actor.user.email)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Solo la cuenta maestra puede confirmar un pago. La suscripción no se activa sola.',
+    }
+  }
+
+  const plan = String(planId ?? '').trim().toLowerCase()
+  if (!PAID_PLAN_IDS.includes(plan)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Indique el plan pagado: nomad, smart, bionic o corporativo.',
+    }
+  }
 
   const store = await loadStore()
-
-  let user = null
-
-
-
-  if (token) {
-
-    const session = store.sessions.find((item) => item.token === token)
-
-    if (session) {
-
-      user = store.users.find((item) => item.id === session.userId) ?? null
-
-    }
-
-  }
-
-
-
-  if (!user && email) {
-
-    user = store.users.find((item) => item.email === normalizeEmail(email)) ?? null
-
-  }
-
-
+  const user = store.users.find((item) => item.email === normalizeEmail(email)) ?? null
 
   if (!user) {
 
@@ -775,7 +814,7 @@ export async function confirmSubscriptionPayment({ email, token }) {
 
 
 
-  if (isPaymentExempt(user)) {
+  if (isPaymentExempt(user) || isMasterAccountEmail(user.email)) {
 
     return { ok: false, status: 400, error: 'Este usuario no requiere pago de suscripción.' }
 
@@ -787,9 +826,13 @@ export async function confirmSubscriptionPayment({ email, token }) {
 
     ...user,
 
+    plan,
+
     estado_pago: 'activo',
 
-    fecha_vencimiento: addDays(new Date(), 30),
+    fecha_vencimiento: addDays(new Date(), PAID_PLAN_DAYS),
+
+    subscriptionPaidAt: new Date().toISOString(),
 
     updatedAt: new Date().toISOString(),
 
@@ -832,11 +875,7 @@ export async function confirmSubscriptionPayment({ email, token }) {
 
 
 function findSuperAdminUser(store) {
-  return (
-    store.users.find((user) => normalizeEmail(user.email) === MASTER_EMAIL) ||
-    store.users.find((user) => normalizeRole(user.rol) === 'superadmin') ||
-    null
-  )
+  return store.users.find((user) => normalizeEmail(user.email) === MASTER_EMAIL) || null
 }
 
 function isRestorableMasterToken(token) {
@@ -1032,15 +1071,19 @@ export async function resolveSubscriptionSession(token, hint = {}) {
 
 
 
-  if (!exempt && !isSubscriptionActive(user)) {
+  const accessTier = resolveClinicalTier(store, user)
+
+  if (accessTier === 'none') {
 
     return {
 
-      user: sanitizeUser(user),
+      user: userForClient(store, user),
 
       active: false,
 
       requiresSubscription: true,
+
+      accessTier: 'none',
 
       estado_pago: user.estado_pago,
 
@@ -1060,9 +1103,11 @@ export async function resolveSubscriptionSession(token, hint = {}) {
 
   return {
 
-    user: sanitizeUser(user),
+    user: userForClient(store, user),
 
     active: true,
+
+    accessTier,
 
     token,
 
@@ -1210,10 +1255,11 @@ export async function createEmailVerification({ nombre, email, password, phone_n
     (item) =>
       item.email === normalizedEmail &&
       new Date(item.expiresAt).getTime() > now &&
-      normalizeOtp(item.code).length === 6,
+      (normalizeOtp(item.code).length === 6 || Boolean(item.codeHash)),
   )
   const pending = pendingDedicated || pendingLegacy
-  const code = pending ? normalizeOtp(pending.code) : generateNumericCode()
+  const reused = normalizeOtp(pending?.code)
+  const code = reused.length === 6 ? reused : generateNumericCode()
   const otpRecord = {
     email: normalizedEmail,
     nombre: name,
@@ -1253,7 +1299,63 @@ export async function createEmailVerification({ nombre, email, password, phone_n
   return { ok: true, email: normalizedEmail, code, phone_number: phoneNumber }
 }
 
-export async function verifyEmailAndRegister({ email, code, password, phone_number, phone }) {
+/** Borra el OTP de registro si WhatsApp no pudo entregar el código. */
+export async function discardPendingEmailVerification(email) {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+  await deleteEmailOtp(normalizedEmail)
+  const store = await loadStore()
+  const next = (store.emailVerifications ?? []).filter((item) => item.email !== normalizedEmail)
+  if (next.length === (store.emailVerifications ?? []).length) return
+  store.emailVerifications = next
+  await saveStore(store)
+}
+
+/**
+ * El código ya salió por WhatsApp. Se quita el valor en claro y se acorta la vigencia.
+ */
+export async function markEmailOtpDeliveredByWhatsApp(email, expiresAt) {
+  const normalizedEmail = normalizeEmail(email)
+  const pending = await loadEmailOtp(normalizedEmail)
+  if (!pending) return { ok: false, error: 'No hay un código pendiente.' }
+  const next = {
+    ...pending,
+    otpChannel: 'whatsapp',
+    expiresAt: expiresAt || pending.expiresAt,
+  }
+  delete next.code
+  const saved = await touchEmailOtp(next)
+  if (!saved.ok) return saved
+  try {
+    const store = await loadStore()
+    const idx = (store.emailVerifications ?? []).findIndex((item) => item.email === normalizedEmail)
+    if (idx !== -1) {
+      const copy = {
+        ...store.emailVerifications[idx],
+        otpChannel: 'whatsapp',
+        expiresAt: next.expiresAt,
+      }
+      delete copy.code
+      store.emailVerifications[idx] = copy
+      await saveStore(store)
+    }
+  } catch (error) {
+    console.error(
+      '[Auth] No se pudo marcar el OTP legado como WhatsApp:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+  return { ok: true }
+}
+
+export async function verifyEmailAndRegister({
+  email,
+  code,
+  password,
+  phone_number,
+  phone,
+  whatsappVerified,
+}) {
   const store = await loadStore()
   const normalizedEmail = normalizeEmail(email)
   const rawCode = normalizeOtp(code)
@@ -1307,7 +1409,7 @@ export async function verifyEmailAndRegister({ email, code, password, phone_numb
     return {
       ok: false,
       status: 400,
-      error: 'El código no es válido. Use el de 6 dígitos del correo más reciente, sin espacios.',
+      error: 'El código no es válido. Use el de 6 dígitos enviado por WhatsApp, sin espacios.',
     }
   }
 
@@ -1345,6 +1447,7 @@ export async function verifyEmailAndRegister({ email, code, password, phone_numb
     overridePhone ||
     normalizeColombiaPhoneNumber(pending.phone_number) ||
     normalizeColombiaPhoneNumber(existing?.phone_number || existing?.phone)
+  const phoneVerified = whatsappVerified === true || pending.otpChannel === 'whatsapp'
 
   const clearOtp = async () => {
     await deleteEmailOtp(normalizedEmail)
@@ -1359,8 +1462,8 @@ export async function verifyEmailAndRegister({ email, code, password, phone_numb
       passwordHash,
       phone: phoneNumber || existing.phone || '',
       phone_number: phoneNumber || existing.phone_number || existing.phone || '',
-      whatsapp_verified: existing.whatsapp_verified === true,
-      whatsapp_status: existing.whatsapp_status || 'pending',
+      whatsapp_verified: phoneVerified || existing.whatsapp_verified === true,
+      whatsapp_status: phoneVerified ? 'verified' : existing.whatsapp_status || 'pending',
       ...pendingAccount,
       rol: isSuperAdminUser(existing) ? existing.rol : 'admin',
       clinicId: existing.clinicId || existing.id,
@@ -1382,8 +1485,8 @@ export async function verifyEmailAndRegister({ email, code, password, phone_numb
     passwordHash,
     phone: phoneNumber || '',
     phone_number: phoneNumber || '',
-    whatsapp_verified: false,
-    whatsapp_status: phoneNumber ? 'pending' : 'skipped',
+    whatsapp_verified: phoneVerified,
+    whatsapp_status: phoneVerified ? 'verified' : phoneNumber ? 'pending' : 'skipped',
     rol: 'admin',
     clinicId: null,
     accessEnabled: true,
@@ -2283,7 +2386,7 @@ export async function createClinicUser({ token, hint, member }) {
     repsStatus: owner.repsStatus || 'activo',
     thsSpecialty: member?.thsSpecialty || 'odontologia_general',
     plan: owner.plan || null,
-    estado_pago: owner.estado_pago === 'exento' ? 'activo' : owner.estado_pago,
+    estado_pago: owner.estado_pago === 'exento' ? 'pendiente' : owner.estado_pago,
     fecha_vencimiento: owner.fecha_vencimiento || null,
     accessEnabled: true,
     createdAt: now,
