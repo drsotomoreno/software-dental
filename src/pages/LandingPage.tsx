@@ -13,46 +13,90 @@ import {
 import { APP_SHORT_NAME } from '@/constants/branding'
 import { PAID_PLANS } from '../../shared/subscriptionPlans.js'
 
-const FEATURES: Array<{ title: string; text: string; icon: LucideIcon }> = [
+type FeatureTone = 'clinical' | 'innovation' | 'admin' | 'ops' | 'infra' | 'comms'
+
+const FEATURE_TONES: Record<FeatureTone, { card: string; icon: string }> = {
+  clinical: {
+    card: 'border-blue-100 bg-blue-50/50 hover:border-blue-300',
+    icon: 'bg-blue-100 text-blue-600',
+  },
+  innovation: {
+    card: 'border-emerald-200 bg-emerald-50/60 hover:border-emerald-400',
+    icon: 'bg-emerald-100 text-emerald-600',
+  },
+  admin: {
+    card: 'border-indigo-100 bg-indigo-50/50 hover:border-indigo-300',
+    icon: 'bg-indigo-100 text-indigo-600',
+  },
+  ops: {
+    card: 'border-amber-100 bg-amber-50/50 hover:border-amber-300',
+    icon: 'bg-amber-100 text-amber-600',
+  },
+  infra: {
+    card: 'border-cyan-100 bg-cyan-50/50 hover:border-cyan-300',
+    icon: 'bg-cyan-100 text-cyan-600',
+  },
+  comms: {
+    card: 'border-emerald-100 bg-emerald-50/50 hover:border-emerald-300',
+    icon: 'bg-emerald-100 text-emerald-600',
+  },
+}
+
+const FEATURES: Array<{
+  title: string
+  text: string
+  icon: LucideIcon
+  tone: FeatureTone
+  featured?: boolean
+}> = [
   {
     title: 'Odontograma Digital',
     text: 'Odontograma interactivo para registrar el estado dental. Claro, rápido y sin papel.',
     icon: Smile,
+    tone: 'clinical',
   },
   {
     title: 'IA que Escucha',
     text: 'Activa la escucha inteligente. La IA transcribe los hallazgos y diligencia por ti.',
     icon: Mic,
+    tone: 'innovation',
+    featured: true,
   },
   {
     title: 'Historia Clínica',
     text: 'Anamnesis, plan de tratamiento y evoluciones que cumplen estándares colombianos.',
     icon: Stethoscope,
+    tone: 'clinical',
   },
   {
     title: 'RIPS Resolución 948',
     text: 'Genera archivos RIPS automáticamente. Sin reingreso de datos ni errores de códigos.',
     icon: FileJson,
+    tone: 'admin',
   },
   {
     title: 'Facturación DIAN',
     text: 'Factura electrónica integrada. Genera la factura directamente desde la atención.',
     icon: Receipt,
+    tone: 'admin',
   },
   {
     title: 'Agenda Inteligente',
     text: 'Programa citas, tratamientos y maneja la vista por profesional y por silla.',
     icon: CalendarDays,
+    tone: 'ops',
   },
   {
     title: 'Historia Clínica en la Nube',
     text: 'Información encriptada. Cumple regulaciones de privacidad y Res. 948 actualizada.',
     icon: Lock,
+    tone: 'infra',
   },
   {
     title: 'WhatsApp Integrado',
     text: 'Envía recordatorios automáticos al WhatsApp del paciente. Reduce el ausentismo.',
     icon: MessageCircle,
+    tone: 'comms',
   },
 ]
 
@@ -124,24 +168,34 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-20">
-        <h2 className="text-center text-3xl font-bold text-slate-900">¿Qué incluye?</h2>
-        <p className="mx-auto mt-3 max-w-2xl text-center text-slate-600">
-          Todo lo que tu consulta necesita para atender, documentar y facturar en un solo flujo.
-        </p>
-        <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="mx-auto max-w-7xl px-4 py-16">
+        <div className="mb-12 text-center">
+          <h2 className="mb-3 text-3xl font-bold text-slate-900">¿Qué incluye?</h2>
+          <p className="mx-auto max-w-2xl text-slate-600">
+            Todo lo que tu consulta necesita para atender, documentar y facturar en un solo flujo.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
           {FEATURES.map((feature) => {
             const Icon = feature.icon
+            const tone = FEATURE_TONES[feature.tone]
             return (
               <article
                 key={feature.title}
-                className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+                className={`relative rounded-2xl border p-6 transition-all duration-300 hover:shadow-md ${tone.card}`}
               >
-                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-dental-50 text-dental-700">
-                  <Icon className="h-5 w-5" aria-hidden />
+                {feature.featured ? (
+                  <span className="absolute -top-3 right-4 rounded-full bg-emerald-600 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                    Destacado
+                  </span>
+                ) : null}
+                <div
+                  className={`mb-4 flex h-12 w-12 items-center justify-center rounded-xl ${tone.icon}`}
+                >
+                  <Icon className="h-6 w-6" aria-hidden />
                 </div>
-                <h3 className="font-semibold text-slate-900">{feature.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-slate-600">{feature.text}</p>
+                <h3 className="mb-2 text-lg font-semibold text-slate-900">{feature.title}</h3>
+                <p className="text-sm leading-relaxed text-slate-600">{feature.text}</p>
               </article>
             )
           })}
