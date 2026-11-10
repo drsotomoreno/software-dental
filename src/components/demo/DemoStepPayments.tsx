@@ -1,7 +1,12 @@
-import { useState } from 'react'
-import { FileText, Receipt, Wallet } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ExternalLink, FileText, Printer, Receipt, Wallet, X } from 'lucide-react'
 import { formatCurrency } from '@/utils/crypto'
-import { openDemoPaymentDocument } from './buildDemoPaymentDocuments'
+import { generateDianQrDataUrl } from '@/utils/thermalInvoicePrint'
+import {
+  buildDemoPaymentDocumentHtml,
+  openDemoPaymentDocument,
+  type DemoPaymentDocumentKind,
+} from './buildDemoPaymentDocuments'
 import {
   demoBudgetBalance,
   demoTreatmentTotal,
@@ -27,8 +32,45 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
   const [note, setNote] = useState(formData.payment?.note ?? '')
   const [error, setError] = useState('')
   const [docMessage, setDocMessage] = useState('')
+  const [previewKind, setPreviewKind] = useState<DemoPaymentDocumentKind | null>(null)
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
 
   const canGenerateDocuments = Boolean(formData.payment && formData.treatmentRow)
+
+  useEffect(() => {
+    if (previewKind !== 'fev' || !formData.payment || !formData.treatmentRow) {
+      setQrDataUrl(null)
+      return
+    }
+    let cancelled = false
+    const seed = `MHD-DEMO-${formData.payment.amount}-${formData.treatmentRow.cupsCode}`
+    // CUFE demo estable para el QR (solo visualización).
+    const fakeCufe = Array.from(seed)
+      .reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0)
+      .toString(16)
+      .padStart(8, '0')
+      .repeat(12)
+      .slice(0, 96)
+
+    generateDianQrDataUrl(fakeCufe)
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url)
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [previewKind, formData.payment, formData.treatmentRow])
+
+  const previewHtml = useMemo(() => {
+    if (!previewKind || !formData.payment || !formData.treatmentRow) return ''
+    return buildDemoPaymentDocumentHtml(formData, previewKind, {
+      qrDataUrl: previewKind === 'fev' ? qrDataUrl : null,
+    })
+  }, [previewKind, formData, qrDataUrl])
 
   const handleRegister = () => {
     if (!budget) {
@@ -46,22 +88,40 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
     }
     onChange({ amount: value, method, note: note.trim() })
     setError('')
-    setDocMessage('Abono guardado. Ya puede generar el recibo o la factura electrónica.')
+    setDocMessage('Abono guardado. Ya puede visualizar el recibo o la factura electrónica.')
   }
 
-  const handleGenerateDocument = (kind: 'recibo_interno' | 'fev') => {
-    const result = openDemoPaymentDocument(formData, kind)
-    if (!result.ok) {
-      setError(result.error)
+  const handleGenerateDocument = (kind: DemoPaymentDocumentKind) => {
+    if (!canGenerateDocuments) {
+      setError('Guarde un abono (y un procedimiento en el Paso 5) para generar el documento.')
       setDocMessage('')
       return
     }
     setError('')
+    setPreviewKind(kind)
     setDocMessage(
       kind === 'recibo_interno'
-        ? 'Recibo interno de caja generado en una nueva ventana.'
-        : 'Factura Electrónica de Venta (simulación) generada en una nueva ventana.',
+        ? 'Vista previa del recibo interno de caja.'
+        : 'Vista previa de la Factura Electrónica de Venta (simulación).',
     )
+  }
+
+  const handleOpenTab = () => {
+    if (!previewKind) return
+    const result = openDemoPaymentDocument(formData, previewKind, {
+      qrDataUrl: previewKind === 'fev' ? qrDataUrl : null,
+    })
+    if (!result.ok) {
+      setError(result.error)
+      return
+    }
+    setError('')
+  }
+
+  const handlePrintPreview = () => {
+    const frame = document.getElementById('demo-payment-preview-frame') as HTMLIFrameElement | null
+    frame?.contentWindow?.focus()
+    frame?.contentWindow?.print()
   }
 
   return (
@@ -179,6 +239,7 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
                 setNote('')
                 setError('')
                 setDocMessage('')
+                setPreviewKind(null)
               }}
               className="btn-secondary"
             >
@@ -191,8 +252,8 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
       <div className="mt-6 space-y-3 rounded-xl border border-slate-200 p-4 sm:p-5">
         <p className="text-sm font-semibold text-slate-700">Documentos de soporte</p>
         <p className="text-sm text-slate-500">
-          Genere el recibo interno de caja o una simulación de Factura Electrónica de Venta con los
-          datos del abono.
+          Visualice un recibo de caja interno o una Factura Electrónica de Venta profesional con los
+          datos del abono (membrete, CUPS, totales, firmas y CUFE simulado).
         </p>
         <div className="flex flex-col gap-3 sm:flex-row">
           <button
@@ -202,7 +263,7 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
             className="btn-secondary flex-1 gap-2 disabled:cursor-not-allowed"
           >
             <Receipt className="h-4 w-4" aria-hidden />
-            Generar recibo interno de caja
+            Ver recibo interno de caja
           </button>
           <button
             type="button"
@@ -211,7 +272,7 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
             className="btn-primary flex-1 gap-2 disabled:cursor-not-allowed"
           >
             <FileText className="h-4 w-4" aria-hidden />
-            Generar Factura Electrónica de Venta
+            Ver Factura Electrónica de Venta
           </button>
         </div>
         {docMessage ? <p className="text-sm text-dental-700">{docMessage}</p> : null}
@@ -221,6 +282,59 @@ export function DemoStepPayments({ formData, onChange }: DemoStepPaymentsProps) 
           </p>
         ) : null}
       </div>
+
+      {previewKind && previewHtml ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label={
+            previewKind === 'recibo_interno'
+              ? 'Vista previa del recibo interno'
+              : 'Vista previa de la factura electrónica'
+          }
+        >
+          <div className="flex h-full max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">
+                  {previewKind === 'recibo_interno'
+                    ? 'Recibo de caja interno'
+                    : 'Factura electrónica de venta (simulación)'}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Documento demostrativo con estándares de presentación comercial y normativa
+                  colombiana.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={handlePrintPreview} className="btn-secondary gap-2">
+                  <Printer className="h-4 w-4" aria-hidden />
+                  Imprimir
+                </button>
+                <button type="button" onClick={handleOpenTab} className="btn-secondary gap-2">
+                  <ExternalLink className="h-4 w-4" aria-hidden />
+                  Abrir pestaña
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewKind(null)}
+                  className="btn-primary gap-2"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                  Cerrar
+                </button>
+              </div>
+            </div>
+            <iframe
+              id="demo-payment-preview-frame"
+              title="Vista previa del documento de pago"
+              srcDoc={previewHtml}
+              className="h-full min-h-0 w-full flex-1 bg-slate-100"
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
