@@ -42,6 +42,14 @@ export function buildWhatsAppUrl(phone: string, message: string): string | null 
   return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`
 }
 
+/** Saludo breve para abrir el chat del paciente desde la historia clínica. */
+export function buildPatientContactMessage(patientName: string, clinicName?: string): string {
+  const firstName = patientName.trim().split(/\s+/)[0] || ''
+  const clinic = clinicName?.trim() || 'nuestra clínica'
+  const greeting = firstName ? `Hola ${firstName}` : 'Hola'
+  return `${greeting}, te escribimos de ${clinic}.`
+}
+
 /** Seguimiento de mercadeo para un paciente que solo tiene valoración. */
 export function buildValuationFollowUpMessage(clinicName?: string): string {
   const clinic = clinicName?.trim() || 'nuestra clínica'

@@ -8,6 +8,7 @@ import {
   type TabletAnamnesisAnswers,
 } from '@/components/kiosk/FillIdentificationOnTablet'
 import { ExternalHistoryRdaPanel } from './ExternalHistoryRdaPanel'
+import { PatientWhatsAppButton } from './PatientWhatsAppButton'
 
 interface PatientRegistrationSectionProps {
   value: PatientFormData
@@ -179,6 +180,10 @@ export function PatientRegistrationSection({
             className="input-field"
             disabled={disabled}
             required
+          />
+          <PatientWhatsAppButton
+            phone={value.phone}
+            patientName={`${value.firstName} ${value.lastName}`}
           />
         </div>
         <div>

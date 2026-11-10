@@ -5,6 +5,7 @@ import { REGIME_TYPES } from '@/constants/dental'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 import { PatientRegistrationSection } from './PatientRegistrationSection'
 import { ExternalHistoryRdaPanel } from './ExternalHistoryRdaPanel'
+import { PatientWhatsAppButton } from './PatientWhatsAppButton'
 
 interface PatientIdentificationSummaryProps {
   patient: Patient
@@ -129,6 +130,12 @@ export function PatientIdentificationSummary({
             <div key={label}>
               <span className="text-xs font-medium uppercase text-slate-500">{label}</span>
               <p className="text-sm text-slate-800">{value}</p>
+              {label === 'Teléfono' ? (
+                <PatientWhatsAppButton
+                  phone={patient.phone}
+                  patientName={`${patient.firstName} ${patient.lastName}`}
+                />
+              ) : null}
             </div>
           ))}
         </div>
