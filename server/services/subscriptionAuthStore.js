@@ -518,100 +518,133 @@ export async function ensureSuperAdmin() {
 
 
 
-export async function registerSubscriptionUser({ nombre, email, password, phone_number, phone }) {
-
+export async function registerSubscriptionUser({
+  nombre,
+  email,
+  password,
+  phone_number,
+  phone,
+  activation_token,
+}) {
   const store = await loadStore()
-
   const normalizedEmail = normalizeEmail(email)
-
   const name = String(nombre ?? '').trim()
   const phoneNumber = normalizeColombiaPhoneNumber(phone_number ?? phone)
-
-
+  const activationToken = String(activation_token ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 6)
 
   if (normalizedEmail === SUPERADMIN_EMAIL) {
-
     return { ok: false, status: 403, error: 'Este correo está reservado para el administrador del sistema.' }
-
   }
-
-
-
   if (!name) {
-
     return { ok: false, status: 400, error: 'El nombre es obligatorio.' }
-
   }
-
   if (!normalizedEmail) {
-
     return { ok: false, status: 400, error: 'El correo es obligatorio.' }
-
   }
-
+  if (!phoneNumber) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Indique un celular colombiano válido (+57), por ejemplo 3001234567.',
+    }
+  }
   if (!password || String(password).length < 6) {
-
     return { ok: false, status: 400, error: 'La contraseña debe tener al menos 6 caracteres.' }
-
   }
-
-
-
   if (store.users.some((user) => user.email === normalizedEmail)) {
-
     return { ok: false, status: 409, error: 'Ya existe una cuenta con este correo.' }
-
   }
 
-
-
+  const createdAt = new Date().toISOString()
   const user = {
-
     id: randomUUID(),
-
     nombre: name,
-
     email: normalizedEmail,
-
     passwordHash: hashPasswordSha256(password),
-
-    phone: phoneNumber || '',
-
-    phone_number: phoneNumber || '',
-
+    phone: phoneNumber,
+    phone_number: phoneNumber,
     whatsapp_verified: false,
-
-    whatsapp_status: phoneNumber ? 'pending' : 'skipped',
-
+    whatsapp_status: 'pending',
+    whatsapp_activation_token: activationToken || null,
+    is_verified: false,
     rol: 'admin',
-
     estado_pago: 'pendiente',
-
     fecha_vencimiento: null,
-
-    createdAt: new Date().toISOString(),
-
-    updatedAt: new Date().toISOString(),
-
+    clinicId: null,
+    accessEnabled: true,
+    createdAt,
+    updatedAt: createdAt,
   }
   user.clinicId = user.id
-  user.accessEnabled = true
 
   store.users.push(user)
-
   await saveStore(store)
   void syncAuthUserToTenantTables(user)
 
-
-
-  return {
-
-    ok: true,
-
-    user: sanitizeUser(user),
-
+  try {
+    const scope = clinicSyncAliasIds(user)
+    await resetClinicClinicalBucket(scope.canonical, scope.aliases)
+  } catch (error) {
+    console.error(
+      '[Auth] No se pudo inicializar cubo clínico vacío para registro nuevo:',
+      error instanceof Error ? error.message : error,
+    )
   }
 
+  return {
+    ok: true,
+    user: sanitizeUser(user),
+    activation_token: user.whatsapp_activation_token,
+  }
+}
+
+/**
+ * Marca la cuenta como verificada cuando llega el mensaje de WhatsApp con el token.
+ * Uso manual / simulado hasta automatizar la bandeja.
+ */
+export async function confirmWhatsAppActivationByToken({ token, email }) {
+  const store = await loadStore()
+  const code = String(token ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+  const normalizedEmail = normalizeEmail(email)
+
+  if (code.length !== 6) {
+    return { ok: false, status: 400, error: 'El token debe tener 6 caracteres.' }
+  }
+
+  const index = store.users.findIndex((user) => {
+    const saved = String(user.whatsapp_activation_token || '')
+      .trim()
+      .toUpperCase()
+    if (saved !== code) return false
+    if (normalizedEmail && user.email !== normalizedEmail) return false
+    return true
+  })
+
+  if (index === -1) {
+    return { ok: false, status: 404, error: 'No hay un registro pendiente con ese token.' }
+  }
+
+  const current = store.users[index]
+  const updated = {
+    ...current,
+    whatsapp_verified: true,
+    is_verified: true,
+    whatsapp_status: 'verified',
+    whatsapp_activation_token: null,
+    whatsappVerifiedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+  store.users[index] = updated
+  await saveStore(store)
+  void syncAuthUserToTenantTables(updated)
+  return { ok: true, user: sanitizeUser(updated) }
 }
 
 
@@ -1539,16 +1572,21 @@ export async function updateUserWhatsAppFields({
       ? normalizeColombiaPhoneNumber(phone_number) || String(phone_number || '').replace(/\D/g, '')
       : current.phone_number || current.phone || ''
 
+  const nextVerified =
+    whatsapp_verified === undefined ? Boolean(current.whatsapp_verified) : Boolean(whatsapp_verified)
   const updated = {
     ...current,
     phone: phoneNumber,
     phone_number: phoneNumber,
-    whatsapp_verified:
-      whatsapp_verified === undefined ? Boolean(current.whatsapp_verified) : Boolean(whatsapp_verified),
+    whatsapp_verified: nextVerified,
+    is_verified: nextVerified,
     whatsapp_status:
       whatsapp_status === undefined
-        ? current.whatsapp_status || 'pending'
+        ? nextVerified
+          ? 'verified'
+          : current.whatsapp_status || 'pending'
         : String(whatsapp_status || 'pending'),
+    whatsapp_activation_token: nextVerified ? null : current.whatsapp_activation_token,
     updatedAt: new Date().toISOString(),
   }
   store.users[index] = updated
@@ -1601,7 +1639,11 @@ function sanitizeUser(user) {
     phone: user.phone_number || user.phone || '',
     phone_number: user.phone_number || user.phone || '',
     whatsapp_verified: user.whatsapp_verified === true,
+    is_verified: user.whatsapp_verified === true || user.is_verified === true,
     whatsapp_status: user.whatsapp_status || 'pending',
+    whatsapp_activation_pending: Boolean(
+      user.whatsapp_activation_token && user.whatsapp_verified !== true,
+    ),
     perfilFiscal: normalizePerfilFiscal(user.perfilFiscal),
     providerNit: user.providerNit ?? '',
     repsCode: user.repsCode ?? '',

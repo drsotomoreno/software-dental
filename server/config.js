@@ -108,9 +108,8 @@ export const config = {
     templateLanguage: process.env.EVOLUTION_TEMPLATE_LANGUAGE || 'es',
   },
   /**
-   * WhatsApp Cloud API (Meta) — OTP de registro.
-   * La plantilla debe ser categoría authentication, con botón copiar código.
-   * El código viaja en el body y en el botón; no se registra en logs.
+   * WhatsApp Cloud API (Meta) — legado OTP. Descartado por registro mercantil;
+   * el registro usa Click-to-Chat (whatsappClickToChat).
    */
   metaWhatsapp: {
     graphVersion: process.env.META_GRAPH_API_VERSION || 'v22.0',
@@ -119,6 +118,18 @@ export const config = {
     templateName: process.env.META_WHATSAPP_OTP_TEMPLATE || 'otp_registro',
     templateLanguage: process.env.META_WHATSAPP_OTP_LANGUAGE || 'es',
     includeButton: process.env.META_WHATSAPP_OTP_BUTTON !== 'false',
+  },
+  /**
+   * Click-to-Chat: el usuario abre wa.me hacia este número corporativo
+   * con un token de 6 caracteres para activar la cuenta.
+   */
+  whatsappClickToChat: {
+    // WhatsApp corporativo Click-to-Chat (activación de cuenta).
+    businessNumber: (
+      process.env.WHATSAPP_BUSINESS_NUMBER ||
+      process.env.WHATSAPP_CLICK_TO_CHAT_NUMBER ||
+      '573155858168'
+    ).replace(/\D/g, ''),
   },
 }
 

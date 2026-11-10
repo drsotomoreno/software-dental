@@ -3,7 +3,7 @@ import { APP_INITIALS, APP_NAME } from '@/constants/branding'
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { clearStoredApiAuth, getStoredApiAuth, isApiSuperAdmin } from '@/services/apiAuthService'
-import { postAuthDestination, userNeedsWelcome } from '@/utils/subscriptionAccess'
+import { postAuthDestination } from '@/utils/subscriptionAccess'
 import {
   clearExpressRegisterFlag,
   markExpressRegisterComplete,
@@ -11,7 +11,7 @@ import {
 import { validateColombiaMobile } from '@/utils/phoneValidation'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 
-type AuthMode = 'login' | 'register' | 'verify'
+type AuthMode = 'login' | 'register' | 'activate'
 
 function initialAuthMode(pathname: string, searchParams: URLSearchParams): AuthMode {
   const modeParam = (searchParams.get('mode') || searchParams.get('modo') || '').toLowerCase()
@@ -53,7 +53,8 @@ export function LoginPage() {
   const [phoneNumber, setPhoneNumber] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [code, setCode] = useState('')
+  const [whatsappUrl, setWhatsappUrl] = useState('')
+  const [activationToken, setActivationToken] = useState('')
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -69,9 +70,6 @@ export function LoginPage() {
       : from
   const storedUser = apiAuth?.user
   const onRegisterPath = location.pathname === '/registro'
-  // Solo redirigir con sesión real. Nunca por doctorSEO_rol suelto en localStorage.
-  // /registro nunca debe absorber al visitante dentro de la cuenta maestra/clínica:
-  // esa ruta es alta de colegas, no reentrada al panel.
   if (!isLoading && (user || (apiAuth?.token && apiAuth.user)) && !onRegisterPath) {
     const dest =
       storedUser && !isSuperAdmin ? postAuthDestination(storedUser, afterLogin) : afterLogin
@@ -82,7 +80,56 @@ export function LoginPage() {
     setMode(next)
     setError('')
     setInfo('')
-    setCode('')
+    if (next !== 'activate') {
+      setWhatsappUrl('')
+      setActivationToken('')
+    }
+  }
+
+  const finishLoginAfterRegister = async (registerEmail: string, registerPassword: string) => {
+    clearStoredApiAuth()
+    try {
+      const { clearClinicIsolationOnLogout } = await import('@/services/clinicLocalIsolation')
+      await clearClinicIsolationOnLogout()
+    } catch {
+      /* ignore */
+    }
+    markExpressRegisterComplete()
+    const result = await login(registerEmail, registerPassword)
+    if (result.ok) {
+      const session = getStoredApiAuth()
+      if (isApiSuperAdmin(session?.user) || session?.user?.email !== registerEmail) {
+        clearStoredApiAuth()
+        clearExpressRegisterFlag()
+        setMode('login')
+        setPassword('')
+        setConfirmPassword('')
+        setError(
+          'La cuenta se creó, pero la sesión quedó inválida por seguridad. Inicie sesión con su correo y contraseña.',
+        )
+        setInfo('Cuenta creada. Use el correo del registro para entrar a la versión demo.')
+        return
+      }
+    }
+    if (!result.ok) {
+      clearExpressRegisterFlag()
+      setMode('login')
+      setPassword('')
+      setConfirmPassword('')
+      setError(
+        'Cuenta creada, pero no se pudo iniciar sesión automáticamente. Inicie sesión para continuar.',
+      )
+      setInfo('Use su correo y contraseña para acceder.')
+      return
+    }
+
+    setPassword('')
+    setConfirmPassword('')
+    setNombre('')
+    setPhoneNumber('')
+    setWhatsappUrl('')
+    setActivationToken('')
+    navigate('/demo', { replace: true })
   }
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -99,17 +146,18 @@ export function LoginPage() {
     navigate(postAuthDestination(sessionUser, afterLogin), { replace: true })
   }
 
-  const requestCode = async () => {
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault()
     setError('')
     setInfo('')
     if (password !== confirmPassword) {
       setError('Las contraseñas no coinciden.')
-      return false
+      return
     }
     const phoneCheck = validateColombiaMobile(phoneNumber)
     if (!phoneCheck.ok) {
       setError(phoneCheck.error || 'Celular colombiano inválido.')
-      return false
+      return
     }
     setSubmitting(true)
     try {
@@ -120,98 +168,39 @@ export function LoginPage() {
         password,
       })
       if (!response.ok) {
-        setError(payload.error || 'No se pudo enviar el código.')
-        return false
+        setError(payload.error || 'No se pudo completar el registro.')
+        return
       }
       setPhoneNumber(phoneCheck.digits)
+      setWhatsappUrl(String(payload.whatsapp_url || ''))
+      setActivationToken(String(payload.activation_token || ''))
       setInfo(
         payload.message ||
-          `Enviamos un código de 6 dígitos a ${email.trim().toLowerCase()}.`,
+          'Cuenta creada. Active su celular enviando el mensaje por WhatsApp.',
       )
-      setMode('verify')
-      return true
+      setMode('activate')
     } catch {
       setError('No se pudo conectar con el servidor. Intente de nuevo.')
-      return false
     } finally {
       setSubmitting(false)
     }
   }
 
-  const handleRequestCode = async (e: React.FormEvent) => {
-    e.preventDefault()
-    await requestCode()
+  const openWhatsAppActivation = () => {
+    if (!whatsappUrl) {
+      setError('No hay un enlace de WhatsApp disponible. Vuelva a registrarse.')
+      return
+    }
+    window.open(whatsappUrl, '_blank', 'noopener,noreferrer')
   }
 
-  const handleVerify = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const continueToDemo = async () => {
     setError('')
-    setInfo('')
     setSubmitting(true)
-    const registerEmail = email.trim().toLowerCase()
-    const registerPassword = password.trim()
-    const phoneCheck = validateColombiaMobile(phoneNumber)
     try {
-      const { response, payload } = await postJson('/api/auth/register/whatsapp/verify', {
-        email: registerEmail,
-        code: code.replace(/\D/g, ''),
-        password: registerPassword,
-        phone_number: phoneCheck.ok ? phoneCheck.digits : phoneNumber.replace(/\D/g, ''),
-      })
-      if (!response.ok) {
-        setError(payload.error || 'No se pudo verificar el código.')
-        return
-      }
-
-      // Limpiar sesión y datos clínicos locales previos (p. ej. Superadmin en este navegador)
-      // antes de iniciar sesión con la cuenta recién creada.
-      clearStoredApiAuth()
-      try {
-        const { clearClinicIsolationOnLogout } = await import('@/services/clinicLocalIsolation')
-        await clearClinicIsolationOnLogout()
-      } catch {
-        /* ignore */
-      }
-      markExpressRegisterComplete()
-      const result = await login(registerEmail, registerPassword)
-      if (result.ok) {
-        const session = getStoredApiAuth()
-        if (isApiSuperAdmin(session?.user) || session?.user?.email !== registerEmail) {
-          clearStoredApiAuth()
-          clearExpressRegisterFlag()
-          setMode('login')
-          setPassword('')
-          setConfirmPassword('')
-          setCode('')
-          setError(
-            'La cuenta se creó, pero la sesión quedó inválida por seguridad. Inicie sesión con su correo y contraseña.',
-          )
-          setInfo('Cuenta verificada. Use el correo del registro para entrar a la versión demo.')
-          return
-        }
-      }
-      if (!result.ok) {
-        clearExpressRegisterFlag()
-        setMode('login')
-        setPassword('')
-        setConfirmPassword('')
-        setCode('')
-        setError(
-          'Cuenta creada, pero no se pudo iniciar sesión automáticamente. Inicie sesión para continuar al Dashboard.',
-        )
-        setInfo('Cuenta verificada. Use su correo y contraseña para acceder.')
-        return
-      }
-
-      setPassword('')
-      setConfirmPassword('')
-      setCode('')
-      setNombre('')
-      setPhoneNumber('')
-      // Sin plan adquirido: únicamente la versión demo (no historia clínica).
-      navigate('/demo', { replace: true })
+      await finishLoginAfterRegister(email.trim().toLowerCase(), password.trim())
     } catch {
-      setError('No se pudo conectar con el servidor. Intente de nuevo.')
+      setError('No se pudo iniciar sesión. Intente desde Iniciar sesión.')
     } finally {
       setSubmitting(false)
     }
@@ -220,8 +209,8 @@ export function LoginPage() {
   const subtitle =
     mode === 'register'
       ? 'Registro express — sin plan entra a la versión demo'
-      : mode === 'verify'
-        ? `Ingrese el código enviado por WhatsApp al ${phoneNumber.trim() || 'celular'}`
+      : mode === 'activate'
+        ? 'Active su cuenta enviando un mensaje por WhatsApp'
         : 'Acceso seguro — cédula y contraseña de su clínica'
 
   return (
@@ -303,7 +292,7 @@ export function LoginPage() {
         )}
 
         {mode === 'register' && (
-          <form onSubmit={handleRequestCode} className="card space-y-4">
+          <form onSubmit={handleRegister} className="card space-y-4">
             <div>
               <label className="label-field">Nombre completo</label>
               <input
@@ -341,8 +330,8 @@ export function LoginPage() {
                 placeholder="300 123 4567"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Indicativo +57. Le enviaremos un código de 6 dígitos por WhatsApp para confirmar que
-                el celular es real.
+                Indicativo +57. Tras crear la cuenta abrirá WhatsApp para activarla con un mensaje
+                único.
               </p>
             </div>
             <div>
@@ -371,7 +360,7 @@ export function LoginPage() {
               <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
             )}
             <button type="submit" disabled={submitting} className="btn-primary w-full">
-              {submitting ? 'Enviando código...' : 'Enviar código de verificación'}
+              {submitting ? 'Creando cuenta...' : 'Crear cuenta'}
             </button>
             <p className="text-center text-sm text-slate-500">
               ¿Ya tiene cuenta?{' '}
@@ -386,43 +375,50 @@ export function LoginPage() {
           </form>
         )}
 
-        {mode === 'verify' && (
-          <form onSubmit={handleVerify} className="card space-y-4">
+        {mode === 'activate' && (
+          <div className="card space-y-4">
             {info && (
               <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{info}</p>
             )}
-            <div>
-              <label className="label-field">Código de 6 dígitos</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                required
-                pattern="[0-9]{6}"
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                className="input-field tracking-[0.35em]"
-                placeholder="000000"
-              />
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 text-center">
+              <p className="text-sm font-semibold text-emerald-900">
+                Haz clic para activar tu cuenta por WhatsApp
+              </p>
+              <p className="mt-2 text-xs text-emerald-800">
+                Se abrirá WhatsApp con el mensaje listo. Solo pulse enviar.
+              </p>
+              {activationToken ? (
+                <p className="mt-3 font-mono text-lg tracking-[0.2em] text-slate-900">
+                  {activationToken}
+                </p>
+              ) : null}
             </div>
+
+            <button
+              type="button"
+              onClick={openWhatsAppActivation}
+              disabled={!whatsappUrl}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              Abrir WhatsApp y activar
+            </button>
+
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => {
+                void continueToDemo()
+              }}
+              className="btn-primary w-full"
+            >
+              {submitting ? 'Entrando...' : 'Ya envié el mensaje — entrar a la demo'}
+            </button>
+
             {error && (
               <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
             )}
-            <button type="submit" disabled={submitting || code.length !== 6} className="btn-primary w-full">
-              {submitting ? 'Verificando...' : 'Verificar y crear cuenta'}
-            </button>
+
             <p className="text-center text-sm text-slate-500">
-              <button
-                type="button"
-                disabled={submitting}
-                onClick={() => {
-                  void requestCode()
-                }}
-                className="font-semibold text-dental-700 hover:underline disabled:opacity-50"
-              >
-                Reenviar código
-              </button>
-              {' · '}
               <button
                 type="button"
                 onClick={() => switchMode('register')}
@@ -431,9 +427,20 @@ export function LoginPage() {
                 Volver
               </button>
             </p>
-          </form>
+          </div>
         )}
       </div>
+
+      {mode === 'activate' && whatsappUrl ? (
+        <button
+          type="button"
+          onClick={openWhatsAppActivation}
+          className="fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-900/20 hover:bg-emerald-700"
+          aria-label="Activar cuenta por WhatsApp"
+        >
+          Activar por WhatsApp
+        </button>
+      ) : null}
     </div>
   )
 }

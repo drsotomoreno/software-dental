@@ -3,6 +3,7 @@ import { Router } from 'express'
 import { config } from '../config.js'
 import { forgotPassword, resetPassword } from '../controllers/authPassword.controller.js'
 import {
+  confirmWhatsAppClickToChat,
   requestRegisterCode,
   verifyRegisterCode,
   verifyWhatsAppRegistration,
@@ -35,6 +36,7 @@ import {
   sessionHintFromRequest,
   updateClinicUser,
   updateSubscriptionProfile,
+  updateUserWhatsAppFields,
 } from '../services/subscriptionAuthStore.js'
 import {
   aislarClinica,
@@ -66,14 +68,7 @@ function masterUserPayload(user) {
 
 const router = Router()
 
-router.post('/registro', (_req, res) => {
-  return res.status(400).json({
-    success: false,
-    ok: false,
-    error:
-      'El registro exige un celular verificado por WhatsApp. Solicite el código de 6 dígitos en el formulario de registro.',
-  })
-})
+router.post('/registro', requestRegisterCode)
 
 router.post('/login', async (req, res) => {
   try {
@@ -214,6 +209,7 @@ router.post('/auth/reset-password', resetPassword)
 router.post('/auth/register/request-code', requestRegisterCode)
 router.post('/auth/register/verify', verifyRegisterCode)
 router.post('/auth/register/whatsapp/verify', verifyWhatsAppRegistration)
+router.post('/auth/register/whatsapp/confirm', confirmWhatsAppClickToChat)
 router.get('/auth/mail-settings', getMailSettings)
 router.put('/auth/mail-settings', updateMailSettings)
 router.get('/subscription', getSubscriptionStatus)
@@ -230,6 +226,35 @@ router.get('/admin/users', verificarToken, soloSuperAdmin, async (req, res) => {
   } catch (error) {
     console.error('[Auth] Error en GET /admin/users:', error)
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo listar los usuarios.' })
+  }
+})
+
+/** Confirmación manual: el Superadmin marca el WhatsApp como recibido/verificado. */
+router.post('/admin/users/:id/whatsapp-verify', verificarToken, soloSuperAdmin, async (req, res) => {
+  try {
+    const result = await updateUserWhatsAppFields({
+      userId: req.params.id,
+      email: req.body?.email,
+      whatsapp_verified: true,
+      whatsapp_status: 'verified',
+    })
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, ok: false, error: result.error })
+    }
+    return res.json({
+      success: true,
+      ok: true,
+      is_verified: true,
+      whatsapp_verified: true,
+      user: result.user,
+    })
+  } catch (error) {
+    console.error('[Auth] Error en POST /admin/users/:id/whatsapp-verify:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo marcar el WhatsApp como verificado.',
+    })
   }
 })
 

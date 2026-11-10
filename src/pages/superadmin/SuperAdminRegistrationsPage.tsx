@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Download, MessageCircle, Search, Users } from 'lucide-react'
 import { useSuperadminResource } from '@/hooks/useSuperadminResource'
 import { fetchRegisteredUsers, type RegisteredSubscriptionUser } from '@/services/subscriptionService'
-import { SUPERADMIN_EMAIL } from '@/services/apiAuthService'
+import { getStoredApiAuth, SUPERADMIN_EMAIL } from '@/services/apiAuthService'
 import { ROLE_LABELS, type CanonicalRole } from '@/utils/permissions'
 
 type SalesFilter = 'all' | 'leads' | 'trial' | 'paid' | 'whatsapp'
@@ -108,10 +108,43 @@ async function loadRegistrations() {
 }
 
 export function SuperAdminRegistrationsPage() {
-  const { data, error, loading } = useSuperadminResource(loadRegistrations)
+  const { data, error, loading, reload } = useSuperadminResource(loadRegistrations)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<SalesFilter>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [verifyingId, setVerifyingId] = useState<string | null>(null)
+  const [verifyError, setVerifyError] = useState('')
+
+  const markWhatsAppVerified = async (user: RegisteredSubscriptionUser) => {
+    setVerifyError('')
+    setVerifyingId(String(user.id))
+    try {
+      const token = getStoredApiAuth()?.token
+      if (!token) {
+        setVerifyError('Sesión Superadmin no disponible.')
+        return
+      }
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(String(user.id))}/whatsapp-verify`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ email: user.email }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setVerifyError(payload.error || 'No se pudo marcar como verificado.')
+        return
+      }
+      await reload?.()
+    } catch {
+      setVerifyError('No se pudo contactar al servidor.')
+    } finally {
+      setVerifyingId(null)
+    }
+  }
 
   const users = useMemo(() => {
     const list = data?.users ?? []
@@ -430,6 +463,23 @@ export function SuperAdminRegistrationsPage() {
                           <MessageCircle className="h-4 w-4" aria-hidden />
                           Abrir WhatsApp
                         </a>
+                      ) : null}
+                      {!selected.whatsapp_verified ? (
+                        <button
+                          type="button"
+                          disabled={verifyingId === String(selected.id)}
+                          onClick={() => {
+                            void markWhatsAppVerified(selected)
+                          }}
+                          className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+                        >
+                          {verifyingId === String(selected.id)
+                            ? 'Marcando...'
+                            : 'Marcar mensaje recibido (verificar)'}
+                        </button>
+                      ) : null}
+                      {verifyError ? (
+                        <p className="text-xs text-red-600">{verifyError}</p>
                       ) : null}
                     </div>
                   ) : (
