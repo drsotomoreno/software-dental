@@ -64,19 +64,30 @@ export async function requestRegisterCode(req, res) {
     }
 
     const user = result.user
-    return res.status(201).json({
+    const token = result.activation_token || activationToken
+    const finalLink = buildWhatsAppActivationLink(token)
+    if (!finalLink.ok) {
+      return res.status(503).json({
+        success: false,
+        ok: false,
+        error: finalLink.error,
+      })
+    }
+    return res.status(result.resumed ? 200 : 201).json({
       success: true,
       ok: true,
       email: user.email,
       phone_number: phone,
-      activation_token: activationToken,
-      whatsapp_url: link.url,
-      whatsapp_message: link.message,
+      activation_token: token,
+      whatsapp_url: finalLink.url,
+      whatsapp_message: finalLink.message,
       is_verified: false,
       whatsapp_verified: false,
+      resumed: Boolean(result.resumed),
       user,
-      message:
-        'Cuenta creada. Abra WhatsApp y envíe el mensaje de activación para verificar su celular.',
+      message: result.resumed
+        ? 'Su cuenta ya existía sin activar. Abra WhatsApp y envíe el mensaje para verificar el celular.'
+        : 'Cuenta creada. Abra WhatsApp y envíe el mensaje de activación para verificar su celular.',
     })
   } catch (error) {
     console.error('[Auth] Error en /auth/register/request-code:', error)

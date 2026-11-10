@@ -555,8 +555,40 @@ export async function registerSubscriptionUser({
   if (!password || String(password).length < 6) {
     return { ok: false, status: 400, error: 'La contraseña debe tener al menos 6 caracteres.' }
   }
-  if (store.users.some((user) => user.email === normalizedEmail)) {
-    return { ok: false, status: 409, error: 'Ya existe una cuenta con este correo.' }
+
+  const existingIndex = store.users.findIndex((user) => user.email === normalizedEmail)
+  const existing = existingIndex === -1 ? null : store.users[existingIndex]
+  if (existing) {
+    // Reanudar Click-to-Chat si la cuenta quedó a medias (intentos Meta OTP / sin verificar).
+    const canResume =
+      existing.whatsapp_verified !== true &&
+      (existing.estado_pago === 'pendiente' || !existing.estado_pago)
+    if (!canResume) {
+      return { ok: false, status: 409, error: 'Ya existe una cuenta con este correo.' }
+    }
+    const updated = {
+      ...existing,
+      nombre: name || existing.nombre,
+      passwordHash: hashPasswordSha256(password),
+      phone: phoneNumber,
+      phone_number: phoneNumber,
+      whatsapp_verified: false,
+      is_verified: false,
+      whatsapp_status: 'pending',
+      whatsapp_activation_token: activationToken || existing.whatsapp_activation_token || null,
+      accessEnabled: true,
+      updatedAt: new Date().toISOString(),
+    }
+    if (!updated.clinicId) updated.clinicId = updated.id
+    store.users[existingIndex] = updated
+    await saveStore(store)
+    void syncAuthUserToTenantTables(updated)
+    return {
+      ok: true,
+      resumed: true,
+      user: sanitizeUser(updated),
+      activation_token: updated.whatsapp_activation_token,
+    }
   }
 
   const createdAt = new Date().toISOString()
@@ -597,6 +629,7 @@ export async function registerSubscriptionUser({
 
   return {
     ok: true,
+    resumed: false,
     user: sanitizeUser(user),
     activation_token: user.whatsapp_activation_token,
   }

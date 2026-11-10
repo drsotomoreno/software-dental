@@ -168,7 +168,19 @@ export function LoginPage() {
         password,
       })
       if (!response.ok) {
-        setError(payload.error || 'No se pudo completar el registro.')
+        const apiError = String(payload.error || '').trim()
+        if (response.status === 409) {
+          setError(
+            apiError ||
+              'Ya existe una cuenta con este correo. Use Iniciar sesión o recupere su contraseña.',
+          )
+          return
+        }
+        setError(apiError || 'No se pudo completar el registro.')
+        return
+      }
+      if (!payload.whatsapp_url) {
+        setError('La cuenta se creó, pero faltó el enlace de WhatsApp. Intente de nuevo.')
         return
       }
       setPhoneNumber(phoneCheck.digits)
