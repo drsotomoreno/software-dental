@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Search } from 'lucide-react'
+import { AnatomicalAssociationSelect } from '@/components/clinical/diagnostics/DiagnosisAssociationFields'
 import { CIE10_DATA } from '@/data/cie10Data'
 import { getDefaultCie10SearchEngine } from '@/services/Cie10SearchEngine'
+import { diagnosisLocationLabel } from '@/utils/diagnosisAssociation'
 import type { DemoDiagnosis } from './demoTypes'
 
 interface DemoStepDiagnosisProps {
@@ -23,7 +25,12 @@ const SUGGESTED_DIAGNOSES: DemoDiagnosis[] = SUGGESTED_CODES.map(findCie10Entry)
   (item): item is DemoDiagnosis => Boolean(item),
 )
 
-/** Paso 4 — Buscador del catálogo CIE-10 odontológico (selección única). */
+function hasAssociation(diagnosis: DemoDiagnosis | null): boolean {
+  if (!diagnosis) return false
+  return diagnosis.toothNumber != null || Boolean(diagnosis.anatomicalScope)
+}
+
+/** Paso 4 — Buscador del catálogo CIE-10 odontológico (selección única + asociación a pieza). */
 export function DemoStepDiagnosis({ selectedDiagnosis, onChange }: DemoStepDiagnosisProps) {
   const [query, setQuery] = useState('')
   const [showLimitWarning, setShowLimitWarning] = useState(false)
@@ -34,6 +41,9 @@ export function DemoStepDiagnosis({ selectedDiagnosis, onChange }: DemoStepDiagn
     if (!q) return SUGGESTED_DIAGNOSES
     return engine.search(q, 40)
   }, [engine, query])
+
+  const location = selectedDiagnosis ? diagnosisLocationLabel(selectedDiagnosis) : null
+  const associationPending = Boolean(selectedDiagnosis && !hasAssociation(selectedDiagnosis))
 
   const handleSelect = (item: DemoDiagnosis) => {
     if (selectedDiagnosis?.code === item.code) {
@@ -47,7 +57,7 @@ export function DemoStepDiagnosis({ selectedDiagnosis, onChange }: DemoStepDiagn
       return
     }
 
-    onChange(item)
+    onChange({ code: item.code, description: item.description })
     setShowLimitWarning(false)
   }
 
@@ -129,6 +139,34 @@ export function DemoStepDiagnosis({ selectedDiagnosis, onChange }: DemoStepDiagn
         )}
       </ul>
 
+      {selectedDiagnosis ? (
+        <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+          <p className="text-sm font-semibold text-slate-800">
+            Asociar {selectedDiagnosis.code} a una pieza
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            En la versión clínica cada diagnóstico se vincula a un diente FDI, a un maxilar o a toda
+            la dentición para RIPS y el plan de tratamiento.
+          </p>
+          <div className="mt-4 max-w-md">
+            <AnatomicalAssociationSelect
+              toothNumber={selectedDiagnosis.toothNumber}
+              anatomicalScope={selectedDiagnosis.anatomicalScope}
+              pending={associationPending}
+              ariaLabel={`Asociar el diagnóstico ${selectedDiagnosis.code} a un diente, un maxilar o toda la dentición`}
+              label="Pieza / alcance anatómico"
+              onChange={(next) =>
+                onChange({
+                  ...selectedDiagnosis,
+                  toothNumber: next.toothNumber,
+                  anatomicalScope: next.anatomicalScope,
+                })
+              }
+            />
+          </div>
+        </div>
+      ) : null}
+
       {showLimitWarning && (
         <div
           role="alert"
@@ -144,8 +182,11 @@ export function DemoStepDiagnosis({ selectedDiagnosis, onChange }: DemoStepDiagn
           Seleccionado:{' '}
           <span className="font-medium text-slate-700">
             {selectedDiagnosis.code} — {selectedDiagnosis.description}
+            {location ? ` · ${location}` : ''}
           </span>
-          . Pulse de nuevo para quitarlo.
+          {associationPending
+            ? '. Elija la pieza o el alcance anatómico arriba.'
+            : '. Pulse el diagnóstico de nuevo para quitarlo.'}
         </p>
       )}
     </div>

@@ -1,7 +1,13 @@
+import type { DiagnosisAnatomicalScope } from '@/types/clinicalRecord'
+
 /** Diagnóstico CIE-10 permitido en la demo (selección única). */
 export interface DemoDiagnosis {
   code: string
   description: string
+  /** Pieza FDI asociada (permanente o temporal). */
+  toothNumber?: number
+  /** Alcance anatómico cuando no aplica una sola pieza. */
+  anatomicalScope?: DiagnosisAnatomicalScope
 }
 
 /** Única fila de plan de tratamiento permitida en la demo. */
@@ -13,6 +19,9 @@ export interface DemoTreatmentRow {
   /** Diagnóstico CIE-10 importado desde el Paso 4. */
   diagnosisCode?: string
   diagnosisDescription?: string
+  /** Pieza o alcance asociado al diagnóstico del Paso 4. */
+  diagnosisToothNumber?: number
+  diagnosisAnatomicalScope?: DiagnosisAnatomicalScope
 }
 
 /** Abono registrado contra el presupuesto del Paso 5. */

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { AlertTriangle, Calculator, Info, Search, Stethoscope, Trash2 } from 'lucide-react'
 import { CUPS_ODONTOLOGIA, type CupsOdontologyEntry } from '@/constants/cupsOdontologyData'
 import { formatCurrency } from '@/utils/crypto'
+import { diagnosisLocationLabel } from '@/utils/diagnosisAssociation'
 import {
   demoTreatmentTotal,
   type DemoDiagnosis,
@@ -69,7 +70,17 @@ export function DemoStepTreatmentPlan({
   const cost = Number(unitCost.replace(/,/g, '.')) || 0
   const previewTotal = Math.max(0, qty) * Math.max(0, cost)
   const hasRow = treatmentRow !== null
-  const hasDiagnosis = Boolean(selectedDiagnosis)
+  const diagnosisLocation = selectedDiagnosis ? diagnosisLocationLabel(selectedDiagnosis) : null
+  const treatmentLocation = treatmentRow
+    ? diagnosisLocationLabel({
+        toothNumber: treatmentRow.diagnosisToothNumber,
+        anatomicalScope: treatmentRow.diagnosisAnatomicalScope,
+      })
+    : null
+  const hasDiagnosis = Boolean(
+    selectedDiagnosis &&
+      (selectedDiagnosis.toothNumber != null || selectedDiagnosis.anatomicalScope),
+  )
 
   const handlePick = (entry: CupsOdontologyEntry) => {
     if (!hasDiagnosis) return
@@ -87,7 +98,7 @@ export function DemoStepTreatmentPlan({
       setShowLimitWarning(true)
       return
     }
-    if (!selectedDiagnosis || !pending || qty <= 0 || cost < 0) return
+    if (!selectedDiagnosis || !hasDiagnosis || !pending || qty <= 0 || cost < 0) return
     onChange({
       cupsCode: pending.codigo,
       procedureName: pending.descripcion,
@@ -95,6 +106,8 @@ export function DemoStepTreatmentPlan({
       unitCost: cost,
       diagnosisCode: selectedDiagnosis.code,
       diagnosisDescription: selectedDiagnosis.description,
+      diagnosisToothNumber: selectedDiagnosis.toothNumber,
+      diagnosisAnatomicalScope: selectedDiagnosis.anatomicalScope,
     })
     setPending(null)
     setQuantity('1')
@@ -130,15 +143,24 @@ export function DemoStepTreatmentPlan({
           <Stethoscope className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
           <div className="min-w-0">
             <p className="text-sm font-semibold">Diagnóstico importado del Paso 4</p>
-            {selectedDiagnosis ? (
+            {hasDiagnosis && selectedDiagnosis ? (
               <p className="mt-1 text-sm">
                 <span className="font-semibold">{selectedDiagnosis.code}</span>
                 {' — '}
                 {selectedDiagnosis.description}
+                {diagnosisLocation ? (
+                  <span className="mt-1 block font-medium">Asociado a: {diagnosisLocation}</span>
+                ) : null}
+              </p>
+            ) : selectedDiagnosis ? (
+              <p className="mt-1 text-sm">
+                El diagnóstico {selectedDiagnosis.code} aún no tiene pieza asociada. Vuelva al Paso 4
+                y elija un diente, un maxilar o toda la dentición.
               </p>
             ) : (
               <p className="mt-1 text-sm">
-                Seleccione un diagnóstico CIE-10 en el Paso 4 para vincularlo al plan de tratamiento.
+                Seleccione un diagnóstico CIE-10 en el Paso 4 y asócielo a un diente para vincularlo
+                al plan de tratamiento.
               </p>
             )}
           </div>
@@ -164,7 +186,7 @@ export function DemoStepTreatmentPlan({
       <p className="mt-2 text-xs text-slate-500">
         {query.trim()
           ? `${filtered.length} resultado${filtered.length === 1 ? '' : 's'} del catálogo`
-          : `Sugerencias frecuentes · ${CUPS_ODONTOLOGIA.length} códigos CUPS disponibles`}
+          : 'Digite o seleccione un procedimiento de los códigos CUPS disponibles'}
       </p>
 
       {!hasRow && hasDiagnosis && (
@@ -229,6 +251,7 @@ export function DemoStepTreatmentPlan({
                 CIE-10 vinculado:{' '}
                 <span className="font-semibold text-slate-800">
                   {selectedDiagnosis.code} — {selectedDiagnosis.description}
+                  {diagnosisLocation ? ` · ${diagnosisLocation}` : ''}
                 </span>
               </p>
             ) : null}
@@ -328,6 +351,7 @@ export function DemoStepTreatmentPlan({
                       {treatmentRow.diagnosisDescription
                         ? ` — ${treatmentRow.diagnosisDescription}`
                         : ''}
+                      {treatmentLocation ? ` · ${treatmentLocation}` : ''}
                     </span>
                   ) : (
                     '—'

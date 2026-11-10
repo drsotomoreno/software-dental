@@ -137,7 +137,12 @@ export function buildDemoRipsJson(form: DemoFormData): object {
       nombrePaciente: form.patientName || null,
       motivoConsulta: form.chiefComplaint || null,
       diagnostico: diagnosis
-        ? { codigo: diagnosis.code, descripcion: diagnosis.description }
+        ? {
+            codigo: diagnosis.code,
+            descripcion: diagnosis.description,
+            pieza: diagnosis.toothNumber ?? null,
+            alcanceAnatomico: diagnosis.anatomicalScope ?? null,
+          }
         : null,
       procedimiento: treatment
         ? {
@@ -150,6 +155,8 @@ export function buildDemoRipsJson(form: DemoFormData): object {
               ? {
                   codigo: treatment.diagnosisCode,
                   descripcion: treatment.diagnosisDescription ?? null,
+                  pieza: treatment.diagnosisToothNumber ?? null,
+                  alcanceAnatomico: treatment.diagnosisAnatomicalScope ?? null,
                 }
               : null,
           }
