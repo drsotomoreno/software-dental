@@ -41,3 +41,12 @@ export function buildWhatsAppUrl(phone: string, message: string): string | null 
   if (!normalized || normalized.length < 10) return null
   return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`
 }
+
+/** Seguimiento de mercadeo para un paciente que solo tiene valoración. */
+export function buildValuationFollowUpMessage(clinicName?: string): string {
+  const clinic = clinicName?.trim() || 'nuestra clínica'
+  return (
+    `Hola, te escribimos de ${clinic}, para continuar con tu tratamiento odontológico. ` +
+    'Quedamos atentos si deseas agendar el siguiente paso de tu tratamiento.'
+  )
+}

@@ -12,9 +12,11 @@ import {
   etiquetaAperturaPaciente,
   ordenarPorAperturaDesc,
 } from '../../shared/patientOpenedAt.js'
+import { resolveAccountHolderTitle } from '@/utils/quickBudgetPrint'
+import { buildValuationFollowUpMessage, buildWhatsAppUrl } from '@/utils/whatsapp'
 
 export function ValuatedPatientsPage() {
-  const { can } = useAuth()
+  const { can, user } = useAuth()
   const { audit } = useAudit()
   const loggedRef = useRef(false)
   const [query, setQuery] = useState('')
@@ -101,39 +103,68 @@ export function ValuatedPatientsPage() {
                 <th className="px-4 py-2.5 font-medium text-slate-600">Teléfono</th>
                 <th className="px-4 py-2.5 font-medium text-slate-600">EPS</th>
                 <th className="px-4 py-2.5 font-medium text-slate-600">Estado</th>
+                <th className="px-4 py-2.5 font-medium text-slate-600">WhatsApp</th>
                 <th className="px-4 py-2.5 font-medium text-slate-600">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredPatients.map((patient) => (
-                <tr key={patient.id} className="hover:bg-amber-50/40">
-                  <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-teal-950">
-                    {etiquetaAperturaPaciente(patient.createdAt) || '—'}
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-xs">
-                    {patient.documentType} {patient.documentNumber}
-                  </td>
-                  <td className="px-4 py-2.5 font-medium">
-                    {patient.firstName} {patient.lastName}
-                  </td>
-                  <td className="px-4 py-2.5">{patient.phone}</td>
-                  <td className="px-4 py-2.5">{patient.insurer ?? '—'}</td>
-                  <td className="px-4 py-2.5">
-                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900">
-                      Solo valoración
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Link
-                      to={`/pacientes/${patient.id}`}
-                      state={{ resetHistoryView: true }}
-                      className="text-dental-600 hover:underline"
-                    >
-                      Ver valoración
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {filteredPatients.map((patient) => {
+                const whatsappUrl = buildWhatsAppUrl(
+                  patient.phone,
+                  buildValuationFollowUpMessage(resolveAccountHolderTitle(user)),
+                )
+                return (
+                  <tr key={patient.id} className="hover:bg-amber-50/40">
+                    <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-teal-950">
+                      {etiquetaAperturaPaciente(patient.createdAt) || '—'}
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-xs">
+                      {patient.documentType} {patient.documentNumber}
+                    </td>
+                    <td className="px-4 py-2.5 font-medium">
+                      {patient.firstName} {patient.lastName}
+                    </td>
+                    <td className="px-4 py-2.5">{patient.phone}</td>
+                    <td className="px-4 py-2.5">{patient.insurer ?? '—'}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900">
+                        Solo valoración
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {whatsappUrl ? (
+                        <a
+                          href={whatsappUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center whitespace-nowrap rounded-md bg-[#25D366] px-2.5 py-1 text-xs font-medium text-white shadow-sm transition hover:bg-[#1ebe57]"
+                          aria-label={`Enviar WhatsApp a ${patient.firstName} ${patient.lastName}`}
+                        >
+                          Enviar WhatsApp
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled
+                          title="Este paciente no tiene un celular válido para WhatsApp"
+                          className="inline-flex cursor-not-allowed items-center whitespace-nowrap rounded-md bg-slate-200 px-2.5 py-1 text-xs font-medium text-slate-500"
+                        >
+                          Enviar WhatsApp
+                        </button>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <Link
+                        to={`/pacientes/${patient.id}`}
+                        state={{ resetHistoryView: true }}
+                        className="text-dental-600 hover:underline"
+                      >
+                        Ver valoración
+                      </Link>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
             </div>
