@@ -2241,43 +2241,62 @@ export async function deleteSubscriptionUserByEmail(email) {
 
   store.users.splice(index, 1)
   store.sessions = (store.sessions || []).filter(
-    (item) => String(item.userId) !== String(removed.id) && normalizeEmail(item.email) !== normalizedEmail,
+    (item) =>
+      String(item.userId) !== String(removed.id) &&
+      normalizeEmail(item.email) !== normalizedEmail,
   )
   store.emailVerifications = (store.emailVerifications || []).filter(
     (item) => item.email !== normalizedEmail,
   )
   await saveStore(store)
 
-  await deleteEmailOtp(normalizedEmail)
+  // Limpieza secundaria en segundo plano: no debe tumbar el DELETE por timeout de nginx.
   const phone = normalizeColombiaPhoneNumber(removed.phone_number || removed.phone)
-  if (phone) {
-    await deletePhoneOtp(phone)
-  }
-
-  try {
-    await withPgClient(async (client) => {
-      await client.query(`DELETE FROM usuarios WHERE lower(email) = lower($1::text)`, [
-        normalizedEmail,
-      ])
-    })
-  } catch (error) {
-    if (error?.code !== 'PG_UNAVAILABLE') {
-      console.error(
-        '[Auth] No se pudo borrar el usuario en Postgres:',
-        error instanceof Error ? error.message : error,
-      )
-    }
-  }
-
-  try {
-    const scope = clinicSyncAliasIds(removed)
-    await resetClinicClinicalBucket(scope.canonical, scope.aliases)
-  } catch (error) {
-    console.error(
-      '[Auth] No se pudo limpiar el cubo clínico al borrar el registro:',
-      error instanceof Error ? error.message : error,
-    )
-  }
+  setImmediate(() => {
+    void (async () => {
+      try {
+        await deleteEmailOtp(normalizedEmail)
+      } catch (error) {
+        console.error(
+          '[Auth] OTP correo no limpiado al borrar registro:',
+          error instanceof Error ? error.message : error,
+        )
+      }
+      if (phone) {
+        try {
+          await deletePhoneOtp(phone)
+        } catch (error) {
+          console.error(
+            '[Auth] OTP WhatsApp no limpiado al borrar registro:',
+            error instanceof Error ? error.message : error,
+          )
+        }
+      }
+      try {
+        await withPgClient(async (client) => {
+          await client.query(`DELETE FROM usuarios WHERE lower(email) = lower($1::text)`, [
+            normalizedEmail,
+          ])
+        })
+      } catch (error) {
+        if (error?.code !== 'PG_UNAVAILABLE') {
+          console.error(
+            '[Auth] No se pudo borrar el usuario en Postgres:',
+            error instanceof Error ? error.message : error,
+          )
+        }
+      }
+      try {
+        const scope = clinicSyncAliasIds(removed)
+        await resetClinicClinicalBucket(scope.canonical, scope.aliases)
+      } catch (error) {
+        console.error(
+          '[Auth] No se pudo limpiar el cubo clínico al borrar el registro:',
+          error instanceof Error ? error.message : error,
+        )
+      }
+    })()
+  })
 
   return {
     ok: true,
