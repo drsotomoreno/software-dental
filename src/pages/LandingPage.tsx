@@ -212,40 +212,58 @@ export function LandingPage() {
             pesos colombianos.
           </p>
 
-          <div className="mt-12 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-12 grid grid-cols-1 items-stretch gap-5 md:grid-cols-2 xl:grid-cols-4">
             {PAID_PLANS.map((plan) => (
               <article
                 key={plan.id}
-                className={`relative flex flex-col rounded-2xl border p-6 shadow-sm ${
+                className={`relative flex h-full flex-col justify-between rounded-2xl border p-6 shadow-sm transition-shadow duration-300 hover:shadow-md ${
                   plan.featured
-                    ? 'border-dental-800 bg-dental-800 text-white shadow-dental-900/20 xl:-translate-y-2'
+                    ? 'border-dental-800 bg-dental-800 text-white shadow-dental-900/20'
                     : 'border-slate-200 bg-white text-slate-800'
                 }`}
               >
-                {plan.featured ? (
-                  <p className="mb-4 inline-flex self-start rounded-full bg-amber-400 px-3 py-1 text-xs font-semibold text-dental-950">
-                    ★ El más elegido
-                  </p>
-                ) : null}
-                <h3 className="text-xl font-bold">{plan.name}</h3>
-                <p
-                  className={`mt-2 text-sm leading-relaxed ${plan.featured ? 'text-dental-100' : 'text-slate-600'}`}
-                >
-                  {plan.blurb}
-                </p>
-                <p className="mt-5 flex items-end gap-1">
-                  <span className="text-3xl font-bold tracking-tight">{plan.priceLabel}</span>
-                  {plan.period ? (
-                    <span
-                      className={`mb-1 text-sm font-medium ${
-                        plan.featured ? 'text-dental-100' : 'text-slate-500'
+                <header className="flex flex-col">
+                  <div className="mb-4 flex min-h-7 items-start">
+                    {plan.featured ? (
+                      <p className="inline-flex rounded-full bg-amber-400 px-3 py-1 text-xs font-semibold text-dental-950">
+                        ★ El más elegido
+                      </p>
+                    ) : (
+                      <span
+                        className="invisible inline-flex rounded-full px-3 py-1 text-xs font-semibold"
+                        aria-hidden
+                      >
+                        ★ El más elegido
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="min-h-7 text-xl font-bold leading-7">{plan.name}</h3>
+                  <div className="mt-2 flex min-h-[20.5rem] flex-col justify-between gap-5">
+                    <p
+                      className={`text-sm leading-relaxed ${
+                        plan.featured ? 'text-dental-100' : 'text-slate-600'
                       }`}
                     >
-                      {plan.period}
-                    </span>
-                  ) : null}
-                </p>
-                <ul className="mt-6 flex-1 space-y-2.5 text-sm">
+                      {plan.blurb}
+                    </p>
+                    <p className="flex min-h-10 items-end gap-1">
+                      <span className="text-3xl font-bold tracking-tight">{plan.priceLabel}</span>
+                      <span
+                        className={`mb-1 text-sm font-medium ${
+                          plan.period
+                            ? plan.featured
+                              ? 'text-dental-100'
+                              : 'text-slate-500'
+                            : 'invisible'
+                        }`}
+                      >
+                        {plan.period || 'COP/mes'}
+                      </span>
+                    </p>
+                  </div>
+                </header>
+
+                <ul className="mt-6 flex grow flex-col space-y-2.5 text-sm">
                   {plan.features.map((feature) => (
                     <li key={feature} className="flex gap-2">
                       <span
@@ -259,16 +277,19 @@ export function LandingPage() {
                     </li>
                   ))}
                 </ul>
-                <Link
-                  to="/subscription-plans"
-                  className={`mt-8 inline-flex w-full items-center justify-center rounded-lg px-4 py-2.5 text-sm font-medium transition ${
-                    plan.featured
-                      ? 'bg-white text-dental-800 hover:bg-dental-50'
-                      : 'bg-dental-600 text-white hover:bg-dental-700'
-                  }`}
-                >
-                  {plan.cta}
-                </Link>
+
+                <div className="mt-8">
+                  <Link
+                    to="/subscription-plans"
+                    className={`inline-flex w-full items-center justify-center rounded-lg px-4 py-2.5 text-sm font-medium transition ${
+                      plan.featured
+                        ? 'bg-white text-dental-800 hover:bg-dental-50'
+                        : 'bg-dental-600 text-white hover:bg-dental-700'
+                    }`}
+                  >
+                    {plan.cta}
+                  </Link>
+                </div>
               </article>
             ))}
           </div>
