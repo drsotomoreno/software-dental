@@ -98,19 +98,25 @@ export function LandingPage() {
             className="h-auto w-full rounded-2xl object-cover object-center"
           />
 
+          <div className="mx-auto mt-10 max-w-4xl text-center">
+            <p className="text-xl font-medium leading-snug tracking-tight text-slate-800 sm:text-2xl sm:leading-snug lg:text-3xl lg:leading-tight">
+              ¿Cansado de pagar software costoso con funciones que nunca usas y de perder horas
+              escribiendo historias clínicas? Imagínate dictar cada diagnóstico y evolución con tu
+              propia voz mientras{' '}
+              <span className="font-bold text-dental-700">{APP_SHORT_NAME}</span> hace el resto.
+              Además, cumple 100% con la normatividad colombiana: facturación DIAN, RIPS, WhatsApp
+              automatizado y firma digital en tablet. Una plataforma diseñada a la medida para{' '}
+              <span className="font-bold text-dental-700">blindar tu rentabilidad</span>.
+            </p>
+          </div>
+
           <div className="mx-auto mt-8 flex max-w-xl flex-col gap-3">
-            <div>
-              <Link
-                to="/registro"
-                className="btn-primary w-full px-6 py-4 text-center text-base font-semibold"
-              >
-                Inicia Prueba Gratuita
-              </Link>
-              <p className="mt-2 text-xs leading-relaxed text-gray-500">
-                Requiere validación con número ReTHUS real. Incluye habilitación de dictado por
-                voz por paciente.
-              </p>
-            </div>
+            <Link
+              to="/registro"
+              className="btn-primary w-full px-6 py-4 text-center text-base font-semibold"
+            >
+              Inicia Prueba Gratuita
+            </Link>
             <a href="#planes" className="btn-secondary w-fit px-6 py-3 text-center text-base">
               Ver Planes
             </a>
