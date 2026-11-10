@@ -19,6 +19,11 @@ import {
 } from '@/utils/valuationConsent'
 import { savePatientValuationDraft } from '@/utils/patientClinicalDraft'
 import { reassignPendingRdaToPatient } from '@/services/rdaExternalHistoryService'
+import { getStoredApiAuth } from '@/services/apiAuthService'
+import { accessTier } from '@/utils/subscriptionAccess'
+import { TRIAL_PATIENT_LIMIT_MESSAGE } from '@/utils/trialLimits'
+import { HistoriaCreadaEn } from '@/components/clinical/HistoriaCreadaEn'
+import { selloAperturaPaciente } from '../../shared/patientOpenedAt.js'
 
 const initialForm: PatientFormData = {
   documentType: 'CC',
@@ -101,6 +106,16 @@ export function NewPatientPage() {
       return null
     }
 
+    const tier = accessTier(getStoredApiAuth()?.user)
+    if (tier === 'none') {
+      setError('Sin suscripción pagada no puede crear historias. Active la prueba gratuita o adquiera un plan.')
+      return null
+    }
+    if (tier === 'trial' && (await db.patients.count()) >= 1) {
+      setError(TRIAL_PATIENT_LIMIT_MESSAGE)
+      return null
+    }
+
     const existing = await db.patients.where('documentNumber').equals(form.documentNumber).first()
     if (existing) {
       setError('Ya existe un paciente con este número de documento.')
@@ -108,14 +123,14 @@ export function NewPatientPage() {
     }
 
     const resolvedConsent = resolveConsentMetadata()
-    const now = new Date().toISOString()
+    const sello = selloAperturaPaciente()
     const id = await db.patients.add({
       ...form,
       phase: withHistory ? 'TRATAMIENTO_ACEPTADO' : DEFAULT_PATIENT_PHASE,
       valuationOnly: !withHistory,
       valuationConsent: resolvedConsent ?? undefined,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: sello.createdAt,
+      updatedAt: sello.updatedAt,
     })
 
     const patientRouteId = String(id)
@@ -198,10 +213,11 @@ export function NewPatientPage() {
     <div className="mx-auto max-w-5xl">
       <div className="print:hidden">
         <h1 className="mb-2 text-2xl font-bold text-slate-900">Nuevo Paciente</h1>
-        <p className="mb-6 text-sm text-slate-500">
+        <p className="mb-4 text-sm text-slate-500">
           Complete en un solo formulario los datos del paciente y la valoración rápida antes de abrir
           la historia clínica detallada.
         </p>
+        <HistoriaCreadaEn pendiente className="mb-6" />
 
         {error && (
           <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>

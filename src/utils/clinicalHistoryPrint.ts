@@ -26,6 +26,7 @@ import {
   type ToothFaceState,
 } from '@/types/odontogram'
 import type { Patient } from '@/types/patient'
+import { etiquetaAperturaPaciente } from '../../shared/patientOpenedAt.js'
 import { SPECIALIZED_ANNEX_LABELS } from '@/types/specializedAnnexes'
 import { formatRehabArchToothColor } from '@/constants/vitaClassicShades'
 import { formatDentalWhiteningPlan, hasDentalWhiteningSelection } from '@/constants/dentalWhitening'
@@ -214,6 +215,7 @@ function buildIdentificationSection(patient: Patient): string {
       <h2>Datos de Identificación del Paciente</h2>
       <table>
         ${fieldRow('Nombre completo', `${patient.firstName} ${patient.lastName}`)}
+        ${fieldRow('Historia creada en', etiquetaAperturaPaciente(patient.createdAt) || '—')}
         ${fieldRow('Documento', `${patient.documentType} ${patient.documentNumber}`)}
         ${fieldRow('Edad', age !== null ? `${age} años` : '—')}
         ${fieldRow('Género', genderLabel)}

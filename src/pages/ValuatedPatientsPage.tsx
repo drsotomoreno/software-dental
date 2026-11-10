@@ -8,6 +8,10 @@ import { PatientListSearch } from '@/components/patients/PatientListSearch'
 import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import { isValuatedOnlyPatient } from '@/types/patient'
 import { patientMatchesQuery } from '@/utils/patientListSearch'
+import {
+  etiquetaAperturaPaciente,
+  ordenarPorAperturaDesc,
+} from '../../shared/patientOpenedAt.js'
 
 export function ValuatedPatientsPage() {
   const { can } = useAuth()
@@ -21,7 +25,10 @@ export function ValuatedPatientsPage() {
   })
 
   const filteredPatients = useMemo(
-    () => (patients ?? []).filter((patient) => patientMatchesQuery(patient, query)),
+    () =>
+      ordenarPorAperturaDesc(
+        (patients ?? []).filter((patient) => patientMatchesQuery(patient, query)),
+      ),
     [patients, query],
   )
 
@@ -41,8 +48,8 @@ export function ValuatedPatientsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Pacientes Valorados</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Pacientes registrados con solo valoración. Puede abrir su ficha o pasarlos a historia
-            completa desde Nuevo Paciente.
+            Ordenados por fecha de apertura, del más nuevo al más antiguo, para las tareas de
+            mercadeo. Puede abrir la ficha o pasarlos a historia completa desde Nuevo Paciente.
           </p>
         </div>
         {can('patients.write') && (
@@ -84,10 +91,11 @@ export function ValuatedPatientsPage() {
               </button>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm">
+            <div className="overflow-x-auto rounded-xl border border-amber-200 bg-white shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-amber-100 bg-amber-50">
               <tr>
+                <th className="px-4 py-2.5 font-medium text-slate-600">Historia creada en</th>
                 <th className="px-4 py-2.5 font-medium text-slate-600">Documento</th>
                 <th className="px-4 py-2.5 font-medium text-slate-600">Nombre</th>
                 <th className="px-4 py-2.5 font-medium text-slate-600">Teléfono</th>
@@ -99,6 +107,9 @@ export function ValuatedPatientsPage() {
             <tbody className="divide-y divide-slate-100">
               {filteredPatients.map((patient) => (
                 <tr key={patient.id} className="hover:bg-amber-50/40">
+                  <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-teal-950">
+                    {etiquetaAperturaPaciente(patient.createdAt) || '—'}
+                  </td>
                   <td className="px-4 py-2.5 font-mono text-xs">
                     {patient.documentType} {patient.documentNumber}
                   </td>

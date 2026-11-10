@@ -10,6 +10,7 @@ import type { Appointment } from '@/types/appointment'
 import type { ClinicalSyncRecord } from '@/types/clinicalSync'
 import type { Patient } from '@/types/patient'
 import { generateId } from '@/utils'
+import { conservarFechaApertura } from '../../shared/patientOpenedAt.js'
 import { renderCitas, syncCitasToLocalStorage } from '@/utils/agendaStorage'
 import {
   applyClinicSnapshot,
@@ -165,12 +166,18 @@ async function mergePatients(records: ClinicalSyncRecord[]): Promise<boolean> {
       if (local.id == null) continue
       const next = applyPayload<Patient>(remote)
       delete next.id
+      const apertura = conservarFechaApertura(local.createdAt, next.createdAt)
+      if (apertura) next.createdAt = apertura
+      else delete next.createdAt
       await db.patients.update(local.id, next)
       changed = true
       continue
     }
     const next = applyPayload<Patient>(remote)
     delete next.id
+    if (!conservarFechaApertura(next.createdAt)) {
+      next.createdAt = new Date().toISOString()
+    }
     await db.patients.add(next)
     changed = true
   }

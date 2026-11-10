@@ -26,6 +26,8 @@ import {
 
 } from '@/components/clinical'
 
+import { HistoriaCreadaEn } from '@/components/clinical/HistoriaCreadaEn'
+
 import type { PatientFormData } from '@/types/patient'
 import {
   KIOSK_SIGNATURE_APPLIED_EVENT,
@@ -812,6 +814,7 @@ export function PatientDetailPage() {
       companionName: patientForm.companionName?.trim() || undefined,
       companionPhone: patientForm.companionPhone?.trim() || undefined,
       companionRelationship: patientForm.companionRelationship?.trim() || undefined,
+      createdAt: current.createdAt,
       updatedAt: new Date().toISOString(),
     })
 
@@ -1850,6 +1853,8 @@ export function PatientDetailPage() {
               <ClinicalSignatureStatus patientId={patientForeignKey} />
             )}
           </p>
+
+          <HistoriaCreadaEn createdAt={patient.createdAt} className="mt-3" />
 
           <div className="mt-3">
             <ExternalHistoryRdaPanel

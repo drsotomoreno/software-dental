@@ -13,6 +13,7 @@ import {
 } from '../../shared/clinicalRecordGuard.js'
 import { withMergedClinicalPayments } from '../../shared/paymentControlMerge.js'
 import { odontogramRecordHasMarks } from './odontogramMerge.js'
+import { conservarFechaApertura } from '../../shared/patientOpenedAt.js'
 
 const STORE_FILE = join(config.dataDir, 'clinical-sync.json')
 const STORE_KEY = 'clinical-sync'
@@ -66,7 +67,27 @@ function shouldReplaceSyncedRecord(prev, next, entityKey) {
   return stamp(next) >= stamp(prev)
 }
 
+function sellarAperturaPaciente(prev, record) {
+  if (!record?.payload || typeof record.payload !== 'object') return record
+  const kept = conservarFechaApertura(prev?.payload?.createdAt, record.payload.createdAt)
+  if (kept) {
+    return { ...record, payload: { ...record.payload, createdAt: kept } }
+  }
+  if (!prev) {
+    return {
+      ...record,
+      payload: { ...record.payload, createdAt: new Date().toISOString() },
+    }
+  }
+  return record
+}
+
 function mergeClinicalEntityRecord(prev, next, entityKey) {
+  const merged = mergeClinicalEntityBody(prev, next, entityKey)
+  return entityKey === 'patients' ? sellarAperturaPaciente(prev, merged) : merged
+}
+
+function mergeClinicalEntityBody(prev, next, entityKey) {
   if (!prev) return next
   if (entityKey !== 'clinicalRecords' && entityKey !== 'drafts') {
     return shouldReplaceSyncedRecord(prev, next, entityKey) ? next : prev
@@ -437,7 +458,7 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
       const canonicalRecord = key === record.syncId ? record : { ...record, syncId: key }
       const prev = clinic.patients[key]
       if (!prev || stamp(canonicalRecord) >= stamp(prev)) {
-        clinic.patients[key] = canonicalRecord
+        clinic.patients[key] = sellarAperturaPaciente(prev, canonicalRecord)
         accepted.patients += 1
       }
     }
