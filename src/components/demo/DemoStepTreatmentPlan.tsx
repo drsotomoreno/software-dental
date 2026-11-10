@@ -29,10 +29,88 @@ function normalizeCupsQuery(value: string): string {
     .replace(/\s+/g, ' ')
 }
 
+/** Sinónimos coloquiales → términos del catálogo oficial. */
+const CUPS_QUERY_ALIASES: Record<string, string[]> = {
+  limpieza: ['profilaxis', 'detartraje', 'pulido'],
+  limpia: ['profilaxis', 'detartraje', 'pulido'],
+  extraccion: ['exodoncia'],
+  sacar: ['exodoncia'],
+  conducto: ['endodoncia', 'terapia de conducto'],
+  calza: ['obturacion'],
+  calzar: ['obturacion'],
+  empaste: ['obturacion'],
+}
+
+function expandCupsToken(token: string): string[] {
+  const aliases = CUPS_QUERY_ALIASES[token] ?? []
+  return [token, ...aliases.map((alias) => normalizeCupsQuery(alias))]
+}
+
 function formatCupsDisplay(code: string): string {
   const digits = code.replace(/\D/g, '').padStart(6, '0').slice(-6)
   if (digits.length !== 6) return code
   return `${digits.slice(0, 2)}.${digits.slice(2, 3)}.${digits.slice(3)}`
+}
+
+function tokenMatchesCupsField(
+  token: string,
+  codeDigits: string,
+  dotted: string,
+  words: string[],
+  blob: string,
+): boolean {
+  const variants = expandCupsToken(token)
+  for (const variant of variants) {
+    const variantDigits = variant.replace(/\D/g, '')
+    if (variantDigits.length >= 2 && codeDigits.includes(variantDigits)) return true
+    if (dotted.includes(variant)) return true
+    if (words.some((word) => word.startsWith(variant) || word.includes(variant))) return true
+    if (blob.includes(variant)) return true
+  }
+  return false
+}
+
+function scoreCupsEntry(entry: CupsOdontologyEntry, query: string): number {
+  const q = normalizeCupsQuery(query)
+  if (!q) return 0
+
+  const codeDigits = entry.codigo.replace(/\D/g, '')
+  const dotted = formatCupsDisplay(codeDigits).toLowerCase()
+  const description = normalizeCupsQuery(entry.descripcion)
+  const category = normalizeCupsQuery(entry.categoria)
+  const blob = `${codeDigits} ${dotted} ${description} ${category}`
+  const words = `${description} ${category}`.split(' ').filter(Boolean)
+  const tokens = q.split(' ').filter((token) => {
+    const digits = token.replace(/\D/g, '')
+    return digits.length >= 2 || token.length >= 2
+  })
+  if (tokens.length === 0) return -1
+  const qDigits = q.replace(/\D/g, '')
+
+  for (const token of tokens) {
+    if (!tokenMatchesCupsField(token, codeDigits, dotted, words, blob)) return -1
+  }
+
+  let score = 0
+  if (qDigits && codeDigits === qDigits) score += 100
+  else if (qDigits.length >= 3 && codeDigits.startsWith(qDigits)) score += 80
+  else if (qDigits.length >= 2 && codeDigits.includes(qDigits)) score += 55
+  else if (dotted.includes(q)) score += 50
+
+  for (const token of tokens) {
+    const variants = expandCupsToken(token)
+    let best = 0
+    for (const variant of variants) {
+      if (words.some((word) => word === variant)) best = Math.max(best, 45)
+      else if (words.some((word) => word.startsWith(variant))) best = Math.max(best, 35)
+      else if (description.includes(variant)) best = Math.max(best, 20)
+      else if (category.includes(variant)) best = Math.max(best, 12)
+    }
+    score += best
+  }
+
+  if (description.startsWith(q)) score += 15
+  return score
 }
 
 function searchCupsCatalog(query: string, limit = 40): CupsOdontologyEntry[] {
@@ -43,14 +121,16 @@ function searchCupsCatalog(query: string, limit = 40): CupsOdontologyEntry[] {
     ).filter((item): item is CupsOdontologyEntry => Boolean(item))
   }
 
-  const results: CupsOdontologyEntry[] = []
-  for (const entry of CUPS_ODONTOLOGIA) {
-    const blob = normalizeCupsQuery(`${entry.codigo} ${entry.descripcion} ${entry.categoria}`)
-    if (!blob.includes(q) && !entry.codigo.includes(q.replace(/\D/g, ''))) continue
-    results.push(entry)
-    if (results.length >= limit) break
-  }
-  return results
+  return CUPS_ODONTOLOGIA.map((entry) => ({ entry, score: scoreCupsEntry(entry, q) }))
+    .filter((row) => row.score >= 0)
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.entry.codigo.localeCompare(b.entry.codigo) ||
+        a.entry.descripcion.localeCompare(b.entry.descripcion, 'es'),
+    )
+    .slice(0, limit)
+    .map((row) => row.entry)
 }
 
 /** Paso 5 — Plan de tratamiento desde catálogo CUPS (máx. 1 procedimiento). */
