@@ -175,7 +175,7 @@ export function LandingPage() {
                 ) : null}
                 <h3 className="text-xl font-bold">{plan.name}</h3>
                 <p
-                  className={`mt-1 text-sm ${plan.featured ? 'text-dental-100' : 'text-slate-600'}`}
+                  className={`mt-2 text-sm leading-relaxed ${plan.featured ? 'text-dental-100' : 'text-slate-600'}`}
                 >
                   {plan.blurb}
                 </p>
@@ -206,7 +206,7 @@ export function LandingPage() {
                   ))}
                 </ul>
                 <Link
-                  to="/login"
+                  to="/subscription-plans"
                   className={`mt-8 inline-flex w-full items-center justify-center rounded-lg px-4 py-2.5 text-sm font-medium transition ${
                     plan.featured
                       ? 'bg-white text-dental-800 hover:bg-dental-50'

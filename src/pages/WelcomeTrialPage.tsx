@@ -6,7 +6,11 @@ import { FiscalProfileSelector } from '@/components/onboarding'
 import { persistClinicPerfilFiscal } from '@/services/fiscalProfileService'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import { getBillingModalitySettings } from '@/services/billingModalityService'
-import { activatePaidPlan, activateRethusTrial, PAID_PLANS, TRIAL_DAYS } from '@/services/subscriptionService'
+import { activateRethusTrial, PAID_PLANS, TRIAL_DAYS } from '@/services/subscriptionService'
+import {
+  SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE,
+  SUBSCRIPTION_PURCHASES_ENABLED,
+} from '../../shared/subscriptionPlans.js'
 import { userHasTrialLimits, userNeedsWelcome } from '@/utils/subscriptionAccess'
 import { normalizePerfilFiscal, type FiscalProfile } from '@/utils/fiscalProfile'
 
@@ -57,20 +61,6 @@ export function WelcomeTrialPage() {
       return
     }
     setInfo(result.message)
-    await savePerfilFiscal(perfilFiscal)
-    await goApp()
-  }
-
-  const handlePlan = async (planId: string) => {
-    setError('')
-    setInfo('')
-    setSubmitting(planId)
-    const result = await activatePaidPlan(planId)
-    setSubmitting(null)
-    if (!result.ok) {
-      setError(result.error)
-      return
-    }
     await savePerfilFiscal(perfilFiscal)
     await goApp()
   }
@@ -174,6 +164,11 @@ export function WelcomeTrialPage() {
         </section>
 
         <h2 className="mb-4 text-lg font-semibold text-slate-800">Planes de suscripción</h2>
+        {!SUBSCRIPTION_PURCHASES_ENABLED ? (
+          <p className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            {SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE}
+          </p>
+        ) : null}
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {PAID_PLANS.map((plan) => (
             <article
@@ -188,7 +183,7 @@ export function WelcomeTrialPage() {
                 </p>
               )}
               <h3 className="text-lg font-bold text-slate-900">{plan.name}</h3>
-              <p className="mt-1 text-sm text-slate-600">{plan.blurb}</p>
+              <p className="mt-2 text-sm leading-relaxed text-slate-600">{plan.blurb}</p>
               <p className="mt-3 text-2xl font-bold text-dental-700">
                 {plan.priceLabel}
                 {plan.period ? (
@@ -205,15 +200,19 @@ export function WelcomeTrialPage() {
               </ul>
               <button
                 type="button"
-                disabled={Boolean(submitting)}
-                onClick={() => void handlePlan(plan.id)}
-                className={`mt-5 w-full ${plan.featured ? 'btn-primary' : 'btn-secondary'}`}
+                disabled
+                className={`mt-5 w-full cursor-not-allowed opacity-70 ${plan.featured ? 'btn-primary' : 'btn-secondary'}`}
               >
-                {submitting === plan.id ? 'Activando...' : 'Elegir este plan'}
+                Compra próximamente
               </button>
             </article>
           ))}
         </div>
+        <p className="mt-4 text-center text-sm text-slate-500">
+          <Link to="/subscription-plans" className="font-semibold text-dental-700 hover:underline">
+            Ver detalle de tarifas
+          </Link>
+        </p>
       </div>
     </div>
   )

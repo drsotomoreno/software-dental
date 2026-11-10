@@ -10,6 +10,8 @@ import {
   PAID_PLAN_DAYS,
   TRIAL_DAYS,
   TTC_MESSAGE_PACKAGES,
+  SUBSCRIPTION_PURCHASES_ENABLED,
+  SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE,
   planDisplayName,
   applyClinicAssistantLookup,
   checkRethusLimit,
@@ -2484,6 +2486,9 @@ export async function deleteClinicUser({ token, hint, userId }) {
 }
 
 export async function selectPaidPlan({ token, planId, hint }) {
+  if (!SUBSCRIPTION_PURCHASES_ENABLED) {
+    return { ok: false, status: 503, error: SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE }
+  }
   const session = await resolveSubscriptionSession(token, hint)
   if (!session?.user) {
     return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
@@ -2577,6 +2582,9 @@ export async function readTitularProducts({ token, hint }) {
 }
 
 export async function purchaseTitularPlan({ token, planId, hint }) {
+  if (!SUBSCRIPTION_PURCHASES_ENABLED) {
+    return { ok: false, status: 503, error: SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE }
+  }
   const session = await resolveSubscriptionSession(token, hint)
   const loaded = await loadTitularAccount(session, { requireManager: true })
   if (!loaded.ok) return loaded
@@ -2603,9 +2611,11 @@ export async function purchaseTitularPlan({ token, planId, hint }) {
   }
   loaded.store.users[loaded.index] = updated
   await saveStore(loaded.store)
+  const planName = planDisplayName(plan, 'activo')
+  const planLabel = planName.startsWith('Plan ') ? planName : `Plan ${planName}`
   return {
     ok: true,
-    message: `Plan ${planDisplayName(plan, 'activo')} adquirido para el titular. Vence el ${formatProductDate(updated.fecha_vencimiento)}.`,
+    message: `${planLabel} adquirido para el titular. Vence el ${formatProductDate(updated.fecha_vencimiento)}.`,
     ...titularProductSnapshot(updated, loaded.actorId),
   }
 }

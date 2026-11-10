@@ -13,6 +13,8 @@ declare module '../../shared/subscriptionPlans.js' {
     maxReps: number | 'custom'
   }>
   export const PAID_PLAN_IDS: string[]
+  export const SUBSCRIPTION_PURCHASES_ENABLED: boolean
+  export const SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE: string
   export const TRIAL_DAYS: number
   export const PAID_PLAN_DAYS: number
   export const TRIAL_SEAT_LIMIT: number

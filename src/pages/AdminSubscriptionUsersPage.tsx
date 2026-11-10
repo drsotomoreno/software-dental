@@ -8,6 +8,10 @@ import {
   purchaseTitularPlan,
   type TitularProducts,
 } from '@/services/subscriptionService'
+import {
+  SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE,
+  SUBSCRIPTION_PURCHASES_ENABLED,
+} from '../../shared/subscriptionPlans.js'
 
 const STATUS_LABELS: Record<string, string> = {
   exento: 'Exento',
@@ -108,6 +112,10 @@ export function AdminSubscriptionUsersPage() {
   }
 
   const handlePlan = async (planId: string) => {
+    if (!SUBSCRIPTION_PURCHASES_ENABLED) {
+      setError(SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE)
+      return
+    }
     setSubmitting(planId)
     setError('')
     setInfo('')
@@ -283,9 +291,16 @@ export function AdminSubscriptionUsersPage() {
           </p>
         )}
 
+        {!SUBSCRIPTION_PURCHASES_ENABLED ? (
+          <p className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            {SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE}
+          </p>
+        ) : null}
+
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {PAID_PLANS.map((plan) => {
             const isCurrent = currentPlanId === plan.id
+            const purchaseLocked = !SUBSCRIPTION_PURCHASES_ENABLED
             return (
               <article
                 key={plan.id}
@@ -294,7 +309,7 @@ export function AdminSubscriptionUsersPage() {
                 }`}
               >
                 <h3 className="text-lg font-semibold text-slate-900">{plan.name}</h3>
-                <p className="mt-1 text-sm text-slate-600">{plan.blurb}</p>
+                <p className="mt-2 text-sm leading-relaxed text-slate-600">{plan.blurb}</p>
                 <p className="mt-2 text-2xl font-bold text-dental-700">
                   {plan.priceLabel}
                   {plan.period ? (
@@ -312,19 +327,29 @@ export function AdminSubscriptionUsersPage() {
                 </ul>
                 <button
                   type="button"
-                  disabled={!canPurchase || exempt || isCurrent || Boolean(submitting)}
+                  disabled={
+                    purchaseLocked || !canPurchase || exempt || isCurrent || Boolean(submitting)
+                  }
                   onClick={() => void handlePlan(plan.id)}
-                  className={`mt-6 w-full ${isCurrent || plan.featured ? 'btn-primary' : 'btn-secondary'}`}
+                  className={`mt-6 w-full ${
+                    purchaseLocked
+                      ? 'cursor-not-allowed opacity-70 btn-secondary'
+                      : isCurrent || plan.featured
+                        ? 'btn-primary'
+                        : 'btn-secondary'
+                  }`}
                 >
-                  {!canPurchase
-                    ? 'Solo el titular'
-                    : exempt
-                      ? 'Cuenta exenta'
-                      : isCurrent
-                        ? 'Plan actual'
-                        : submitting === plan.id
-                          ? 'Comprando…'
-                          : 'Comprar plan'}
+                  {purchaseLocked
+                    ? 'Compra próximamente'
+                    : !canPurchase
+                      ? 'Solo el titular'
+                      : exempt
+                        ? 'Cuenta exenta'
+                        : isCurrent
+                          ? 'Plan actual'
+                          : submitting === plan.id
+                            ? 'Comprando…'
+                            : 'Comprar plan'}
                 </button>
               </article>
             )

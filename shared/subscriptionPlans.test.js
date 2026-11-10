@@ -15,7 +15,7 @@ import {
 const corporativo = { plan: 'corporativo', estado_pago: 'activo', rol: 'admin' }
 
 test('el catálogo deja ReTHUS en 1, 4 y 6, y una sede REPS en todos los planes', () => {
-  assert.deepEqual(PLAN_LIMITS.nomad, { name: 'Plan Nomad', maxRethus: 1, maxReps: 1 })
+  assert.deepEqual(PLAN_LIMITS.nomad, { name: 'Plan Pioneros', maxRethus: 1, maxReps: 1 })
   assert.deepEqual(PLAN_LIMITS.smart, { name: 'Plan Smart', maxRethus: 4, maxReps: 1 })
   assert.deepEqual(PLAN_LIMITS.bionic, { name: 'Plan Bionic', maxRethus: 6, maxReps: 1 })
   assert.deepEqual(PLAN_LIMITS.corporativo, {
@@ -44,7 +44,7 @@ test('Corporativo lee custom_max_rethus y mantiene una sede REPS', () => {
   assert.equal(checkRepsLimit(clinic, 1).canAdd, true)
   assert.equal(checkRepsLimit(clinic, 2).canAdd, false)
   assert.equal(checkRepsLimit(clinic, 2).limit, 1)
-  assert.match(checkRepsLimit({ plan: 'nomad', estado_pago: 'activo' }, 2).planName, /Plan Nomad/)
+  assert.match(checkRepsLimit({ plan: 'nomad', estado_pago: 'activo' }, 2).planName, /Plan Pioneros/)
 })
 
 test('Smart y BioniC ignoran el tope manual de ReTHUS', () => {

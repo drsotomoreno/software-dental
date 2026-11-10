@@ -269,7 +269,7 @@ export function DemoShell() {
                 lanzamiento.
               </p>
               <Link
-                to={needsPlan ? '/welcome-trial' : '/registro'}
+                to="/subscription-plans"
                 className="mt-6 inline-flex items-center justify-center rounded-xl bg-amber-400 px-6 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-amber-500/30 transition hover:bg-amber-300"
               >
                 Asegurar mi tarifa de pionero
@@ -303,7 +303,7 @@ export function DemoShell() {
                   ) : null}
                   <h4 className="text-xl font-bold">{plan.name}</h4>
                   <p
-                    className={`mt-1 text-sm ${plan.featured ? 'text-dental-100' : 'text-slate-600'}`}
+                    className={`mt-2 text-sm leading-relaxed ${plan.featured ? 'text-dental-100' : 'text-slate-600'}`}
                   >
                     {plan.blurb}
                   </p>
@@ -334,7 +334,7 @@ export function DemoShell() {
                     ))}
                   </ul>
                   <Link
-                    to={needsPlan ? '/welcome-trial' : '/registro'}
+                    to="/subscription-plans"
                     className={`mt-8 inline-flex w-full items-center justify-center rounded-lg px-4 py-2.5 text-sm font-medium transition ${
                       plan.featured
                         ? 'bg-white text-dental-800 hover:bg-dental-50'

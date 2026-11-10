@@ -31,6 +31,7 @@ import {
   CatalogManagementPage,
   InvoicesAccountsPage,
   WelcomeTrialPage,
+  SubscriptionPlansPage,
   AdminSubscriptionUsersPage,
   SuperAdminDashboardPage,
   SuperAdminRegistrationsPage,
@@ -69,12 +70,13 @@ export default function ClinicalApp() {
         <Route path="/demo" element={<DemoPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/registro" element={<LoginPage />} />
+        <Route path="/subscription-plans" element={<SubscriptionPlansPage />} />
+        <Route path="/planes" element={<SubscriptionPlansPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
         <Route element={<ProtectedRoute />}>
           <Route path="welcome-trial" element={<WelcomeTrialPage />} />
-          <Route path="subscription-plans" element={<WelcomeTrialPage />} />
           <Route element={<RequireSuperAdmin />}>
             <Route element={<SuperAdminLayout />}>
               <Route path="superadmin" element={<SuperAdminDashboardPage />} />

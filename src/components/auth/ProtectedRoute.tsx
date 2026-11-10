@@ -60,7 +60,6 @@ export function ProtectedRoute() {
   // Nunca historia clínica completa (/app, pacientes, etc.).
   const unpaidAllowed =
     path === '/welcome-trial' ||
-    path === '/subscription-plans' ||
     path === '/suscripcion'
   if (
     userNeedsWelcome(apiAuth?.user) &&

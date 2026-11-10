@@ -1,6 +1,6 @@
 -- Topes manuales del plan corporativo.
 -- custom_max_assistants cuenta auxiliares. custom_max_rethus cuenta profesionales ReTHUS.
--- En Corporativo un NULL se trata como 0. Nomad, Smart y BioniC usan el catálogo.
+-- En Corporativo un NULL se trata como 0. Plan Pioneros, Smart y BioniC usan el catálogo.
 -- clinics.id es el id del titular de la clínica.
 -- Idempotente: se puede reejecutar sobre AWS RDS.
 

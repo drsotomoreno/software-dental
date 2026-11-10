@@ -1,10 +1,11 @@
 export const PAID_PLANS = [
   {
     id: 'nomad',
-    name: 'Nomad',
+    name: 'Plan Pioneros',
     priceLabel: '$50.000',
     period: 'COP/mes',
-    blurb: 'Para el especialista independiente.',
+    blurb:
+      'Da el salto a mihistoriadental por solo $50.000 al mes. Asegura tu tarifa de Pionero: beneficio exclusivo para los primeros 100 colegas que se suscriban a mihistoriadental.',
     featured: false,
     cta: 'Comenzar',
     features: [
@@ -81,6 +82,11 @@ export const PAID_PLANS = [
 
 export const PAID_PLAN_IDS = PAID_PLANS.map((plan) => plan.id)
 
+/** Mientras no exista pasarela de pago, la compra de planes queda bloqueada. */
+export const SUBSCRIPTION_PURCHASES_ENABLED = false
+export const SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE =
+  'La compra de planes estará disponible cuando se active el medio de pago. Por ahora puede revisar tarifas; la adquisición permanece inactiva.'
+
 export const TRIAL_DAYS = 7
 export const PAID_PLAN_DAYS = 30
 export const TRIAL_SEAT_LIMIT = 2
@@ -126,7 +132,7 @@ export const CORPORATE_PLAN_ID = 'corporativo'
 export const CUSTOM_PLAN_LIMIT = 'custom'
 
 export const PLAN_LIMITS = {
-  nomad: { name: 'Plan Nomad', maxRethus: 1, maxReps: 1 },
+  nomad: { name: 'Plan Pioneros', maxRethus: 1, maxReps: 1 },
   smart: { name: 'Plan Smart', maxRethus: 4, maxReps: 1 },
   bionic: { name: 'Plan Bionic', maxRethus: 6, maxReps: 1 },
   corporativo: { name: 'Plan Corporativo', maxRethus: 'custom', maxReps: 1 },

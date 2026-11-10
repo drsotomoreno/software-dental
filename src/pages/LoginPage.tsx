@@ -68,8 +68,11 @@ export function LoginPage() {
       ? '/app'
       : from
   const storedUser = apiAuth?.user
+  const onRegisterPath = location.pathname === '/registro'
   // Solo redirigir con sesión real. Nunca por doctorSEO_rol suelto en localStorage.
-  if (!isLoading && (user || (apiAuth?.token && apiAuth.user))) {
+  // /registro nunca debe absorber al visitante dentro de la cuenta maestra/clínica:
+  // esa ruta es alta de colegas, no reentrada al panel.
+  if (!isLoading && (user || (apiAuth?.token && apiAuth.user)) && !onRegisterPath) {
     const dest =
       storedUser && !isSuperAdmin ? postAuthDestination(storedUser, afterLogin) : afterLogin
     return <Navigate to={dest} replace />
