@@ -254,7 +254,11 @@ async function adoptLocalRecords(clinicId: string): Promise<void> {
   })
 }
 
-async function pushAllLocal(clinicId: string): Promise<boolean> {
+async function pushAllLocal(clinicId: string): Promise<{
+  ok: boolean
+  acceptedPatients: number
+  rejected: number
+}> {
   const { clinicIdsMatch, ensureClinicLocalIsolation } = await import(
     '@/services/clinicLocalIsolation'
   )
@@ -281,13 +285,15 @@ async function pushAllLocal(clinicId: string): Promise<boolean> {
     .map((row) => toSyncRecord(row, clinicId))
     .filter((row): row is ClinicalSyncRecord => row != null)
 
-  if (patientRecords.length === 0 && appointmentRecords.length === 0) return true
+  if (patientRecords.length === 0 && appointmentRecords.length === 0) {
+    return { ok: true, acceptedPatients: 0, rejected: 0 }
+  }
 
-  const { response } = await syncFetch('/api/sync/clinical', {
+  const { response, payload } = await syncFetch('/api/sync/clinical', {
     method: 'POST',
     body: JSON.stringify({ patients: patientRecords, appointments: appointmentRecords }),
   })
-  if (!response.ok) return false
+  if (!response.ok) return { ok: false, acceptedPatients: 0, rejected: 0 }
 
   const now = new Date().toISOString()
   await withRemotePullLock(async () => {
@@ -304,7 +310,9 @@ async function pushAllLocal(clinicId: string): Promise<boolean> {
       })
     }
   })
-  return true
+  const acceptedPatients = Number(payload?.accepted?.patients) || 0
+  const rejected = Number(payload?.accepted?.rejected) || 0
+  return { ok: true, acceptedPatients, rejected }
 }
 
 /** Aplica pacientes, citas, historias y blobs del snapshot a IndexedDB. */
@@ -335,10 +343,14 @@ export async function applyFullClinicPull(
   return extraChanged || patients.length > 0 || appointments.length > 0
 }
 
-async function pullAndMerge(includeBlobs = false): Promise<boolean> {
+async function pullAndMerge(includeBlobs = false): Promise<{ ok: boolean; patients: number }> {
   const { response, payload } = await syncFetch(`/api/sync/pull?full=${includeBlobs ? '1' : '0'}`)
-  if (!response.ok) return false
-  return applyFullClinicPull(payload, { hydrateBlobs: includeBlobs })
+  if (!response.ok) return { ok: false, patients: 0 }
+  await applyFullClinicPull(payload, { hydrateBlobs: includeBlobs })
+  const patients = Array.isArray(payload.patients)
+    ? payload.patients.length
+    : Number(payload.patientCount) || 0
+  return { ok: true, patients }
 }
 
 /** Pull forzado al iniciar sesión: snapshot completo con archivos antes de renderizar. */
@@ -354,27 +366,31 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
       await ensureClinicLocalIsolation(clinicId)
     }
 
+    const { clinicIdsMatch } = await import('@/services/clinicLocalIsolation')
     if (typeof window !== 'undefined' && typeof window.__doctorSEOForceClinicPull === 'function') {
       const forced = await window.__doctorSEOForceClinicPull(auth.token, auth.user)
       if (forced) {
-        // Solo aplicar caché si pertenece a ESTA clínica (evita mezcla Superadmin → nuevo registro).
         const cached = await readCachedClinicPull()
-        if (cached && clinicId && cached.clinicId && cached.clinicId === clinicId) {
+        if (
+          cached &&
+          clinicId &&
+          cached.clinicId &&
+          clinicIdsMatch(cached.clinicId, clinicId)
+        ) {
           await applyFullClinicPull(cached)
         }
         return true
       }
     }
     const cached = await readCachedClinicPull()
-    if (cached && clinicId && (!cached.clinicId || cached.clinicId === clinicId)) {
-      // Si el caché no trae clinicId (legacy), no aplicarlo: forzar pull remoto limpio.
-      if (cached.clinicId) await applyFullClinicPull(cached)
+    if (cached && clinicId && cached.clinicId && clinicIdsMatch(cached.clinicId, clinicId)) {
+      await applyFullClinicPull(cached)
     }
     if (!clinicId) return false
     const merged = await pullAndMerge(true)
     await syncCitasToLocalStorage()
     renderCitas()
-    return merged
+    return merged.ok
   } catch {
     return false
   }
@@ -398,10 +414,10 @@ async function performClinicalSyncCycle(): Promise<boolean> {
     await flushPendingClinicalDraft().catch(() => undefined)
     await pushAllLocal(clinicId).catch(() => false)
     await pushClinicSnapshotLocal(clinicId).catch(() => false)
-    const changed = await pullAndMerge(false).catch(() => false)
+    const changed = await pullAndMerge(false).catch(() => ({ ok: false, patients: 0 }))
     await syncCitasToLocalStorage()
     renderCitas()
-    return Boolean(changed)
+    return changed.ok
   } catch {
     return false
   }
@@ -438,7 +454,13 @@ setClinicalSyncDirtyListener(() => {
 
 export type ForzarSincronizacionResult = {
   ok: boolean
+  /** Pacientes que el servidor tiene de esta clínica después del pull. */
   patients: number
+  /** Pacientes que el servidor aceptó en esta subida. */
+  acceptedPatients: number
+  /** Fichas de este equipo que siguen sin acuse. */
+  pending: number
+  localPatients: number
   appointments: number
   clinicId?: string
   error?: string
@@ -452,35 +474,64 @@ export async function forzarSincronizacionLocal(): Promise<ForzarSincronizacionR
     return {
       ok: false,
       patients: 0,
+      acceptedPatients: 0,
+      pending: 0,
+      localPatients: 0,
       appointments: 0,
       error: 'Inicie sesión para forzar la sincronización.',
     }
   }
 
-  const [patientCount, appointmentCount] = await Promise.all([
-    db.patients.count(),
+  const { clinicIdsMatch } = await import('@/services/clinicLocalIsolation')
+  const [patientRows, appointmentCount] = await Promise.all([
+    db.patients.toArray(),
     db.appointments.count(),
   ])
+  const ownPatients = patientRows.filter(
+    (row) => !row.clinicId || clinicIdsMatch(row.clinicId, clinicId),
+  )
+  const pending = ownPatients.filter((row) => row.pendingSync === true || !row.lastSyncedAt).length
 
   try {
     const pushed = await pushAllLocal(clinicId)
-    if (!pushed) {
+    if (!pushed.ok) {
       return {
         ok: false,
-        patients: patientCount,
+        patients: 0,
+        acceptedPatients: 0,
+        pending,
+        localPatients: ownPatients.length,
         appointments: appointmentCount,
         clinicId,
         error: 'El servidor rechazó el POST /api/sync/clinical.',
       }
     }
-    await pullAndMerge(true)
+    await pushClinicSnapshotLocal(clinicId).catch(() => false)
+    const pulled = await pullAndMerge(true)
     await syncCitasToLocalStorage()
     renderCitas()
-    return { ok: true, patients: patientCount, appointments: appointmentCount, clinicId }
+    const stillPending = (await db.patients.toArray()).filter(
+      (row) =>
+        (!row.clinicId || clinicIdsMatch(row.clinicId, clinicId)) &&
+        (row.pendingSync === true || !row.lastSyncedAt),
+    ).length
+    return {
+      ok: pulled.ok,
+      patients: pulled.patients,
+      acceptedPatients: pushed.acceptedPatients,
+      pending: stillPending,
+      localPatients: ownPatients.length,
+      appointments: appointmentCount,
+      clinicId,
+      error: pulled.ok ? undefined : 'La subida llegó, pero no se pudo volver a bajar el listado.',
+    }
   } catch (error) {
     return {
       ok: false,
-      patients: patientCount,
+      patients: 0,
+      acceptedPatients: 0,
+      pending,
+      localPatients: ownPatients.length,
       appointments: appointmentCount,
       clinicId,
       error: error instanceof Error ? error.message : 'No se pudo sincronizar.',

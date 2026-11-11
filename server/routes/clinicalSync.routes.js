@@ -3,7 +3,7 @@ import {
   resolveSubscriptionSession,
   sessionHintFromRequest,
 } from '../services/subscriptionAuthStore.js'
-import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
+import { clinicKeyInScope, clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
 import { countDistinctClinicalPatients, TRIAL_MAX_PATIENTS } from '../../shared/clinicalAccess.js'
 import {
   findClinicAttachment,
@@ -33,16 +33,17 @@ function booleanQuery(value, fallback) {
   return fallback
 }
 
-function aliasesWithTenant(auth, tenantId) {
-  const aliases = [...auth.aliases]
-  if (!tenantId) return aliases
-  if (tenantId === auth.canonical || aliases.includes(tenantId)) return aliases
-  const prefixed = tenantId.startsWith('clinic:') ? tenantId : `clinic:${tenantId}`
-  if (prefixed === auth.canonical || aliases.includes(prefixed)) {
-    aliases.push(tenantId, prefixed)
-    return [...new Set(aliases)]
-  }
-  return aliases
+/** El cliente no elige la sede. Un id ajeno se rechaza; el cubo sale solo de la sesión. */
+function denyForeignTenant(auth, req, res) {
+  const requested = tenantIdFromRequest(req)
+  if (!requested) return false
+  if (clinicKeyInScope(requested, auth.canonical, auth.aliases)) return false
+  res.status(403).json({
+    success: false,
+    ok: false,
+    error: 'Violación de seguridad. No tienes permisos para acceder a los datos de esta sede.',
+  })
+  return true
 }
 
 async function requireClinicSession(req, res) {
@@ -56,7 +57,9 @@ async function requireClinicSession(req, res) {
     res.status(400).json({ success: false, ok: false, error: 'La sesión no tiene clínica asociada.' })
     return null
   }
-  return { session, ...scope }
+  const auth = { session, ...scope }
+  if (denyForeignTenant(auth, req, res)) return null
+  return auth
 }
 
 function denyWithoutClinicalAccess(auth, res) {
@@ -114,6 +117,7 @@ function snapshotResponse(auth, snapshot) {
     ok: true,
     clinicId: auth.canonical,
     tenant_id: auth.canonical,
+    patientCount: Array.isArray(snapshot.patients) ? snapshot.patients.length : 0,
     patients: snapshot.patients,
     appointments: snapshot.appointments,
     clinicalRecords: snapshot.clinicalRecords,
@@ -132,7 +136,7 @@ router.get('/clinical', async (req, res) => {
     if (!auth) return
     if (denyWithoutClinicalAccess(auth, res)) return
 
-    const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
+    const aliases = auth.aliases
     const includeBlobs = booleanQuery(req.query?.includeBlobs ?? req.query?.full, false)
     const snapshot = capTrialSnapshot(
       auth.session.accessTier,
@@ -155,7 +159,7 @@ router.get('/pull', async (req, res) => {
     if (!auth) return
     if (denyWithoutClinicalAccess(auth, res)) return
 
-    const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
+    const aliases = auth.aliases
     const includeBlobs = booleanQuery(req.query?.includeBlobs ?? req.query?.full, true)
     const snapshot = capTrialSnapshot(
       auth.session.accessTier,
@@ -180,7 +184,7 @@ router.post('/clinical', async (req, res) => {
 
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     if (denyTrialOverflow(auth, body, res)) return
-    const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
+    const aliases = auth.aliases
     const hasExtended =
       Array.isArray(body.clinicalRecords) ||
       Array.isArray(body.diagnosticAids) ||
@@ -230,7 +234,7 @@ router.post('/push', async (req, res) => {
 
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     if (denyTrialOverflow(auth, body, res)) return
-    const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
+    const aliases = auth.aliases
     const result = await pushClinicSnapshot(auth.canonical, body, aliases)
     return res.json({
       success: true,
@@ -252,7 +256,7 @@ router.get('/attachment', async (req, res) => {
     if (!auth) return
     if (denyWithoutClinicalAccess(auth, res)) return
 
-    const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
+    const aliases = auth.aliases
     const query = req.query && typeof req.query === 'object' ? req.query : {}
     const attachment = await findClinicAttachment(
       auth.canonical,
@@ -292,7 +296,7 @@ router.get('/files/:fileId', async (req, res) => {
     if (!auth) return
     if (denyWithoutClinicalAccess(auth, res)) return
 
-    const aliases = aliasesWithTenant(auth, tenantIdFromRequest(req))
+    const aliases = auth.aliases
     const query = {
       ...(req.query && typeof req.query === 'object' ? req.query : {}),
       id: req.params.fileId,

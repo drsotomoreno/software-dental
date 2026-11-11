@@ -59,3 +59,24 @@ export function clinicSyncAliasIds(user) {
 
   return { canonical, aliases: [...aliases].filter(Boolean) }
 }
+
+/**
+ * ¿Esta clave pertenece al cubo de la sesión?
+ * Vacío significa «aún sin clínica»: el servidor la sella con la clínica del token.
+ * Una clave de otra sede queda fuera.
+ */
+export function clinicKeyInScope(value, canonical, aliases = []) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return true
+  const allowed = new Set()
+  for (const item of [canonical, ...(Array.isArray(aliases) ? aliases : [])]) {
+    const key = String(item ?? '').trim()
+    if (!key) continue
+    allowed.add(key)
+    if (key.startsWith('clinic:')) allowed.add(key.slice('clinic:'.length))
+    else allowed.add(`clinic:${key}`)
+  }
+  const prefixed = raw.startsWith('clinic:') ? raw : `clinic:${raw}`
+  const bare = raw.startsWith('clinic:') ? raw.slice('clinic:'.length) : raw
+  return allowed.has(raw) || allowed.has(prefixed) || allowed.has(bare)
+}

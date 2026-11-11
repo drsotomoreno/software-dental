@@ -14,6 +14,7 @@ import {
 import { withMergedClinicalPayments } from '../../shared/paymentControlMerge.js'
 import { odontogramRecordHasMarks } from './odontogramMerge.js'
 import { conservarFechaApertura } from '../../shared/patientOpenedAt.js'
+import { clinicKeyInScope } from '../../shared/clinicalSyncScope.js'
 
 const STORE_FILE = join(config.dataDir, 'clinical-sync.json')
 const STORE_KEY = 'clinical-sync'
@@ -350,9 +351,19 @@ export async function resetClinicClinicalBucket(clinicId, aliasIds = []) {
   })
 }
 
-function mergeIncomingMap(target, incoming, clinicId, acceptedKey, accepted) {
+function rawClinicId(raw) {
+  if (!raw || typeof raw !== 'object') return ''
+  const payload = raw.payload && typeof raw.payload === 'object' ? raw.payload : null
+  return String(raw.clinicId || payload?.clinicId || '').trim()
+}
+
+function mergeIncomingMap(target, incoming, clinicId, acceptedKey, accepted, aliasIds = []) {
   let count = 0
   for (const raw of Array.isArray(incoming) ? incoming : []) {
+    if (!clinicKeyInScope(rawClinicId(raw), clinicId, aliasIds)) {
+      accepted.rejected = (accepted.rejected || 0) + 1
+      continue
+    }
     const record = normalizeRecord(raw, clinicId)
     if (!record) continue
     const prev = target[record.syncId]
@@ -394,6 +405,15 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
   }
   const store = await loadStore()
   const clinic = mergeClinicBuckets(store, ids)
+  try {
+    const { mergeMirroredPatients } = await import('./clinicPatientMirror.js')
+    clinic.patients = await mergeMirroredPatients(clinicId, clinic.patients)
+  } catch (error) {
+    console.error(
+      '[Sync] No se pudo leer el espejo Postgres de pacientes:',
+      error instanceof Error ? error.message : error,
+    )
+  }
   const attachments = []
   for (const record of Object.values(clinic.attachments).filter(Boolean)) {
     attachments.push(await hydrateAttachment(ids, record, includeBlobs))
@@ -441,6 +461,7 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
     attachments: 0,
     drafts: 0,
     sync_queue: 0,
+    rejected: 0,
   }
   if (!canonical) {
     return { accepted: emptyAccepted, serverTime: new Date().toISOString() }
@@ -452,6 +473,10 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
     const accepted = { ...emptyAccepted }
 
     for (const raw of Array.isArray(body.patients) ? body.patients : []) {
+      if (!clinicKeyInScope(rawClinicId(raw), canonical, aliasIds)) {
+        accepted.rejected += 1
+        continue
+      }
       const record = normalizeRecord(raw, canonical)
       if (!record) continue
       const key = findPatientKey(clinic.patients, record)
@@ -463,11 +488,11 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
       }
     }
 
-    mergeIncomingMap(clinic.appointments, body.appointments, canonical, 'appointments', accepted)
-    mergeIncomingMap(clinic.clinicalRecords, body.clinicalRecords, canonical, 'clinicalRecords', accepted)
-    mergeIncomingMap(clinic.odontograms, body.odontograms, canonical, 'odontograms', accepted)
-    mergeIncomingMap(clinic.diagnosticAids, body.diagnosticAids, canonical, 'diagnosticAids', accepted)
-    mergeIncomingMap(clinic.drafts, body.drafts, canonical, 'drafts', accepted)
+    mergeIncomingMap(clinic.appointments, body.appointments, canonical, 'appointments', accepted, aliasIds)
+    mergeIncomingMap(clinic.clinicalRecords, body.clinicalRecords, canonical, 'clinicalRecords', accepted, aliasIds)
+    mergeIncomingMap(clinic.odontograms, body.odontograms, canonical, 'odontograms', accepted, aliasIds)
+    mergeIncomingMap(clinic.diagnosticAids, body.diagnosticAids, canonical, 'diagnosticAids', accepted, aliasIds)
+    mergeIncomingMap(clinic.drafts, body.drafts, canonical, 'drafts', accepted, aliasIds)
 
     const queueItems = [
       ...(Array.isArray(body.sync_queue) ? body.sync_queue : []),
@@ -476,6 +501,10 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
     ]
 
     for (const raw of queueItems) {
+      if (!clinicKeyInScope(rawClinicId(raw), canonical, aliasIds)) {
+        accepted.rejected += 1
+        continue
+      }
       const record = normalizeRecord(raw, canonical)
       if (!record) continue
       const withBinary = await persistAttachmentBinary(canonical, record, raw, aliasIds)
@@ -500,6 +529,15 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
 
     replicateAliases(store, canonical, clinic, aliasIds)
     await saveStore(store)
+    try {
+      const { mirrorClinicPatients } = await import('./clinicPatientMirror.js')
+      await mirrorClinicPatients(canonical, Object.values(clinic.patients))
+    } catch (error) {
+      console.error(
+        '[Sync] El espejo Postgres de pacientes no se actualizó:',
+        error instanceof Error ? error.message : error,
+      )
+    }
     return {
       accepted,
       serverTime: new Date().toISOString(),

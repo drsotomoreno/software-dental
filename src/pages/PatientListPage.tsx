@@ -25,6 +25,15 @@ export function PatientListPage() {
     return all.filter((patient) => belongsToCurrentClinic(patient) && isActivePatient(patient))
   })
 
+  const pendingSyncCount = useLiveQuery(async () => {
+    const all = await db.patients.toArray()
+    return all.filter(
+      (patient) =>
+        belongsToCurrentClinic(patient) &&
+        (patient.pendingSync === true || !patient.lastSyncedAt),
+    ).length
+  })
+
   const filteredPatients = useMemo(
     () => (patients ?? []).filter((patient) => patientMatchesQuery(patient, query)),
     [patients, query],
@@ -47,7 +56,7 @@ export function PatientListPage() {
     setSyncing(false)
     if (result.ok) {
       setSyncMessage(
-        `Sincronizados ${result.patients} pacientes y ${result.appointments} citas (${result.clinicId}).`,
+        `Servidor: ${result.patients} pacientes de esta clínica. Aceptó ${result.acceptedPatients} en esta subida. En este equipo quedan ${result.pending} pendientes.`,
       )
     } else {
       setSyncMessage(result.error || 'No se pudo forzar la sincronización.')
@@ -74,6 +83,13 @@ export function PatientListPage() {
           )}
         </div>
       </div>
+
+      {pendingSyncCount ? (
+        <p className="mb-4 text-sm text-amber-800">
+          {pendingSyncCount} paciente{pendingSyncCount === 1 ? '' : 's'} de esta cuenta aún no tienen
+          acuse del servidor. Los otros dispositivos no los ven hasta que esta subida termine.
+        </p>
+      ) : null}
 
       {syncMessage ? <p className="mb-4 text-sm text-slate-600">{syncMessage}</p> : null}
 

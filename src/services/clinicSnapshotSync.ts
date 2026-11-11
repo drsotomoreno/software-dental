@@ -630,12 +630,15 @@ async function blobBase64ForAid(aidId: string): Promise<string> {
 }
 
 export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean> {
+  const { clinicIdsMatch } = await import('@/services/clinicLocalIsolation')
+  const ownClinic = <T extends { clinicId?: string | null }>(rows: T[]) =>
+    rows.filter((row) => !row.clinicId || clinicIdsMatch(row.clinicId, clinicId))
   await flushPendingClinicalDraft()
   const [clinicalRecords, odontograms, diagnosticAids, drafts] = await Promise.all([
-    db.clinicalRecords.toArray(),
-    db.odontograms.toArray(),
-    db.diagnosticAids.toArray(),
-    db.patientClinicalDrafts.toArray(),
+    db.clinicalRecords.toArray().then(ownClinic),
+    db.odontograms.toArray().then(ownClinic),
+    db.diagnosticAids.toArray().then(ownClinic),
+    db.patientClinicalDrafts.toArray().then(ownClinic),
   ])
 
   for (const aid of diagnosticAids) {

@@ -42,20 +42,6 @@
     )
   }
 
-  function grantMasterSession(token) {
-    const sessionToken = token || 'superadmin-local-' + Date.now()
-    const user = {
-      id: 'superadmin-session',
-      nombre: 'Dr. Mauricio Soto',
-      email: MASTER_EMAIL,
-      rol: 'superadmin',
-      estado_pago: 'exento',
-      fecha_vencimiento: null,
-    }
-    storeAuth(sessionToken, user)
-    return { token: sessionToken, user }
-  }
-
   function isSuperAdminUser(user) {
     const email = String(user?.email || '').trim().toLowerCase()
     return email === MASTER_EMAIL
@@ -136,8 +122,19 @@
   const PULL_CACHE_STORE = 'snapshots'
   let clinicPullInFlight = null
 
+  function resolveClinicSyncId(user) {
+    var email = String(user && user.email ? user.email : '')
+      .trim()
+      .toLowerCase()
+    if (email === MASTER_EMAIL) return 'clinic:' + MASTER_EMAIL
+    var tenant = String((user && (user.clinicId || user.id)) || '').trim()
+    if (!tenant) return ''
+    if (tenant.indexOf('clinic:') === 0) return tenant
+    return 'clinic:' + tenant
+  }
+
   function tenantIdOfUser(user) {
-    return String(user?.clinicId || user?.id || '').trim()
+    return resolveClinicSyncId(user)
   }
 
   function payloadOfSyncRecord(record) {
@@ -165,8 +162,18 @@
         }
         req.onsuccess = function () {
           const db = req.result
+          const clinicId = String((payload && payload.clinicId) || '').trim()
+          const cacheKey = clinicId
+            ? 'pull:' + (clinicId.indexOf('clinic:') === 0 ? clinicId : 'clinic:' + clinicId)
+            : ''
+          if (!cacheKey) {
+            db.close()
+            resolve(false)
+            return
+          }
           const tx = db.transaction(PULL_CACHE_STORE, 'readwrite')
-          tx.objectStore(PULL_CACHE_STORE).put(payload, 'latest')
+          tx.objectStore(PULL_CACHE_STORE).put(payload, cacheKey)
+          tx.objectStore(PULL_CACHE_STORE).delete('latest')
           tx.oncomplete = function () {
             db.close()
             resolve(true)
@@ -353,7 +360,7 @@
           diagnosticAids: Array.isArray(payload.diagnosticAids) ? payload.diagnosticAids.length : 0,
           syncQueue: Array.isArray(payload.sync_queue) ? payload.sync_queue.length : 0,
         })
-        return true
+        return applied === true
       } catch (error) {
         logError('error en pull forzado', error)
         return false
@@ -488,25 +495,23 @@
         (isSuperAdminUser(payload.user) || payload.unlimitedAccess === true)
 
       if (masterAccess) {
+        if (!payload.token || !payload.user) {
+          showMessage(
+            'El servidor no entregó una sesión. La historia clínica no se abre sin token.',
+            'error',
+          )
+          return false
+        }
         localStorage.setItem(ROLE_KEY, 'superadmin')
         document.documentElement.dataset.superadmin = 'true'
-        const token = payload.token || 'superadmin-local-' + Date.now()
-        const user = payload.user || {
-          id: 'superadmin-session',
-          nombre: 'Dr. Mauricio Soto',
-          email: MASTER_EMAIL,
-          rol: 'superadmin',
-          estado_pago: 'exento',
-          fecha_vencimiento: null,
-        }
-        await activateSession(token, {
-          ...user,
+        await activateSession(payload.token, {
+          ...payload.user,
           rol: 'superadmin',
           estado_pago: 'exento',
           email: MASTER_EMAIL,
         })
         showMessage('Bienvenido SuperAdmin — acceso ilimitado habilitado.', 'success')
-        log('login maestro exitoso', user)
+        log('login maestro exitoso', payload.user)
         return true
       }
 
@@ -537,14 +542,12 @@
       log('login exitoso', payload.user)
       return true
     } catch (error) {
-      if (isMasterCredentials(email, password)) {
-        logError('API no disponible; se otorga sesión local de SuperAdmin', error)
-        const granted = grantMasterSession()
-        await activateSession(granted.token, granted.user)
-        showMessage('Bienvenido SuperAdmin — acceso ilimitado habilitado.', 'success')
-        return true
-      }
-      throw error
+      logError('login sin servidor', error)
+      showMessage(
+        'No hay conexión con el servidor. La historia clínica no se abre sin una sesión válida.',
+        'error',
+      )
+      return false
     }
   }
 
@@ -570,9 +573,9 @@
   }
 
   async function validateSession(token, storedUser) {
-    if (isSuperAdminUser(storedUser)) {
-      await activateSession(token, storedUser)
-      return true
+    if (String(token || '').indexOf('superadmin-local-') === 0) {
+      clearAuth()
+      return false
     }
 
     try {
@@ -599,10 +602,6 @@
       }
     } catch (error) {
       logError('validación de sesión falló', error)
-      if (isSuperAdminUser(storedUser)) {
-        await activateSession(token, storedUser)
-        return true
-      }
     }
 
     if (isPublicPath()) {
@@ -624,11 +623,6 @@
     }
 
     const stored = getStoredAuth()
-    if (stored?.token && isSuperAdminUser(stored.user)) {
-      await activateSession(stored.token, stored.user)
-      return
-    }
-
     if (stored?.token) {
       const ok = await validateSession(stored.token, stored.user)
       if (ok) return

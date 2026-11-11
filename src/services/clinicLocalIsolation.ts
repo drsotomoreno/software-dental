@@ -154,15 +154,14 @@ export async function ensureClinicLocalIsolation(clinicId = getCurrentClinicId()
 
   if (clinicChanged || dbChanged) {
     console.warn(
-      '[Tenant] Cambio de clínica/cuenta en este navegador; se limpia IndexedDB local.',
+      '[Tenant] Cambio de clínica/cuenta. Se abre la base de esta sesión y se conserva la anterior.',
       { previousClinic, clinicId, previousDb, nextDbName },
     )
-    await wipeLocalClinicalData()
   }
 
   await ensureDentalDatabaseForAuth(userId, clinicId || auth?.user?.clinicId || userId)
 
-  if (!clinicChanged && !dbChanged && clinicId) {
+  if (clinicId) {
     await purgeForeignClinicRecords(clinicId)
   }
 

@@ -7,3 +7,9 @@ export function clinicSyncAliasIds(user?: object | null): {
   canonical: string
   aliases: string[]
 }
+
+export function clinicKeyInScope(
+  value?: string | null,
+  canonical?: string | null,
+  aliases?: string[] | null,
+): boolean
