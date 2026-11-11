@@ -23,6 +23,7 @@ import { getLocalLanIPv4, isPrivateLanOrigin } from './server/utils/localLanAddr
 import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
 import { startMonthlyRipsCron } from './server/jobs/monthlyRipsCron.js'
+import { startClinicalDataIndexer } from './server/services/clinicalDataIndexer.service.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -177,6 +178,14 @@ async function bootAfterListen() {
       error instanceof Error ? error.message : error,
     )
   })
+  try {
+    startClinicalDataIndexer()
+  } catch (error) {
+    console.error(
+      '[Indexer] No se pudo registrar el listener CQRS (el sync sigue operativo):',
+      error instanceof Error ? error.message : error,
+    )
+  }
 }
 
 // Abrir el puerto antes de PostgreSQL. Si la base no responde, Render

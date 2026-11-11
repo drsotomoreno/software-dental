@@ -16,6 +16,27 @@ import { withMergedClinicalPayments } from '../../shared/paymentControlMerge.js'
 import { odontogramRecordHasMarks } from './odontogramMerge.js'
 import { conservarFechaApertura } from '../../shared/patientOpenedAt.js'
 import { clinicKeyInScope } from '../../shared/clinicalSyncScope.js'
+import { clinicalSyncEvents, SNAPSHOT_PUSHED } from './clinicalSyncEvents.js'
+
+/**
+ * Emite el delta al indexador CQRS sin await.
+ * Si el listener falla o tarda, el push HTTP ya respondió / sigue su curso.
+ */
+function emitSnapshotPushed(clinicId, payload, accepted) {
+  try {
+    clinicalSyncEvents.emit(SNAPSHOT_PUSHED, {
+      clinicId,
+      payload,
+      accepted,
+      pushedAt: new Date().toISOString(),
+    })
+  } catch (error) {
+    console.error(
+      '[Sync] No se pudo emitir snapshot:pushed (el guardado ya quedó persistido):',
+      error instanceof Error ? error.message : error,
+    )
+  }
+}
 
 const STORE_FILE = join(config.dataDir, 'clinical-sync.json')
 const STORE_KEY = 'clinical-sync'
@@ -643,6 +664,8 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
         error instanceof Error ? error.message : error,
       )
     }
+    // CQRS: el write path ya persistió. El read model se actualiza en background.
+    emitSnapshotPushed(canonical, body, accepted)
     return {
       accepted,
       serverTime: new Date().toISOString(),
