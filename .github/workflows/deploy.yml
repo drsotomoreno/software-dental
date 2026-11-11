@@ -26,10 +26,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 concurrency:
-  group: deploy-ec2-main
-  cancel-in-progress: false
+  # v2: desbloquea si un run anterior quedó fantasma en "queued" sin runner.
+  group: deploy-ec2-main-v2
+  cancel-in-progress: true
 
 permissions:
   contents: none
