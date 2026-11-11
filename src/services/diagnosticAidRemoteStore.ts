@@ -4,6 +4,10 @@ import {
   getDiagnosticAidBlobByAidId,
   saveDiagnosticAidBlobFromBuffer,
 } from '@/services/diagnosticAidBlobStore'
+import {
+  isGoogleDriveRequiredResponse,
+  notifyGoogleDriveRequired,
+} from '@/services/globalToast'
 import type { DiagnosticAid, DiagnosticAidBlobRecord } from '@/types/diagnosticAid'
 import { base64ToArrayBuffer } from '@/utils/base64Binary'
 import { mimeTypeForDiagnosticFile } from '@/utils/diagnosticAidWebClassification'
@@ -58,6 +62,7 @@ async function fetchClinicAttachment(params: Record<string, string>): Promise<Re
   const fileId = params.id || params.aidId || params.fileId
   if (fileId) paths.push(`/api/sync/files/${encodeURIComponent(fileId)}?${search.toString()}`)
 
+  let driveRequired = false
   for (const path of paths) {
     const response = await fetch(path, {
       headers: {
@@ -65,10 +70,17 @@ async function fetchClinicAttachment(params: Record<string, string>): Promise<Re
         ...identityHeaders(),
       },
     })
-    if (!response.ok) continue
     const body = await response.json().catch(() => ({}))
+    if (isGoogleDriveRequiredResponse(response, body)) {
+      driveRequired = true
+      continue
+    }
+    if (!response.ok) continue
     if (!body?.attachment) continue
     return payloadOf(body.attachment)
+  }
+  if (driveRequired) {
+    notifyGoogleDriveRequired()
   }
   return null
 }

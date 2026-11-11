@@ -131,6 +131,24 @@ export const config = {
       '573155858168'
     ).replace(/\D/g, ''),
   },
+  /**
+   * Google Drive OAuth 2.0 por clínica (Gmail del dueño/admin).
+   * No usar cuenta de servicio: cada tenant vincula su propio Drive.
+   */
+  googleOAuth: {
+    clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || '',
+    // Callback siempre en el host del API Express (no el origen Vite suelto).
+    redirectUri: (
+      process.env.GOOGLE_OAUTH_REDIRECT_URI ||
+      `${(
+        process.env.APP_PUBLIC_URL ||
+        (process.env.NODE_ENV === 'production' || process.env.RENDER === 'true'
+          ? 'https://www.mihistoriadental.com'
+          : `http://localhost:${Number(process.env.PORT) || 3000}`)
+      ).replace(/\/$/, '')}/api/integrations/google-drive/callback`
+    ).trim(),
+  },
 }
 
 /** Credenciales completas para modo producción contra el API del ministerio. */

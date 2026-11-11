@@ -19,6 +19,10 @@ const MIGRATION_FILES = [
     dirname(fileURLToPath(import.meta.url)),
     '../db/migrations/20261108190000_usuarios_whatsapp.sql',
   ),
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    '../db/migrations/20261111150000_clinicas_google_drive.sql',
+  ),
 ]
 
 export const MASTER_EMAIL = 'doctormauriciosoto@gmail.com'

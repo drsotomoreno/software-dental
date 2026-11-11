@@ -3,6 +3,7 @@ import { config } from '../config.js'
 import {
   base64ToBuffer,
   bufferToBase64,
+  isGoogleDriveRequiredError,
   readAttachmentBytes,
   writeAttachmentBytes,
 } from './clinicAttachmentStore.js'
@@ -240,68 +241,151 @@ function extractBase64(raw) {
   return ''
 }
 
-function attachmentStorageKeys(record) {
+function attachmentPatientSyncId(record, raw) {
   const payload = record?.payload && typeof record.payload === 'object' ? record.payload : {}
-  return [
-    ...new Set(
-      [record?.syncId, payload.id, payload.aidId, payload.blobId, payload.fileHash]
-        .map((value) => String(value || '').trim())
-        .filter(Boolean),
-    ),
-  ]
+  const fromRaw =
+    raw && typeof raw === 'object'
+      ? raw.patientSyncId || raw.patientId || raw.payload?.patientSyncId || raw.payload?.patientId
+      : ''
+  return String(
+    payload.patientSyncId || payload.patientId || fromRaw || 'sin-paciente',
+  ).trim() || 'sin-paciente'
 }
 
-async function persistAttachmentBinary(clinicId, record, raw, aliasIds = []) {
+/**
+ * Sube el binario a Google Drive. Sin Drive conectado → GoogleDriveRequiredError (428).
+ * Ya no escribe en server/data/clinic-attachments/.
+ */
+async function persistAttachmentBinary(clinicId, record, raw, _aliasIds = []) {
   const base64 = extractBase64(raw)
   const buffer = base64ToBuffer(base64)
-  if (!buffer) return record
-  const keys = attachmentStorageKeys(record)
-  for (const scopeId of scopeIds(clinicId, aliasIds)) {
-    for (const key of keys) {
-      await writeAttachmentBytes(scopeId, key, buffer)
+  if (!buffer) {
+    // Metadato sin binario nuevo: conservar driveFileId previo si existe.
+    const prevId = String(record?.payload?.driveFileId || '').trim()
+    if (prevId) {
+      return {
+        ...record,
+        payload: {
+          ...record.payload,
+          storageBackend: 'google_drive',
+          driveFileId: prevId,
+          hasBinary: true,
+        },
+      }
     }
+    return record
   }
+
+  const payload = record.payload && typeof record.payload === 'object' ? record.payload : {}
+  const attachmentKey = String(
+    record.syncId || payload.id || payload.aidId || payload.blobId || 'archivo',
+  ).trim()
+  const uploaded = await writeAttachmentBytes(clinicId, attachmentKey, buffer, {
+    patientSyncId: attachmentPatientSyncId(record, raw),
+    fileName: String(payload.fileName || attachmentKey),
+    mimeType: String(payload.mimeType || 'application/octet-stream'),
+    driveFileId: String(payload.driveFileId || '').trim() || null,
+    aidId: String(payload.aidId || payload.id || '').trim(),
+    fileHash: String(payload.fileHash || '').trim(),
+    syncId: String(record.syncId || '').trim(),
+  })
+
   return {
     ...record,
     payload: {
-      ...record.payload,
-      byteLength: buffer.length,
+      ...payload,
+      storageBackend: 'google_drive',
+      driveFileId: uploaded.driveFileId,
+      byteLength: uploaded.byteLength,
       hasBinary: true,
     },
   }
 }
 
-async function readAttachmentBytesFromScopes(clinicIds, record) {
+async function readAttachmentBytesFromDrive(clinicIds, record) {
   const ids = Array.isArray(clinicIds) ? clinicIds : [clinicIds]
-  const keys = attachmentStorageKeys(record)
+  const payload = record?.payload && typeof record.payload === 'object' ? record.payload : {}
+  const driveFileId = String(payload.driveFileId || '').trim()
+  if (!driveFileId) return null
+
+  let lastDriveRequired = null
   for (const clinicId of ids) {
     if (!clinicId) continue
-    for (const key of keys) {
-      const bytes = await readAttachmentBytes(clinicId, key)
+    try {
+      const bytes = await readAttachmentBytes(clinicId, driveFileId, { driveFileId })
       if (bytes && bytes.length) return bytes
+    } catch (error) {
+      if (isGoogleDriveRequiredError(error)) {
+        lastDriveRequired = error
+        continue
+      }
+      throw error
     }
   }
+  if (lastDriveRequired) throw lastDriveRequired
   return null
 }
 
 async function hydrateAttachment(clinicIds, record, includeBlobs) {
   if (!record) return null
+  const payload = record.payload && typeof record.payload === 'object' ? record.payload : {}
+  const hasBinary = Boolean(payload.hasBinary || payload.driveFileId)
   if (!includeBlobs) {
     return {
       ...record,
-      payload: { ...record.payload, dataBase64: undefined, hasBinary: Boolean(record.payload?.hasBinary) },
+      payload: {
+        ...payload,
+        dataBase64: undefined,
+        hasBinary,
+        storageBackend: payload.driveFileId ? 'google_drive' : payload.storageBackend,
+        driveFileId: payload.driveFileId || undefined,
+      },
     }
   }
-  const bytes = await readAttachmentBytesFromScopes(clinicIds, record)
-  if (!bytes) return record
-  return {
-    ...record,
-    payload: {
-      ...record.payload,
-      dataBase64: bufferToBase64(bytes),
-      byteLength: bytes.length,
-      hasBinary: true,
-    },
+  if (!payload.driveFileId) {
+    return {
+      ...record,
+      payload: { ...payload, dataBase64: undefined, hasBinary: Boolean(payload.hasBinary) },
+    }
+  }
+  try {
+    const bytes = await readAttachmentBytesFromDrive(clinicIds, record)
+    if (!bytes) {
+      return {
+        ...record,
+        payload: {
+          ...payload,
+          storageBackend: 'google_drive',
+          dataBase64: undefined,
+          hasBinary: true,
+        },
+      }
+    }
+    return {
+      ...record,
+      payload: {
+        ...payload,
+        storageBackend: 'google_drive',
+        driveFileId: payload.driveFileId,
+        dataBase64: bufferToBase64(bytes),
+        byteLength: bytes.length,
+        hasBinary: true,
+      },
+    }
+  } catch (error) {
+    // El pull completo no debe caerse: el GET /attachment devolverá 428 si aplica.
+    if (isGoogleDriveRequiredError(error)) {
+      return {
+        ...record,
+        payload: {
+          ...payload,
+          storageBackend: 'google_drive',
+          dataBase64: undefined,
+          hasBinary: true,
+        },
+      }
+    }
+    throw error
   }
 }
 
@@ -445,6 +529,9 @@ export async function pushClinicalRecords(clinicId, patients = [], appointments 
     accepted: {
       patients: result.accepted.patients,
       appointments: result.accepted.appointments,
+      rejected: result.accepted.rejected || 0,
+      patientSyncIds: result.accepted.patientSyncIds || [],
+      appointmentSyncIds: result.accepted.appointmentSyncIds || [],
     },
     serverTime: result.serverTime,
   }
@@ -462,6 +549,8 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
     drafts: 0,
     sync_queue: 0,
     rejected: 0,
+    patientSyncIds: [],
+    appointmentSyncIds: [],
   }
   if (!canonical) {
     return { accepted: emptyAccepted, serverTime: new Date().toISOString() }
@@ -485,10 +574,26 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
       if (!prev || stamp(canonicalRecord) >= stamp(prev)) {
         clinic.patients[key] = sellarAperturaPaciente(prev, canonicalRecord)
         accepted.patients += 1
+        accepted.patientSyncIds.push(key)
+        if (record.syncId && record.syncId !== key) accepted.patientSyncIds.push(record.syncId)
+      } else {
+        // Ya estaba en el servidor: cuenta como retenido para no dejar pendingSync falso.
+        accepted.patientSyncIds.push(key)
+        if (record.syncId && record.syncId !== key) accepted.patientSyncIds.push(record.syncId)
       }
     }
 
     mergeIncomingMap(clinic.appointments, body.appointments, canonical, 'appointments', accepted, aliasIds)
+    if (Array.isArray(body.appointments)) {
+      for (const raw of body.appointments) {
+        const record = normalizeRecord(raw, canonical)
+        if (!record) continue
+        if (!clinicKeyInScope(rawClinicId(raw), canonical, aliasIds)) continue
+        if (clinic.appointments[record.syncId]) {
+          accepted.appointmentSyncIds.push(record.syncId)
+        }
+      }
+    }
     mergeIncomingMap(clinic.clinicalRecords, body.clinicalRecords, canonical, 'clinicalRecords', accepted, aliasIds)
     mergeIncomingMap(clinic.odontograms, body.odontograms, canonical, 'odontograms', accepted, aliasIds)
     mergeIncomingMap(clinic.diagnosticAids, body.diagnosticAids, canonical, 'diagnosticAids', accepted, aliasIds)
@@ -602,5 +707,38 @@ export async function findClinicAttachment(clinicId, query = {}, aliasIds = []) 
     }
   }
   if (!match) return null
-  return hydrateAttachment(ids, match, true)
+  const payload = match.payload && typeof match.payload === 'object' ? match.payload : {}
+  const driveFileId = String(payload.driveFileId || '').trim()
+  if (!driveFileId) {
+    return {
+      ...match,
+      payload: { ...payload, dataBase64: undefined, hasBinary: Boolean(payload.hasBinary) },
+    }
+  }
+  // Bajo demanda: exige Drive conectado (428 si falta).
+  const bytes = await readAttachmentBytesFromDrive(ids, match)
+  if (!bytes) {
+    return {
+      ...match,
+      payload: {
+        ...payload,
+        storageBackend: 'google_drive',
+        dataBase64: undefined,
+        hasBinary: true,
+      },
+    }
+  }
+  return {
+    ...match,
+    payload: {
+      ...payload,
+      storageBackend: 'google_drive',
+      driveFileId,
+      dataBase64: bufferToBase64(bytes),
+      byteLength: bytes.length,
+      hasBinary: true,
+    },
+  }
 }
+
+export { isGoogleDriveRequiredError, GoogleDriveRequiredError } from './clinicAttachmentStore.js'

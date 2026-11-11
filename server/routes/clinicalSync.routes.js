@@ -7,10 +7,24 @@ import { clinicKeyInScope, clinicSyncAliasIds } from '../../shared/clinicalSyncS
 import { countDistinctClinicalPatients, TRIAL_MAX_PATIENTS } from '../../shared/clinicalAccess.js'
 import {
   findClinicAttachment,
+  isGoogleDriveRequiredError,
   pullClinicSnapshot,
   pushClinicSnapshot,
   pushClinicalRecords,
 } from '../services/clinicalSyncStore.js'
+
+function driveRequiredPayload(error) {
+  return {
+    success: false,
+    ok: false,
+    error:
+      error instanceof Error
+        ? error.message
+        : 'Google Drive es obligatorio para sincronizar adjuntos. Conecte el Gmail de la clínica.',
+    code: 'google_drive_required',
+    requiresGoogleDrive: true,
+  }
+}
 
 const router = Router()
 
@@ -221,6 +235,9 @@ router.post('/clinical', async (req, res) => {
       serverTime: result.serverTime,
     })
   } catch (error) {
+    if (isGoogleDriveRequiredError(error)) {
+      return res.status(error.status || 428).json(driveRequiredPayload(error))
+    }
     console.error('[Sync] Error en POST /api/sync/clinical:', error)
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo guardar la sincronización.' })
   }
@@ -245,6 +262,9 @@ router.post('/push', async (req, res) => {
       serverTime: result.serverTime,
     })
   } catch (error) {
+    if (isGoogleDriveRequiredError(error)) {
+      return res.status(error.status || 428).json(driveRequiredPayload(error))
+    }
     console.error('[Sync] Error en POST /api/sync/push:', error)
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo guardar la sincronización.' })
   }
@@ -285,6 +305,9 @@ router.get('/attachment', async (req, res) => {
       attachment,
     })
   } catch (error) {
+    if (isGoogleDriveRequiredError(error)) {
+      return res.status(error.status || 428).json(driveRequiredPayload(error))
+    }
     console.error('[Sync] Error en GET /api/sync/attachment:', error)
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo descargar el archivo.' })
   }
@@ -319,6 +342,9 @@ router.get('/files/:fileId', async (req, res) => {
       attachment,
     })
   } catch (error) {
+    if (isGoogleDriveRequiredError(error)) {
+      return res.status(error.status || 428).json(driveRequiredPayload(error))
+    }
     console.error('[Sync] Error en GET /api/sync/files:', error)
     return res.status(500).json({ success: false, ok: false, error: 'No se pudo descargar el archivo.' })
   }

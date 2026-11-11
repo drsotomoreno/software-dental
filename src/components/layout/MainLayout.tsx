@@ -3,6 +3,7 @@ import { APP_NAME } from '@/constants/branding'
 import { TopNavbar } from './TopNavbar'
 import { AppBreadcrumbs } from './AppBreadcrumbs'
 import { BackupReminderBanner } from './BackupReminderBanner'
+import { GlobalToastHost } from '@/components/ui/GlobalToastHost'
 import { useAutoBackup } from '@/hooks/useAutoBackup'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -31,6 +32,9 @@ export function MainLayout() {
       <footer className="border-t border-slate-200 bg-white py-3 text-center text-xs text-slate-500 print:hidden">
         {APP_NAME} — RIPS · Ley 527 · FHIR R4
       </footer>
+      <div className="print:hidden">
+        <GlobalToastHost />
+      </div>
     </div>
   )
 }

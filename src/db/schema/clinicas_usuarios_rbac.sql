@@ -10,7 +10,29 @@ CREATE TABLE IF NOT EXISTS clinicas (
     nombre VARCHAR(255) NOT NULL,
     codigo_reps VARCHAR(50),
     direccion TEXT,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Google Drive OAuth (ciphertext). Ver migración 20261111150000_clinicas_google_drive.sql
+    google_drive_email VARCHAR(255),
+    google_drive_refresh_token TEXT,
+    google_drive_root_folder_id VARCHAR(128),
+    google_drive_connected_at TIMESTAMP WITH TIME ZONE,
+    google_drive_status VARCHAR(32) NOT NULL DEFAULT 'disconnected',
+    clinic_canonical_id VARCHAR(255)
+);
+
+-- Fuente operativa indexada por clinicId canónico (clinic:{tenantId})
+CREATE TABLE IF NOT EXISTS clinica_google_drive (
+    clinic_canonical_id TEXT PRIMARY KEY,
+    google_drive_email VARCHAR(255),
+    google_drive_refresh_token TEXT,
+    google_drive_root_folder_id VARCHAR(128),
+    google_drive_access_token TEXT,
+    google_drive_token_expires_at TIMESTAMP WITH TIME ZONE,
+    google_drive_connected_at TIMESTAMP WITH TIME ZONE,
+    google_drive_status VARCHAR(32) NOT NULL DEFAULT 'disconnected',
+    clinic_name VARCHAR(255),
+    connected_by_user_id TEXT,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS usuarios (

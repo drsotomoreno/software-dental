@@ -7,6 +7,10 @@ import {
 } from '@/services/clinicalSyncState'
 import { saveDiagnosticAidBlobFromBuffer } from '@/services/diagnosticAidBlobStore'
 import {
+  isGoogleDriveRequiredResponse,
+  notifyGoogleDriveRequired,
+} from '@/services/globalToast'
+import {
   enqueueDiagnosticAidForSync,
   listPendingSyncQueue,
   markSyncQueueSynced,
@@ -33,24 +37,42 @@ function paymentFingerprint(form: {
   paymentControl?: unknown
   orthodonticsPaymentControl?: unknown
   paymentControlLines?: unknown
+  paymentPlan?: unknown
+  budgetItems?: unknown
+  budget?: unknown
   clinicalDraft?: {
     paymentControl?: unknown
     orthodonticsPaymentControl?: unknown
     paymentControlLines?: unknown
+    paymentPlan?: unknown
+    budgetItems?: unknown
+    budget?: unknown
   } | null
   valuationDraft?: {
     paymentControl?: unknown
     orthodonticsPaymentControl?: unknown
     paymentControlLines?: unknown
+    paymentPlan?: unknown
+    budgetItems?: unknown
+    budget?: unknown
   } | null
 } | null | undefined): string {
   if (!form) return ''
+  const clinical = form.clinicalDraft
+  const valuation = form.valuationDraft
   return JSON.stringify({
-    p: form.paymentControl ?? form.clinicalDraft?.paymentControl ?? null,
-    o: form.orthodonticsPaymentControl ?? form.clinicalDraft?.orthodonticsPaymentControl ?? null,
-    l: form.paymentControlLines ?? form.clinicalDraft?.paymentControlLines ?? null,
-    vp: form.valuationDraft?.paymentControl ?? null,
-    vo: form.valuationDraft?.orthodonticsPaymentControl ?? null,
+    p: form.paymentControl ?? clinical?.paymentControl ?? null,
+    o: form.orthodonticsPaymentControl ?? clinical?.orthodonticsPaymentControl ?? null,
+    l: form.paymentControlLines ?? clinical?.paymentControlLines ?? null,
+    plan: form.paymentPlan ?? clinical?.paymentPlan ?? null,
+    b: form.budgetItems ?? clinical?.budgetItems ?? null,
+    bt: form.budget ?? clinical?.budget ?? null,
+    vp: valuation?.paymentControl ?? null,
+    vo: valuation?.orthodonticsPaymentControl ?? null,
+    vl: valuation?.paymentControlLines ?? null,
+    vplan: valuation?.paymentPlan ?? null,
+    vb: valuation?.budgetItems ?? null,
+    vbt: valuation?.budget ?? null,
   })
 }
 import {
@@ -93,6 +115,12 @@ async function syncFetch(url: string, init?: RequestInit) {
   })
   const payload = await response.json().catch(() => ({}))
   return { response, payload }
+}
+
+function notifyIfGoogleDriveRequired(response: Response, payload: unknown): boolean {
+  if (!isGoogleDriveRequiredResponse(response, payload)) return false
+  notifyGoogleDriveRequired()
+  return true
 }
 
 function toSyncPayload(entity: Record<string, unknown>): Record<string, unknown> {
@@ -185,6 +213,8 @@ async function mergeClinicalRecords(records: ClinicalSyncRecord[]): Promise<bool
             paymentControlLines: paymentsOnly.paymentControlLines,
             orthodonticsPaymentControl: paymentsOnly.orthodonticsPaymentControl,
             paymentPlan: paymentsOnly.paymentPlan,
+            budgetItems: paymentsOnly.budgetItems,
+            budget: paymentsOnly.budget,
             pendingSync: true,
           })
           changed = true
@@ -440,6 +470,7 @@ async function fetchRemoteAttachment(params: Record<string, string>): Promise<Cl
   const tenantId = String(getStoredApiAuth()?.user?.clinicId || getStoredApiAuth()?.user?.id || '').trim()
   if (tenantId) search.set('tenant_id', tenantId)
   const { response, payload } = await syncFetch(`/api/sync/attachment?${search.toString()}`)
+  if (notifyIfGoogleDriveRequired(response, payload)) return null
   if (!response.ok || !payload?.attachment) return null
   return payload.attachment as ClinicalSyncRecord
 }
@@ -722,6 +753,9 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
       drafts: draftsPayload,
     }),
   })
+  if (notifyIfGoogleDriveRequired(metadataResponse.response, metadataResponse.payload)) {
+    return false
+  }
   if (!metadataResponse.response.ok) return false
 
   const MAX_BATCH_CHARS = 18 * 1024 * 1024
@@ -742,13 +776,16 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
 
   const syncedIds: string[] = []
   for (const batch of batches) {
-    const { response } = await syncFetch('/api/sync/push', {
+    const { response, payload } = await syncFetch('/api/sync/push', {
       method: 'POST',
       body: JSON.stringify({
         sync_queue: batch,
         attachments: batch,
       }),
     })
+    if (notifyIfGoogleDriveRequired(response, payload)) {
+      return false
+    }
     if (!response.ok) continue
     syncedIds.push(...batch.map((row) => row.syncId))
   }

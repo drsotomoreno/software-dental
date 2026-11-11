@@ -7,6 +7,7 @@ import { upsertProfessionalFromUser } from '@/services/dentalServiceCatalogServi
 import { ROLE_LABELS } from '@/utils/permissions'
 import { LocalBackupPanel } from '@/components/backup/LocalBackupPanel'
 import { ClearTestDatabasePanel } from '@/components/settings/ClearTestDatabasePanel'
+import { GoogleDriveIntegration } from '@/components/settings/GoogleDriveIntegration'
 import { MailSettingsPanel } from '@/components/settings/MailSettingsPanel'
 import {
   DocumentIdentityField,
@@ -622,6 +623,8 @@ export function ProfilePage() {
           </p>
         ) : null}
       </form>
+
+      <GoogleDriveIntegration />
 
       {(getStoredApiAuth()?.user?.rol === 'superadmin' || user.role === 'superadmin') && (
         <MailSettingsPanel />
