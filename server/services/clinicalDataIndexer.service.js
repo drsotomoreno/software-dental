@@ -10,10 +10,11 @@ import { fileURLToPath } from 'node:url'
 import { withPgClient } from './durableStore.js'
 import { clinicalSyncEvents, SNAPSHOT_PUSHED } from './clinicalSyncEvents.js'
 
-const MIGRATION_FILE = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '../db/migrations/20261111163000_clinical_analytics_read_model.sql',
-)
+const DIR = dirname(fileURLToPath(import.meta.url))
+const MIGRATION_FILES = [
+  join(DIR, '../db/migrations/20261111170000_cleanup_ghost_tables.sql'),
+  join(DIR, '../db/migrations/20261111163000_clinical_analytics_read_model.sql'),
+]
 
 const CIE10_PATTERN = /^[A-Z]\d{2,3}[A-Z0-9]?$/i
 
@@ -85,9 +86,11 @@ export function splitSqlStatements(sql) {
 export async function ensureClinicalAnalyticsSchema() {
   if (!schemaReady) {
     schemaReady = withPgClient(async (client) => {
-      const sql = await readFile(MIGRATION_FILE, 'utf8')
-      for (const statement of splitSqlStatements(sql)) {
-        await client.query(statement)
+      for (const file of MIGRATION_FILES) {
+        const sql = await readFile(file, 'utf8')
+        for (const statement of splitSqlStatements(sql)) {
+          await client.query(statement)
+        }
       }
     }).catch((error) => {
       schemaReady = null

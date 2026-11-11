@@ -4,12 +4,45 @@
  * Si Postgres no responde, el snapshot JSON sigue siendo la copia que viaja entre dispositivos.
  */
 import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { withPgClient } from './durableStore.js'
+import { splitSqlStatements } from './consultasRepository.js'
+import { ensureTenantRbacSchema } from './tenantRbacStore.js'
 
 const DOC_TYPES = new Set(['CC', 'TI', 'CE', 'PA', 'RC', 'NV', 'CD', 'SC', 'PE', 'PT', 'AS', 'MS'])
 const SEX = new Set(['F', 'M', 'O'])
 
+const DIR = dirname(fileURLToPath(import.meta.url))
+const PACIENTES_MIGRATION = join(
+  DIR,
+  '../db/migrations/20261102150000_pacientes_historias_clinicas.sql',
+)
+const CLEANUP_MIGRATION = join(DIR, '../db/migrations/20261111170000_cleanup_ghost_tables.sql')
+
 let columnsReady = null
+let schemaReady = null
+
+async function ensurePacientesSchema() {
+  if (!schemaReady) {
+    schemaReady = (async () => {
+      await ensureTenantRbacSchema()
+      await withPgClient(async (client) => {
+        for (const file of [PACIENTES_MIGRATION, CLEANUP_MIGRATION]) {
+          const sql = await readFile(file, 'utf8')
+          for (const statement of splitSqlStatements(sql)) {
+            await client.query(statement)
+          }
+        }
+      })
+    })().catch((error) => {
+      schemaReady = null
+      throw error
+    })
+  }
+  return schemaReady
+}
 
 export function clinicaUuidFromCanonical(canonical) {
   const hex = createHash('sha256').update(String(canonical || '')).digest('hex').slice(0, 32)
@@ -74,6 +107,8 @@ export async function mirrorClinicPatients(canonical, records) {
   if (rows.length === 0) return { ok: true, mirrored: 0 }
   const clinicaId = clinicaUuidFromCanonical(clinicKey)
   const nombre = clinicKey.startsWith('clinic:') ? clinicKey.slice('clinic:'.length) : clinicKey
+
+  await ensurePacientesSchema()
 
   return withPgClient(async (client) => {
     await ensureMirrorColumns(client)
@@ -159,6 +194,7 @@ export async function mergeMirroredPatients(canonical, patients = {}) {
   const clinicaId = clinicaUuidFromCanonical(clinicKey)
   let rows = []
   try {
+    await ensurePacientesSchema()
     rows = await withPgClient(async (client) => {
       await ensureMirrorColumns(client)
       const result = await client.query(

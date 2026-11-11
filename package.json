@@ -18,6 +18,8 @@
     "preview": "vite preview",
     "rips:mensual": "node server/jobs/enviarRipsMensuales.js",
     "rips:mensual:dry": "node server/jobs/enviarRipsMensuales.js --dry-run",
+    "analytics:backfill": "node server/scripts/backfillAnalyticsIndexer.js",
+    "analytics:backfill:dry": "node server/scripts/backfillAnalyticsIndexer.js --dry-run",
     "muv:sandbox": "node scripts/probar-muv-sandbox.mjs"
   },
   "dependencies": {
@@ -27,6 +29,7 @@
     "cors": "^2.8.6",
     "date-fns": "^4.1.0",
     "dexie": "^4.0.11",
+    "dexie-encrypted": "^4.2.0-beta.1",
     "dexie-react-hooks": "^1.1.7",
     "dotenv": "^16.6.1",
     "express": "^5.2.1",
