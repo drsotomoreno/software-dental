@@ -151,86 +151,69 @@ jobs:
             NODE
 
             echo "==== PM2 env DATABASE_URL + Postgres counts ===="
-            pm2 jlist 2>/dev/null | node <<'NODE'
-            let raw = ''
-            process.stdin.on('data', (d) => { raw += d })
-            process.stdin.on('end', async () => {
-              const apps = JSON.parse(raw || '[]')
-              let databaseUrl = ''
-              const report = []
-              for (const app of apps) {
-                const env = app.pm2_env || {}
-                const has = Boolean(env.DATABASE_URL)
-                report.push({
-                  name: app.name,
-                  status: env.status,
-                  cwd: env.pm_cwd || null,
-                  hasDatabaseUrl: has,
-                })
-                if (has && !databaseUrl) databaseUrl = String(env.DATABASE_URL)
-              }
-              console.log('PM2_APPS', JSON.stringify(report, null, 2))
-              if (!databaseUrl) {
-                console.log('PM2_DATABASE_URL_MISSING')
-                return
-              }
-              console.log('PM2_DATABASE_URL_PRESENT=yes')
-              let Client
-              try {
-                Client = require('pg').Client
-              } catch {
-                try {
-                  const cwd = report.find((r) => r.cwd)?.cwd
-                  Client = require((cwd || '/var/www/mihistoriadental') + '/node_modules/pg').Client
-                } catch (e) {
-                  console.log('PG_MODULE_MISSING', e.message)
-                  return
+            set +e
+            PM2_JSON=$(pm2 jlist 2>/dev/null)
+            PM2_RC=$?
+            set -e
+            if [[ $PM2_RC -ne 0 || -z "$PM2_JSON" ]]; then
+              echo "PM2_JLIST_FAILED rc=$PM2_RC"
+            else
+              printf '%s' "$PM2_JSON" > /tmp/mhd_pm2.json
+              node -e '
+                const fs = require("fs");
+                const apps = JSON.parse(fs.readFileSync("/tmp/mhd_pm2.json","utf8"));
+                let databaseUrl = "";
+                const report = [];
+                for (const app of apps) {
+                  const env = app.pm2_env || {};
+                  const has = Boolean(env.DATABASE_URL);
+                  report.push({ name: app.name, status: env.status, cwd: env.pm_cwd || null, hasDatabaseUrl: has });
+                  if (has && !databaseUrl) databaseUrl = String(env.DATABASE_URL);
                 }
-              }
-              const client = new Client({ connectionString: databaseUrl })
-              try {
-                await client.connect()
-                const tables = await client.query(`
-                  SELECT table_name FROM information_schema.tables
-                  WHERE table_schema='public'
-                    AND table_name IN ('pacientes','patients','clinicas')
-                  ORDER BY table_name
-                `)
-                console.log('PG_TABLES', JSON.stringify(tables.rows, null, 2))
-                const hasPacientes = tables.rows.some((r) => r.table_name === 'pacientes')
-                const hasPatients = tables.rows.some((r) => r.table_name === 'patients')
-                if (hasPacientes) {
-                  const by = await client.query(`
-                    SELECT clinica_id::text AS clinic_id,
-                           COUNT(*) FILTER (WHERE deleted_at IS NULL) AS vivos,
-                           COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) AS borrados
-                    FROM pacientes
-                    GROUP BY 1
-                    ORDER BY vivos DESC
-                    LIMIT 50
-                  `)
-                  console.log('PG_PACIENTES_BY_CLINICA', JSON.stringify(by.rows, null, 2))
+                console.log("PM2_APPS", JSON.stringify(report, null, 2));
+                if (!databaseUrl) {
+                  console.log("PM2_DATABASE_URL_MISSING");
+                  process.exit(0);
                 }
-                if (hasPatients) {
-                  const cols = await client.query(`
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_name='patients'
-                    ORDER BY ordinal_position
-                  `)
-                  console.log('PG_PATIENTS_COLUMNS', JSON.stringify(cols.rows.map(r=>r.column_name), null, 2))
-                  const colNames = cols.rows.map((r) => r.column_name)
-                  const clinicCol = colNames.includes('clinic_id') ? 'clinic_id' : (colNames.includes('clinica_id') ? 'clinica_id' : null)
-                  if (clinicCol) {
-                    const by = await client.query(`SELECT ${clinicCol}::text AS clinic_id, COUNT(*) AS n FROM patients GROUP BY 1 ORDER BY n DESC LIMIT 50`)
-                    console.log('PG_PATIENTS_BY_CLINIC', JSON.stringify(by.rows, null, 2))
+                console.log("PM2_DATABASE_URL_PRESENT=yes");
+                fs.writeFileSync("/tmp/mhd_database_url.txt", databaseUrl);
+                const cwd = (report.find((r) => r.cwd) || {}).cwd || "/var/www/mihistoriadental";
+                fs.writeFileSync("/tmp/mhd_app_cwd.txt", cwd);
+              '
+              if [[ -f /tmp/mhd_database_url.txt ]]; then
+                export DATABASE_URL="$(cat /tmp/mhd_database_url.txt)"
+                APP_CWD="$(cat /tmp/mhd_app_cwd.txt 2>/dev/null || echo /var/www/mihistoriadental)"
+                node -e '
+                  let Client;
+                  try { Client = require("pg").Client; }
+                  catch (e1) {
+                    try { Client = require(require("fs").readFileSync("/tmp/mhd_app_cwd.txt","utf8").trim() + "/node_modules/pg").Client; }
+                    catch (e2) { console.log("PG_MODULE_MISSING", e2.message); process.exit(0); }
                   }
-                }
-              } catch (err) {
-                console.log('PG_ERROR', err.message)
-              } finally {
-                try { await client.end() } catch {}
-              }
-            })
-            NODE
+                  const client = new Client({ connectionString: process.env.DATABASE_URL });
+                  (async () => {
+                    await client.connect();
+                    const tables = await client.query("SELECT table_name FROM information_schema.tables WHERE table_schema='"'"'public'"'"' AND table_name IN ('"'"'pacientes'"'"','"'"'patients'"'"','"'"'clinicas'"'"') ORDER BY table_name");
+                    console.log("PG_TABLES", JSON.stringify(tables.rows, null, 2));
+                    const names = tables.rows.map(r => r.table_name);
+                    if (names.includes("pacientes")) {
+                      const by = await client.query("SELECT clinica_id::text AS clinic_id, COUNT(*) FILTER (WHERE deleted_at IS NULL) AS vivos, COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) AS borrados FROM pacientes GROUP BY 1 ORDER BY vivos DESC LIMIT 50");
+                      console.log("PG_PACIENTES_BY_CLINICA", JSON.stringify(by.rows, null, 2));
+                    }
+                    if (names.includes("patients")) {
+                      const cols = await client.query("SELECT column_name FROM information_schema.columns WHERE table_name='"'"'patients'"'"' ORDER BY ordinal_position");
+                      console.log("PG_PATIENTS_COLUMNS", JSON.stringify(cols.rows.map(r=>r.column_name), null, 2));
+                      const colNames = cols.rows.map(r => r.column_name);
+                      const clinicCol = colNames.includes("clinic_id") ? "clinic_id" : (colNames.includes("clinica_id") ? "clinica_id" : null);
+                      if (clinicCol) {
+                        const by = await client.query("SELECT " + clinicCol + "::text AS clinic_id, COUNT(*) AS n FROM patients GROUP BY 1 ORDER BY n DESC LIMIT 50");
+                        console.log("PG_PATIENTS_BY_CLINIC", JSON.stringify(by.rows, null, 2));
+                      }
+                    }
+                    await client.end();
+                  })().catch((err) => { console.log("PG_ERROR", err.message); process.exit(0); });
+                '
+              fi
+            fi
 
             echo "==== DONE READONLY ===="
