@@ -106,7 +106,7 @@ jobs:
             backup_clinical_sync_before_deploy
 
             echo "Procesos PM2:"
-            pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};console.log([app.name,env.status,env.pm_cwd,env.pm_exec_path,env.PORT||""].join(" | "));}});'}
+            pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};console.log([app.name,env.status,env.pm_cwd,env.pm_exec_path,env.PORT||""].join(" | "));}});'
 
             force_main() {
               local dir="$1"
