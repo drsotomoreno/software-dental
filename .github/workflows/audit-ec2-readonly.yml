@@ -113,87 +113,86 @@ jobs:
             )
             NODE
 
+            echo "==== Locate .env / DATABASE_URL (read-only) ===="
+            ENV_CANDIDATES=(
+              "$CANONICAL/.env"
+              "$CANONICAL/server/.env"
+              "/home/ubuntu/mihistoriadental/.env"
+              "/home/ec2-user/mihistoriadental/.env"
+            )
+            pm2 jlist 2>/dev/null | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{for(const a of JSON.parse(r||"[]")){const cwd=(a.pm2_env||{}).pm_cwd; if(cwd){console.log(cwd+"/.env"); console.log(cwd+"/server/.env");}}})' | while read -r p; do
+              ENV_CANDIDATES+=("$p")
+            done || true
+
+            ENV_FILE=""
+            for p in "${ENV_CANDIDATES[@]}"; do
+              if [[ -f "$p" ]]; then
+                echo "FOUND_ENV=$p"
+                ENV_FILE="$p"
+                break
+              else
+                echo "MISS_ENV=$p"
+              fi
+            done
+
             echo "==== PostgreSQL pacientes by clinica_id ===="
-            cd "$CANONICAL"
-            if [[ ! -f .env ]]; then
-              echo "MISSING_ENV"
+            if [[ -z "$ENV_FILE" ]]; then
+              echo "MISSING_ENV_ALL_CANDIDATES"
+              # still try pm2 env
+              pm2 jlist 2>/dev/null | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{for(const a of JSON.parse(r||"[]")){const e=a.pm2_env||{}; if(e.DATABASE_URL){console.log("PM2_HAS_DATABASE_URL name="+a.name);}}})' || true
+              echo "==== DONE READONLY ===="
               exit 0
             fi
-            DATABASE_URL=$(grep -E '^DATABASE_URL=' .env | head -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+
+            DATABASE_URL=$(grep -E '^DATABASE_URL=' "$ENV_FILE" | head -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
             if [[ -z "${DATABASE_URL:-}" ]]; then
-              echo "EMPTY_DATABASE_URL"
+              echo "EMPTY_DATABASE_URL in $ENV_FILE"
+              echo "==== DONE READONLY ===="
               exit 0
             fi
-            if ! command -v psql >/dev/null 2>&1; then
-              echo "PSQL_MISSING — using node pg"
-              node <<'NODE'
-              const fs = require('fs')
-              const { Client } = require('pg')
-              const envLine = fs.readFileSync('/var/www/mihistoriadental/.env', 'utf8')
-                .split(/\r?\n/)
-                .find((l) => l.startsWith('DATABASE_URL='))
-              const url = envLine ? envLine.slice('DATABASE_URL='.length).replace(/^["']|["']$/g, '') : ''
-              ;(async () => {
-                const client = new Client({ connectionString: url })
-                await client.connect()
-                const byClinic = await client.query(`
-                  SELECT c.id::text AS clinica_id,
-                         COALESCE(c.nombre, '') AS nombre,
-                         COUNT(p.*) FILTER (WHERE p.deleted_at IS NULL) AS vivos,
-                         COUNT(p.*) FILTER (WHERE p.deleted_at IS NOT NULL) AS borrados
-                  FROM clinicas c
-                  LEFT JOIN pacientes p ON p.clinica_id = c.id
-                  GROUP BY c.id, c.nombre
-                  ORDER BY vivos DESC
-                  LIMIT 100
-                `)
-                console.log('PG_BY_CLINICA', JSON.stringify(byClinic.rows, null, 2))
-                const totals = await client.query(`
-                  SELECT COUNT(*) FILTER (WHERE deleted_at IS NULL) AS vivos,
-                         COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) AS borrados
-                  FROM pacientes
-                `)
-                console.log('PG_TOTALS', JSON.stringify(totals.rows[0], null, 2))
-                // deterministic uuid from canonical used by mirror if available in app; list docs for master-looking names
-                const sample = await client.query(`
-                  SELECT id::text, clinica_id::text, tipo_documento, numero_documento,
-                         nombres, apellidos, deleted_at, updated_at
-                  FROM pacientes
-                  WHERE deleted_at IS NULL
-                  ORDER BY updated_at DESC NULLS LAST
-                  LIMIT 40
-                `)
-                console.log('PG_RECENT_VIVOS', JSON.stringify(sample.rows, null, 2))
-                await client.end()
-              })().catch((err) => {
-                console.error('PG_ERROR', err.message)
+            echo "DATABASE_URL_PRESENT=yes"
+            export ENV_FILE
+            node - <<'NODE'
+            const fs = require('fs')
+            let Client
+            try {
+              Client = require('pg').Client
+            } catch (e1) {
+              try {
+                Client = require('/var/www/mihistoriadental/node_modules/pg').Client
+              } catch (e2) {
+                console.error('PG_MODULE_MISSING', e2.message)
                 process.exit(0)
-              })
-              NODE
-            else
-              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
-            \pset format aligned
-            SELECT c.id::text AS clinica_id,
-                   COALESCE(c.nombre, '') AS nombre,
-                   COUNT(p.*) FILTER (WHERE p.deleted_at IS NULL) AS vivos,
-                   COUNT(p.*) FILTER (WHERE p.deleted_at IS NOT NULL) AS borrados
-            FROM clinicas c
-            LEFT JOIN pacientes p ON p.clinica_id = c.id
-            GROUP BY c.id, c.nombre
-            ORDER BY vivos DESC
-            LIMIT 100;
-
-            SELECT COUNT(*) FILTER (WHERE deleted_at IS NULL) AS vivos,
-                   COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) AS borrados
-            FROM pacientes;
-
-            SELECT id::text, clinica_id::text, tipo_documento, numero_documento,
-                   nombres, apellidos, deleted_at::text, updated_at::text
-            FROM pacientes
-            WHERE deleted_at IS NULL
-            ORDER BY updated_at DESC NULLS LAST
-            LIMIT 40;
-            SQL
-            fi
+              }
+            }
+            const envFile = process.env.ENV_FILE
+            const envLine = fs
+              .readFileSync(envFile, 'utf8')
+              .split(/\r?\n/)
+              .find((l) => l.startsWith('DATABASE_URL='))
+            const url = envLine
+              ? envLine.slice('DATABASE_URL='.length).replace(/^["']|["']$/g, '')
+              : ''
+            ;(async () => {
+              const client = new Client({ connectionString: url })
+              await client.connect()
+              const byClinic = await client.query(
+                'SELECT c.id::text AS clinica_id, COALESCE(c.nombre, chr(32)) AS nombre, COUNT(p.*) FILTER (WHERE p.deleted_at IS NULL) AS vivos, COUNT(p.*) FILTER (WHERE p.deleted_at IS NOT NULL) AS borrados FROM clinicas c LEFT JOIN pacientes p ON p.clinica_id = c.id GROUP BY c.id, c.nombre ORDER BY vivos DESC LIMIT 100',
+              )
+              console.log('PG_BY_CLINICA', JSON.stringify(byClinic.rows, null, 2))
+              const totals = await client.query(
+                'SELECT COUNT(*) FILTER (WHERE deleted_at IS NULL) AS vivos, COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) AS borrados FROM pacientes',
+              )
+              console.log('PG_TOTALS', JSON.stringify(totals.rows[0], null, 2))
+              const sample = await client.query(
+                'SELECT id::text, clinica_id::text, tipo_documento, numero_documento, nombres, apellidos, deleted_at, updated_at FROM pacientes WHERE deleted_at IS NULL ORDER BY updated_at DESC NULLS LAST LIMIT 40',
+              )
+              console.log('PG_RECENT_VIVOS', JSON.stringify(sample.rows, null, 2))
+              await client.end()
+            })().catch((err) => {
+              console.error('PG_ERROR', err.message)
+              process.exit(0)
+            })
+            NODE
 
             echo "==== DONE READONLY ===="
