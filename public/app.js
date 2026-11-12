@@ -57,7 +57,13 @@
     if (!(expires > Date.now())) return false
     if (estado === 'prueba') return true
     const plan = String(user?.plan || '').trim().toLowerCase()
-    return estado === 'activo' && ['nomad', 'smart', 'bionic', 'corporativo'].includes(plan)
+    const paidAt = user?.subscriptionPaidAt
+    const hasPaymentProof = Boolean(paidAt) && Number.isFinite(new Date(paidAt).getTime())
+    return (
+      estado === 'activo' &&
+      ['nomad', 'smart', 'bionic', 'corporativo'].includes(plan) &&
+      hasPaymentProof
+    )
   }
 
   function getApiBase() {

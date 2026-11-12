@@ -14,6 +14,8 @@ import {
   usePatientsList,
 } from '@/hooks/usePatientsList'
 import { PatientSearchInput } from './PatientSearchInput'
+import { PhoneCountryInput } from '@/components/ui/PhoneCountryInput'
+import { toStoredInternationalPhone } from '@/utils/phoneInternational'
 
 export interface SlotSelection {
   columnId: string
@@ -132,7 +134,7 @@ export function CreateAppointmentModal({
     try {
       await onSubmit({
         patientName: resolvedPatientName,
-        patientPhone: patientPhone.trim(),
+        patientPhone: toStoredInternationalPhone(patientPhone),
         patientId,
         procedureType,
         startTime: `${appointmentDate}T${startTime}:00`,
@@ -174,13 +176,11 @@ export function CreateAppointmentModal({
             <label className="label-field" htmlFor="appointment-patient-phone">
               Teléfono / WhatsApp *
             </label>
-            <input
+            <PhoneCountryInput
               id="appointment-patient-phone"
-              type="tel"
               value={patientPhone}
-              onChange={(e) => setPatientPhone(e.target.value)}
-              className="input-field"
-              placeholder="Ej: 3001234567"
+              onChange={setPatientPhone}
+              required
             />
             <p className="mt-1 text-xs text-slate-500">
               Se autocompleta al elegir un paciente registrado.

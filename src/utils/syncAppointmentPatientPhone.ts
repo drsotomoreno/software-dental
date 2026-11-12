@@ -3,6 +3,7 @@ import type { Appointment } from '@/types/appointment'
 import { syncCitasToLocalStorage } from '@/utils/agendaStorage'
 import { getPatientByRouteId } from '@/utils/patientId'
 import { resolveAppointmentPatient } from '@/utils/resolveAppointmentPatient'
+import { toStoredInternationalPhone } from '@/utils/phoneInternational'
 
 export interface SyncAppointmentPatientPhoneResult {
   patientUpdated: boolean
@@ -12,7 +13,7 @@ export async function syncAppointmentPatientPhone(
   appointment: Appointment,
   phone: string,
 ): Promise<SyncAppointmentPatientPhoneResult> {
-  const trimmed = phone.trim()
+  const trimmed = toStoredInternationalPhone(phone)
   if (!trimmed) {
     throw new Error('El teléfono es obligatorio.')
   }

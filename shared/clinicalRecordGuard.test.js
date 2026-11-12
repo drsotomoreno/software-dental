@@ -116,7 +116,7 @@ test('un borrador con anamnesis no se pierde contra un formulario vacío más nu
   assert.equal(shouldPersistClinicalDraft(draft.clinicalDraft, empty.clinicalDraft), false)
 })
 
-test('dos historias con contenido siguen la fecha: la más nueva gana', () => {
+test('mismo contentHash del cliente no permite alterar hallazgos de una historia firmada', () => {
   const older = signedHistory('2026-10-23T18:40:00.000Z')
   const newer = signedHistory('2026-10-23T19:40:00.000Z')
   newer.payload = {
@@ -124,6 +124,14 @@ test('dos historias con contenido siguen la fecha: la más nueva gana', () => {
     contentHash: older.payload.contentHash,
     findings: 'Caries profunda y fistula',
   }
+  // Sello recalculado: el núcleo clínico cambió → hard reject (Res. 839).
+  assert.equal(shouldReplaceClinicalDocument(older, newer), false)
+  assert.equal(shouldReplaceClinicalDocument(newer, older), false)
+})
+
+test('dos historias firmadas con el mismo sello clínico siguen la fecha', () => {
+  const older = signedHistory('2026-10-23T18:40:00.000Z')
+  const newer = signedHistory('2026-10-23T19:40:00.000Z')
   assert.equal(shouldReplaceClinicalDocument(older, newer), true)
   assert.equal(shouldReplaceClinicalDocument(newer, older), false)
 })
@@ -293,4 +301,31 @@ test('el presupuesto de ortodoncia cuenta como contenido clínico legal', () => 
     ),
     false,
   )
+})
+
+test('una copia más nueva sin presupuesto no reemplaza la que sí lo tiene', () => {
+  const withBudget = {
+    syncId: 'rec-maria',
+    updatedAt: '2026-11-05T14:00:00.000Z',
+    payload: {
+      patientId: '7',
+      anamnesis: { chiefComplaint: 'Dolor' },
+      budgetItems: [{ id: 'b1', procedure: 'Resina 16', unitPrice: 180_000, quantity: 1 }],
+      budget: { subtotal: 180_000, discount: 0, total: 180_000, currency: 'COP' },
+      paymentControl: [{ id: 'p1', amount: 50_000, paymentDate: '2026-11-06' }],
+    },
+  }
+  const newerWithoutBudget = {
+    syncId: 'rec-maria',
+    updatedAt: '2026-11-10T16:00:00.000Z',
+    payload: {
+      patientId: '7',
+      anamnesis: { chiefComplaint: 'Dolor y sensibilidad' },
+      budgetItems: [],
+      budget: { subtotal: 0, discount: 0, total: 0, currency: 'COP' },
+      paymentControl: [],
+    },
+  }
+  assert.equal(shouldReplaceClinicalDocument(withBudget, newerWithoutBudget), false)
+  assert.equal(shouldReplaceClinicalDocument(newerWithoutBudget, withBudget), true)
 })

@@ -10,6 +10,7 @@ import {
 } from '@/utils/expressRegister'
 import { validateColombiaMobile } from '@/utils/phoneValidation'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { PhoneCountryInput } from '@/components/ui/PhoneCountryInput'
 
 type AuthMode = 'login' | 'register' | 'activate'
 
@@ -330,20 +331,19 @@ export function LoginPage() {
               />
             </div>
             <div>
-              <label className="label-field">Celular (WhatsApp Colombia)</label>
-              <input
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
+              <label className="label-field" htmlFor="register-phone">
+                Celular (WhatsApp)
+              </label>
+              <PhoneCountryInput
+                id="register-phone"
                 required
                 value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                className="input-field"
+                onChange={setPhoneNumber}
                 placeholder="300 123 4567"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Indicativo +57. Tras crear la cuenta abrirá WhatsApp para activarla con un mensaje
-                único.
+                Colombia (+57) viene seleccionada. La activación de la cuenta usa un celular
+                colombiano y abre WhatsApp con un mensaje único.
               </p>
             </div>
             <div>

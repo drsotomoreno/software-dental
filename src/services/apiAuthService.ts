@@ -22,6 +22,9 @@ export interface ApiSubscriptionUser {
   estado_pago: 'pendiente' | 'activo' | 'vencido' | 'exento' | 'prueba'
   fecha_vencimiento: string | null
   plan?: string | null
+  /** Sello de pago confirmado por el superadmin (o pasarela). Sin esto no hay suscripción activa. */
+  subscriptionPaidAt?: string | null
+  subscriptionPaidBy?: string | null
   /** Tope manual de auxiliares. Solo lo aplica el plan corporativo. */
   customMaxAssistants?: number | null
   custom_max_assistants?: number | null

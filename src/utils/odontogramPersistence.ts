@@ -10,6 +10,7 @@ import {
   stomatologicalExamHasContent,
   treatmentPlanHasContent,
 } from '../../shared/clinicalRecordGuard.js'
+import { preferGeneralBudgetSections } from '../../shared/clinicalBudgetMerge.js'
 import { mergeClinicalPaymentSections } from '../../shared/paymentControlMerge.js'
 import { isRemoteDraftNewer } from './clinicalDraftMerge.ts'
 
@@ -102,6 +103,10 @@ export function mergeLivingChart<T extends LivingChart>(
     base as Record<string, unknown>,
     draft as Record<string, unknown>,
   )
+  const budgetSections = preferGeneralBudgetSections(
+    base as Record<string, unknown>,
+    draft as Record<string, unknown>,
+  )
 
   if (draftIsNewer) {
     const draftRecord = draft as T & {
@@ -122,6 +127,7 @@ export function mergeLivingChart<T extends LivingChart>(
       ...base,
       ...draft,
       ...paymentSections,
+      ...budgetSections,
       anamnesis: anamnesisHasContent(draftRecord.anamnesis)
         ? draftRecord.anamnesis
         : (baseRecord.anamnesis ?? draftRecord.anamnesis),
@@ -150,6 +156,7 @@ export function mergeLivingChart<T extends LivingChart>(
   return {
     ...base,
     ...paymentSections,
+    ...budgetSections,
     diagnoses: hasDiagnoses(base) ? base.diagnoses : (draft.diagnoses ?? base.diagnoses),
     diagnosticChart: hasChartEntries(base)
       ? base.diagnosticChart

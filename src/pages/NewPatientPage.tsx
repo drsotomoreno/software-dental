@@ -24,6 +24,7 @@ import { accessTier } from '@/utils/subscriptionAccess'
 import { TRIAL_PATIENT_LIMIT_MESSAGE } from '@/utils/trialLimits'
 import { HistoriaCreadaEn } from '@/components/clinical/HistoriaCreadaEn'
 import { selloAperturaPaciente } from '../../shared/patientOpenedAt.js'
+import { toStoredInternationalPhone } from '@/utils/phoneInternational'
 
 const initialForm: PatientFormData = {
   documentType: 'CC',
@@ -126,6 +127,10 @@ export function NewPatientPage() {
     const sello = selloAperturaPaciente()
     const id = await db.patients.add({
       ...form,
+      phone: toStoredInternationalPhone(form.phone),
+      companionPhone: form.companionPhone?.trim()
+        ? toStoredInternationalPhone(form.companionPhone)
+        : '',
       phase: withHistory ? 'TRATAMIENTO_ACEPTADO' : DEFAULT_PATIENT_PHASE,
       valuationOnly: !withHistory,
       valuationConsent: resolvedConsent ?? undefined,

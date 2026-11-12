@@ -9,9 +9,11 @@ import {
 } from './clinicAttachmentStore.js'
 import { readDurableJsonWithMerge, writeDurableJsonWithMerge } from './durableStore.js'
 import {
+  mergeAdministrativeClinicalFields,
   shouldReplaceClinicalDocument,
   stripClinicalPayloadEvolutionPatientSignatures,
 } from '../../shared/clinicalRecordGuard.js'
+import { rejectsSignedClinicalMutation } from '../utils/clinicalHash.js'
 import { withMergedClinicalPayments } from '../../shared/paymentControlMerge.js'
 import { odontogramRecordHasMarks } from './odontogramMerge.js'
 import { conservarFechaApertura } from '../../shared/patientOpenedAt.js'
@@ -115,6 +117,29 @@ function mergeClinicalEntityBody(prev, next, entityKey) {
   if (entityKey !== 'clinicalRecords' && entityKey !== 'drafts') {
     return shouldReplaceSyncedRecord(prev, next, entityKey) ? next : prev
   }
+
+  // Hard reject: si el servidor ya tiene signedAt y el SHA-256 del núcleo clínico
+  // entrante no coincide con el recalculado del guardado, se conserva el sello.
+  if (rejectsSignedClinicalMutation(prev, next)) {
+    const sealed = mergeAdministrativeClinicalFields(prev, next)
+    const mergedPayload = withMergedClinicalPayments(
+      { ...(sealed.payload || sealed), updatedAt: prev.updatedAt },
+      next.payload || {},
+    )
+    const { updatedAt: _ignored, ...payload } = mergedPayload
+    return {
+      ...prev,
+      payload: {
+        ...(prev.payload || {}),
+        ...payload,
+        evolutionNotes:
+          payload.evolutionNotes ??
+          sealed.payload?.evolutionNotes ??
+          prev.payload?.evolutionNotes,
+      },
+    }
+  }
+
   if (shouldReplaceSyncedRecord(prev, next, entityKey)) {
     // El ganador conserva también los abonos del perdedor (unión por id).
     const mergedPayload = withMergedClinicalPayments(
@@ -130,8 +155,9 @@ function mergeClinicalEntityBody(prev, next, entityKey) {
       },
     }
   }
+  const sealedKeep = mergeAdministrativeClinicalFields(prev, next)
   const mergedPayload = withMergedClinicalPayments(
-    { ...(prev.payload || {}), updatedAt: prev.updatedAt },
+    { ...(sealedKeep.payload || prev.payload || {}), updatedAt: prev.updatedAt },
     next.payload || {},
   )
   const { updatedAt: _ignored, ...payload } = mergedPayload

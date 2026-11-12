@@ -28,6 +28,21 @@ async function requireSessionUser(req, res) {
   return session.user
 }
 
+/** Clínica objetivo (superadmin puede elegir otra sede vía query/body). */
+function requestedClinicIdFrom(req) {
+  const query = req.query && typeof req.query === 'object' ? req.query : {}
+  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  return String(
+    query.clinicId ||
+      query.tenant_id ||
+      query.clinica_id ||
+      body.clinicId ||
+      body.tenant_id ||
+      body.clinica_id ||
+      '',
+  ).trim()
+}
+
 function mapOAuthError(error) {
   const status = Number(error?.status) || 500
   const code = error?.code || 'GOOGLE_DRIVE_ERROR'
@@ -41,7 +56,9 @@ router.get('/status', async (req, res) => {
   try {
     const user = await requireSessionUser(req, res)
     if (!user) return
-    const status = await readGoogleDriveStatusForUser(user)
+    const status = await readGoogleDriveStatusForUser(user, {
+      clinicId: requestedClinicIdFrom(req),
+    })
     return res.json({ success: true, ok: true, ...status })
   } catch (error) {
     console.error('[google-drive] GET /status:', error)
@@ -64,7 +81,9 @@ router.get('/connect', async (req, res) => {
     const user = await requireSessionUser(req, res)
     if (!user) return
 
-    const { url, clinicId } = buildGoogleDriveConnectUrl(user)
+    const { url, clinicId } = buildGoogleDriveConnectUrl(user, {
+      clinicId: requestedClinicIdFrom(req),
+    })
     if (String(req.query?.redirect || '') === '1') {
       return res.redirect(302, url)
     }
@@ -129,7 +148,9 @@ router.post('/disconnect', async (req, res) => {
   try {
     const user = await requireSessionUser(req, res)
     if (!user) return
-    const status = await disconnectGoogleDriveForUser(user)
+    const status = await disconnectGoogleDriveForUser(user, {
+      clinicId: requestedClinicIdFrom(req),
+    })
     return res.json({ success: true, ok: true, ...status })
   } catch (error) {
     console.error('[google-drive] POST /disconnect:', error)

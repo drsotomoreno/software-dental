@@ -1,7 +1,12 @@
 import { useMemo, useState } from 'react'
 import { Download, MessageCircle, Search, Users } from 'lucide-react'
 import { useSuperadminResource } from '@/hooks/useSuperadminResource'
-import { fetchRegisteredUsers, type RegisteredSubscriptionUser } from '@/services/subscriptionService'
+import {
+  confirmRegisteredUserPayment,
+  fetchRegisteredUsers,
+  PAID_PLANS,
+  type RegisteredSubscriptionUser,
+} from '@/services/subscriptionService'
 import { getStoredApiAuth, SUPERADMIN_EMAIL } from '@/services/apiAuthService'
 import { ROLE_LABELS, type CanonicalRole } from '@/utils/permissions'
 
@@ -114,6 +119,10 @@ export function SuperAdminRegistrationsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [verifyingId, setVerifyingId] = useState<string | null>(null)
   const [verifyError, setVerifyError] = useState('')
+  const [confirmPlanId, setConfirmPlanId] = useState(PAID_PLANS[0]?.id || 'nomad')
+  const [confirmingPaymentId, setConfirmingPaymentId] = useState<string | null>(null)
+  const [paymentError, setPaymentError] = useState('')
+  const [paymentMessage, setPaymentMessage] = useState('')
 
   const markWhatsAppVerified = async (user: RegisteredSubscriptionUser) => {
     setVerifyError('')
@@ -143,6 +152,34 @@ export function SuperAdminRegistrationsPage() {
       setVerifyError('No se pudo contactar al servidor.')
     } finally {
       setVerifyingId(null)
+    }
+  }
+
+  const confirmPaymentExplicitly = async (user: RegisteredSubscriptionUser) => {
+    setPaymentError('')
+    setPaymentMessage('')
+    const plan = PAID_PLANS.find((item) => item.id === confirmPlanId)
+    const planLabel = plan?.name || confirmPlanId
+    const accepted = window.confirm(
+      `Confirmación explícita de pago\n\n` +
+        `¿Confirma que ${user.email} pagó el plan «${planLabel}»?\n\n` +
+        `Solo use esta acción si el pago es real. Sin esta confirmación no hay suscripción activa.`,
+    )
+    if (!accepted) return
+
+    setConfirmingPaymentId(String(user.id))
+    try {
+      const result = await confirmRegisteredUserPayment(String(user.email || ''), confirmPlanId)
+      if (!result.ok) {
+        setPaymentError(result.error)
+        return
+      }
+      setPaymentMessage(result.message)
+      await reload?.()
+    } catch {
+      setPaymentError('No se pudo contactar al servidor.')
+    } finally {
+      setConfirmingPaymentId(null)
     }
   }
 
@@ -501,6 +538,52 @@ export function SuperAdminRegistrationsPage() {
                     <dd className="mt-0.5 font-medium text-slate-900">
                       {selected.planName || selected.plan || 'Sin plan adquirido'}
                     </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-slate-500">Pago confirmado</dt>
+                    <dd className="mt-0.5 font-medium text-slate-900">
+                      {selected.subscriptionPaidAt
+                        ? formatDate(selected.subscriptionPaidAt)
+                        : 'Sin prueba de pago'}
+                    </dd>
+                  </div>
+                  <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-900">
+                      Activar suscripción (solo con pago real)
+                    </p>
+                    <p className="mt-1 text-xs text-amber-800">
+                      Sin prueba de pago no hay suscripción. Esta acción la confirma usted de forma
+                      explícita como superadmin.
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <select
+                        value={confirmPlanId}
+                        onChange={(event) => setConfirmPlanId(event.target.value)}
+                        className="rounded-lg border border-amber-300 bg-white px-2.5 py-2 text-sm text-slate-800"
+                      >
+                        {PAID_PLANS.map((plan) => (
+                          <option key={plan.id} value={plan.id}>
+                            {plan.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={confirmingPaymentId === String(selected.id)}
+                        onClick={() => {
+                          void confirmPaymentExplicitly(selected)
+                        }}
+                        className="inline-flex items-center rounded-lg bg-amber-700 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
+                      >
+                        {confirmingPaymentId === String(selected.id)
+                          ? 'Confirmando...'
+                          : 'Confirmar pago y activar 30 días'}
+                      </button>
+                    </div>
+                    {paymentError ? <p className="mt-2 text-xs text-red-600">{paymentError}</p> : null}
+                    {paymentMessage ? (
+                      <p className="mt-2 text-xs text-emerald-700">{paymentMessage}</p>
+                    ) : null}
                   </div>
                   <div>
                     <dt className="text-xs uppercase tracking-wide text-slate-500">Rol</dt>

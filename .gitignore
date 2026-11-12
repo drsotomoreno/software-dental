@@ -30,3 +30,6 @@ dist-ssr
 
 # API RIPS — registros CUV locales
 server/data/
+
+# Respaldo de emergencia IndexedDB / PHI — solo en disco local
+backups/

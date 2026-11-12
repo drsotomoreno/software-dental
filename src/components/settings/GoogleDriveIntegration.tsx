@@ -3,6 +3,7 @@ import { Cloud, HardDrive, Link2Off, Loader2 } from 'lucide-react'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import { showGlobalToast } from '@/services/globalToast'
 import { canManageClinicTeam } from '@/utils/permissions'
+import { sessionIsSuperAdmin } from '@/utils/superadminAccess'
 import { useAuth } from '@/contexts/AuthContext'
 
 type DriveStatus = {
@@ -31,18 +32,30 @@ function authHeaders(): HeadersInit {
 export function GoogleDriveIntegration() {
   const { user } = useAuth()
   const apiUser = getStoredApiAuth()?.user
-  const canManage = canManageClinicTeam({
-    role: user?.role,
-    rol: apiUser?.rol,
-    isClinicOwner: apiUser?.isClinicOwner ?? user?.isClinicOwner,
-    id: apiUser?.id ?? user?.id,
-    clinicId: apiUser?.clinicId ?? user?.clinicId,
-  })
+  const isSuperAdmin = sessionIsSuperAdmin(user) || sessionIsSuperAdmin(apiUser)
+  const canManage =
+    isSuperAdmin ||
+    canManageClinicTeam({
+      role: user?.role,
+      rol: apiUser?.rol,
+      isClinicOwner: apiUser?.isClinicOwner ?? user?.isClinicOwner,
+      id: apiUser?.id ?? user?.id,
+      clinicId: apiUser?.clinicId ?? user?.clinicId,
+    })
 
   const [status, setStatus] = useState<DriveStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  const clinicQuery = useCallback(() => {
+    if (!isSuperAdmin) return ''
+    const auth = getStoredApiAuth()
+    // Solo si hay sede explícita (impersonación/contexto). Si no, el backend usa clinic:email maestro.
+    const clinicId = String(auth?.user?.clinicId || '').trim()
+    if (clinicId) return `?clinicId=${encodeURIComponent(clinicId)}`
+    return ''
+  }, [isSuperAdmin])
 
   const loadStatus = useCallback(async () => {
     const auth = getStoredApiAuth()
@@ -55,7 +68,7 @@ export function GoogleDriveIntegration() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch('/api/integrations/google-drive/status', {
+      const response = await fetch(`/api/integrations/google-drive/status${clinicQuery()}`, {
         headers: authHeaders(),
       })
       const payload = await response.json().catch(() => ({}))
@@ -79,7 +92,7 @@ export function GoogleDriveIntegration() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [clinicQuery])
 
   useEffect(() => {
     void loadStatus()
@@ -116,7 +129,7 @@ export function GoogleDriveIntegration() {
     setBusy(true)
     setError('')
     try {
-      const response = await fetch('/api/integrations/google-drive/connect', {
+      const response = await fetch(`/api/integrations/google-drive/connect${clinicQuery()}`, {
         headers: authHeaders(),
       })
       const payload = await response.json().catch(() => ({}))
@@ -148,7 +161,7 @@ export function GoogleDriveIntegration() {
     setBusy(true)
     setError('')
     try {
-      const response = await fetch('/api/integrations/google-drive/disconnect', {
+      const response = await fetch(`/api/integrations/google-drive/disconnect${clinicQuery()}`, {
         method: 'POST',
         headers: authHeaders(),
       })
@@ -178,8 +191,8 @@ export function GoogleDriveIntegration() {
           <h2 className="text-base font-semibold text-slate-800">Google Drive</h2>
           <p className="mt-1 text-sm text-slate-600">
             Las radiografías y fotos clínicas se guardan en el Drive del Gmail de la clínica
-            (carpeta visible <span className="font-medium">mihistoriadental</span>). Solo el
-            dueño o un administrador puede vincular la cuenta.
+            (carpeta visible <span className="font-medium">mihistoriadental</span>). Pueden
+            vincularla el dueño, un administrador o el superadministrador.
           </p>
         </div>
       </div>

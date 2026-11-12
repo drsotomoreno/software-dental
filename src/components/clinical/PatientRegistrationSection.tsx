@@ -9,6 +9,7 @@ import {
 } from '@/components/kiosk/FillIdentificationOnTablet'
 import { ExternalHistoryRdaPanel } from './ExternalHistoryRdaPanel'
 import { PatientWhatsAppButton } from './PatientWhatsAppButton'
+import { PhoneCountryInput } from '@/components/ui/PhoneCountryInput'
 
 interface PatientRegistrationSectionProps {
   value: PatientFormData
@@ -172,12 +173,10 @@ export function PatientRegistrationSection({
           <label className="label-field" htmlFor="patient-phone">
             Teléfono *
           </label>
-          <input
+          <PhoneCountryInput
             id="patient-phone"
-            type="tel"
             value={value.phone}
-            onChange={(event) => update({ phone: event.target.value })}
-            className="input-field"
+            onChange={(phone) => update({ phone })}
             disabled={disabled}
             required
           />
@@ -303,13 +302,12 @@ export function PatientRegistrationSection({
           <label className="label-field" htmlFor="patient-companion-phone">
             Teléfono del acompañante
           </label>
-          <input
+          <PhoneCountryInput
             id="patient-companion-phone"
-            type="tel"
-            value={value.companionPhone}
-            onChange={(event) => update({ companionPhone: event.target.value })}
-            className="input-field"
+            value={value.companionPhone ?? ''}
+            onChange={(companionPhone) => update({ companionPhone })}
             disabled={disabled}
+            placeholder="300 123 4567"
           />
         </div>
         <div>

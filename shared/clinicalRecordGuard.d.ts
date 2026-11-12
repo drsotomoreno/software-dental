@@ -17,3 +17,4 @@ export function isSignedClinicalDocument(record: unknown): boolean
 export function isBlankClinicalShell(record: unknown): boolean
 export function shouldPersistClinicalDraft(existing: unknown, incoming: unknown): boolean
 export function shouldReplaceClinicalDocument(prev: unknown, next: unknown): boolean
+export function mergeAdministrativeClinicalFields(sealedPrev: unknown, incoming: unknown): unknown

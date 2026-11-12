@@ -31,7 +31,11 @@ import {
 } from './emailOtpStore.js'
 import { deletePhoneOtp } from './phoneOtpStore.js'
 import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
-import { applyStoredAccessPolicy, clinicalAccessTier } from '../../shared/clinicalAccess.js'
+import {
+  applyStoredAccessPolicy,
+  clinicalAccessTier,
+  hasSubscriptionPaymentProof,
+} from '../../shared/clinicalAccess.js'
 import { resetClinicClinicalBucket } from './clinicalSyncStore.js'
 import {
   ensureMasterUsuarioRow,
@@ -259,6 +263,7 @@ function migrateUser(user) {
     estado_pago: policy.estado_pago,
     plan: policy.plan,
     fecha_vencimiento: policy.fecha_vencimiento,
+    subscriptionPaidAt: policy.subscriptionPaidAt,
   })
 }
 
@@ -267,7 +272,8 @@ function accessPolicyChanged(before, after) {
     String(before?.rol ?? '') !== String(after?.rol ?? '') ||
     String(before?.estado_pago ?? '') !== String(after?.estado_pago ?? '') ||
     (before?.plan ?? null) !== (after?.plan ?? null) ||
-    (before?.fecha_vencimiento ?? null) !== (after?.fecha_vencimiento ?? null)
+    (before?.fecha_vencimiento ?? null) !== (after?.fecha_vencimiento ?? null) ||
+    (before?.subscriptionPaidAt ?? null) !== (after?.subscriptionPaidAt ?? null)
   )
 }
 
@@ -357,8 +363,13 @@ function isSubscriptionActive(user) {
 
   if (isPaymentExempt(user)) return true
 
-  if (user.estado_pago !== 'activo' && user.estado_pago !== 'prueba') return false
+  if (user.estado_pago === 'prueba') {
+    if (!user.fecha_vencimiento) return false
+    return new Date(user.fecha_vencimiento).getTime() > Date.now()
+  }
 
+  if (user.estado_pago !== 'activo') return false
+  if (!hasSubscriptionPaymentProof(user)) return false
   if (!user.fecha_vencimiento) return false
 
   return new Date(user.fecha_vencimiento).getTime() > Date.now()
@@ -889,6 +900,7 @@ export async function confirmSubscriptionPayment({ email, token, planId, hint })
 
 
 
+  const paidAt = new Date().toISOString()
   const updatedUser = {
 
     ...user,
@@ -899,9 +911,11 @@ export async function confirmSubscriptionPayment({ email, token, planId, hint })
 
     fecha_vencimiento: addDays(new Date(), PAID_PLAN_DAYS),
 
-    subscriptionPaidAt: new Date().toISOString(),
+    subscriptionPaidAt: paidAt,
 
-    updatedAt: new Date().toISOString(),
+    subscriptionPaidBy: MASTER_EMAIL,
+
+    updatedAt: paidAt,
 
   }
 
@@ -1654,6 +1668,8 @@ function sanitizeUser(user) {
     estado_pago: isSuperAdminUser(user) ? 'exento' : user.estado_pago,
     fecha_vencimiento: user.fecha_vencimiento,
     plan: isSuperAdminUser(user) ? 'exento' : user.plan ?? null,
+    subscriptionPaidAt: isSuperAdminUser(user) ? null : user.subscriptionPaidAt ?? null,
+    subscriptionPaidBy: isSuperAdminUser(user) ? null : user.subscriptionPaidBy ?? null,
     customMaxAssistants: normalizeCustomMaxAssistants(
       user.customMaxAssistants ?? user.custom_max_assistants,
     ),
@@ -2200,6 +2216,8 @@ export async function listAllSubscriptionUsers() {
         trialStartedAt: refreshed.trialStartedAt ?? null,
         trialUsedAt: refreshed.trialUsedAt ?? null,
         emailVerifiedAt: refreshed.emailVerifiedAt ?? null,
+        subscriptionPaidAt: safe.subscriptionPaidAt ?? null,
+        subscriptionPaidBy: safe.subscriptionPaidBy ?? null,
         // Campos explícitos para el panel de ventas del Superadmin.
         phone,
         phone_number: phone,
@@ -2755,40 +2773,19 @@ export async function deleteClinicUser({ token, hint, userId }) {
 }
 
 export async function selectPaidPlan({ token, planId, hint }) {
+  void token
+  void planId
+  void hint
   if (!SUBSCRIPTION_PURCHASES_ENABLED) {
     return { ok: false, status: 503, error: SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE }
   }
-  const session = await resolveSubscriptionSession(token, hint)
-  if (!session?.user) {
-    return { ok: false, status: 401, error: 'Sesión inválida o expirada.' }
+  // Defensa: nunca activar solo por elegir plan. Solo el superadmin confirma el pago.
+  return {
+    ok: false,
+    status: 403,
+    error:
+      'Sin prueba de pago no hay suscripción. Solo el superadministrador puede confirmar un pago de forma explícita.',
   }
-  const plan = String(planId ?? '').trim().toLowerCase()
-  if (!PAID_PLAN_IDS.includes(plan)) {
-    return { ok: false, status: 400, error: 'Seleccione un plan de suscripción válido.' }
-  }
-
-  const store = await loadStore()
-  const index = store.users.findIndex((item) => item.id === session.user.id)
-  if (index === -1) {
-    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
-  }
-
-  const current = store.users[index]
-  if (isPaymentExempt(current)) {
-    return { ok: false, status: 400, error: 'Esta cuenta no requiere un plan de pago.' }
-  }
-
-  const now = new Date().toISOString()
-  const updated = {
-    ...current,
-    plan,
-    estado_pago: 'activo',
-    fecha_vencimiento: addDays(new Date(), PAID_PLAN_DAYS),
-    updatedAt: now,
-  }
-  store.users[index] = updated
-  await saveStore(store)
-  return { ok: true, user: sanitizeUser(updated) }
 }
 
 function titularProductSnapshot(owner, actorId) {
@@ -2851,41 +2848,18 @@ export async function readTitularProducts({ token, hint }) {
 }
 
 export async function purchaseTitularPlan({ token, planId, hint }) {
+  void token
+  void planId
+  void hint
   if (!SUBSCRIPTION_PURCHASES_ENABLED) {
     return { ok: false, status: 503, error: SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE }
   }
-  const session = await resolveSubscriptionSession(token, hint)
-  const loaded = await loadTitularAccount(session, { requireManager: true })
-  if (!loaded.ok) return loaded
-
-  const plan = String(planId ?? '').trim().toLowerCase()
-  if (!PAID_PLAN_IDS.includes(plan)) {
-    return { ok: false, status: 400, error: 'Seleccione un plan de suscripción válido.' }
-  }
-  if (isPaymentExempt(loaded.owner)) {
-    return {
-      ok: false,
-      status: 400,
-      error: 'La cuenta del titular está exenta y no requiere comprar un plan.',
-    }
-  }
-
-  const now = new Date().toISOString()
-  const updated = {
-    ...loaded.owner,
-    plan,
-    estado_pago: 'activo',
-    fecha_vencimiento: addDays(new Date(), PAID_PLAN_DAYS),
-    updatedAt: now,
-  }
-  loaded.store.users[loaded.index] = updated
-  await saveStore(loaded.store)
-  const planName = planDisplayName(plan, 'activo')
-  const planLabel = planName.startsWith('Plan ') ? planName : `Plan ${planName}`
+  // Defensa: la compra self-serve no marca activo. Requiere confirmación del superadmin.
   return {
-    ok: true,
-    message: `${planLabel} adquirido para el titular. Vence el ${formatProductDate(updated.fecha_vencimiento)}.`,
-    ...titularProductSnapshot(updated, loaded.actorId),
+    ok: false,
+    status: 403,
+    error:
+      'Sin prueba de pago no hay suscripción. Solo el superadministrador puede confirmar un pago de forma explícita.',
   }
 }
 

@@ -307,6 +307,8 @@ export type RegisteredSubscriptionUser = ApiSubscriptionUser & {
   trialUsedAt?: string | null
   emailVerifiedAt?: string | null
   registrationComplete?: boolean
+  subscriptionPaidAt?: string | null
+  subscriptionPaidBy?: string | null
 }
 
 /** Listado global de cuentas. Solo responde si la sesión es superadmin. */
@@ -323,6 +325,30 @@ export async function fetchRegisteredUsers() {
     ? (payload.users as RegisteredSubscriptionUser[])
     : []
   return { ok: true as const, users }
+}
+
+/**
+ * Confirmación explícita de pago por el superadmin. Es la única vía actual
+ * para marcar una cuenta como suscripción activa.
+ */
+export async function confirmRegisteredUserPayment(email: string, planId: string) {
+  const { response, payload } = await authFetch('/api/confirmar-pago', {
+    method: 'POST',
+    body: JSON.stringify({ email, planId }),
+  })
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      status: response.status,
+      error: String(payload.error || 'No se pudo confirmar el pago.'),
+    }
+  }
+  return {
+    ok: true as const,
+    user: payload.user as ApiSubscriptionUser | undefined,
+    expiresAt: payload.expiresAt as string | undefined,
+    message: String(payload.message || 'Pago confirmado.'),
+  }
 }
 
 export async function fetchClinicUsers() {

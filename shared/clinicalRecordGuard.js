@@ -4,7 +4,14 @@
  * servidor, ni al bajar el snapshot, ni al autoguardar el formulario.
  */
 
+import { generalBudgetHasContent } from './clinicalBudgetMerge.js'
 import { paymentControlHasContent } from './paymentControlMerge.js'
+import {
+  clinicalSealsEqual,
+  evolutionSealsEqual,
+  mergeEvolutionAdminSidecar,
+  recordHasSignedAt,
+} from './clinicalSeal.js'
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : ''
@@ -106,10 +113,13 @@ export function mergeSignedEvolutionNotes(baseNotes, incomingNotes) {
       merged.set(note.id, note)
       continue
     }
-    const kept = { ...previous }
-    if (note.ripsMetadata !== undefined) kept.ripsMetadata = note.ripsMetadata
-    if (note.workflowStatus !== undefined) kept.workflowStatus = note.workflowStatus
-    merged.set(note.id, kept)
+    // Sello real: si el núcleo clínico cambió, se conserva la firma del servidor
+    // y solo se admite sidecar administrativo (RIPS / pago / workflow).
+    if (!evolutionSealsEqual(previous, note)) {
+      merged.set(note.id, mergeEvolutionAdminSidecar(previous, note))
+      continue
+    }
+    merged.set(note.id, mergeEvolutionAdminSidecar(previous, note))
   }
   return preserveEvolutionWorkflowStatus(cleanedBase, [...merged.values()])
 }
@@ -349,6 +359,12 @@ export function clinicalDocumentRichness(record) {
     if (informedConsentHasContent(form.informedConsent)) score += 2
     if (evolutionNotesHaveContent(form.evolutionNotes)) score += 4
     if (specializedAnnexesHaveContent(form.specializedAnnexes)) score += 2
+    if (
+      Array.isArray(form.budgetItems) &&
+      form.budgetItems.some((item) => text(item?.procedure))
+    ) {
+      score += 5
+    }
     if (specialtyBudgetHasContent(form.orthodonticsBudget)) score += 4
     if (specialtyBudgetHasContent(form.dentalImplantsBudget)) score += 3
     if (paymentControlHasContent(form)) score += 5
@@ -421,6 +437,11 @@ const CLINICAL_SECTION_CHECKS = [
   (form) => treatmentPlanHasContent(form.treatmentPlan),
   (form) => evolutionNotesHaveContent(form.evolutionNotes),
   (form) => text(form.findings) || text(form.diagnosisNotes) || text(form.treatmentPlanNotes),
+  (form) => generalBudgetHasContent(form),
+  (form) => specialtyBudgetHasContent(form.orthodonticsBudget),
+  (form) => specialtyBudgetHasContent(form.dentalImplantsBudget),
+  (form) => paymentControlHasContent(form),
+  (form) => informedConsentHasContent(form.informedConsent),
 ]
 
 /** Una copia más nueva no puede dejar atrás secciones que la guardada sí tiene. */
@@ -441,12 +462,18 @@ export function shouldReplaceClinicalDocument(prev, next) {
   if (!prev) return true
   if (!next) return false
 
-  const prevSigned = isSignedClinicalDocument(prev)
-  const nextSigned = isSignedClinicalDocument(next)
+  const prevSigned = isSignedClinicalDocument(prev) || recordHasSignedAt(prev)
+  const nextSigned = isSignedClinicalDocument(next) || recordHasSignedAt(next)
   const prevBody = clinicalBodyHasContent(prev)
   const nextBody = clinicalBodyHasContent(next)
   const prevHash = text(unwrapClinicalPayload(prev).contentHash)
   const nextHash = text(unwrapClinicalPayload(next).contentHash)
+
+  // Sello criptográfico recalculado en servidor/cliente (no confiar en contentHash).
+  // Debe ir antes de LWW / “gana secciones”: el núcleo firmado es inmutable.
+  if (prevSigned && recordHasSignedAt(prev) && !clinicalSealsEqual(prev, next)) {
+    return false
+  }
 
   if (prevBody && !nextBody) return false
   if (!prevBody && nextBody) return true
@@ -458,4 +485,48 @@ export function shouldReplaceClinicalDocument(prev, next) {
 
   if (prevSigned && nextSigned && prevHash && nextHash && prevHash !== nextHash) return false
   return stampOf(next) >= stampOf(prev)
+}
+
+/**
+ * Cuando el sello clínico impide reemplazar, aún se pueden fusionar
+ * abonos y sidecar RIPS sobre la copia sellada del servidor.
+ */
+export function mergeAdministrativeClinicalFields(sealedPrev, incoming) {
+  if (!sealedPrev) return incoming
+  if (!incoming) return sealedPrev
+  const prevData = unwrapClinicalPayload(sealedPrev)
+  const nextData = unwrapClinicalPayload(incoming)
+  const mergedNotes = mergeSignedEvolutionNotes(prevData.evolutionNotes, nextData.evolutionNotes)
+  const patch = {
+    ...prevData,
+    evolutionNotes: mergedNotes,
+  }
+  if (prevData.clinicalDraft || nextData.clinicalDraft) {
+    const base = prevData.clinicalDraft || {}
+    const inc = nextData.clinicalDraft || {}
+    patch.clinicalDraft = {
+      ...base,
+      ...inc,
+      ...base,
+      evolutionNotes: mergeSignedEvolutionNotes(base.evolutionNotes, inc.evolutionNotes),
+      anamnesis: base.anamnesis,
+      stomatologicalExam: base.stomatologicalExam,
+      diagnoses: base.diagnoses,
+      findings: base.findings,
+      treatmentPlan: base.treatmentPlan,
+      informedConsent: base.informedConsent,
+      treatingDentistSignature: base.treatingDentistSignature,
+      signedAt: base.signedAt,
+      contentHash: base.contentHash,
+      isLocked: base.isLocked,
+      isSigned: base.isSigned,
+    }
+  }
+  if (sealedPrev.payload && typeof sealedPrev.payload === 'object') {
+    return {
+      ...sealedPrev,
+      payload: { ...sealedPrev.payload, ...patch, ...prevData, evolutionNotes: mergedNotes },
+    }
+  }
+  return { ...sealedPrev, ...patch, evolutionNotes: mergedNotes }
 }

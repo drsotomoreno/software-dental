@@ -22,10 +22,21 @@ function expiryInFuture(value) {
 }
 
 /**
- * full: suscripción pagada vigente (plan de pago + fecha) o la cuenta maestra.
+ * Prueba de pago: solo la confirmación explícita del superadmin (o pasarela futura)
+ * deja `subscriptionPaidAt`. Sin ese sello no hay suscripción pagada.
+ */
+export function hasSubscriptionPaymentProof(user) {
+  const paidAt = user?.subscriptionPaidAt
+  if (paidAt == null || paidAt === '') return false
+  const time = new Date(paidAt).getTime()
+  return Number.isFinite(time)
+}
+
+/**
+ * full: suscripción pagada vigente (plan + fecha + prueba de pago) o la cuenta maestra.
  * trial: prueba gratuita vigente. Un paciente.
  * none: sin derecho a historias clínicas.
- * `exento`, `activo` sin plan o el rol superadmin no cuentan.
+ * `exento`, `activo` sin plan, `activo` sin pago confirmado o el rol superadmin no cuentan.
  */
 export function clinicalAccessTier(user) {
   if (!user) return 'none'
@@ -34,7 +45,11 @@ export function clinicalAccessTier(user) {
   const estado = String(user.estado_pago ?? '').trim().toLowerCase()
   if (!expiryInFuture(user.fecha_vencimiento)) return 'none'
   if (estado === 'prueba') return 'trial'
-  if (estado === 'activo' && PAID_PLAN_SET.has(String(user.plan ?? '').trim().toLowerCase())) {
+  if (
+    estado === 'activo' &&
+    PAID_PLAN_SET.has(String(user.plan ?? '').trim().toLowerCase()) &&
+    hasSubscriptionPaymentProof(user)
+  ) {
     return 'full'
   }
   return 'none'
@@ -42,7 +57,7 @@ export function clinicalAccessTier(user) {
 
 /**
  * Corrige el almacén: un correo que no es el maestro no conserva exento
- * ni un activo sin plan pagado. Así no vuelve a entrar quien no pagó.
+ * ni un activo sin plan pagado y sin prueba de pago. Así no vuelve a entrar quien no pagó.
  */
 export function applyStoredAccessPolicy(user) {
   const isMaster = isMasterAccessEmail(user?.email)
@@ -57,6 +72,7 @@ export function applyStoredAccessPolicy(user) {
       estado_pago: 'exento',
       plan: 'exento',
       fecha_vencimiento: user?.fecha_vencimiento ?? null,
+      subscriptionPaidAt: null,
     }
   }
 
@@ -65,13 +81,16 @@ export function applyStoredAccessPolicy(user) {
   let estado = String(user?.estado_pago ?? 'pendiente').trim().toLowerCase()
   let plan = user?.plan ?? null
   let fecha = user?.fecha_vencimiento ?? null
+  let subscriptionPaidAt = hasSubscriptionPaymentProof(user) ? user.subscriptionPaidAt : null
   const planId = String(plan ?? '').trim().toLowerCase()
-  const paid = estado === 'activo' && PAID_PLAN_SET.has(planId)
+  const paid =
+    estado === 'activo' && PAID_PLAN_SET.has(planId) && Boolean(subscriptionPaidAt)
 
   if (estado === 'exento' || (estado === 'activo' && !paid)) {
     estado = 'pendiente'
     plan = null
     fecha = null
+    subscriptionPaidAt = null
   }
 
   return {
@@ -79,6 +98,7 @@ export function applyStoredAccessPolicy(user) {
     estado_pago: estado,
     plan,
     fecha_vencimiento: fecha,
+    subscriptionPaidAt,
   }
 }
 

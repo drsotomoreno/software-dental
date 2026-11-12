@@ -141,6 +141,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const completeApiLogin = async (token: string, sessionUser: ApiSubscriptionUser) => {
       setStoredApiAuth(token, sessionUser)
       const { ensureDentalDatabaseForAuth } = await import('@/db/database')
+      const { unlockLocalEncryption } = await import('@/db/localEncryptionKey')
+      await unlockLocalEncryption({
+        secret: token,
+        userId: String(sessionUser.id),
+        clinicId: String(sessionUser.clinicId || sessionUser.id),
+      })
       await ensureDentalDatabaseForAuth(sessionUser.id, sessionUser.clinicId || sessionUser.id)
       if (accessTier(sessionUser) !== 'none') {
         await pullCompleteClinicOnLogin()
@@ -266,13 +272,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
       })
     }
+    // Antes de soltar la sesión: vaciar borrador pendiente y empujar al servidor.
+    // IndexedDB de la clínica NO se borra (evidencia médico-legal).
+    try {
+      const { flushPendingClinicalDraft } = await import('@/services/clinicalSyncState')
+      await flushPendingClinicalDraft()
+    } catch (error) {
+      console.error('[auth] No se pudo vaciar el borrador clínico pendiente:', error)
+    }
+    try {
+      const { forzarSincronizacionLocal } = await import('@/services/clinicalSyncService')
+      await forzarSincronizacionLocal()
+    } catch (error) {
+      console.error('[auth] No se pudo sincronizar antes del cierre de sesión:', error)
+    }
     clearStoredApiAuth()
+    try {
+      const { lockLocalEncryption } = await import('@/db/localEncryptionKey')
+      lockLocalEncryption()
+    } catch (error) {
+      console.error('[auth] No se pudo cerrar el vault de cifrado local:', error)
+    }
     await logoutSession(user?.sessionId ?? (await getStoredSessionToken()))
     try {
       const { clearClinicIsolationOnLogout } = await import('@/services/clinicLocalIsolation')
       await clearClinicIsolationOnLogout()
     } catch (error) {
-      console.error('[auth] No se pudo limpiar IndexedDB al cerrar sesión:', error)
+      console.error('[auth] No se pudo limpiar marcas de clínica al cerrar sesión:', error)
     }
     setUser(null)
   }, [user])

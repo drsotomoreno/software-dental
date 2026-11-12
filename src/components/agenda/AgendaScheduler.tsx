@@ -49,6 +49,7 @@ import {
   pegarCitasEn,
 } from '@/utils/agendaClipboard'
 import { noteTextForSlot, readSlotNotes, writeSlotNotes } from '@/utils/agendaSlotNotes'
+import { toStoredInternationalPhone } from '@/utils/phoneInternational'
 import { useAgendaClipboard } from '@/hooks/useAgendaClipboard'
 import { useScheduleColumns } from '@/hooks/useScheduleColumns'
 import { useAppointmentsRange } from '@/hooks/useAppointments'
@@ -1017,7 +1018,7 @@ export function AgendaScheduler() {
             const result = await updateAppointmentPatientPhone(selectedAppointment, phone)
             setSelectedAppointment({
               ...selectedAppointment,
-              patientPhone: phone.trim(),
+              patientPhone: toStoredInternationalPhone(phone),
             })
             setRenderKey((key) => key + 1)
             return result

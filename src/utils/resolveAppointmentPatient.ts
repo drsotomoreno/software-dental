@@ -2,10 +2,7 @@ import { db } from '@/db/database'
 import type { Appointment } from '@/types/appointment'
 import type { Patient } from '@/types/patient'
 import { getPatientByRouteId } from './patientId'
-
-function normalizePhone(phone: string): string {
-  return phone.replace(/\D/g, '')
-}
+import { phonesEquivalent } from './phoneInternational'
 
 export async function resolveAppointmentPatient(
   appointment: Appointment,
@@ -17,9 +14,11 @@ export async function resolveAppointmentPatient(
 
   if (!appointment.patientPhone?.trim()) return null
 
-  const targetPhone = normalizePhone(appointment.patientPhone)
   const patients = await db.patients.toArray()
-  return patients.find((patient) => normalizePhone(patient.phone) === targetPhone) ?? null
+  return (
+    patients.find((patient) => phonesEquivalent(patient.phone, appointment.patientPhone ?? '')) ??
+    null
+  )
 }
 
 export async function resolveAppointmentPatientRouteId(

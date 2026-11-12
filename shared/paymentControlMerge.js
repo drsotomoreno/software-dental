@@ -1,7 +1,10 @@
 /**
  * Los abonos del Plan y Control de Pagos son evidencia legal (recibos / FEV).
  * Al sincronizar o autoguardar entre terminales NUNCA se descartan: se unen por id.
+ * El presupuesto general se une en el mismo paso (documento médico-legal).
  */
+
+import { withMergedClinicalBudgets } from './clinicalBudgetMerge.js'
 
 function asArray(value) {
   return Array.isArray(value) ? value : []
@@ -245,24 +248,27 @@ function mergeNestedPaymentForm(winnerForm, otherForm) {
 }
 
 /**
- * Aplica la unión de pagos sobre el documento ganador, conservando abonos
- * del perdedor. Usado en pull/push de sync y al autoguardar.
+ * Aplica la unión de pagos (y presupuesto general) sobre el documento ganador,
+ * conservando abonos y líneas del perdedor. Usado en pull/push y autoguardado.
  */
 export function withMergedClinicalPayments(winner, other) {
   if (!winner || typeof winner !== 'object') return winner
   const otherRecord = other && typeof other === 'object' ? other : {}
 
   // Borrador paciente: los abonos viven dentro de clinicalDraft / valuationDraft.
+  let merged
   if ('clinicalDraft' in winner || 'valuationDraft' in winner) {
-    return {
+    merged = {
       ...winner,
       clinicalDraft: mergeNestedPaymentForm(winner.clinicalDraft, otherRecord.clinicalDraft),
       valuationDraft: mergeNestedPaymentForm(winner.valuationDraft, otherRecord.valuationDraft),
     }
+  } else {
+    merged = {
+      ...winner,
+      ...mergeClinicalPaymentSections(otherRecord, winner),
+    }
   }
 
-  return {
-    ...winner,
-    ...mergeClinicalPaymentSections(otherRecord, winner),
-  }
+  return withMergedClinicalBudgets(merged, otherRecord)
 }

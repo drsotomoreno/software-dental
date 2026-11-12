@@ -3,11 +3,15 @@ import { es } from 'date-fns/locale'
 
 export const CLINIC_DISPLAY_NAME = 'doctorSEOlabs'
 
-/** Normaliza teléfono colombiano para wa.me (solo dígitos, prefijo 57). */
+/**
+ * Dígitos para wa.me. Si el número ya trae indicativo (E.164 o más de 10 dígitos)
+ * se respeta. Un celular local de 10 dígitos se asume Colombia (+57).
+ */
 export function normalizePhoneForWhatsApp(phone: string): string {
-  const digits = phone.replace(/\D/g, '')
+  const trimmed = String(phone ?? '').trim()
+  const digits = trimmed.replace(/\D/g, '')
   if (!digits) return ''
-  if (digits.startsWith('57') && digits.length >= 12) return digits
+  if (trimmed.startsWith('+') || digits.length > 10) return digits
   if (digits.length === 10) return `57${digits}`
   return digits
 }

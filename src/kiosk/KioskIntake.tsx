@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { useParams } from 'react-router-dom'
 import SignaturePad, { type SignaturePadHandle } from './SignaturePad'
+import { PhoneCountryInput } from '@/components/ui/PhoneCountryInput'
+import { splitInternationalPhone, toStoredInternationalPhone } from '@/utils/phoneInternational'
 
 const DOCUMENT_TYPES = [
   { value: 'CC', label: 'Cédula de ciudadanía' },
@@ -211,7 +213,7 @@ export default function KioskIntake({
         documentType: values.documentType,
         documentNumber: values.documentNumber.trim(),
         birthDate: values.birthDate,
-        phone: values.phone.trim(),
+        phone: toStoredInternationalPhone(values.phone),
         email: values.email.trim(),
         esMenorDeEdad,
         guardianName: esMenorDeEdad ? values.guardianName.trim() : '',
@@ -397,16 +399,24 @@ export default function KioskIntake({
               <label htmlFor="phone" className={labelClass}>
                 Teléfono *
               </label>
-              <input
-                id="phone"
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                className={inputClass}
-                {...register('phone', {
+              <Controller
+                name="phone"
+                control={control}
+                rules={{
                   required: 'Ingrese un teléfono de contacto',
-                  minLength: { value: 7, message: 'Teléfono inválido' },
-                })}
+                  validate: (value) =>
+                    splitInternationalPhone(value).national.length >= 7 || 'Teléfono inválido',
+                }}
+                render={({ field }) => (
+                  <PhoneCountryInput
+                    id="phone"
+                    size="lg"
+                    className="mt-2"
+                    value={field.value}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                  />
+                )}
               />
               {errors.phone ? (
                 <p className="mt-2 text-base text-red-600">{errors.phone.message}</p>

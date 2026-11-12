@@ -16,6 +16,7 @@ import { resolveAppointmentPatient } from '@/utils/resolveAppointmentPatient'
 import { ClinicalPrecautionAlertBanner } from '@/components/clinical/ClinicalPrecautionAlertBanner'
 import { usePatientPrecautionAlert } from '@/hooks/usePatientPrecautionAlert'
 import { WhatsAppReminderButton } from './WhatsAppReminderButton'
+import { PhoneCountryInput } from '@/components/ui/PhoneCountryInput'
 
 interface AppointmentDetailPanelProps {
   appointment: Appointment
@@ -245,16 +246,13 @@ export function AppointmentDetailPanel({
                   </dt>
                   {canEditPhone && onSavePhone && appointment.id != null ? (
                     <div className="mt-1 space-y-2">
-                      <input
+                      <PhoneCountryInput
                         id="appointment-detail-phone"
-                        type="tel"
                         value={phone}
-                        onChange={(event) => {
-                          setPhone(event.target.value)
+                        onChange={(next) => {
+                          setPhone(next)
                           setPhoneFeedback('idle')
                         }}
-                        placeholder="Ej: 3001234567"
-                        className="input-field"
                       />
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs text-slate-500">
@@ -330,16 +328,13 @@ export function AppointmentDetailPanel({
                     </dt>
                     {canEditPhone && onSavePhone && appointment.id != null ? (
                       <div className="mt-1 space-y-2">
-                        <input
+                        <PhoneCountryInput
                           id="appointment-detail-phone-unlinked"
-                          type="tel"
                           value={phone}
-                          onChange={(event) => {
-                            setPhone(event.target.value)
+                          onChange={(next) => {
+                            setPhone(next)
                             setPhoneFeedback('idle')
                           }}
-                          placeholder="Ej: 3001234567"
-                          className="input-field"
                         />
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="text-xs text-amber-800">

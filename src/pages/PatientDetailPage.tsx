@@ -27,6 +27,7 @@ import {
 } from '@/components/clinical'
 
 import { HistoriaCreadaEn } from '@/components/clinical/HistoriaCreadaEn'
+import { toStoredInternationalPhone } from '@/utils/phoneInternational'
 
 import type { PatientFormData } from '@/types/patient'
 import {
@@ -98,6 +99,7 @@ import {
   savePatientValuationDraft,
 } from '@/utils/patientClinicalDraft'
 import { isRemoteDraftNewer } from '@/utils/clinicalDraftMerge'
+import { preferGeneralBudgetSections } from '../../shared/clinicalBudgetMerge.js'
 import { mergeClinicalPaymentSections } from '../../shared/paymentControlMerge.js'
 import {
   mergeLivingChart,
@@ -532,23 +534,36 @@ export function PatientDetailPage() {
     const pullPaymentsIntoForm = async () => {
       try {
         const draft = await getPatientClinicalDraft(patientForeignKey)
-        const living = draft?.clinicalDraft ?? draft?.valuationDraft
+        const livingRaw = draft?.clinicalDraft ?? draft?.valuationDraft
+        const living =
+          draft?.clinicalDraft && draft?.valuationDraft
+            ? {
+                ...draft.clinicalDraft,
+                ...mergeClinicalPaymentSections(draft.valuationDraft, draft.clinicalDraft),
+                ...preferGeneralBudgetSections(draft.valuationDraft, draft.clinicalDraft),
+              }
+            : livingRaw
         if (!living || cancelled) return
         setClinicalData((prev) => {
           if (!prev) return prev
           const mergedPayments = mergeClinicalPaymentSections(prev, living)
+          const mergedBudget = preferGeneralBudgetSections(prev, living)
           const prevKey = JSON.stringify({
             p: prev.paymentControl,
             o: prev.orthodonticsPaymentControl,
             l: prev.paymentControlLines,
+            b: prev.budgetItems,
+            bt: prev.budget,
           })
           const nextKey = JSON.stringify({
             p: mergedPayments.paymentControl,
             o: mergedPayments.orthodonticsPaymentControl,
             l: mergedPayments.paymentControlLines,
+            b: mergedBudget.budgetItems,
+            bt: mergedBudget.budget,
           })
           if (prevKey === nextKey) return prev
-          return { ...prev, ...mergedPayments }
+          return { ...prev, ...mergedPayments, ...mergedBudget }
         })
       } catch {
         // Pull opcional: el próximo autoguardado igual une por id.
@@ -639,7 +654,16 @@ export function PatientDetailPage() {
         if (patientForeignKey) {
           try {
             const draft = await getPatientClinicalDraft(patientForeignKey)
-            const living = draft?.clinicalDraft ?? draft?.valuationDraft
+            // Conserva presupuesto/pagos de valuationDraft aunque clinicalDraft exista.
+            const livingRaw = draft?.clinicalDraft ?? draft?.valuationDraft
+            const living =
+              draft?.clinicalDraft && draft?.valuationDraft
+                ? {
+                    ...draft.clinicalDraft,
+                    ...mergeClinicalPaymentSections(draft.valuationDraft, draft.clinicalDraft),
+                    ...preferGeneralBudgetSections(draft.valuationDraft, draft.clinicalDraft),
+                  }
+                : livingRaw
             if (draft && living && !draftClinicalData) {
               const newer = signedRecord
                 ? isRemoteDraftNewer(
@@ -805,14 +829,16 @@ export function PatientDetailPage() {
       documentNumber,
       firstName: patientForm.firstName.trim(),
       lastName: patientForm.lastName.trim(),
-      phone: patientForm.phone.trim(),
+      phone: toStoredInternationalPhone(patientForm.phone),
       email: patientForm.email?.trim() || undefined,
       address: patientForm.address?.trim() || undefined,
       city: patientForm.city?.trim() || undefined,
       insurer: patientForm.insurer?.trim() || undefined,
       occupation: patientForm.occupation?.trim() || undefined,
       companionName: patientForm.companionName?.trim() || undefined,
-      companionPhone: patientForm.companionPhone?.trim() || undefined,
+      companionPhone: patientForm.companionPhone?.trim()
+        ? toStoredInternationalPhone(patientForm.companionPhone)
+        : undefined,
       companionRelationship: patientForm.companionRelationship?.trim() || undefined,
       createdAt: current.createdAt,
       updatedAt: new Date().toISOString(),

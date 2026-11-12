@@ -14,6 +14,7 @@ import {
 import { fetchClinicUsers, type ClinicSeatSnapshot } from '@/services/subscriptionService'
 import { snapshotLimitError } from '../../shared/subscriptionPlans.js'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { PhoneCountryInput } from '@/components/ui/PhoneCountryInput'
 import type { UserProfile, UserRole } from '@/types/user'
 import {
   ASSIGNABLE_ROLES,
@@ -624,14 +625,10 @@ function UserFields({
           </div>
           <div className="sm:col-span-2">
             <label className="label-field">Teléfono</label>
-            <input
-              type="tel"
+            <PhoneCountryInput
               required
-              inputMode="numeric"
               value={values.phone ?? ''}
-              onChange={(e) => onChange({ phone: e.target.value.replace(/[^\d+\s()-]/g, '') })}
-              className="input-field"
-              placeholder="3001234567"
+              onChange={(phone) => onChange({ phone })}
             />
           </div>
         </>

@@ -1,5 +1,16 @@
 import Dexie, { type EntityTable } from 'dexie'
+import {
+  applyEncryptionMiddleware,
+  clearEncryptedTables,
+  cryptoOptions,
+} from 'dexie-encrypted'
 import type { Patient } from '@/types/patient'
+import {
+  getLocalEncryptionKeyPromise,
+  hydrateLocalEncryptionFromAuth,
+  lockLocalEncryption,
+} from '@/db/localEncryptionKey'
+import { getStoredApiAuth } from '@/services/apiAuthService'
 import type { OdontogramData } from '@/types/odontogram'
 import type { ClinicalRecord } from '@/types/clinicalRecord'
 import type { DigitalSignature } from '@/types/signature'
@@ -63,7 +74,6 @@ import { isAutoTestSeedDisabled } from '@/db/autoSeedPreference'
 import {
   assertElectronicInvoiceMutableUpdate,
 } from '@/services/invoiceImmutabilityService'
-import { getStoredApiAuth } from '@/services/apiAuthService'
 
 function sanitizeDentalDbSegment(value: string | null | undefined): string {
   const cleaned = String(value ?? '')
@@ -138,6 +148,24 @@ export class DentalDatabase extends Dexie {
 
   constructor(dbName = resolveDentalEmrDbName()) {
     super(dbName)
+
+    // Cifrado en reposo (Ley 1581): payloads clínicos. Los índices siguen en claro
+    // para no romper búsquedas (documentNumber, patientId, signedAt, …).
+    // Debe aplicarse ANTES de declarar version().
+    applyEncryptionMiddleware(
+      this,
+      getLocalEncryptionKeyPromise(dbName),
+      {
+        patients: cryptoOptions.NON_INDEXED_FIELDS,
+        clinicalRecords: cryptoOptions.NON_INDEXED_FIELDS,
+        odontograms: cryptoOptions.NON_INDEXED_FIELDS,
+        patientClinicalDrafts: cryptoOptions.NON_INDEXED_FIELDS,
+      },
+      async (database) => {
+        // Cambio de llave (otro usuario/clínica): vacía solo tablas cifradas.
+        await clearEncryptedTables(database)
+      },
+    )
 
     this.version(1).stores({
       patients: '++id, documentNumber, lastName, createdAt',
@@ -890,11 +918,20 @@ export class DentalDatabase extends Dexie {
       appointments:
         '++id, patientId, professionalId, unitId, columnId, startTime, status, procedureType, syncId, clinicId, pendingSync',
     })
+
+    // v36 — dexie-encrypted: tabla interna `_encryptionSettings` + re-cifrado
+    // de patients / clinicalRecords / odontograms / patientClinicalDrafts.
+    this.version(36).stores({})
   }
 }
 
+// Desbloquea el vault si ya hay JWT de sesión (recarga de pestaña).
+void hydrateLocalEncryptionFromAuth(getStoredApiAuth())
+
 /** Instancia activa. Se recrea al cambiar user/clínica. */
 export let db: DentalDatabase = new DentalDatabase()
+
+export { lockLocalEncryption, hydrateLocalEncryptionFromAuth }
 
 const hookedDatabases = new WeakSet<DentalDatabase>()
 
@@ -902,6 +939,16 @@ export async function ensureDentalDatabaseForAuth(
   userId?: string | null,
   clinicaId?: string | null,
 ): Promise<DentalDatabase> {
+  const auth = getStoredApiAuth()
+  if (auth?.token && (userId || auth.user?.id)) {
+    await hydrateLocalEncryptionFromAuth({
+      token: auth.token,
+      user: {
+        id: String(userId || auth.user?.id || ''),
+        clinicId: String(clinicaId || auth.user?.clinicId || userId || auth.user?.id || ''),
+      },
+    })
+  }
   const nextName = resolveDentalEmrDbName(userId, clinicaId)
   if (db.name === nextName) {
     registerDentalDatabaseHooks(db)

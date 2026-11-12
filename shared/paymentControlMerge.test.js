@@ -106,3 +106,26 @@ test('detecta cuando una copia pierde abonos de la otra', () => {
   assert.equal(dropsPaymentRecords(next, prev), false)
   assert.equal(paymentControlHasContent(prev), true)
 })
+
+test('withMergedClinicalPayments también conserva el presupuesto general', () => {
+  const rich = {
+    clinicalDraft: {
+      anamnesis: { chiefComplaint: 'Plan aceptado' },
+      budgetItems: [{ id: 'b1', procedure: 'Endodoncia', unitPrice: 450_000, quantity: 1 }],
+      budget: { total: 450_000 },
+      paymentControl: [{ id: 'p1', amount: 100_000, paymentDate: '2026-11-01' }],
+    },
+  }
+  const emptyAutosave = {
+    clinicalDraft: {
+      anamnesis: { chiefComplaint: 'Plan aceptado' },
+      budgetItems: [],
+      budget: { total: 0 },
+      paymentControl: [],
+    },
+  }
+  const winner = withMergedClinicalPayments(emptyAutosave, rich)
+  assert.equal(winner.clinicalDraft.budgetItems.length, 1)
+  assert.equal(winner.clinicalDraft.budgetItems[0].procedure, 'Endodoncia')
+  assert.equal(winner.clinicalDraft.paymentControl.length, 1)
+})

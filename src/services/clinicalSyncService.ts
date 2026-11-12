@@ -295,14 +295,40 @@ async function pushAllLocal(clinicId: string): Promise<{
   })
   if (!response.ok) return { ok: false, acceptedPatients: 0, rejected: 0 }
 
+  const acceptedPatientSyncIds = new Set(
+    (Array.isArray(payload?.accepted?.patientSyncIds)
+      ? payload.accepted.patientSyncIds
+      : []
+    ).map((id: unknown) => String(id)),
+  )
+  const acceptedAppointmentSyncIds = new Set(
+    (Array.isArray(payload?.accepted?.appointmentSyncIds)
+      ? payload.accepted.appointmentSyncIds
+      : []
+    ).map((id: unknown) => String(id)),
+  )
+  const acceptedPatients = Number(payload?.accepted?.patients) || 0
+  const rejected = Number(payload?.accepted?.rejected) || 0
+  // Solo marca synced lo que el servidor confirmó. Si no hay lista de ids
+  // (API antigua), exige cero rechazos y al menos un aceptado.
+  const legacySafe =
+    acceptedPatientSyncIds.size === 0 &&
+    acceptedAppointmentSyncIds.size === 0 &&
+    rejected === 0 &&
+    acceptedPatients >= patientRecords.length
+
   const now = new Date().toISOString()
   await withRemotePullLock(async () => {
     for (const row of patients) {
       if (row.id == null) continue
+      const syncId = String(row.syncId || '')
+      if (!legacySafe && (!syncId || !acceptedPatientSyncIds.has(syncId))) continue
       await db.patients.update(row.id, { pendingSync: false, lastSyncedAt: now, clinicId })
     }
     for (const row of appointments) {
       if (row.id == null) continue
+      const syncId = String(row.syncId || '')
+      if (!legacySafe && (!syncId || !acceptedAppointmentSyncIds.has(syncId))) continue
       await db.appointments.update(row.id, {
         pendingSync: false,
         lastSyncedAt: now,
@@ -310,8 +336,6 @@ async function pushAllLocal(clinicId: string): Promise<{
       })
     }
   })
-  const acceptedPatients = Number(payload?.accepted?.patients) || 0
-  const rejected = Number(payload?.accepted?.rejected) || 0
   return { ok: true, acceptedPatients, rejected }
 }
 

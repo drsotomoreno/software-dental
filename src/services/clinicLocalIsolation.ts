@@ -270,9 +270,12 @@ async function withBackupUnlockInvoiceDelete(id: string): Promise<void> {
   })
 }
 
+/**
+ * Cierre de sesión médico-legal: NO borra IndexedDB.
+ * La partición DentalEMR_${user}_${clinic} se reabre en el próximo login.
+ * Solo limpia las marcas de última clínica/DB en storage de sesión.
+ */
 export async function clearClinicIsolationOnLogout(): Promise<void> {
-  await wipeLocalClinicalData()
-  await deleteAndResetDentalDatabase()
   try {
     localStorage.removeItem(LAST_CLINIC_KEY)
     localStorage.removeItem(LAST_DB_KEY)

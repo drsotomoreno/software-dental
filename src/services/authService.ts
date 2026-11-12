@@ -20,6 +20,7 @@ import {
   mapApiUserToAuthUser,
 } from '@/services/apiAuthService'
 import { validateProfessionalDocumentNumber } from '@/utils/professionalDocument'
+import { toStoredInternationalPhone } from '@/utils/phoneInternational'
 import { checkRethusLimit, hasRethusCode, rethusLimitReachedMessage } from '../../shared/subscriptionPlans.js'
 import {
   createClinicMember,
@@ -288,7 +289,7 @@ function localRethusError(
 }
 
 function staffPhoneDigits(value: string | undefined): string {
-  return String(value ?? '').replace(/\D/g, '').slice(0, 12)
+  return toStoredInternationalPhone(String(value ?? ''))
 }
 
 function isLikelyEmail(value: string | undefined): boolean {
@@ -371,8 +372,9 @@ export async function createAppUser(
     if (!isLikelyEmail(email)) {
       return { ok: false, error: 'El correo electrónico es obligatorio para auxiliares.' }
     }
-    if (phone.length < 7 || phone.length > 12) {
-      return { ok: false, error: 'El teléfono es obligatorio para auxiliares (7 a 12 dígitos).' }
+    const phoneDigits = phone.replace(/\D/g, '')
+    if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+      return { ok: false, error: 'El teléfono es obligatorio para auxiliares (7 a 15 dígitos).' }
     }
     if (!firstName) firstName = 'Auxiliar'
     if (!lastName) lastName = 'Administrativo'
@@ -502,8 +504,9 @@ export async function updateAppUser(
     if (!isLikelyEmail(email)) {
       return { ok: false, error: 'El correo electrónico es obligatorio para auxiliares.' }
     }
-    if (phone.length < 7 || phone.length > 12) {
-      return { ok: false, error: 'El teléfono es obligatorio para auxiliares (7 a 12 dígitos).' }
+    const phoneDigits = phone.replace(/\D/g, '')
+    if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+      return { ok: false, error: 'El teléfono es obligatorio para auxiliares (7 a 15 dígitos).' }
     }
     nextPatch.email = email
     nextPatch.phone = phone

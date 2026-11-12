@@ -5,7 +5,11 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { google } from 'googleapis'
 import { config } from '../config.js'
-import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
+import {
+  clinicKeyInScope,
+  clinicSyncAliasIds,
+  SUPERADMIN_SYNC_EMAIL,
+} from '../../shared/clinicalSyncScope.js'
 import { decryptSecret, encryptSecret } from '../utils/tokenEncryption.js'
 import {
   clearClinicGoogleDriveConnection,
@@ -29,12 +33,25 @@ function normalizeRole(rol) {
   return value
 }
 
-export function canManageClinicGoogleDrive(user) {
-  if (!user || typeof user !== 'object') return false
-  const email = String(user.email || '')
+function normalizeEmail(email) {
+  return String(email ?? '')
     .trim()
     .toLowerCase()
-  if (email === 'doctormauriciosoto@gmail.com') return false
+}
+
+/** God Mode Drive: solo la cuenta maestra (no un rol local inventado). */
+export function isGoogleDriveSuperAdmin(user) {
+  return normalizeEmail(user?.email) === SUPERADMIN_SYNC_EMAIL
+}
+
+/**
+ * Quién puede vincular/desvincular Drive:
+ * - Dueño o admin de la clínica
+ * - Superadmin maestro (cualquier clínica)
+ */
+export function canManageClinicGoogleDrive(user) {
+  if (!user || typeof user !== 'object') return false
+  if (isGoogleDriveSuperAdmin(user)) return true
   const clinicId = String(user.clinicId || user.id || '').trim()
   if (!clinicId) return false
   const isOwner = String(user.id) === clinicId
@@ -44,6 +61,34 @@ export function canManageClinicGoogleDrive(user) {
 
 export function canonicalClinicIdOf(user) {
   return clinicSyncAliasIds(user).canonical
+}
+
+function asCanonicalClinicId(raw) {
+  const value = String(raw || '').trim()
+  if (!value) return ''
+  return value.startsWith('clinic:') ? value : `clinic:${value}`
+}
+
+/**
+ * Clínica objetivo del acto Drive.
+ * Superadmin puede pasar clinicId/tenant_id de cualquier sede; el resto solo la propia.
+ */
+export function resolveManagedClinicId(user, requestedClinicId) {
+  const own = canonicalClinicIdOf(user)
+  const requested = asCanonicalClinicId(requestedClinicId)
+
+  if (isGoogleDriveSuperAdmin(user)) {
+    return requested || own
+  }
+
+  if (requested && own && !clinicKeyInScope(requested, own, clinicSyncAliasIds(user).aliases)) {
+    const err = new Error('No puede gestionar Google Drive de otra clínica.')
+    err.code = 'FORBIDDEN_DRIVE_TENANT'
+    err.status = 403
+    throw err
+  }
+
+  return own
 }
 
 function clinicDisplayName(user) {
@@ -140,15 +185,19 @@ function verifyStateToken(state) {
 
 /**
  * Genera la URL de consentimiento de Google (offline + consent + drive.file).
+ * @param {object} user
+ * @param {{ clinicId?: string }} [options]
  */
-export function buildGoogleDriveConnectUrl(user) {
+export function buildGoogleDriveConnectUrl(user, options = {}) {
   if (!canManageClinicGoogleDrive(user)) {
-    const err = new Error('Solo el dueño o un administrador de la clínica puede conectar Google Drive.')
+    const err = new Error(
+      'Solo el dueño, un administrador o el superadministrador pueden conectar Google Drive.',
+    )
     err.code = 'FORBIDDEN_DRIVE_CONNECT'
     err.status = 403
     throw err
   }
-  const clinicId = canonicalClinicIdOf(user)
+  const clinicId = resolveManagedClinicId(user, options.clinicId)
   if (!clinicId) {
     const err = new Error('La sesión no tiene clínica canónica asociada.')
     err.code = 'MISSING_CLINIC'
@@ -305,14 +354,16 @@ export async function completeGoogleDriveOAuthCallback({ code, state }) {
   }
 }
 
-export async function readGoogleDriveStatusForUser(user) {
-  const clinicId = canonicalClinicIdOf(user)
+export async function readGoogleDriveStatusForUser(user, options = {}) {
+  const canManage = canManageClinicGoogleDrive(user)
+  const clinicId = resolveManagedClinicId(user, options.clinicId)
   const oauth = getGoogleOAuthConfigStatus()
   if (!clinicId) {
     return {
       success: true,
       clinicId: null,
-      canManage: false,
+      canManage,
+      isSuperAdmin: isGoogleDriveSuperAdmin(user),
       oauthConfigured: oauth.configured,
       connected: false,
       status: 'disconnected',
@@ -324,20 +375,23 @@ export async function readGoogleDriveStatusForUser(user) {
   return {
     success: true,
     clinicId,
-    canManage: canManageClinicGoogleDrive(user),
+    canManage,
+    isSuperAdmin: isGoogleDriveSuperAdmin(user),
     oauthConfigured: oauth.configured,
     ...row,
   }
 }
 
-export async function disconnectGoogleDriveForUser(user) {
+export async function disconnectGoogleDriveForUser(user, options = {}) {
   if (!canManageClinicGoogleDrive(user)) {
-    const err = new Error('Solo el dueño o un administrador puede desconectar Google Drive.')
+    const err = new Error(
+      'Solo el dueño, un administrador o el superadministrador pueden desconectar Google Drive.',
+    )
     err.code = 'FORBIDDEN_DRIVE_DISCONNECT'
     err.status = 403
     throw err
   }
-  const clinicId = canonicalClinicIdOf(user)
+  const clinicId = resolveManagedClinicId(user, options.clinicId)
   const status = await clearClinicGoogleDriveConnection(clinicId)
   return { ...status, clinicId }
 }
