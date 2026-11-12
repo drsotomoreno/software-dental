@@ -9,10 +9,12 @@ import {
   deleteAndResetDentalDatabase,
   ensureDentalDatabaseForAuth,
   resolveDentalEmrDbName,
+  retireOrphanUuidDentalEmrDatabase,
 } from '@/db/database'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import { getCurrentClinicId, withRemotePullLock } from '@/services/clinicalSyncState'
 import { citasStorageKey, CITAS_STORAGE_KEY_LEGACY } from '@/utils/agendaStorage'
+import { resolveClinicSyncId } from '../../shared/clinicalSyncScope.js'
 
 const LAST_CLINIC_KEY = 'doctorSEO_lastClinicSyncId'
 const LAST_DB_KEY = 'doctorSEO_lastDentalEmrDb'
@@ -137,7 +139,9 @@ export async function wipeLocalClinicalData(): Promise<void> {
 export async function ensureClinicLocalIsolation(clinicId = getCurrentClinicId()): Promise<void> {
   const auth = getStoredApiAuth()
   const userId = auth?.user?.id || null
-  const nextDbName = resolveDentalEmrDbName(userId, clinicId || auth?.user?.clinicId || userId)
+  const canonicalClinicId =
+    resolveClinicSyncId(auth?.user) || clinicId || getCurrentClinicId()
+  const nextDbName = resolveDentalEmrDbName(userId, canonicalClinicId)
 
   let previousClinic = ''
   let previousDb = ''
@@ -149,24 +153,27 @@ export async function ensureClinicLocalIsolation(clinicId = getCurrentClinicId()
     previousDb = ''
   }
 
-  const clinicChanged = Boolean(previousClinic && clinicId && !clinicIdsMatch(previousClinic, clinicId))
+  const clinicChanged = Boolean(
+    previousClinic && canonicalClinicId && !clinicIdsMatch(previousClinic, canonicalClinicId),
+  )
   const dbChanged = Boolean(previousDb && previousDb !== nextDbName)
 
   if (clinicChanged || dbChanged) {
     console.warn(
       '[Tenant] Cambio de clínica/cuenta. Se abre la base de esta sesión y se conserva la anterior.',
-      { previousClinic, clinicId, previousDb, nextDbName },
+      { previousClinic, clinicId: canonicalClinicId, previousDb, nextDbName },
     )
   }
 
-  await ensureDentalDatabaseForAuth(userId, clinicId || auth?.user?.clinicId || userId)
+  await ensureDentalDatabaseForAuth(userId, canonicalClinicId)
+  await retireOrphanUuidDentalEmrDatabase(userId, canonicalClinicId)
 
-  if (clinicId) {
-    await purgeForeignClinicRecords(clinicId)
+  if (canonicalClinicId) {
+    await purgeForeignClinicRecords(canonicalClinicId)
   }
 
   try {
-    if (clinicId) localStorage.setItem(LAST_CLINIC_KEY, normalizeClinicKey(clinicId))
+    if (canonicalClinicId) localStorage.setItem(LAST_CLINIC_KEY, normalizeClinicKey(canonicalClinicId))
     localStorage.setItem(LAST_DB_KEY, nextDbName)
   } catch {
     /* ignore */

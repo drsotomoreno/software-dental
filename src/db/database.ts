@@ -50,6 +50,12 @@ import {
   notifyClinicalRecordDirty,
   withClinicalSyncSuppressed,
 } from '@/services/clinicalSyncState'
+import { resolveClinicSyncId } from '../../shared/clinicalSyncScope.js'
+import {
+  orphanUuidDentalEmrDbName,
+  resolveDentalEmrDbNameFromUser,
+  sanitizeDentalDbSegment,
+} from '../../shared/dentalEmrDbName.js'
 import { dentalServiceSpecialtyId, normalizeOrganizationId } from '@/utils/organizationId'
 import {
   preserveEvolutionWorkflowStatus,
@@ -75,29 +81,20 @@ import {
   assertElectronicInvoiceMutableUpdate,
 } from '@/services/invoiceImmutabilityService'
 
-function sanitizeDentalDbSegment(value: string | null | undefined): string {
-  const cleaned = String(value ?? '')
-    .trim()
-    .replace(/^clinic:/i, '')
-    .replace(/[^a-zA-Z0-9._@-]+/g, '_')
-    .slice(0, 80)
-  return cleaned || 'anon'
-}
+export { sanitizeDentalDbSegment }
 
-/** Nombre IndexedDB particionado: DentalEMR_${userId}_${clinicaId} */
+/** Nombre IndexedDB particionado: DentalEMR_${userId}_${clinicaCanonica} */
 export function resolveDentalEmrDbName(
   userId?: string | null,
   clinicaId?: string | null,
 ): string {
-  let authUser: { id?: string; clinicId?: string } | null = null
+  let authUser: { id?: string; clinicId?: string; email?: string } | null = null
   try {
     authUser = getStoredApiAuth()?.user ?? null
   } catch {
     authUser = null
   }
-  const uid = sanitizeDentalDbSegment(userId || authUser?.id || 'anon')
-  const cid = sanitizeDentalDbSegment(clinicaId || authUser?.clinicId || authUser?.id || 'none')
-  return `DentalEMR_${uid}_${cid}`
+  return resolveDentalEmrDbNameFromUser(authUser, { userId, clinicaId })
 }
 
 export class DentalDatabase extends Dexie {
@@ -940,16 +937,30 @@ export async function ensureDentalDatabaseForAuth(
   clinicaId?: string | null,
 ): Promise<DentalDatabase> {
   const auth = getStoredApiAuth()
-  if (auth?.token && (userId || auth.user?.id)) {
+  const resolvedUserId = String(userId || auth?.user?.id || '').trim()
+  const userForScope = {
+    ...(auth?.user || {}),
+    ...(resolvedUserId ? { id: resolvedUserId } : {}),
+    ...(clinicaId ? { clinicId: String(clinicaId) } : {}),
+  }
+  const resolvedClinicId =
+    resolveClinicSyncId(userForScope) ||
+    String(clinicaId || '').trim() ||
+    resolveClinicSyncId(auth?.user) ||
+    getCurrentClinicId()
+
+  if (auth?.token && resolvedUserId) {
     await hydrateLocalEncryptionFromAuth({
       token: auth.token,
       user: {
-        id: String(userId || auth.user?.id || ''),
-        clinicId: String(clinicaId || auth.user?.clinicId || userId || auth.user?.id || ''),
+        ...userForScope,
+        id: resolvedUserId,
+        clinicId: resolvedClinicId,
+        email: auth.user?.email || (userForScope as { email?: string }).email,
       },
     })
   }
-  const nextName = resolveDentalEmrDbName(userId, clinicaId)
+  const nextName = resolveDentalEmrDbName(resolvedUserId || userId, resolvedClinicId || clinicaId)
   if (db.name === nextName) {
     registerDentalDatabaseHooks(db)
     return db
@@ -962,6 +973,39 @@ export async function ensureDentalDatabaseForAuth(
   db = new DentalDatabase(nextName)
   registerDentalDatabaseHooks(db)
   return db
+}
+
+/**
+ * Retira IndexedDB legacy DentalEMR_{userId}_{userId} cuando la base canónica
+ * es distinta (p. ej. Superadmin → …_doctormauriciosoto@gmail.com).
+ * No toca la base activa ni clinical-sync del servidor.
+ */
+export async function retireOrphanUuidDentalEmrDatabase(
+  userId?: string | null,
+  canonicalClinicId?: string | null,
+): Promise<void> {
+  if (typeof indexedDB === 'undefined') return
+  const uid = String(userId || '').trim()
+  if (!uid) return
+  const orphanName = orphanUuidDentalEmrDbName(uid)
+  const canonicalName = resolveDentalEmrDbName(uid, canonicalClinicId)
+  if (!canonicalName || orphanName === canonicalName) return
+
+  if (db.name === orphanName) {
+    try {
+      db.close()
+    } catch {
+      /* ignore */
+    }
+    db = new DentalDatabase(canonicalName)
+    registerDentalDatabaseHooks(db)
+  }
+
+  try {
+    await Dexie.delete(orphanName)
+  } catch {
+    /* ignore — puede estar bloqueada por otra pestaña */
+  }
 }
 
 export async function deleteAndResetDentalDatabase(): Promise<void> {

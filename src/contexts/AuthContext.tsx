@@ -140,14 +140,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const completeApiLogin = async (token: string, sessionUser: ApiSubscriptionUser) => {
       setStoredApiAuth(token, sessionUser)
-      const { ensureDentalDatabaseForAuth } = await import('@/db/database')
+      const { resolveClinicSyncId } = await import('../../shared/clinicalSyncScope.js')
+      const { getCurrentClinicId } = await import('@/services/clinicalSyncState')
+      const {
+        ensureDentalDatabaseForAuth,
+        retireOrphanUuidDentalEmrDatabase,
+      } = await import('@/db/database')
       const { unlockLocalEncryption } = await import('@/db/localEncryptionKey')
+      // Cubo canónico (clinic:email del maestro / clinicId del titular). Nunca UUID crudo.
+      const clinicSyncId = resolveClinicSyncId(sessionUser) || getCurrentClinicId()
       await unlockLocalEncryption({
         secret: token,
         userId: String(sessionUser.id),
-        clinicId: String(sessionUser.clinicId || sessionUser.id),
+        clinicId: clinicSyncId,
       })
-      await ensureDentalDatabaseForAuth(sessionUser.id, sessionUser.clinicId || sessionUser.id)
+      await ensureDentalDatabaseForAuth(sessionUser.id, clinicSyncId)
+      await retireOrphanUuidDentalEmrDatabase(sessionUser.id, clinicSyncId)
       if (accessTier(sessionUser) !== 'none') {
         await pullCompleteClinicOnLogin()
       }

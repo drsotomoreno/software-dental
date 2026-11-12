@@ -31,6 +31,10 @@ export async function withClinicalSyncSuppressed<T>(fn: () => Promise<T>): Promi
   }
 }
 
+/**
+ * Tenant activo canónico para Dexie, pull, purge y belongsToCurrentClinic.
+ * Superadmin → clinic:doctormauriciosoto@gmail.com; resto → clinic:{clinicId|id}.
+ */
 export function getCurrentClinicId(): string {
   try {
     const auth = getStoredApiAuth()
@@ -38,6 +42,14 @@ export function getCurrentClinicId(): string {
   } catch {
     return ''
   }
+}
+
+/** Alias explícito: misma resolución que getCurrentClinicId. */
+export function resolveActiveClinicSyncId(
+  user?: { id?: string; clinicId?: string; email?: string } | null,
+): string {
+  if (user) return resolveClinicSyncId(user)
+  return getCurrentClinicId()
 }
 
 export function setClinicalSyncDirtyListener(listener: (() => void) | null): void {

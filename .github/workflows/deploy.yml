@@ -54,8 +54,59 @@ jobs:
             set -euo pipefail
             CANONICAL="/var/www/mihistoriadental"
 
+            # ------------------------------------------------------------------
+            # Respaldo PREVIO al deploy: solo cp -a; NUNCA escribe el activo.
+            # ------------------------------------------------------------------
+            backup_clinical_sync_before_deploy() {
+              local bak_suffix="bak-20261112"
+              local sync_file=""
+              local cand p dir bak before_size before_mtime after_size after_mtime
+              for cand in \
+                "$CANONICAL/server/data/clinical-sync.json" \
+                /home/ubuntu/software-dental/server/data/clinical-sync.json \
+                /home/ec2-user/software-dental/server/data/clinical-sync.json
+              do
+                if [[ -f "$cand" ]]; then
+                  sync_file="$cand"
+                fi
+              done
+              pm2 jlist 2>/dev/null | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{try{for(const a of JSON.parse(r||"[]")){const cwd=(a.pm2_env||{}).pm_cwd; if(cwd) console.log(cwd+"/server/data/clinical-sync.json")}}catch(e){}})' | while read -r p; do
+                if [[ -f "$p" ]]; then
+                  echo "$p" > /tmp/mhd_sync_path_deploy.txt
+                fi
+              done || true
+              if [[ -f /tmp/mhd_sync_path_deploy.txt ]]; then
+                sync_file=$(cat /tmp/mhd_sync_path_deploy.txt)
+              fi
+              if [[ -z "$sync_file" || ! -f "$sync_file" ]]; then
+                echo "AVISO: clinical-sync.json no encontrado; se continúa sin bak."
+                return 0
+              fi
+              dir=$(dirname "$sync_file")
+              bak="$dir/clinical-sync.json.$bak_suffix"
+              before_size=$(stat -c%s "$sync_file")
+              before_mtime=$(stat -c%Y "$sync_file")
+              if [[ -f "$bak" ]]; then
+                echo "BACKUP_EXISTS=$bak (intacto; no se sobrescribe)"
+              else
+                echo "BACKUP_CREATE=$bak (cp -a; activo no se modifica)"
+                cp -a "$sync_file" "$bak"
+              fi
+              after_size=$(stat -c%s "$sync_file")
+              after_mtime=$(stat -c%Y "$sync_file")
+              if [[ "$before_size" != "$after_size" || "$before_mtime" != "$after_mtime" ]]; then
+                echo "ERROR: clinical-sync.json activo cambió durante el backup" >&2
+                exit 1
+              fi
+              ls -la "$sync_file" "$bak"
+              echo "BACKUP_OK=$bak bytes=$(stat -c%s "$bak")"
+            }
+
+            echo "---- Backup clinical-sync (antes de tocar código) ----"
+            backup_clinical_sync_before_deploy
+
             echo "Procesos PM2:"
-            pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};console.log([app.name,env.status,env.pm_cwd,env.pm_exec_path,env.PORT||""].join(" | "));}});'
+            pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};console.log([app.name,env.status,env.pm_cwd,env.pm_exec_path,env.PORT||""].join(" | "));}});'}
 
             force_main() {
               local dir="$1"

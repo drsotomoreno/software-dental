@@ -1,0 +1,100 @@
+# Copia de seguridad de clinical-sync.json en EC2.
+# NO modifica ni sobrescribe el archivo activo.
+name: Backup clinical-sync EC2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    name: clinical-sync.json.bak-20261112
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: SSH copy-only backup
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            BAK_SUFFIX="bak-20261112"
+            echo "==== Locate clinical-sync.json (read-only locate) ===="
+            SYNC_FILE=""
+            for cand in \
+              /var/www/mihistoriadental/server/data/clinical-sync.json \
+              /home/ubuntu/software-dental/server/data/clinical-sync.json \
+              /home/ec2-user/software-dental/server/data/clinical-sync.json
+            do
+              if [[ -f "$cand" ]]; then
+                echo "CANDIDATE_SYNC=$cand"
+                SYNC_FILE="$cand"
+              fi
+            done
+            pm2 jlist 2>/dev/null | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{try{for(const a of JSON.parse(r||"[]")){const cwd=(a.pm2_env||{}).pm_cwd; if(cwd) console.log(cwd+"/server/data/clinical-sync.json")}}catch(e){}})' | while read -r p; do
+              if [[ -f "$p" ]]; then
+                echo "PM2_SYNC=$p"
+                echo "$p" > /tmp/mhd_sync_path.txt
+              fi
+            done || true
+            if [[ -f /tmp/mhd_sync_path.txt ]]; then
+              SYNC_FILE=$(cat /tmp/mhd_sync_path.txt)
+            fi
+            echo "SYNC_FILE=${SYNC_FILE:-MISSING}"
+            if [[ -z "${SYNC_FILE}" || ! -f "$SYNC_FILE" ]]; then
+              echo "ERROR: clinical-sync.json no encontrado" >&2
+              exit 1
+            fi
+
+            DIR=$(dirname "$SYNC_FILE")
+            BAK="$DIR/clinical-sync.json.$BAK_SUFFIX"
+            BEFORE_SIZE=$(stat -c%s "$SYNC_FILE" 2>/dev/null || stat -f%z "$SYNC_FILE")
+            BEFORE_MTIME=$(stat -c%Y "$SYNC_FILE" 2>/dev/null || stat -f%m "$SYNC_FILE")
+
+            if [[ -f "$BAK" ]]; then
+              echo "BACKUP_EXISTS=$BAK (se conserva intacto; no se sobrescribe)"
+            else
+              echo "Creating backup (cp -a; active file not rewritten)..."
+              cp -a "$SYNC_FILE" "$BAK"
+            fi
+
+            AFTER_SIZE=$(stat -c%s "$SYNC_FILE" 2>/dev/null || stat -f%z "$SYNC_FILE")
+            AFTER_MTIME=$(stat -c%Y "$SYNC_FILE" 2>/dev/null || stat -f%m "$SYNC_FILE")
+            if [[ "$BEFORE_SIZE" != "$AFTER_SIZE" || "$BEFORE_MTIME" != "$AFTER_MTIME" ]]; then
+              echo "ERROR: el archivo activo cambió durante el backup" >&2
+              exit 1
+            fi
+
+            echo "==== Verify backup JSON ===="
+            BAK="$BAK" SYNC_FILE="$SYNC_FILE" node <<'NODE'
+            const fs = require('fs')
+            const bak = process.env.BAK
+            const sync = process.env.SYNC_FILE
+            const j = JSON.parse(fs.readFileSync(bak, 'utf8'))
+            const clinic = j.clinics?.['clinic:doctormauriciosoto@gmail.com']
+            const patients = Object.keys(clinic?.patients || {}).length
+            const odontograms = Object.keys(clinic?.odontograms || {}).length
+            const drafts = Object.keys(clinic?.drafts || {}).length
+            const activeStat = fs.statSync(sync)
+            const bakStat = fs.statSync(bak)
+            console.log(JSON.stringify({
+              syncFile: sync,
+              backupFile: bak,
+              activeBytes: activeStat.size,
+              backupBytes: bakStat.size,
+              activeUnchanged: true,
+              patients,
+              odontograms,
+              drafts,
+              ok: Boolean(clinic) && patients > 0,
+            }, null, 2))
+            if (!clinic || patients <= 0) process.exit(1)
+            NODE
+
+            ls -la "$SYNC_FILE" "$BAK"
+            echo "BACKUP_OK=$BAK"

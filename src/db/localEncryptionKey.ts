@@ -96,15 +96,18 @@ export async function unlockLocalEncryption(options: {
 /** Hidrata desde JWT en memoria de sesión al recargar la pestaña. */
 export async function hydrateLocalEncryptionFromAuth(auth: {
   token: string
-  user: { id?: string; clinicId?: string }
+  user: { id?: string; clinicId?: string; email?: string }
 } | null): Promise<void> {
   if (!auth?.token || !auth.user?.id) {
     return
   }
+  const { resolveClinicSyncId } = await import('../../shared/clinicalSyncScope.js')
+  const clinicId =
+    resolveClinicSyncId(auth.user) || String(auth.user.clinicId || auth.user.id || '')
   await unlockLocalEncryption({
     secret: auth.token,
     userId: String(auth.user.id),
-    clinicId: String(auth.user.clinicId || auth.user.id),
+    clinicId,
   })
 }
 

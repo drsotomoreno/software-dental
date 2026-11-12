@@ -384,7 +384,8 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
   try {
     const clinicId = getCurrentClinicId()
     const { ensureDentalDatabaseForAuth } = await import('@/db/database')
-    await ensureDentalDatabaseForAuth(auth.user?.id, clinicId || auth.user?.clinicId || auth.user?.id)
+    // Misma resolución canónica que AuthContext / purge (nunca UUID crudo del maestro).
+    await ensureDentalDatabaseForAuth(auth.user?.id, clinicId)
     if (clinicId) {
       const { ensureClinicLocalIsolation } = await import('@/services/clinicLocalIsolation')
       await ensureClinicLocalIsolation(clinicId)
