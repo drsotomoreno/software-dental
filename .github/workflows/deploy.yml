@@ -49,7 +49,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          command_timeout: 20m
+          command_timeout: 35m
           script: |
             set -euo pipefail
             CANONICAL="/var/www/mihistoriadental"
@@ -140,15 +140,12 @@ jobs:
               force_main "$CANONICAL" || exit 1
               chmod +x scripts/*.sh 2>/dev/null || true
               npm install || exit 1
-              # Evitar 502: primero construir con PM2 en línea. Solo si OOM, pausar y reintentar.
-              echo "---- Build (PM2 en línea) ----"
-              export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}"
-              if ! npm run build; then
-                echo "Build falló; reintento liberando RAM (PM2 pause breve)."
-                pm2 stop all || true
-                export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
-                npm run build || { pm2 restart all --update-env || true; exit 1; }
-              fi
+              # Vite + clinical-sync (~72MB) + PM2 saturan RAM pequeña: pausar PM2
+              # antes del build evita cuelgues de 20m (timeout SSH).
+              echo "---- Build (PM2 en pausa para liberar RAM) ----"
+              pm2 stop all || true
+              export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
+              npm run build || { pm2 restart all --update-env || true; exit 1; }
               echo "Bundle canónico:"
               grep -o 'assets/index-[^"]*' dist/index.html || true
 
