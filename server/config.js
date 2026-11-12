@@ -34,6 +34,34 @@ function redactDatabaseUrl(url) {
 /** URL de PostgreSQL: la de Render (DATABASE_URL) o el Postgres local de desarrollo. */
 export const DATABASE_URL = resolveDatabaseUrl()
 
+/** Origen canónico de producción (localStorage / OAuth / correos). Siempre con www. */
+export const CANONICAL_PRODUCTION_ORIGIN = 'https://www.mihistoriadental.com'
+
+/**
+ * Unifica apex → www para mihistoriadental.com.
+ * Evita split-brain de sesión si APP_PUBLIC_URL o Host llegan sin www.
+ */
+export function resolveAppPublicUrl(fromEnv = process.env.APP_PUBLIC_URL) {
+  const fallback =
+    process.env.NODE_ENV === 'production' || process.env.RENDER === 'true'
+      ? CANONICAL_PRODUCTION_ORIGIN
+      : process.env.CORS_ORIGIN || 'http://localhost:5173'
+  const raw = String(fromEnv || fallback || '')
+    .trim()
+    .replace(/\/$/, '')
+  if (!raw) return CANONICAL_PRODUCTION_ORIGIN
+  try {
+    const parsed = new URL(raw)
+    const host = parsed.hostname.toLowerCase()
+    if (host === 'mihistoriadental.com' || host === 'www.mihistoriadental.com') {
+      return CANONICAL_PRODUCTION_ORIGIN
+    }
+  } catch {
+    /* keep raw */
+  }
+  return raw
+}
+
 export const config = {
   port,
   nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -55,12 +83,7 @@ export const config = {
     technicalKey: process.env.DIAN_TECHNICAL_KEY ?? '',
   },
   dataDir: join(__dirname, 'data'),
-  appPublicUrl: (
-    process.env.APP_PUBLIC_URL ||
-    (process.env.NODE_ENV === 'production'
-      ? 'https://www.mihistoriadental.com'
-      : process.env.CORS_ORIGIN || 'http://localhost:5173')
-  ).replace(/\/$/, ''),
+  appPublicUrl: resolveAppPublicUrl(),
   mail: {
     resendApiKey: process.env.RESEND_API_KEY ?? '',
     sendgridApiKey: process.env.SENDGRID_API_KEY ?? '',
@@ -141,12 +164,12 @@ export const config = {
     // Callback siempre en el host del API Express (no el origen Vite suelto).
     redirectUri: (
       process.env.GOOGLE_OAUTH_REDIRECT_URI ||
-      `${(
+      `${resolveAppPublicUrl(
         process.env.APP_PUBLIC_URL ||
-        (process.env.NODE_ENV === 'production' || process.env.RENDER === 'true'
-          ? 'https://www.mihistoriadental.com'
-          : `http://localhost:${Number(process.env.PORT) || 3000}`)
-      ).replace(/\/$/, '')}/api/integrations/google-drive/callback`
+          (process.env.NODE_ENV === 'production' || process.env.RENDER === 'true'
+            ? CANONICAL_PRODUCTION_ORIGIN
+            : `http://localhost:${Number(process.env.PORT) || 3000}`),
+      )}/api/integrations/google-drive/callback`
     ).trim(),
   },
 }

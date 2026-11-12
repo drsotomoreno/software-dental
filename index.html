@@ -13,6 +13,11 @@
     <script>
       (function () {
         try {
+          // Unificar dominio: apex → www (localStorage / OAuth / sesión).
+          if (location.hostname === 'mihistoriadental.com') {
+            location.replace('https://www.mihistoriadental.com' + location.pathname + location.search + location.hash)
+            return
+          }
           if (localStorage.getItem('doctorSEO_rol') === 'superadmin') {
             document.documentElement.dataset.superadmin = 'true'
           }

@@ -21,6 +21,9 @@ export function ProtectedRoute() {
   const hasApiSession = Boolean(apiAuth?.token && apiAuth.user)
   // Nunca autenticar solo por doctorSEO_rol=superadmin en localStorage.
   const hasAccess = Boolean(user || hasApiSession)
+  const oauthReturnFlag = new URLSearchParams(location.search).get('googleDrive')
+  const returningFromGoogleDrive =
+    oauthReturnFlag === 'connected' || oauthReturnFlag === 'error'
 
   if (path === '/') {
     return <LandingPage />
@@ -38,7 +41,15 @@ export function ProtectedRoute() {
     return <ResetPasswordPage />
   }
 
+  // Tras OAuth: si ya hay token/sesión local, no bloquear /perfil en "Verificando…".
+  // Si no hay token en este host, salir del loading (apex→www debió unificar dominio).
   if (isLoading) {
+    if (returningFromGoogleDrive && (hasAccess || hasStoredToken)) {
+      return <Outlet />
+    }
+    if (!hasStoredToken && !hasApiSession && !user) {
+      return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
+    }
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-500">
         Verificando sesión...
@@ -53,7 +64,13 @@ export function ProtectedRoute() {
   }
 
   if (!hasAccess) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: location.pathname + (location.search || '') }}
+      />
+    )
   }
 
   // Sin prueba vigente ni plan pagado: no hay historias clínicas.

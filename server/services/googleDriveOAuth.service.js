@@ -4,7 +4,7 @@
  */
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { google } from 'googleapis'
-import { config } from '../config.js'
+import { CANONICAL_PRODUCTION_ORIGIN, config, resolveAppPublicUrl } from '../config.js'
 import {
   clinicKeyInScope,
   clinicSyncAliasIds,
@@ -445,9 +445,32 @@ export async function getAuthorizedDriveClient(canonicalClinicId) {
   }
 }
 
+/**
+ * Tras OAuth siempre vuelve al origen canónico con www en producción.
+ * No usa req.headers.host (puede llegar sin www) ni cae en apex
+ * aunque APP_PUBLIC_URL esté mal configurada.
+ */
 export function frontendRedirectAfterOAuth({ ok, errorCode }) {
-  const base = String(config.appPublicUrl || '').replace(/\/$/, '') || 'http://localhost:5173'
-  const url = new URL(`${base}/perfil`)
+  const production = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true'
+  let base = resolveAppPublicUrl(config.appPublicUrl) || ''
+  try {
+    const host = new URL(base || CANONICAL_PRODUCTION_ORIGIN).hostname.toLowerCase()
+    if (
+      production ||
+      host === 'mihistoriadental.com' ||
+      host === 'www.mihistoriadental.com'
+    ) {
+      // En prod (o cualquier host del producto) el return OAuth es siempre www.
+      if (production || host.endsWith('mihistoriadental.com')) {
+        base = CANONICAL_PRODUCTION_ORIGIN
+      }
+    }
+  } catch {
+    base = production ? CANONICAL_PRODUCTION_ORIGIN : 'http://localhost:5173'
+  }
+  if (!base) base = production ? CANONICAL_PRODUCTION_ORIGIN : 'http://localhost:5173'
+
+  const url = new URL(`${base.replace(/\/$/, '')}/perfil`)
   if (ok) {
     url.searchParams.set('googleDrive', 'connected')
   } else {

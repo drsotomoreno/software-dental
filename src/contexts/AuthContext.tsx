@@ -58,65 +58,75 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useClinicalPullSync(Boolean(user) && !isLoading && accessTier(getStoredApiAuth()?.user) !== 'none')
 
   const loadSession = useCallback(async () => {
-    let apiAuth = getStoredApiAuth()
+    try {
+      let apiAuth = getStoredApiAuth()
 
-    // Nunca fabricar una sesión Superadmin solo porque localStorage diga
-    // doctorSEO_rol=superadmin. Eso filtraba privilegios tras un registro.
+      // Nunca fabricar una sesión Superadmin solo porque localStorage diga
+      // doctorSEO_rol=superadmin. Eso filtraba privilegios tras un registro.
 
-    if (apiAuth) {
-      // Si el JSON local dice superadmin pero el correo no es el maestro, limpiar.
-      if (apiAuth.user?.rol === 'superadmin' && !isApiSuperAdmin(apiAuth.user)) {
-        clearStoredApiAuth()
-        apiAuth = null
-      }
-    }
-
-    if (apiAuth) {
-      let validation = await validateApiSession(apiAuth.token)
-      // Restaurar maestro solo si el correo almacenado YA es la cuenta maestra.
-      if (!validation.ok && isApiSuperAdmin(apiAuth.user)) {
-        const restored = await restoreMasterApiSession(apiAuth.user.email)
-        if (restored && isApiSuperAdmin(restored.user)) {
-          validation = {
-            ok: true as const,
-            user: restored.user,
-            expiresAt: null as unknown as string,
-            rol: 'superadmin' as const,
-          }
-          apiAuth = restored
+      if (apiAuth) {
+        // Si el JSON local dice superadmin pero el correo no es el maestro, limpiar.
+        if (apiAuth.user?.rol === 'superadmin' && !isApiSuperAdmin(apiAuth.user)) {
+          clearStoredApiAuth()
+          apiAuth = null
         }
       }
-      if (validation.ok) {
-        // Rechazar respuesta de servidor que eleve a maestro sin serlo el cliente esperado.
-        if (
-          isApiSuperAdmin(validation.user) &&
-          !isApiSuperAdmin(apiAuth.user) &&
-          String(apiAuth.user?.email || '').toLowerCase() !== SUPERADMIN_EMAIL
-        ) {
-          clearStoredApiAuth()
-          setUser(null)
+
+      if (apiAuth) {
+        let validation = await validateApiSession(apiAuth.token)
+        // Restaurar maestro solo si el correo almacenado YA es la cuenta maestra.
+        if (!validation.ok && isApiSuperAdmin(apiAuth.user)) {
+          const restored = await restoreMasterApiSession(apiAuth.user.email)
+          if (restored && isApiSuperAdmin(restored.user)) {
+            validation = {
+              ok: true as const,
+              user: restored.user,
+              expiresAt: null as unknown as string,
+              rol: 'superadmin' as const,
+            }
+            apiAuth = restored
+          }
+        }
+        if (validation.ok) {
+          // Rechazar respuesta de servidor que eleve a maestro sin serlo el cliente esperado.
+          if (
+            isApiSuperAdmin(validation.user) &&
+            !isApiSuperAdmin(apiAuth.user) &&
+            String(apiAuth.user?.email || '').toLowerCase() !== SUPERADMIN_EMAIL
+          ) {
+            clearStoredApiAuth()
+            setUser(null)
+            return
+          }
+          setStoredApiAuth(apiAuth.token, validation.user)
+          // Liberar UI antes del pull: OAuth (?googleDrive=connected) no debe
+          // quedar atrapado en "Verificando sesión..." si el sync tarda.
+          const authUser = await sessionUserFromApi(validation.user, apiAuth.token)
+          setUser(authUser)
           setIsLoading(false)
+          if (accessTier(validation.user) !== 'none') {
+            // No await: un pull lento no debe re-bloquear /perfil tras OAuth Drive.
+            void pullCompleteClinicOnLogin().catch((error) => {
+              console.error('[auth] Pull clínico tras sesión:', error)
+            })
+          }
           return
         }
-        setStoredApiAuth(apiAuth.token, validation.user)
-        if (accessTier(validation.user) !== 'none') {
-          await pullCompleteClinicOnLogin()
+        if (validation.requiresPayment && validation.user) {
+          setStoredApiAuth(apiAuth.token, validation.user)
+          setUser(await sessionUserFromApi(validation.user, apiAuth.token))
+          return
         }
-        setUser(await sessionUserFromApi(validation.user, apiAuth.token))
-        setIsLoading(false)
-        return
+        clearStoredApiAuth()
       }
-      if (validation.requiresPayment && validation.user) {
-        setStoredApiAuth(apiAuth.token, validation.user)
-        setUser(await sessionUserFromApi(validation.user, apiAuth.token))
-        setIsLoading(false)
-        return
-      }
-      clearStoredApiAuth()
-    }
 
-    setUser(null)
-    setIsLoading(false)
+      setUser(null)
+    } catch (error) {
+      console.error('[auth] Error verificando sesión:', error)
+      setUser(null)
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
 
   useEffect(() => {
