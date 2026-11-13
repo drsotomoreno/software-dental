@@ -115,9 +115,8 @@ export function MailSettingsPanel() {
           Las variables persistentes del servidor (
           <code className="font-mono">MAIL_FROM</code>,{' '}
           <code className="font-mono">RESEND_API_KEY</code>,{' '}
-          <code className="font-mono">BREVO_API_KEY</code>) se respaldan en el archivo{' '}
-          <code className="font-mono">.env</code> de producción en AWS EC2 para que no se
-          pierdan al redesplegar.
+          <code className="font-mono">BREVO_API_KEY</code>) se configuran en AWS EC2
+          (<code className="font-mono">.env</code>) para que no se pierdan al redesplegar.
         </p>
         <p className="mt-2 text-sm font-medium text-slate-700">{status}</p>
       </div>

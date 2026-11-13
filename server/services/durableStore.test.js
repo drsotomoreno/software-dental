@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mergeDurableStores, poolConfig } from './durableStore.js'
+import {
+  mergeDurableStores,
+  poolConfig,
+  stripSslModeFromConnectionString,
+} from './durableStore.js'
 
 const CEDULA = '52333444'
 const OTRA = '1099887766'
@@ -37,18 +41,37 @@ test('una copia más nueva sin cédula no borra la que ya estaba guardada', () =
   assert.equal(merged.users[0].rethusNumber, '12345678')
 })
 
-test('la URL externa de Render usa SSL sin verificar la CA', () => {
+test('stripSslModeFromConnectionString elimina sslmode conflictivo', () => {
+  const cleaned = stripSslModeFromConnectionString(
+    'postgresql://user:secret@mydb.xxxxx.us-east-1.rds.amazonaws.com:5432/app?sslmode=require',
+  )
+  assert.equal(cleaned.includes('sslmode'), false)
+  assert.match(cleaned, /rds\.amazonaws\.com/)
+})
+
+test('URL remota RDS usa connectionString limpio + SSL + timeouts 15s/30s + max 10', () => {
+  const config = poolConfig(
+    'postgresql://user:secret@mydb.xxxxx.us-east-1.rds.amazonaws.com:5432/mydb?sslmode=require',
+  )
+  assert.deepEqual(config.ssl, { rejectUnauthorized: false })
+  assert.equal(config.max, 10)
+  assert.equal(config.connectionTimeoutMillis, 15_000)
+  assert.equal(config.idleTimeoutMillis, 30_000)
+  assert.equal(typeof config.connectionString, 'string')
+  assert.equal(String(config.connectionString).includes('sslmode'), false)
+  assert.equal(config.host, undefined)
+})
+
+test('URL externa legacy (Render) también usa connectionString limpio + SSL', () => {
   const config = poolConfig(
     'postgresql://user:secret@dpg-abc123-a.oregon-postgres.render.com:5432/mydb?sslmode=require',
   )
   assert.deepEqual(config.ssl, { rejectUnauthorized: false })
-  assert.equal(config.host, 'dpg-abc123-a.oregon-postgres.render.com')
-  assert.equal(config.port, 5432)
-  assert.equal(config.database, 'mydb')
-  assert.equal(config.connectionString, undefined)
+  assert.equal(config.max, 10)
+  assert.equal(String(config.connectionString).includes('sslmode'), false)
 })
 
-test('el host interno de Render y localhost no fuerzan TLS', () => {
+test('el host interno y localhost no fuerzan TLS', () => {
   assert.equal(poolConfig('postgresql://user:secret@dpg-abc123-a/mydb').ssl, false)
   assert.equal(
     poolConfig('postgresql://postgres:postgres@localhost:5432/software_dental').ssl,
@@ -58,11 +81,11 @@ test('el host interno de Render y localhost no fuerzan TLS', () => {
 
 test('una contraseña con % no apaga el SSL de la base externa', () => {
   const config = poolConfig(
-    'postgresql://user:100%@dpg-abc123-a.oregon-postgres.render.com/mydb',
+    'postgresql://user:100%@mydb.xxxxx.us-east-1.rds.amazonaws.com/mydb?sslmode=require',
   )
   assert.deepEqual(config.ssl, { rejectUnauthorized: false })
-  assert.equal(config.password, '100%')
-  assert.equal(config.connectionString, undefined)
+  assert.equal(typeof config.connectionString, 'string')
+  assert.match(String(config.connectionString), /100%25|100%/)
 })
 
 test('una cédula nueva reemplaza la anterior', () => {

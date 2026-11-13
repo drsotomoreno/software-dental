@@ -627,9 +627,15 @@ export function ProfilePage() {
 
       <GoogleDriveIntegration />
 
-      {sessionIsSuperAdmin(user) || sessionIsSuperAdmin(getStoredApiAuth()?.user) ? (
-        <MailSettingsPanel />
-      ) : null}
+      {(() => {
+        const apiUser = getStoredApiAuth()?.user
+        const isMaster =
+          sessionIsSuperAdmin(user) || sessionIsSuperAdmin(apiUser)
+        const role = String(user.role || apiUser?.rol || '')
+          .trim()
+          .toLowerCase()
+        return isMaster && role === 'superadmin' ? <MailSettingsPanel /> : null
+      })()}
 
       {can('backups.manage') && (
         <div className="card space-y-3">

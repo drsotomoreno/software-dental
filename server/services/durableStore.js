@@ -26,9 +26,8 @@ function loadPgPool() {
 }
 
 /**
- * El host interno de Render (dpg-…-a, sin dominio) no habla TLS.
- * sslmode en la URL no se reenvía al pool: pg lo interpretaría y el handshake
- * dejaría el arranque colgado. Fuera de ese host se usa SSL sin verificar CA.
+ * Localhost / host interno sin dominio no habla TLS.
+ * Hosts remotos (AWS RDS, Render externo, etc.) usan SSL sin verificar CA.
  */
 export function postgresSslOption(connectionString) {
   try {
@@ -43,6 +42,26 @@ export function postgresSslOption(connectionString) {
     return { rejectUnauthorized: false }
   } catch {
     return false
+  }
+}
+
+/**
+ * Quita `sslmode` (y `ssl`) del query string: en pg 8 chocan con `ssl: { rejectUnauthorized: false }`.
+ */
+export function stripSslModeFromConnectionString(connectionString) {
+  const raw = String(connectionString || '').trim()
+  if (!raw) return raw
+  try {
+    const parsed = new URL(raw)
+    parsed.searchParams.delete('sslmode')
+    parsed.searchParams.delete('ssl')
+    return parsed.toString()
+  } catch {
+    return raw
+      .replace(/([?&])sslmode=[^&]*/gi, '$1')
+      .replace(/([?&])ssl=[^&]*/gi, '$1')
+      .replace(/\?&/, '?')
+      .replace(/[?&]$/, '')
   }
 }
 
@@ -79,19 +98,29 @@ function decodeConnectionPart(value) {
 }
 
 export function poolConfig(url) {
-  // La URL externa de Render exige TLS sin verificar la CA. En pg 8, sslmode=require
-  // dentro de connectionString pisa este objeto y activa la verificación: la
-  // conexión se rechaza. El host interno (sin dominio) no habla TLS y se deja en false.
-  const ssl = postgresSslOption(url) === false ? false : { rejectUnauthorized: false }
+  const remoteSsl = postgresSslOption(url)
+  const isRemote = remoteSsl !== false
+
+  // AWS RDS / hosts remotos: connectionString limpio + ssl explícito.
+  if (isRemote) {
+    return {
+      connectionString: stripSslModeFromConnectionString(url),
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 15_000,
+      idleTimeoutMillis: 30_000,
+      max: 10,
+    }
+  }
+
+  // Localhost / host interno: sin TLS; params discretos evitan ambigüedad.
   const common = {
     max: 2,
     connectionTimeoutMillis: 8_000,
     idleTimeoutMillis: 20_000,
+    ssl: false,
   }
   try {
     const parsed = new URL(url)
-    // No se pasa connectionString: un sslmode=require ahí pisa `ssl`
-    // y anula tanto este objeto como el bypass del host interno de Render.
     return {
       ...common,
       user: decodeConnectionPart(parsed.username),
@@ -99,10 +128,12 @@ export function poolConfig(url) {
       host: parsed.hostname,
       port: parsed.port ? Number(parsed.port) : 5432,
       database: decodeConnectionPart(parsed.pathname.replace(/^\//, '')),
-      ssl,
     }
   } catch {
-    return { ...common, connectionString: url, ssl }
+    return {
+      ...common,
+      connectionString: stripSslModeFromConnectionString(url),
+    }
   }
 }
 

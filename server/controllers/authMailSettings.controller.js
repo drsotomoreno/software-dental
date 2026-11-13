@@ -6,7 +6,7 @@ import {
 import { isMailConfigured, mailTransportLabel } from '../services/mailer.js'
 import { loadMailSettings, publicMailStatus, saveMailSettings } from '../services/mailSettingsStore.js'
 
-/** Solo el superadministrador global (cuenta maestra) puede ver/editar correo de la plataforma. */
+/** Solo el superadministrador global (cuenta maestra + rol superadmin) puede ver/editar correo. */
 async function requireSuperAdmin(req) {
   const authHeader = req.headers.authorization ?? ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
@@ -14,7 +14,9 @@ async function requireSuperAdmin(req) {
   if (!session?.user) return null
   // God Mode: solo cuenta maestra. No confiar en rol local de clínica ni estado_pago.
   if (!isSuperAdminUser(session.user)) return null
-  const rol = String(session.user.rol ?? '').toLowerCase()
+  const rol = String(session.user.rol ?? session.user.role ?? '')
+    .trim()
+    .toLowerCase()
   if (rol !== 'superadmin') return null
   return session
 }
@@ -23,7 +25,11 @@ export async function getMailSettings(req, res) {
   try {
     const session = await requireSuperAdmin(req)
     if (!session) {
-      return res.status(403).json({ success: false, ok: false, error: 'No autorizado.' })
+      return res.status(403).json({
+        success: false,
+        ok: false,
+        error: 'Solo el superadministrador puede ver la configuración de correo.',
+      })
     }
     const settings = await loadMailSettings()
     return res.json({
@@ -44,7 +50,11 @@ export async function updateMailSettings(req, res) {
   try {
     const session = await requireSuperAdmin(req)
     if (!session) {
-      return res.status(403).json({ success: false, ok: false, error: 'No autorizado.' })
+      return res.status(403).json({
+        success: false,
+        ok: false,
+        error: 'Solo el superadministrador puede editar la configuración de correo.',
+      })
     }
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     const saved = await saveMailSettings({
