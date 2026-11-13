@@ -17,6 +17,7 @@ import {
   ensureSpecialtyInRepsPortfolio,
 } from '@/components/settings/RegulatoryIdentityFields'
 import { getStoredApiAuth, setStoredApiAuth } from '@/services/apiAuthService'
+import { sessionIsSuperAdmin } from '@/utils/superadminAccess'
 import { updateOwnProfile, changeOwnPassword } from '@/services/subscriptionService'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import type { OdontologyThsSpecialtyId } from '@/constants/ripsThsSpecialty'
@@ -626,9 +627,9 @@ export function ProfilePage() {
 
       <GoogleDriveIntegration />
 
-      {(getStoredApiAuth()?.user?.rol === 'superadmin' || user.role === 'superadmin') && (
+      {sessionIsSuperAdmin(user) || sessionIsSuperAdmin(getStoredApiAuth()?.user) ? (
         <MailSettingsPanel />
-      )}
+      ) : null}
 
       {can('backups.manage') && (
         <div className="card space-y-3">

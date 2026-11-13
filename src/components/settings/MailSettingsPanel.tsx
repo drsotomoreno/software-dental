@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { sessionIsSuperAdmin } from '@/utils/superadminAccess'
 
 export function MailSettingsPanel() {
   const [from, setFrom] = useState('')
@@ -10,8 +11,10 @@ export function MailSettingsPanel() {
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const allowed = sessionIsSuperAdmin(getStoredApiAuth()?.user)
 
   useEffect(() => {
+    if (!allowed) return
     const auth = getStoredApiAuth()
     if (!auth?.token) {
       setStatus('Inicie sesión como superadmin para configurar el correo.')
@@ -34,9 +37,10 @@ export function MailSettingsPanel() {
         )
       })
       .catch(() => setStatus('No se pudo conectar con el servidor.'))
-  }, [])
+  }, [allowed])
 
   const handleSave = async (e: React.FormEvent) => {
+    if (!allowed) return
     e.preventDefault()
     setError('')
     setSaved(false)
@@ -80,14 +84,17 @@ export function MailSettingsPanel() {
     }
   }
 
+  if (!allowed) return null
+
   return (
     <form onSubmit={handleSave} className="card space-y-4">
       <div>
         <h2 className="text-base font-semibold text-slate-800">Correo de verificación</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Render bloquea SMTP. El envío usa Resend por HTTPS. Para que el código llegue a
-          cualquier correo (Gmail, Yahoo, Outlook), el dominio mihistoriadental.com debe
-          estar verificado en Resend. En Namecheap → Domain List → Advanced DNS agregue:
+          El envío transaccional usa Resend o Brevo por API HTTPS (no SMTP). Para que el
+          código llegue a cualquier correo (Gmail, Yahoo, Outlook), el dominio
+          mihistoriadental.com debe estar verificado. En Namecheap → Domain List → Advanced
+          DNS agregue los registros que indique el proveedor (DKIM/SPF), por ejemplo:
         </p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-600">
           <li>
@@ -105,8 +112,12 @@ export function MailSettingsPanel() {
           </li>
         </ul>
         <p className="mt-2 text-sm text-slate-600">
-          También agregue <code className="font-mono">RESEND_API_KEY</code> en Render →
-          Environment para que no se pierda al redesplegar.
+          Las variables persistentes del servidor (
+          <code className="font-mono">MAIL_FROM</code>,{' '}
+          <code className="font-mono">RESEND_API_KEY</code>,{' '}
+          <code className="font-mono">BREVO_API_KEY</code>) se respaldan en el archivo{' '}
+          <code className="font-mono">.env</code> de producción en AWS EC2 para que no se
+          pierdan al redesplegar.
         </p>
         <p className="mt-2 text-sm font-medium text-slate-700">{status}</p>
       </div>

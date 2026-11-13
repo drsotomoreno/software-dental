@@ -1,15 +1,21 @@
-import { MASTER_EMAIL, resolveSubscriptionSession, sessionHintFromRequest } from '../services/subscriptionAuthStore.js'
+import {
+  isSuperAdminUser,
+  resolveSubscriptionSession,
+  sessionHintFromRequest,
+} from '../services/subscriptionAuthStore.js'
 import { isMailConfigured, mailTransportLabel } from '../services/mailer.js'
 import { loadMailSettings, publicMailStatus, saveMailSettings } from '../services/mailSettingsStore.js'
 
+/** Solo el superadministrador global (cuenta maestra) puede ver/editar correo de la plataforma. */
 async function requireSuperAdmin(req) {
   const authHeader = req.headers.authorization ?? ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
   const session = await resolveSubscriptionSession(token, sessionHintFromRequest(req))
   if (!session?.user) return null
-  const email = String(session.user.email ?? '').toLowerCase()
+  // God Mode: solo cuenta maestra. No confiar en rol local de clínica ni estado_pago.
+  if (!isSuperAdminUser(session.user)) return null
   const rol = String(session.user.rol ?? '').toLowerCase()
-  if (email !== MASTER_EMAIL && rol !== 'superadmin') return null
+  if (rol !== 'superadmin') return null
   return session
 }
 
