@@ -216,8 +216,18 @@ jobs:
               exit 1
             fi
 
-            echo "---- Reinicio PM2 (debe quedar online; heap 4096 para clinical-sync ~72MB) ----"
-            export NODE_OPTIONS="--max-old-space-size=4096"
+            echo "---- Reinicio PM2 (heap = 70% RAM física, nunca 4096 en t3 pequeña) ----"
+            HEAP_SCRIPT="$CANONICAL/scripts/pm2-heap-from-ram.sh"
+            if [[ -f "$HEAP_SCRIPT" ]]; then
+              HEAP_MB="$(bash "$HEAP_SCRIPT")"
+            else
+              MEM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
+              HEAP_MB=$((MEM_MB * 70 / 100))
+              [[ "$HEAP_MB" -gt 1536 ]] && HEAP_MB=1536
+              [[ "$HEAP_MB" -lt 512 ]] && HEAP_MB=512
+            fi
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+            echo "HEAP_MB=$HEAP_MB"
             ensure_pm2_online() {
               local name=""
               if pm2 describe software-dental >/dev/null 2>&1; then
@@ -258,7 +268,7 @@ jobs:
               # shellcheck disable=SC1091
               [[ -f "$app_dir/.env" ]] && . "$app_dir/.env"
               set +a
-              export NODE_OPTIONS="--max-old-space-size=4096"
+              export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
               export NODE_ENV="${NODE_ENV:-production}"
               [[ -n "${DATABASE_URL:-}" ]] || {
                 echo "ERROR: DATABASE_URL vacío en $app_dir/.env" >&2
@@ -268,7 +278,7 @@ jobs:
                 --name software-dental \
                 --cwd "$app_dir" \
                 --update-env \
-                --node-args="--max-old-space-size=4096"
+                --node-args="--max-old-space-size=${HEAP_MB}"
               pm2 save || true
               sleep 15
               local status

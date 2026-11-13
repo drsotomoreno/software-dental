@@ -28,16 +28,27 @@ jobs:
           script: |
             set -euo pipefail
             CANONICAL="/var/www/mihistoriadental"
-            export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
+            APP_DIR="$CANONICAL"
+            if [[ -f /home/ubuntu/software-dental/server.js ]]; then
+              APP_DIR="/home/ubuntu/software-dental"
+            fi
+            HEAP_SCRIPT="$APP_DIR/scripts/pm2-heap-from-ram.sh"
+            [[ -x "$HEAP_SCRIPT" ]] || HEAP_SCRIPT="$CANONICAL/scripts/pm2-heap-from-ram.sh"
+            if [[ -f "$HEAP_SCRIPT" ]]; then
+              HEAP_MB="$(bash "$HEAP_SCRIPT")"
+            else
+              MEM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
+              HEAP_MB=$((MEM_MB * 70 / 100))
+              [[ "$HEAP_MB" -gt 1536 ]] && HEAP_MB=1536
+              [[ "$HEAP_MB" -lt 512 ]] && HEAP_MB=512
+            fi
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+            echo "HEAP_MB=$HEAP_MB"
             echo "---- Estado PM2 antes ----"
             pm2 status || true
             pm2 logs --lines 30 --err --nostream || true
             sudo tail -n 20 /var/log/nginx/error.log 2>/dev/null || true
 
-            APP_DIR="$CANONICAL"
-            if [[ -f /home/ubuntu/software-dental/server.js ]]; then
-              APP_DIR="/home/ubuntu/software-dental"
-            fi
             if pm2 describe software-dental >/dev/null 2>&1; then
               pm2 delete software-dental || true
             fi
@@ -55,7 +66,7 @@ jobs:
             # shellcheck disable=SC1091
             [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
             set +a
-            export NODE_OPTIONS="--max-old-space-size=4096"
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
             export NODE_ENV="${NODE_ENV:-production}"
             [[ -n "${DATABASE_URL:-}" ]] || {
               echo "ERROR: DATABASE_URL vacío en $APP_DIR/.env" >&2
@@ -66,7 +77,7 @@ jobs:
               --name software-dental \
               --cwd "$APP_DIR" \
               --update-env \
-              --node-args="--max-old-space-size=4096"
+              --node-args="--max-old-space-size=${HEAP_MB}"
             pm2 save || true
             sleep 15
             sudo systemctl reload nginx || true
