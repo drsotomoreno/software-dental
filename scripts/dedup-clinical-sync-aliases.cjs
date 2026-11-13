@@ -114,14 +114,24 @@ function main() {
     void before
   }
 
-  fs.copyFileSync(activePath, bakDedup)
-  console.log(
-    JSON.stringify({
-      phase: 'backup',
-      path: bakDedup,
-      bytes: fs.statSync(bakDedup).size,
-    }),
-  )
+  if (fs.existsSync(bakDedup)) {
+    console.log(
+      JSON.stringify({
+        phase: 'backup_exists',
+        path: bakDedup,
+        bytes: fs.statSync(bakDedup).size,
+      }),
+    )
+  } else {
+    fs.copyFileSync(activePath, bakDedup)
+    console.log(
+      JSON.stringify({
+        phase: 'backup',
+        path: bakDedup,
+        bytes: fs.statSync(bakDedup).size,
+      }),
+    )
+  }
 
   const store = JSON.parse(fs.readFileSync(activePath, 'utf8'))
   if (!store.clinics || typeof store.clinics !== 'object') store.clinics = {}

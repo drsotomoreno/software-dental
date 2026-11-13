@@ -115,9 +115,15 @@ jobs:
             pm2 status
             free -m
             echo "SYNC_BYTES_FINAL=$(stat -c%s "$SYNC")"
-            HEAD=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 8 -I "https://www.mihistoriadental.com/pacientes-valorados" || echo 000)
+            ls -la /etc/nginx/sites-enabled/ || true
+            HEADERS=$(curl -sS -D - -o /tmp/mhd-spa.html --max-time 12 -I "https://www.mihistoriadental.com/pacientes-valorados" || true)
+            echo "$HEADERS" | head -n 25
+            HEAD=$(echo "$HEADERS" | head -1 | awk '{print $2}')
             echo "PUBLIC_HEAD_/pacientes-valorados=$HEAD"
-            [[ "$HEAD" == "200" ]] || exit 1
-            # Cabecera Server/nginx: cuerpo HTML no debe venir de Node lento
-            curl -sS -D - -o /tmp/mhd-spa.html --max-time 8 -I "https://www.mihistoriadental.com/pacientes-valorados" | head -n 20 || true
+            echo "$HEADERS" | grep -qi 'X-MHD-Static' && echo "SPA_STATIC_HEADER=yes" || echo "SPA_STATIC_HEADER=no"
+            [[ "$HEAD" == "200" ]] || {
+              echo "SPA_FAIL body:"; head -c 400 /tmp/mhd-spa.html || true
+              sudo tail -n 40 /var/log/nginx/error.log || true
+              exit 1
+            }
             echo "HARDEN_OK heap=${HEAP_MB} sync=$(stat -c%s "$SYNC")"
