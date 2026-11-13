@@ -19,27 +19,53 @@ export function normalizePatientPhase(phase?: PatientPhase | string | null): Pat
   return phase === 'TRATAMIENTO_ACEPTADO' ? 'TRATAMIENTO_ACEPTADO' : DEFAULT_PATIENT_PHASE
 }
 
+/** Acepta boolean real o string serializado en sync ("true"/"false"). */
+export function coerceOptionalBoolean(value: unknown): boolean | undefined {
+  if (value === true || value === 1) return true
+  if (value === false || value === 0) return false
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'si') {
+      return true
+    }
+    if (normalized === 'false' || normalized === '0' || normalized === 'no') return false
+  }
+  return undefined
+}
+
 /**
- * Pacientes Valorados (EC2): valuationOnly=true o phase=VALORACION_RAPIDA.
- * No depende de status (en sync suele venir null).
- * valuationOnly=false (historia completa) nunca entra aquí.
+ * Pacientes Valorados.
+ * valuationOnly=false / 'false' (historia completa) nunca entra aquí,
+ * aunque conserve phase VALORACION_RAPIDA.
+ * Tolera boolean o string serializado tras sync.
  */
 export function isValuatedOnlyPatient(
   patient: Pick<Patient, 'valuationOnly' | 'phase' | 'treatmentCompleted'>,
 ): boolean {
-  if (patient.treatmentCompleted === true) return false
-  if (patient.valuationOnly === false) return false
-  return patient.valuationOnly === true || patient.phase === 'VALORACION_RAPIDA'
+  if (coerceOptionalBoolean(patient.treatmentCompleted) === true) return false
+  const raw = patient.valuationOnly as unknown
+  if (raw === true || raw === 'true') return true
+  if (raw === false || raw === 'false') return false
+  return patient.phase === 'VALORACION_RAPIDA'
 }
 
 export function isCompletedPatient(patient: Pick<Patient, 'treatmentCompleted'>): boolean {
-  return patient.treatmentCompleted === true
+  return coerceOptionalBoolean(patient.treatmentCompleted) === true
 }
 
 export function isActivePatient(
   patient: Pick<Patient, 'valuationOnly' | 'phase' | 'treatmentCompleted'>,
 ): boolean {
   return !isValuatedOnlyPatient(patient) && !isCompletedPatient(patient)
+}
+
+/** Cubo de listado: mismos criterios que Activos / Valorados / Terminados. */
+export function classifyPatientListBucket(
+  patient: Pick<Patient, 'valuationOnly' | 'phase' | 'treatmentCompleted'>,
+): 'activo' | 'valorado' | 'terminado' {
+  if (isCompletedPatient(patient)) return 'terminado'
+  if (isValuatedOnlyPatient(patient)) return 'valorado'
+  return 'activo'
 }
 
 export interface Patient {

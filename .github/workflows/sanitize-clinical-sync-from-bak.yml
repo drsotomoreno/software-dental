@@ -1,0 +1,100 @@
+# Parte B: fusión atómica única desde bak-20261112.
+# NO modifica clinical-sync.json.bak-20261112.
+name: Sanitize clinical-sync from bak
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sanitize:
+    name: Pause PM2, merge from bak, verify counts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: SSH sanitize
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            CANONICAL="/var/www/mihistoriadental"
+            HOME_APP="/home/ubuntu/software-dental"
+            APP_DIR="$HOME_APP"
+            if [[ ! -f "$APP_DIR/server.js" ]]; then APP_DIR="$CANONICAL"; fi
+
+            # Asegurar script + shared en APP_DIR (sin tocar server/data).
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL"
+              git fetch origin main || true
+              git reset --hard origin/main || true
+            fi
+            if [[ "$APP_DIR" != "$CANONICAL" ]]; then
+              mkdir -p "$APP_DIR/scripts" "$APP_DIR/shared"
+              rsync -a --exclude 'server/data/' --exclude '.env' --exclude 'node_modules/' \
+                "$CANONICAL/scripts/" "$APP_DIR/scripts/" || true
+              rsync -a "$CANONICAL/shared/" "$APP_DIR/shared/" || true
+              # Código servidor (merge no destructivo) sin pisar data.
+              rsync -a --exclude 'data/' "$CANONICAL/server/" "$APP_DIR/server/" || true
+              rsync -a "$CANONICAL/server.js" "$APP_DIR/server.js" || true
+              if [[ -d "$CANONICAL/dist" ]]; then
+                rsync -a "$CANONICAL/dist/" "$APP_DIR/dist/" || true
+              fi
+            fi
+
+            SYNC="$APP_DIR/server/data/clinical-sync.json"
+            BAK="$SYNC.bak-20261112"
+            test -f "$SYNC" || { echo "MISSING_ACTIVE=$SYNC"; exit 1; }
+            test -f "$BAK" || { echo "MISSING_BAK=$BAK"; exit 1; }
+            BAK_BYTES=$(stat -c%s "$BAK")
+            echo "BAK_BYTES_BEFORE=$BAK_BYTES"
+            [[ "$BAK_BYTES" == "72014840" ]] || echo "WARN: bak size != 72014840 (got $BAK_BYTES)"
+
+            echo "==== Pause PM2 ===="
+            pm2 stop software-dental || pm2 stop all || true
+            sleep 2
+
+            echo "==== Atomic merge from bak ===="
+            cd "$APP_DIR"
+            export NODE_OPTIONS="--max-old-space-size=4096"
+            node scripts/merge-clinical-sync-from-bak.cjs "$SYNC"
+
+            echo "==== Verify bak intact ===="
+            BAK_BYTES_AFTER=$(stat -c%s "$BAK")
+            echo "BAK_BYTES_AFTER=$BAK_BYTES_AFTER"
+            [[ "$BAK_BYTES_AFTER" == "$BAK_BYTES" ]] || { echo "BAK_CHANGED"; exit 1; }
+            test -f "$SYNC.bak-20261113-pre-merge" || { echo "MISSING_PRE_MERGE"; exit 1; }
+
+            echo "==== Restart PM2 with env ===="
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            export NODE_OPTIONS="--max-old-space-size=4096"
+            export NODE_ENV="${NODE_ENV:-production}"
+            if pm2 describe software-dental >/dev/null 2>&1; then
+              pm2 delete software-dental || true
+            fi
+            pm2 start "$APP_DIR/server.js" \
+              --name software-dental \
+              --cwd "$APP_DIR" \
+              --update-env \
+              --node-args="--max-old-space-size=4096"
+            pm2 save || true
+            sleep 12
+            sudo systemctl reload nginx || true
+
+            STATUS=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental")||apps[0];console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
+            echo "PM2_STATUS=$STATUS"
+            [[ "$STATUS" == "online" ]] || { pm2 logs --lines 40 --err --nostream || true; exit 1; }
+
+            HEAD458=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 8 -I "https://www.mihistoriadental.com/pacientes/458" || echo 000)
+            echo "PUBLIC_HEAD_/pacientes/458=$HEAD458"
+            [[ "$HEAD458" == "200" ]] || exit 1
+
+            echo "SANITIZE_OK"

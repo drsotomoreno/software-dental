@@ -6,27 +6,30 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
-function isCompletedPatient(patient) {
-  return patient.treatmentCompleted === true
+function isValuatedOnlyPatient(patient) {
+  if (patient.treatmentCompleted === true || patient.treatmentCompleted === 'true') return false
+  const raw = patient.valuationOnly
+  if (raw === true || raw === 'true') return true
+  if (raw === false || raw === 'false') return false
+  return patient.phase === 'VALORACION_RAPIDA'
 }
 
-function isValuatedOnlyPatient(patient) {
-  if (patient.treatmentCompleted === true) return false
-  if (patient.valuationOnly === false) return false
-  return patient.valuationOnly === true || patient.phase === 'VALORACION_RAPIDA'
+function isCompletedPatient(patient) {
+  return patient.treatmentCompleted === true || patient.treatmentCompleted === 'true'
 }
 
 function isActivePatient(patient) {
   return !isValuatedOnlyPatient(patient) && !isCompletedPatient(patient)
 }
 
-test('fuente patient.ts declara filtro valuationOnly || VALORACION_RAPIDA', async () => {
+test('fuente patient.ts declara filtro valuationOnly true/false + phase', async () => {
   const src = await readFile(join(here, 'patient.ts'), 'utf8')
-  assert.match(src, /valuationOnly === true \|\| patient\.phase === 'VALORACION_RAPIDA'/)
-  assert.match(src, /valuationOnly === false/)
+  assert.match(src, /raw === true \|\| raw === 'true'/)
+  assert.match(src, /raw === false \|\| raw === 'false'/)
+  assert.match(src, /phase === 'VALORACION_RAPIDA'/)
 })
 
-test('Valorados: valuationOnly true o phase VALORACION_RAPIDA (status null OK)', () => {
+test('Valorados: valuationOnly true o phase sin false', () => {
   assert.equal(
     isValuatedOnlyPatient({
       valuationOnly: true,
@@ -37,7 +40,7 @@ test('Valorados: valuationOnly true o phase VALORACION_RAPIDA (status null OK)',
   )
   assert.equal(
     isValuatedOnlyPatient({
-      valuationOnly: true,
+      valuationOnly: 'true',
       phase: null,
       status: null,
     }),
@@ -53,10 +56,17 @@ test('Valorados: valuationOnly true o phase VALORACION_RAPIDA (status null OK)',
   )
 })
 
-test('historia completa (valuationOnly false) no es Valorado', () => {
+test('historia completa (valuationOnly false) no es Valorado aunque phase VALORACION_RAPIDA', () => {
   assert.equal(
     isValuatedOnlyPatient({
       valuationOnly: false,
+      phase: 'VALORACION_RAPIDA',
+    }),
+    false,
+  )
+  assert.equal(
+    isValuatedOnlyPatient({
+      valuationOnly: 'false',
       phase: 'VALORACION_RAPIDA',
     }),
     false,

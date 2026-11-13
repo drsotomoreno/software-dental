@@ -18,6 +18,7 @@ import { withMergedClinicalPayments } from '../../shared/paymentControlMerge.js'
 import { odontogramRecordHasMarks } from './odontogramMerge.js'
 import { conservarFechaApertura } from '../../shared/patientOpenedAt.js'
 import { clinicKeyInScope } from '../../shared/clinicalSyncScope.js'
+import { mergeSyncedRecordNonDestructive } from '../../shared/clinicalSyncMerge.js'
 import { clinicalSyncEvents, SNAPSHOT_PUSHED } from './clinicalSyncEvents.js'
 
 /**
@@ -115,7 +116,9 @@ function mergeClinicalEntityRecord(prev, next, entityKey) {
 function mergeClinicalEntityBody(prev, next, entityKey) {
   if (!prev) return next
   if (entityKey !== 'clinicalRecords' && entityKey !== 'drafts') {
-    return shouldReplaceSyncedRecord(prev, next, entityKey) ? next : prev
+    // Pacientes, odontogramas, citas, etc.: nunca reemplazo destructivo del payload.
+    if (!shouldReplaceSyncedRecord(prev, next, entityKey)) return prev
+    return mergeSyncedRecordNonDestructive(prev, next, { preferNextMeta: true })
   }
 
   // Hard reject: si el servidor ya tiene signedAt y el SHA-256 del núcleo clínico

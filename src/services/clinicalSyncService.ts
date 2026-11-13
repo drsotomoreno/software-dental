@@ -11,6 +11,7 @@ import type { ClinicalSyncRecord } from '@/types/clinicalSync'
 import type { Patient } from '@/types/patient'
 import { generateId } from '@/utils'
 import { conservarFechaApertura } from '../../shared/patientOpenedAt.js'
+import { preserveOmittedLocalFields } from '../../shared/clinicalSyncMerge.js'
 import { renderCitas, syncCitasToLocalStorage } from '@/utils/agendaStorage'
 import {
   applyClinicSnapshot,
@@ -164,7 +165,11 @@ async function mergePatients(records: ClinicalSyncRecord[]): Promise<boolean> {
     if (local) {
       if (stampOf(remote) <= stampOf(local)) continue
       if (local.id == null) continue
-      const next = applyPayload<Patient>(remote)
+      let next = applyPayload<Patient>(remote)
+      next = preserveOmittedLocalFields(
+        local as unknown as Record<string, unknown>,
+        next as unknown as Record<string, unknown>,
+      ) as Patient
       delete next.id
       const apertura = conservarFechaApertura(local.createdAt, next.createdAt)
       if (apertura) next.createdAt = apertura
