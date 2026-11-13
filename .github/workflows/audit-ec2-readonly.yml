@@ -242,4 +242,20 @@ jobs:
               fi
             fi
 
+            echo "==== DEEP valorados ACTIVE vs BAK (readonly) ===="
+            DEEP_SCRIPT=""
+            for cand in \
+              /home/ubuntu/software-dental/scripts/audit-valorados-deep-readonly.mjs \
+              /var/www/mihistoriadental/scripts/audit-valorados-deep-readonly.mjs
+            do
+              if [[ -f "$cand" ]]; then DEEP_SCRIPT="$cand"; break; fi
+            done
+            if [[ -z "$DEEP_SCRIPT" ]]; then
+              curl -fsSL "https://raw.githubusercontent.com/drsotomoreno/software-dental/main/scripts/audit-valorados-deep-readonly.mjs" \
+                -o /tmp/audit-valorados-deep-readonly.mjs
+              DEEP_SCRIPT=/tmp/audit-valorados-deep-readonly.mjs
+            fi
+            echo "DEEP_SCRIPT=$DEEP_SCRIPT SYNC_FILE=$SYNC_FILE"
+            node "$DEEP_SCRIPT" "$SYNC_FILE" || echo "DEEP_AUDIT_FAILED"
+
             echo "==== DONE READONLY ===="
