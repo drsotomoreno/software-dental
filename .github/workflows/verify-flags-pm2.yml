@@ -1,0 +1,93 @@
+# Verifica 43/39/24 + tamaño sync + PM2 online (sin tocar baks).
+name: Verify flags and PM2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify counts size PM2
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: SSH verify
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            APP_DIR="/home/ubuntu/software-dental"
+            [[ -f "$APP_DIR/server.js" ]] || APP_DIR="/var/www/mihistoriadental"
+            CANONICAL="/var/www/mihistoriadental"
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL" && git fetch origin main && git reset --hard origin/main || true
+              rsync -a "$CANONICAL/scripts/" "$APP_DIR/scripts/" || true
+            fi
+
+            HEAP_MB="$(bash "$APP_DIR/scripts/pm2-heap-from-ram.sh")"
+            echo "HEAP_MB=$HEAP_MB"
+            SYNC="$APP_DIR/server/data/clinical-sync.json"
+            echo "SYNC_BYTES=$(stat -c%s "$SYNC")"
+
+            node --max-old-space-size="${HEAP_MB}" \
+              "$APP_DIR/scripts/restore-patient-classification-flags.cjs" "$SYNC" --verify-only
+
+            ensure_online() {
+              set -a
+              # shellcheck disable=SC1091
+              [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+              set +a
+              export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+              export NODE_ENV="${NODE_ENV:-production}"
+              local status
+              status=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental");console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
+              echo "PM2_STATUS_NOW=$status"
+              if [[ "$status" == "online" ]]; then
+                return 0
+              fi
+              pm2 delete software-dental 2>/dev/null || true
+              cd "$APP_DIR"
+              pm2 start "$APP_DIR/server.js" \
+                --name software-dental \
+                --cwd "$APP_DIR" \
+                --update-env \
+                --node-args="--max-old-space-size=${HEAP_MB}"
+              pm2 save || true
+              sleep 20
+              status=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental");console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
+              echo "PM2_STATUS_AFTER_START=$status"
+              if [[ "$status" != "online" ]]; then
+                echo "---- out ----"; pm2 logs software-dental --lines 40 --out --nostream || true
+                echo "---- err ----"; pm2 logs software-dental --lines 40 --err --nostream || true
+                dmesg -T 2>/dev/null | grep -i -E 'oom|killed process' | tail -n 5 || true
+                # Segundo intento
+                pm2 delete software-dental 2>/dev/null || true
+                sleep 2
+                pm2 start "$APP_DIR/server.js" \
+                  --name software-dental \
+                  --cwd "$APP_DIR" \
+                  --update-env \
+                  --node-args="--max-old-space-size=${HEAP_MB}"
+                sleep 25
+                status=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental");console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
+                echo "PM2_STATUS_RETRY=$status"
+              fi
+              [[ "$status" == "online" ]]
+            }
+
+            ensure_online
+            pm2 status
+            free -m
+            echo "SYNC_BYTES_FINAL=$(stat -c%s "$SYNC")"
+            HEAD=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 8 -I "https://www.mihistoriadental.com/pacientes-valorados" || echo 000)
+            echo "PUBLIC_HEAD_/pacientes-valorados=$HEAD"
+            API=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 8 "http://127.0.0.1:3000/api/health" || curl -sS -o /dev/null -w "%{http_code}" --max-time 8 "http://127.0.0.1:3000/api/sesion" || echo 000)
+            echo "LOCAL_API=$API"
+            [[ "$HEAD" == "200" ]] || exit 1
+            echo "VERIFY_FLAGS_PM2_OK"
