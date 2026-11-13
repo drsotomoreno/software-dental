@@ -45,7 +45,24 @@ jobs:
               pm2 delete mihistoriadental || true
             fi
             cd "$APP_DIR"
-            NODE_OPTIONS="--max-old-space-size=4096" pm2 start "$APP_DIR/server.js" \
+            if [[ -f "$CANONICAL/.env" ]] && grep -qE '^DATABASE_URL=.+' "$CANONICAL/.env"; then
+              if [[ ! -f "$APP_DIR/.env" ]] || ! grep -qE '^DATABASE_URL=.+' "$APP_DIR/.env"; then
+                touch "$APP_DIR/.env"
+                grep -E '^DATABASE_URL=' "$CANONICAL/.env" | head -1 >> "$APP_DIR/.env"
+              fi
+            fi
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            export NODE_OPTIONS="--max-old-space-size=4096"
+            export NODE_ENV="${NODE_ENV:-production}"
+            [[ -n "${DATABASE_URL:-}" ]] || {
+              echo "ERROR: DATABASE_URL vacío en $APP_DIR/.env" >&2
+              exit 1
+            }
+            echo "DATABASE_URL_PRESENT=yes"
+            pm2 start "$APP_DIR/server.js" \
               --name software-dental \
               --cwd "$APP_DIR" \
               --update-env \

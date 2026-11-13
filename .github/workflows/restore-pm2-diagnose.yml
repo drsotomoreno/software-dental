@@ -121,23 +121,23 @@ jobs:
               if [[ -f "$cand" ]]; then SYNC_JSON="$cand"; break; fi
             done
             if [[ -n "$SYNC_JSON" ]]; then
-              SYNC_JSON="$SYNC_JSON" node <<'NODE'
-              const fs = require('fs')
-              const j = JSON.parse(fs.readFileSync(process.env.SYNC_JSON, 'utf8'))
-              const clinic = j.clinics?.['clinic:doctormauriciosoto@gmail.com'] || {}
-              const patients = Object.values(clinic.patients || {})
-              let valorados = 0
-              const clinicIdCounts = {}
-              for (const rec of patients) {
-                const p = rec?.payload && typeof rec.payload === 'object' ? rec.payload : {}
-                const valued = p.valuationOnly === true || p.phase === 'VALORACION_RAPIDA'
-                if (!valued) continue
-                valorados += 1
-                const cid = String(rec.clinicId || p.clinicId || '(empty)')
-                clinicIdCounts[cid] = (clinicIdCounts[cid] || 0) + 1
-              }
-              console.log(JSON.stringify({ syncFile: process.env.SYNC_JSON, valorados, clinicIdCounts }, null, 2))
-NODE
+              SYNC_JSON="$SYNC_JSON" node -e '
+                const fs = require("fs");
+                const j = JSON.parse(fs.readFileSync(process.env.SYNC_JSON, "utf8"));
+                const clinic = (j.clinics && j.clinics["clinic:doctormauriciosoto@gmail.com"]) || {};
+                const patients = Object.values(clinic.patients || {});
+                let valorados = 0;
+                const clinicIdCounts = {};
+                for (const rec of patients) {
+                  const p = rec && rec.payload && typeof rec.payload === "object" ? rec.payload : {};
+                  const valued = p.valuationOnly === true || p.phase === "VALORACION_RAPIDA";
+                  if (!valued) continue;
+                  valorados += 1;
+                  const cid = String(rec.clinicId || p.clinicId || "(empty)");
+                  clinicIdCounts[cid] = (clinicIdCounts[cid] || 0) + 1;
+                }
+                console.log(JSON.stringify({ syncFile: process.env.SYNC_JSON, valorados, clinicIdCounts }, null, 2));
+              '
             else
               echo "SYNC_JSON missing (readonly skip)"
             fi

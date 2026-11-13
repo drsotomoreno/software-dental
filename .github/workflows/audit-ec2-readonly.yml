@@ -116,12 +116,31 @@ jobs:
               return targetAidIds.includes(id) || targetAidIds.includes(String(p.aidId || '')) || targetHashes.includes(hash)
             }
 
-            let activos = 0, valorados = 0, terminados = 0
+            let activos = 0, valoradosStrict = 0, valoradosPhase = 0, valoradosCombined = 0, terminados = 0
+            const clinicIdCounts = {}
+            const phaseCounts = {}
+            const valuationOnlyCounts = {}
+            const statusCounts = {}
             for (const rec of patients) {
               const p = rec.payload || {}
-              if (p.valuationOnly === true) valorados++
-              else if (p.treatmentCompleted === true) terminados++
-              else activos++
+              const phase = String(p.phase ?? '(null)')
+              const vo = p.valuationOnly === true ? 'true' : p.valuationOnly === false ? 'false' : String(p.valuationOnly ?? '(null)')
+              const st = p.status == null ? '(null)' : String(p.status)
+              phaseCounts[phase] = (phaseCounts[phase] || 0) + 1
+              valuationOnlyCounts[vo] = (valuationOnlyCounts[vo] || 0) + 1
+              statusCounts[st] = (statusCounts[st] || 0) + 1
+              const isStrict = p.valuationOnly === true
+              const isPhase = p.phase === 'VALORACION_RAPIDA'
+              const isCombined = isStrict || isPhase
+              if (isStrict) valoradosStrict++
+              if (isPhase) valoradosPhase++
+              if (isCombined) {
+                valoradosCombined++
+                const cid = String(rec.clinicId || p.clinicId || '(empty)')
+                clinicIdCounts[cid] = (clinicIdCounts[cid] || 0) + 1
+              }
+              if (p.treatmentCompleted === true) terminados++
+              else if (!isCombined) activos++
             }
 
             console.log('SAMPLE_AUDIT_JSON_BEGIN')
@@ -135,8 +154,15 @@ jobs:
                 attachments: attachments.length,
                 sync_queue: syncQueue.length,
                 activos,
-                valorados,
+                valorados: valoradosStrict,
+                valoradosStrict,
+                valoradosPhase,
+                valoradosCombined,
                 terminados,
+                phaseCounts,
+                valuationOnlyCounts,
+                statusCounts,
+                valoradosClinicIdCounts: clinicIdCounts,
               },
               samplePatients: samplePatients.map(pickMeta),
               sampleOdontogram: sampleOdonto ? pickMeta(sampleOdonto) : null,
