@@ -1,104 +1,6 @@
 import { Link } from 'react-router-dom'
-import {
-  CalendarDays,
-  FileJson,
-  Lock,
-  MessageCircle,
-  Mic,
-  Receipt,
-  Smile,
-  Stethoscope,
-  type LucideIcon,
-} from 'lucide-react'
 import { APP_SHORT_NAME } from '@/constants/branding'
 import { PAID_PLANS } from '../../shared/subscriptionPlans.js'
-
-type FeatureTone = 'clinical' | 'innovation' | 'admin' | 'ops' | 'infra' | 'comms'
-
-const FEATURE_TONES: Record<FeatureTone, { card: string; icon: string }> = {
-  clinical: {
-    card: 'border-blue-100 bg-blue-50/50 hover:border-blue-300',
-    icon: 'bg-blue-100 text-blue-600',
-  },
-  innovation: {
-    card: 'border-emerald-200 bg-emerald-50/60 hover:border-emerald-400',
-    icon: 'bg-emerald-100 text-emerald-600',
-  },
-  admin: {
-    card: 'border-indigo-100 bg-indigo-50/50 hover:border-indigo-300',
-    icon: 'bg-indigo-100 text-indigo-600',
-  },
-  ops: {
-    card: 'border-amber-100 bg-amber-50/50 hover:border-amber-300',
-    icon: 'bg-amber-100 text-amber-600',
-  },
-  infra: {
-    card: 'border-cyan-100 bg-cyan-50/50 hover:border-cyan-300',
-    icon: 'bg-cyan-100 text-cyan-600',
-  },
-  comms: {
-    card: 'border-emerald-100 bg-emerald-50/50 hover:border-emerald-300',
-    icon: 'bg-emerald-100 text-emerald-600',
-  },
-}
-
-const FEATURES: Array<{
-  title: string
-  text: string
-  icon: LucideIcon
-  tone: FeatureTone
-  featured?: boolean
-}> = [
-  {
-    title: 'Odontograma Digital',
-    text: 'Odontograma interactivo para registrar el estado dental. Claro, rápido y sin papel.',
-    icon: Smile,
-    tone: 'clinical',
-  },
-  {
-    title: 'IA que Escucha',
-    text: 'Activa la escucha inteligente. La IA transcribe los hallazgos y diligencia por ti.',
-    icon: Mic,
-    tone: 'innovation',
-    featured: true,
-  },
-  {
-    title: 'Historia Clínica',
-    text: 'Anamnesis, plan de tratamiento y evoluciones que cumplen estándares colombianos.',
-    icon: Stethoscope,
-    tone: 'clinical',
-  },
-  {
-    title: 'RIPS Resolución 948',
-    text: 'Genera archivos RIPS automáticamente. Sin reingreso de datos ni errores de códigos.',
-    icon: FileJson,
-    tone: 'admin',
-  },
-  {
-    title: 'Facturación DIAN',
-    text: 'Factura electrónica integrada. Genera la factura directamente desde la atención.',
-    icon: Receipt,
-    tone: 'admin',
-  },
-  {
-    title: 'Agenda Inteligente',
-    text: 'Programa citas, tratamientos y maneja la vista por profesional y por silla.',
-    icon: CalendarDays,
-    tone: 'ops',
-  },
-  {
-    title: 'Historia Clínica en la Nube',
-    text: 'Información encriptada. Cumple regulaciones de privacidad y Res. 948 actualizada.',
-    icon: Lock,
-    tone: 'infra',
-  },
-  {
-    title: 'WhatsApp Integrado',
-    text: 'Envía recordatorios automáticos al WhatsApp del paciente. Reduce el ausentismo.',
-    icon: MessageCircle,
-    tone: 'comms',
-  },
-]
 
 export function LandingPage() {
   return (
@@ -114,93 +16,147 @@ export function LandingPage() {
         </div>
       </header>
 
-      <section className="border-b border-slate-200 bg-white">
-        <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:py-10">
-          <h1 className="sr-only">
-            mihistoriadental: el software que soluciona tu gestión de historias sin afectar tu
-            rentabilidad
+      <main className="w-full">
+        {/* 1. HERO SECTION (H1 Principal) */}
+        <section className="relative mx-auto max-w-7xl px-6 py-20 text-center lg:py-32">
+          <span className="mb-6 inline-block rounded-full border border-cyan-200 bg-cyan-50 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-cyan-700">
+            Arquitectura Offline-First &bull; RIPS &bull; DIAN
+          </span>
+
+          {/* H1: Término de búsqueda #1 */}
+          <h1 className="mb-6 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
+            Software para clínica dental{' '}
+            <span className="text-cyan-600">sin límites de conexión</span>
           </h1>
-          {/*
-            El titular y la bajada ya van impresos en la fotografía.
-            <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-dental-600">
-              {APP_SHORT_NAME}
-            </p>
-            <h1 className="text-3xl font-bold leading-tight text-dental-800 sm:text-4xl lg:text-5xl">
-              El Software de Historia Clínica Odontológica con Dictado por Voz
-            </h1>
-            <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600 sm:text-lg">
-              Recupera tu tiempo clínico. Dicta la atención, gestiona todo 100% en la nube y
-              exporta los RIPS sin reescribir datos.
-            </p>
-          */}
+
+          <p className="mx-auto mb-10 max-w-3xl text-lg text-slate-600 sm:text-xl">
+            mihistoriadental el software que soluciona tu gestión de historias sin afectar tu
+            rentabilidad. Dictado por voz, cumplimiento normativo y sincronización automática en la
+            nube por solo $50,000 COP/mes.
+          </p>
+
+          <div className="flex flex-col justify-center gap-4 sm:flex-row">
+            <Link
+              to="/registro"
+              className="rounded-xl bg-cyan-500 px-8 py-4 font-bold text-slate-950 shadow-lg transition-all hover:bg-cyan-400"
+            >
+              Empieza como Pionero
+            </Link>
+            <a
+              href="#planes"
+              className="rounded-xl border border-slate-300 bg-white px-8 py-4 font-semibold text-slate-800 transition-all hover:bg-slate-100"
+            >
+              Ver Demostración
+            </a>
+          </div>
+
           <img
             src="/hero-mihistoriadental.jpg"
-            alt="mihistoriadental: el software que soluciona tu gestión de historias sin afectar tu rentabilidad"
+            alt="Software para clínica dental sin límites de conexión — mihistoriadental"
             width={1024}
             height={572}
             fetchPriority="high"
-            className="h-auto w-full rounded-2xl object-cover object-center"
+            className="mx-auto mt-12 h-auto w-full max-w-5xl rounded-2xl object-cover object-center"
           />
+        </section>
 
-          <div className="mx-auto mt-10 max-w-4xl text-center">
-            <p className="text-xl font-medium leading-snug tracking-tight text-slate-800 sm:text-2xl sm:leading-snug lg:text-3xl lg:leading-tight">
-              ¿Cansado de pagar software costoso con funciones que nunca usas y de perder horas
-              escribiendo historias clínicas? Imagínate dictar cada diagnóstico y evolución con tu
-              propia voz mientras{' '}
-              <span className="font-bold text-dental-700">{APP_SHORT_NAME}</span> hace el resto.
-              Además, cumple 100% con la normatividad colombiana: facturación DIAN, RIPS, WhatsApp
-              automatizado y firma digital en tablet. Una plataforma diseñada a la medida para{' '}
-              <span className="font-bold text-dental-700">blindar tu rentabilidad</span>.
+        {/* 2. NÚCLEO CLÍNICO (H2 - Término #2) */}
+        <section className="mx-auto max-w-7xl border-t border-slate-200 px-6 py-20">
+          <div className="max-w-3xl">
+            <h2 className="mb-6 text-3xl font-bold text-slate-900 sm:text-4xl">
+              Historia clínica digital odontológica con odontograma interactivo
+            </h2>
+            <p className="mb-10 text-lg leading-relaxed text-slate-600">
+              Diseñado por odontólogos para especialistas. Gestiona diagnósticos, gráficos
+              periodontales, planes de tratamiento y consentimientos informados con validez legal
+              respaldada por sellos criptográficos SHA-256.
             </p>
-          </div>
 
-          <div className="mx-auto mt-8 flex max-w-xl flex-col gap-3">
-            <Link
-              to="/registro"
-              className="btn-primary w-full px-6 py-4 text-center text-base font-semibold"
-            >
-              Inicia Prueba Gratuita
-            </Link>
-            <a href="#planes" className="btn-secondary w-fit px-6 py-3 text-center text-base">
-              Ver Planes
-            </a>
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-4 py-16">
-        <div className="mb-12 text-center">
-          <h2 className="mb-3 text-3xl font-bold text-slate-900">¿Qué incluye?</h2>
-          <p className="mx-auto max-w-2xl text-slate-600">
-            Todo lo que tu consulta necesita para atender, documentar y facturar en un solo flujo.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-          {FEATURES.map((feature) => {
-            const Icon = feature.icon
-            const tone = FEATURE_TONES[feature.tone]
-            return (
-              <article
-                key={feature.title}
-                className={`relative rounded-2xl border p-6 transition-all duration-300 hover:shadow-md ${tone.card}`}
-              >
-                {feature.featured ? (
-                  <span className="absolute -top-3 right-4 rounded-full bg-emerald-600 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                    Destacado
-                  </span>
-                ) : null}
-                <div
-                  className={`mb-4 flex h-12 w-12 items-center justify-center rounded-xl ${tone.icon}`}
-                >
-                  <Icon className="h-6 w-6" aria-hidden />
-                </div>
-                <h3 className="mb-2 text-lg font-semibold text-slate-900">{feature.title}</h3>
-                <p className="text-sm leading-relaxed text-slate-600">{feature.text}</p>
+            <div className="space-y-8">
+              <article>
+                <h3 className="mb-2 text-xl font-semibold text-slate-900">
+                  Diagnósticos con clasificación CIE-10
+                </h3>
+                <p className="text-base leading-relaxed text-slate-600">
+                  En el historial clínico selecciona con agilidad los códigos de la clasificación
+                  oficial de patologías. El buscador de{' '}
+                  <strong className="font-semibold text-slate-800">CIE-10</strong> acelera el
+                  registro diagnóstico y deja cada hallazgo listo para RIPS sin reescribir datos.
+                </p>
               </article>
-            )
-          })}
-        </div>
-      </section>
+
+              <article>
+                <h3 className="mb-2 text-xl font-semibold text-slate-900">
+                  Periodontograma y seguimiento visual
+                </h3>
+                <p className="text-base leading-relaxed text-slate-600">
+                  Junto al odontograma interactivo, el{' '}
+                  <strong className="font-semibold text-slate-800">Periodontograma</strong> registra
+                  profundidad de bolsas, movilidad y sangrado, para un seguimiento visual claro de
+                  la salud periodontal del paciente en cada control.
+                </p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        {/* 3. CUMPLIMIENTO NORMATIVO (H2 - Término #3) */}
+        <section className="border-t border-slate-200 bg-white/60">
+          <div className="mx-auto max-w-7xl px-6 py-20">
+            <div className="max-w-3xl">
+              <h2 className="mb-6 text-3xl font-bold text-slate-900 sm:text-4xl">
+                Software dental con RIPS y facturación electrónica DIAN
+              </h2>
+              <p className="mb-6 text-lg leading-relaxed text-slate-600">
+                Olvídate de las multas y los dolores de cabeza con el MinSalud. Genera paquetes RIPS
+                JSON automáticos, obtén la validación CUV en tiempo real desde el endpoint oficial y
+                emite tus facturas electrónicas sin fricciones.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* 4. GESTIÓN Y OPERACIÓN (H2 - Término #4) */}
+        <section className="mx-auto max-w-7xl border-t border-slate-200 px-6 py-20">
+          <div className="max-w-3xl">
+            <h2 className="mb-6 text-3xl font-bold text-slate-900 sm:text-4xl">
+              Programa para consultorio odontológico y control de pacientes
+            </h2>
+            <p className="mb-10 text-lg leading-relaxed text-slate-600">
+              Lleva el control absoluto de caja, ingresos y pagos, y automatiza los recordatorios
+              por WhatsApp con selector internacional de prefijos para reducir el ausentismo.
+            </p>
+
+            <article>
+              <h3 className="mb-2 text-xl font-semibold text-slate-900">
+                Agenda multi-usuario para turnos y citas
+              </h3>
+              <p className="text-base leading-relaxed text-slate-600">
+                La{' '}
+                <strong className="font-semibold text-slate-800">Agenda multi-usuario</strong>{' '}
+                organiza turnos y citas por profesional, optimiza el tiempo de la clínica, refuerza
+                la prevención de ausentismo y mantiene el control operativo diario del consultorio.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        {/* 5. INNOVACIÓN TECNOLÓGICA (H2 - Término #5) */}
+        <section className="border-t border-slate-200 bg-white/60">
+          <div className="mx-auto max-w-7xl px-6 py-20">
+            <div className="max-w-3xl">
+              <h2 className="mb-6 text-3xl font-bold text-slate-900 sm:text-4xl">
+                Software dental con inteligencia artificial y notas por voz
+              </h2>
+              <p className="mb-6 text-lg leading-relaxed text-slate-600">
+                Ahorra horas de tipeo al finalizar tu jornada. Dicta las evoluciones clínicas y notas
+                operatorias 100% manos libres gracias a nuestro motor de transcripción inteligente
+                integrado en la experiencia offline-first.
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
 
       <section id="planes" className="scroll-mt-8 border-t border-slate-200 bg-white">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-20">
