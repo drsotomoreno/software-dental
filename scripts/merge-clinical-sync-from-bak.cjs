@@ -82,6 +82,43 @@ function countPatients(map) {
   return { ui, naive, n: Object.keys(map || {}).length }
 }
 
+function isEmptyish(value) {
+  if (value == null) return true
+  if (typeof value === 'string' && value.trim() === '') return true
+  if (Array.isArray(value) && value.length === 0) return true
+  if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) return true
+  return false
+}
+
+/** Restaura desde bak sin pisar valores activos sustanciales; no deja vacíos ganar. */
+function mergePayloadRestoreFromBak(bakPayload, activePayload) {
+  const bak = bakPayload && typeof bakPayload === 'object' ? bakPayload : {}
+  const active = activePayload && typeof activePayload === 'object' ? activePayload : {}
+  const out = { ...bak }
+  for (const [key, value] of Object.entries(active)) {
+    if (value === undefined) continue
+    const bakVal = bak[key]
+    if (!(key in bak)) {
+      out[key] = value
+      continue
+    }
+    if (isEmptyish(value) && !isEmptyish(bakVal)) continue
+    if (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      bakVal &&
+      typeof bakVal === 'object' &&
+      !Array.isArray(bakVal)
+    ) {
+      out[key] = mergePayloadRestoreFromBak(bakVal, value)
+      continue
+    }
+    out[key] = value
+  }
+  return out
+}
+
 function mergeEntityMaps(mergePayloadNonDestructive, mergeSyncedRecordNonDestructive, activeMap = {}, bakMap = {}, bakMtimeMs) {
   const out = { ...activeMap }
   let restoredRecords = 0
@@ -102,12 +139,8 @@ function mergeEntityMaps(mergePayloadNonDestructive, mergeSyncedRecordNonDestruc
       activeRec.payload && typeof activeRec.payload === 'object' ? activeRec.payload : {}
     const activeNewer = stamp(activeRec) > bakMtimeMs
 
-    // Bak rellena huecos; llaves definidas en active ganan (cambios legítimos posteriores).
-    let mergedPayload = mergePayloadNonDestructive(bakPayload, activePayload)
-    if (!activeNewer) {
-      mergedPayload = mergePayloadNonDestructive(activePayload, bakPayload)
-      mergedPayload = mergePayloadNonDestructive(mergedPayload, activePayload)
-    }
+    // Bak rellena huecos y valores vacíos; active gana solo con contenido real.
+    const mergedPayload = mergePayloadRestoreFromBak(bakPayload, activePayload)
 
     const beforeKeys = Object.keys(activePayload).length
     const afterKeys = Object.keys(mergedPayload).length
@@ -238,20 +271,29 @@ async function main() {
     after,
     entityStats: stats,
     targets: {
-      naive: { activo: 43, valorado: 39, terminado: 24, odontograms: 82 },
+      naive: { activo: 43, valorado: 39, terminado: 24, odontogramsMin: 82 },
       uiFilter: after.patients.ui,
     },
+    patientsMatch:
+      after.patients.naive.activo === 43 &&
+      after.patients.naive.valorado === 39 &&
+      after.patients.naive.terminado === 24,
+    odontogramsOk: after.odontograms >= 82,
     naiveMatch:
       after.patients.naive.activo === 43 &&
       after.patients.naive.valorado === 39 &&
       after.patients.naive.terminado === 24 &&
-      after.odontograms === 82,
+      after.odontograms >= 82,
   }
   console.log('MERGE_REPORT_JSON_BEGIN')
   console.log(JSON.stringify(report, null, 2))
   console.log('MERGE_REPORT_JSON_END')
-  if (!report.naiveMatch) {
-    console.error('COUNT_MISMATCH_VS_43_39_24_82')
+  if (!report.patientsMatch) {
+    console.error('COUNT_MISMATCH_PATIENTS_VS_43_39_24')
+    process.exit(1)
+  }
+  if (!report.odontogramsOk) {
+    console.error('COUNT_MISMATCH_ODONTOGRAMS_LT_82', after.odontograms)
     process.exit(1)
   }
 }

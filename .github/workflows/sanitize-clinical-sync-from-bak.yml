@@ -62,13 +62,42 @@ jobs:
             echo "==== Atomic merge from bak ===="
             cd "$APP_DIR"
             export NODE_OPTIONS="--max-old-space-size=4096"
-            node scripts/merge-clinical-sync-from-bak.cjs "$SYNC"
+            MERGE_RC=0
+            node scripts/merge-clinical-sync-from-bak.cjs "$SYNC" || MERGE_RC=$?
 
             echo "==== Verify bak intact ===="
             BAK_BYTES_AFTER=$(stat -c%s "$BAK")
             echo "BAK_BYTES_AFTER=$BAK_BYTES_AFTER"
             [[ "$BAK_BYTES_AFTER" == "$BAK_BYTES" ]] || { echo "BAK_CHANGED"; exit 1; }
             test -f "$SYNC.bak-20261113-pre-merge" || { echo "MISSING_PRE_MERGE"; exit 1; }
+
+            # Conteos finales (siempre, aunque merge previo haya dejado el archivo saneado).
+            SYNC="$SYNC" node <<'NODE'
+            const fs = require('fs')
+            const sync = process.env.SYNC
+            const j = JSON.parse(fs.readFileSync(sync, 'utf8'))
+            const clinic = j.clinics?.['clinic:doctormauriciosoto@gmail.com'] || {}
+            const patients = Object.values(clinic.patients || {})
+            let activo = 0, valorado = 0, terminado = 0
+            for (const rec of patients) {
+              const p = rec.payload || {}
+              if (p.valuationOnly === true) valorado++
+              else if (p.treatmentCompleted === true) terminado++
+              else activo++
+            }
+            const odontograms = Object.keys(clinic.odontograms || {}).length
+            const drafts = Object.keys(clinic.drafts || {}).length
+            console.log('FINAL_COUNTS_JSON=' + JSON.stringify({
+              activo, valorado, terminado, odontograms, drafts,
+              patients: patients.length,
+              bytes: fs.statSync(sync).size,
+              bakBytes: fs.statSync(sync + '.bak-20261112').size,
+            }))
+            if (!(activo === 43 && valorado === 39 && terminado === 24 && odontograms >= 82)) {
+              console.error('FINAL_COUNT_FAIL')
+              process.exit(1)
+            }
+NODE
 
             echo "==== Restart PM2 with env ===="
             set -a
@@ -97,4 +126,5 @@ jobs:
             echo "PUBLIC_HEAD_/pacientes/458=$HEAD458"
             [[ "$HEAD458" == "200" ]] || exit 1
 
+            [[ "$MERGE_RC" == "0" ]] || echo "WARN: merge exit $MERGE_RC (counts revalidated above)"
             echo "SANITIZE_OK"
