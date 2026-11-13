@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { BlogSection } from '@/components/landing/BlogSection'
 import { APP_SHORT_NAME } from '@/constants/branding'
 import { PAID_PLANS } from '../../shared/subscriptionPlans.js'
 
@@ -10,9 +11,17 @@ export function LandingPage() {
           <Link to="/" className="text-sm font-semibold tracking-wide text-dental-700">
             {APP_SHORT_NAME}
           </Link>
-          <Link to="/login" className="btn-secondary px-4 py-2 text-sm">
-            Iniciar sesión
-          </Link>
+          <div className="flex items-center gap-3">
+            <a
+              href="#guias-tecnicas"
+              className="hidden text-sm font-medium text-slate-600 transition hover:text-dental-700 sm:inline"
+            >
+              Guías técnicas
+            </a>
+            <Link to="/login" className="btn-secondary px-4 py-2 text-sm">
+              Iniciar sesión
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -156,6 +165,8 @@ export function LandingPage() {
             </div>
           </div>
         </section>
+
+        <BlogSection />
       </main>
 
       <section id="planes" className="scroll-mt-8 border-t border-slate-200 bg-white">
