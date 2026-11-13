@@ -42,31 +42,37 @@ jobs:
             echo "---- node/vite/pm2 ----"
             ps aux | grep -E '[n]ode|[v]ite|[p]m2' || true
 
-            # Matar node huérfanos (no el daemon PM2 God ni systemd esenciales).
-            # Conservar: PM2 God Daemon, y luego relanzaremos software-dental.
-            mapfile -t NODE_PIDS < <(ps -eo pid,user,cmd --sort=-%mem | awk '
-              /node/ && $0 !~ /PM2.*God/ && $0 !~ /pm2-god/ && $0 !~ /grep/ {print $1}
-            ' || true)
-            for pid in "${NODE_PIDS[@]+"${NODE_PIDS[@]}"}"; do
+            # Matar solo procesos reales (NUNCA pkill -f sobre el bash -c del SSH:
+            # el script embebido contiene "vite"/"node" y se suicidaría).
+            SELF_PID=$$
+            PPID_SAFE=$PPID
+            while read -r pid rss cmd; do
               [[ -n "$pid" ]] || continue
-              cmd=$(ps -p "$pid" -o cmd= 2>/dev/null || true)
-              echo "KILL_ORPHAN_NODE pid=$pid cmd=$cmd"
-              kill -TERM "$pid" 2>/dev/null || true
-            done
-            sleep 2
-            for pid in "${NODE_PIDS[@]+"${NODE_PIDS[@]}"}"; do
+              [[ "$pid" == "$SELF_PID" || "$pid" == "$PPID_SAFE" ]] && continue
+              # Solo node/esbuild/vite con cmdline corta de binario real
+              case "$cmd" in
+                *PM2*God*|*pm2-god*|*/bash\ -c*|*"appleboy"*|*ssh*)
+                  echo "SKIP pid=$pid rss=${rss}K cmd=$cmd"
+                  continue
+                  ;;
+              esac
+              if echo "$cmd" | grep -Eq 'node_modules/\.bin/vite|node_modules/@esbuild|/bin/vite |esbuild --service|node .*server\.js|node /home/.*/software-dental|node /var/www/mihistoriadental'; then
+                echo "KILL_ORPHAN pid=$pid rss=${rss}K cmd=$cmd"
+                kill -TERM "$pid" 2>/dev/null || true
+              fi
+            done < <(ps -eo pid=,rss=,args= --sort=-rss | head -n 40)
+
+            sleep 3
+            while read -r pid rss cmd; do
               [[ -n "$pid" ]] || continue
-              if kill -0 "$pid" 2>/dev/null; then
+              case "$cmd" in
+                *PM2*God*|*/bash\ -c*) continue ;;
+              esac
+              if echo "$cmd" | grep -Eq 'node_modules/\.bin/vite|esbuild --service' && kill -0 "$pid" 2>/dev/null; then
                 echo "KILL_FORCE pid=$pid"
                 kill -KILL "$pid" 2>/dev/null || true
               fi
-            done
-
-            # vite huérfanos
-            pkill -f '[v]ite' 2>/dev/null || true
-            # cursor/agent residuales en home (si existen y consumen)
-            pkill -f 'cursor-agent' 2>/dev/null || true
-            pkill -f 'openclaw' 2>/dev/null || true
+            done < <(ps -eo pid=,rss=,args= --sort=-rss | head -n 40)
 
             sleep 2
             echo "---- free tras limpieza ----"
@@ -110,27 +116,19 @@ jobs:
             export NODE_ENV="${NODE_ENV:-production}"
             [[ -n "${DATABASE_URL:-}" ]] || { echo "DATABASE_URL_EMPTY"; exit 1; }
 
-            # Asegurar definición PM2 (si está deleted, start; si stopped, restart).
-            if ! pm2 describe software-dental >/dev/null 2>&1; then
-              cd "$APP_DIR"
-              pm2 start "$APP_DIR/server.js" \
-                --name software-dental \
-                --cwd "$APP_DIR" \
-                --update-env \
-                --node-args="--max-old-space-size=${HEAP_MB}"
-            else
-              cd "$APP_DIR"
-              # Recrear con node-args correctos si estaba stopped
-              pm2 delete software-dental || true
-              pm2 start "$APP_DIR/server.js" \
-                --name software-dental \
-                --cwd "$APP_DIR" \
-                --update-env \
-                --node-args="--max-old-space-size=${HEAP_MB}"
-            fi
-            pm2 restart software-dental --update-env
+            # Arranque limpio: delete + start con heap correcto, luego save.
+            cd "$APP_DIR"
+            pm2 delete software-dental 2>/dev/null || true
+            sleep 1
+            pm2 start "$APP_DIR/server.js" \
+              --name software-dental \
+              --cwd "$APP_DIR" \
+              --update-env \
+              --node-args="--max-old-space-size=${HEAP_MB}"
+            # Equivalente a restart --update-env sobre proceso recién creado
+            pm2 restart software-dental --update-env || true
             pm2 save
-            sleep 18
+            sleep 22
 
             STATUS=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental");console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
             echo "PM2_STATUS=$STATUS"
