@@ -36,6 +36,7 @@
     "google-libphonenumber": "^3.2.48",
     "googleapis": "^189.0.0",
     "lucide-react": "^1.31.0",
+    "multer": "^2.5.0",
     "nodemailer": "^9.1.0",
     "pg": "^8.23.0",
     "postcss": "^8.5.3",
@@ -59,6 +60,7 @@
   "devDependencies": {
     "@eslint/js": "^9.25.0",
     "@types/google-libphonenumber": "^7.4.31",
+    "@types/multer": "^2.3.0",
     "@types/node": "^22.15.3",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.1.2",

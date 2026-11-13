@@ -3,7 +3,10 @@ import {
   downloadDiagnosticAidBlob,
   getDiagnosticAidBlobUrl,
 } from '@/services/diagnosticAidBlobStore'
-import { ensureLocalDiagnosticAidBlob } from '@/services/diagnosticAidRemoteStore'
+import {
+  DIAGNOSTIC_AID_UNAVAILABLE_MESSAGE,
+  ensureLocalDiagnosticAidBlob,
+} from '@/services/diagnosticAidRemoteStore'
 import type { DiagnosticAid } from '@/types/diagnosticAid'
 import type { UserProfile } from '@/types/user'
 import {
@@ -162,18 +165,7 @@ export async function executeDiagnosticAidWebAction(
       case 'view_in_app_3d': {
         const local = await ensureLocalDiagnosticAidBlob(entry)
         if (!local) {
-          const drive = driveLinkOf(entry)
-          if (drive) {
-            openExternalTab(drive)
-            await auditWebOpen(entry, action, true, `Drive fallback: ${entry.fileName}`, user)
-            return {
-              ok: true,
-              message: 'No hay caché local; se abrió el archivo en Google Drive.',
-              openDriveUrl: drive,
-            }
-          }
-          const message =
-            'No se pudo cargar el escaneo 3D. Reintente con conexión o descárguelo.'
+          const message = DIAGNOSTIC_AID_UNAVAILABLE_MESSAGE
           await auditWebOpen(entry, action, false, message, user)
           return { ok: false, message }
         }
@@ -215,18 +207,7 @@ export async function executeDiagnosticAidWebAction(
         const fileName = downloadNameFor(entry)
         const downloaded = await downloadStoredBlob(entry)
         if (!downloaded) {
-          const drive = driveLinkOf(entry)
-          if (drive) {
-            openExternalTab(drive)
-            await auditWebOpen(entry, action, true, `Drive download: ${fileName}`, user)
-            return {
-              ok: true,
-              message: 'No hay caché local; se abrió el archivo en Google Drive para descargarlo.',
-              openDriveUrl: drive,
-            }
-          }
-          const message =
-            'No se pudo descargar el archivo desde el servidor de la clínica. Reintente con conexión.'
+          const message = DIAGNOSTIC_AID_UNAVAILABLE_MESSAGE
           await auditWebOpen(entry, action, false, message, user)
           return { ok: false, message }
         }
@@ -259,7 +240,7 @@ export async function executeDiagnosticAidWebAction(
               openDriveUrl: drive,
             }
           }
-          const message = 'No se pudo descargar la vista previa desde la clínica.'
+          const message = DIAGNOSTIC_AID_UNAVAILABLE_MESSAGE
           await auditWebOpen(entry, action, false, message, user)
           return { ok: false, message }
         }

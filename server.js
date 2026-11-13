@@ -63,8 +63,9 @@ app.use(
     ],
   }),
 )
-app.use(express.json({ limit: '250mb' }))
-app.use(express.urlencoded({ extended: true, limit: '250mb' }))
+/** Multipart Drive (multer) limita a 100 MB; JSON sync admite overhead base64. */
+app.use(express.json({ limit: '150mb' }))
+app.use(express.urlencoded({ extended: true, limit: '150mb' }))
 
 app.use('/api/health', healthRoutes)
 app.use('/api/rips', ripsRoutes)

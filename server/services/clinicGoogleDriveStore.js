@@ -189,12 +189,25 @@ export async function getClinicGoogleDriveStatus(canonicalClinicId) {
   return publicRow(store.clinics[id] || null)
 }
 
+function clinicIdLookupKeys(canonicalClinicId) {
+  const id = String(canonicalClinicId || '').trim()
+  if (!id) return []
+  const keys = [id]
+  if (id.startsWith('clinic:')) keys.push(id.slice('clinic:'.length))
+  else keys.push(`clinic:${id}`)
+  return [...new Set(keys.filter(Boolean))]
+}
+
 /** Fila interna con ciphertext (solo servicios de servidor). */
 export async function getClinicGoogleDriveRecord(canonicalClinicId) {
   const id = String(canonicalClinicId || '').trim()
   if (!id) return null
   const store = await loadStore()
-  return store.clinics[id] || null
+  for (const key of clinicIdLookupKeys(id)) {
+    const row = store.clinics[key]
+    if (row) return row
+  }
+  return null
 }
 
 export async function saveClinicGoogleDriveConnection(canonicalClinicId, patch) {

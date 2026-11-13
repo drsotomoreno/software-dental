@@ -8,8 +8,9 @@ import {
 } from '@/services/globalToast'
 import { enqueueDiagnosticAidForSync } from '@/services/syncQueueService'
 import type { DiagnosticAid } from '@/types/diagnosticAid'
-import { arrayBufferToBase64 } from '@/utils/base64Binary'
 import { mimeTypeForDiagnosticFile } from '@/utils/diagnosticAidWebClassification'
+
+export const DIAGNOSTIC_AID_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 export type DriveUploadProgress = {
   aidId: string
@@ -21,6 +22,8 @@ type DriveStatusPayload = {
   connected?: boolean
   status?: string
   clinicId?: string | null
+  error?: string
+  code?: string
 }
 
 function identityHeaders() {
@@ -43,9 +46,19 @@ function clinicQuery(): string {
   return clinicId ? `?clinicId=${encodeURIComponent(clinicId)}` : ''
 }
 
-async function readDriveConnected(): Promise<boolean> {
+async function readDriveStatus(): Promise<{
+  connected: boolean
+  clinicId: string | null
+  message: string | null
+}> {
   const auth = getStoredApiAuth()
-  if (!auth?.token) return false
+  if (!auth?.token) {
+    return {
+      connected: false,
+      clinicId: null,
+      message: 'Sesión inválida o expirada. Vuelva a iniciar sesión para subir a Google Drive.',
+    }
+  }
   try {
     const response = await fetch(`/api/integrations/google-drive/status${clinicQuery()}`, {
       headers: {
@@ -54,19 +67,56 @@ async function readDriveConnected(): Promise<boolean> {
       },
     })
     const body = (await response.json().catch(() => ({}))) as DriveStatusPayload
-    if (!response.ok) return false
-    return Boolean(body.connected) || body.status === 'connected'
-  } catch {
-    return false
+    if (response.status === 401) {
+      return {
+        connected: false,
+        clinicId: null,
+        message: 'Sesión inválida o expirada. Vuelva a iniciar sesión.',
+      }
+    }
+    if (!response.ok) {
+      return {
+        connected: false,
+        clinicId: typeof body.clinicId === 'string' ? body.clinicId : null,
+        message:
+          typeof body.error === 'string'
+            ? body.error
+            : `No se pudo verificar Google Drive (HTTP ${response.status}).`,
+      }
+    }
+    const connected = Boolean(body.connected) || body.status === 'connected'
+    return {
+      connected,
+      clinicId: typeof body.clinicId === 'string' ? body.clinicId : null,
+      message: connected
+        ? null
+        : 'Google Drive no está conectado. Conéctelo en Perfil → Google Drive.',
+    }
+  } catch (error) {
+    return {
+      connected: false,
+      clinicId: null,
+      message:
+        error instanceof Error
+          ? `No se pudo verificar Google Drive: ${error.message}`
+          : 'No se pudo verificar Google Drive.',
+    }
   }
 }
 
-async function blobBase64ForAid(aidId: string): Promise<string | null> {
-  const record = await getDiagnosticAidBlobByAidId(aidId)
-  if (!record?.data) return null
-  return arrayBufferToBase64(record.data)
+async function markUploadError(aidId: string, message: string): Promise<DiagnosticAid | undefined> {
+  await db.diagnosticAids.update(aidId, {
+    driveUploadStatus: 'error',
+    driveUploadError: message,
+    storageBackend: 'indexeddb',
+  })
+  return db.diagnosticAids.get(aidId)
 }
 
+/**
+ * Sube (o reintenta) un examen complementario a Google Drive vía multipart.
+ * Nunca oculta el fallo: deja `driveUploadStatus: 'error'` + mensaje legible.
+ */
 export async function uploadDiagnosticAidToGoogleDrive(
   entry: DiagnosticAid,
   onProgress?: (progress: DriveUploadProgress) => void,
@@ -76,7 +126,7 @@ export async function uploadDiagnosticAidToGoogleDrive(
     onProgress?.({ aidId, phase, message })
   }
 
-  if (entry.driveFileId && entry.webViewLink) {
+  if (entry.driveFileId && entry.webViewLink && entry.driveUploadStatus === 'uploaded') {
     emit('done', 'Ya estaba en Google Drive.')
     return entry
   }
@@ -87,53 +137,65 @@ export async function uploadDiagnosticAidToGoogleDrive(
     driveUploadError: null,
   })
 
-  const connected = await readDriveConnected()
-  if (!connected) {
-    await db.diagnosticAids.update(aidId, {
-      driveUploadStatus: 'local_only',
-      driveUploadError: null,
-      storageBackend: 'indexeddb',
-    })
-    emit('skipped', 'Google Drive no está conectado; queda en caché local.')
-    const local = await db.diagnosticAids.get(aidId)
-    return local ?? entry
+  const status = await readDriveStatus()
+  if (!status.connected) {
+    const message =
+      status.message ||
+      'Google Drive no está conectado. Conéctelo en Perfil → Google Drive.'
+    const failed = await markUploadError(aidId, message)
+    emit('error', message)
+    return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
   }
 
-  const dataBase64 = await blobBase64ForAid(aidId)
-  if (!dataBase64) {
-    const message = 'No hay copia local del archivo para subir a Google Drive.'
-    await db.diagnosticAids.update(aidId, {
-      driveUploadStatus: 'error',
-      driveUploadError: message,
-    })
+  const blobRecord = await getDiagnosticAidBlobByAidId(aidId)
+  if (!blobRecord?.data) {
+    const message =
+      'No hay copia local del archivo para subir a Google Drive. Elimínelo y vuelva a adjuntarlo.'
+    const failed = await markUploadError(aidId, message)
     emit('error', message)
-    const failed = await db.diagnosticAids.get(aidId)
-    return failed ?? entry
+    return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
+  }
+
+  if (blobRecord.data.byteLength > DIAGNOSTIC_AID_MAX_UPLOAD_BYTES) {
+    const message = `El archivo supera el límite de ${Math.round(DIAGNOSTIC_AID_MAX_UPLOAD_BYTES / (1024 * 1024))} MB.`
+    const failed = await markUploadError(aidId, message)
+    emit('error', message)
+    return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
   }
 
   emit('uploading', 'Subiendo a Google Drive…')
   const auth = getStoredApiAuth()
   const clinicId = String(
-    entry.clinicId || getCurrentClinicId() || auth?.user?.clinicId || auth?.user?.id || '',
+    status.clinicId ||
+      entry.clinicId ||
+      getCurrentClinicId() ||
+      auth?.user?.clinicId ||
+      auth?.user?.id ||
+      '',
   ).trim()
 
   try {
+    const mimeType = blobRecord.mimeType || mimeTypeForDiagnosticFile(entry.fileName)
+    const form = new FormData()
+    form.append(
+      'file',
+      new Blob([blobRecord.data as BlobPart], { type: mimeType }),
+      entry.fileName || 'archivo.bin',
+    )
+    form.append('aidId', aidId)
+    form.append('fileName', entry.fileName)
+    form.append('mimeType', mimeType)
+    form.append('patientSyncId', entry.patientSyncId || entry.patientId || 'sin-paciente')
+    if (clinicId) form.append('clinicId', clinicId)
+    if (entry.driveFileId) form.append('driveFileId', entry.driveFileId)
+
     const response = await fetch(`/api/integrations/google-drive/upload${clinicQuery()}`, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
-        'Content-Type': 'application/json',
         ...identityHeaders(),
       },
-      body: JSON.stringify({
-        aidId,
-        fileName: entry.fileName,
-        mimeType: mimeTypeForDiagnosticFile(entry.fileName),
-        dataBase64,
-        patientSyncId: entry.patientSyncId || entry.patientId,
-        clinicId: clinicId || undefined,
-        driveFileId: entry.driveFileId || undefined,
-      }),
+      body: form,
     })
     const body = await response.json().catch(() => ({}))
 
@@ -143,14 +205,19 @@ export async function uploadDiagnosticAidToGoogleDrive(
         typeof body?.error === 'string'
           ? body.error
           : 'La clínica debe conectar Google Drive antes de subir adjuntos.'
-      await db.diagnosticAids.update(aidId, {
-        driveUploadStatus: 'local_only',
-        driveUploadError: message,
-        storageBackend: 'indexeddb',
-      })
+      const failed = await markUploadError(aidId, message)
       emit('error', message)
-      const local = await db.diagnosticAids.get(aidId)
-      return local ?? entry
+      return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
+    }
+
+    if (response.status === 401) {
+      const message =
+        typeof body?.error === 'string'
+          ? body.error
+          : 'Sesión inválida o expirada. Vuelva a iniciar sesión.'
+      const failed = await markUploadError(aidId, message)
+      emit('error', message)
+      return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
     }
 
     if (!response.ok || !body?.driveFileId) {
@@ -158,13 +225,9 @@ export async function uploadDiagnosticAidToGoogleDrive(
         typeof body?.error === 'string'
           ? body.error
           : `Error al subir a Google Drive (HTTP ${response.status}).`
-      await db.diagnosticAids.update(aidId, {
-        driveUploadStatus: 'error',
-        driveUploadError: message,
-      })
+      const failed = await markUploadError(aidId, message)
       emit('error', message)
-      const failed = await db.diagnosticAids.get(aidId)
-      return failed ?? entry
+      return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
     }
 
     const driveFileId = String(body.driveFileId)
@@ -193,7 +256,7 @@ export async function uploadDiagnosticAidToGoogleDrive(
     await enqueueDiagnosticAidForSync(updated, {
       driveFileId,
       binarySynced: true,
-      mimeType: mimeTypeForDiagnosticFile(entry.fileName),
+      mimeType,
     })
 
     emit('done', 'Guardado en Google Drive.')
@@ -201,12 +264,8 @@ export async function uploadDiagnosticAidToGoogleDrive(
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'No se pudo subir el archivo a Google Drive.'
-    await db.diagnosticAids.update(aidId, {
-      driveUploadStatus: 'error',
-      driveUploadError: message,
-    })
+    const failed = await markUploadError(aidId, message)
     emit('error', message)
-    const failed = await db.diagnosticAids.get(aidId)
-    return failed ?? entry
+    return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
   }
 }

@@ -19,6 +19,8 @@ import {
   clinicalSectionTitle,
 } from "@/constants/clinicalHistorySections";
 
+import { uploadDiagnosticAidToGoogleDrive } from "@/services/diagnosticAidDriveUpload";
+
 import { ensureLocalDiagnosticAidBlob } from "@/services/diagnosticAidRemoteStore";
 
 import {
@@ -64,23 +66,29 @@ import {
 function storageLabel(item: DiagnosticAid): {
   text: string;
   tone: "drive" | "uploading" | "error" | "local";
+  canRetry: boolean;
 } {
   if (item.driveUploadStatus === "uploading" || item.driveUploadStatus === "pending") {
-    return { text: "Subiendo a Google Drive…", tone: "uploading" };
+    return { text: "Subiendo a Google Drive…", tone: "uploading", canRetry: false };
   }
   if (item.driveFileId || item.driveUploadStatus === "uploaded") {
-    return { text: "Guardado en Google Drive", tone: "drive" };
+    return { text: "Guardado en Google Drive", tone: "drive", canRetry: false };
   }
-  if (item.driveUploadStatus === "error") {
+  if (item.driveUploadError || item.driveUploadStatus === "error") {
     return {
       text: item.driveUploadError || "Error al subir a Google Drive",
       tone: "error",
+      canRetry: true,
     };
   }
   if (item.driveUploadStatus === "local_only" || isBrowserStoredDiagnosticAid(item)) {
-    return { text: "Almacenado en este navegador", tone: "local" };
+    return {
+      text: "Almacenado en este navegador",
+      tone: "local",
+      canRetry: Boolean(item.blobId),
+    };
   }
-  return { text: item.absolutePath, tone: "local" };
+  return { text: item.absolutePath, tone: "local", canRetry: false };
 }
 
 interface DiagnosticAidsSectionProps {
@@ -251,11 +259,15 @@ function DiagnosticAidCard({
 
   openingId,
 
+  retryingId,
+
   onOpenNative,
 
   onOpenWebMenu,
 
   onOpenWithPicker,
+
+  onRetryDrive,
 
   onDelete,
 
@@ -269,11 +281,15 @@ function DiagnosticAidCard({
 
   openingId: string | null;
 
+  retryingId: string | null;
+
   onOpenNative: (id: string) => void;
 
   onOpenWebMenu: (item: DiagnosticAid) => void;
 
   onOpenWithPicker: (id: string) => void;
+
+  onRetryDrive: (item: DiagnosticAid) => void;
 
   onDelete: (id: string) => void;
 
@@ -282,6 +298,8 @@ function DiagnosticAidCard({
   preferredProgramName?: string | null;
 }) {
   const isOpening = openingId === item.id;
+
+  const isRetrying = retryingId === item.id;
 
   const useWebMenu = shouldOpenDiagnosticAidWithWebMenu(item);
 
@@ -333,6 +351,22 @@ function DiagnosticAidCard({
         ) : null}
         <span className="min-w-0 break-words">{storage.text}</span>
       </div>
+
+      {storage.canRetry && !disabled && (
+        <button
+          type="button"
+          disabled={isRetrying || storage.tone === "uploading"}
+          onClick={() => onRetryDrive(item)}
+          className="inline-flex w-fit items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isRetrying ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Cloud className="h-3 w-3" />
+          )}
+          Subir a Drive
+        </button>
+      )}
 
       <p className="font-mono text-[10px] text-slate-400" title={item.fileHash}>
         SHA-256: {item.fileHash.slice(0, 16)}…
@@ -432,6 +466,10 @@ export function DiagnosticAidsSection({
 
   const [openingId, setOpeningId] = useState<string | null>(null);
 
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+
+  const [menuBusy, setMenuBusy] = useState(false);
+
   const [webMenuItem, setWebMenuItem] = useState<DiagnosticAid | null>(null);
 
   const [preview, setPreview] = useState<{
@@ -473,7 +511,10 @@ export function DiagnosticAidsSection({
 
   useEffect(() => {
     for (const item of items) {
-      void ensureLocalDiagnosticAidBlob(item);
+      // Solo precargar si hay caché local o Drive; evita spinners eternos en registros viejos.
+      if (item.blobId || item.driveFileId) {
+        void ensureLocalDiagnosticAidBlob(item);
+      }
     }
   }, [items]);
 
@@ -510,22 +551,17 @@ export function DiagnosticAidsSection({
         user,
       });
 
-      if (saved.driveUploadStatus === "error") {
-        setBanner({
-          tone: "error",
-          message:
-            saved.driveUploadError ||
-            `Archivo registrado localmente, pero falló la subida a Google Drive: ${picked.fileName}`,
-        });
-      } else if (saved.driveFileId) {
+      if (saved.driveFileId && saved.driveUploadStatus === "uploaded") {
         setBanner({
           tone: "success",
           message: `Guardado en Google Drive: ${picked.fileName}`,
         });
       } else {
         setBanner({
-          tone: "info",
-          message: `Archivo registrado en este navegador: ${picked.fileName}. Conecte Google Drive en Perfil para sincronizar.`,
+          tone: "error",
+          message:
+            saved.driveUploadError ||
+            `No se pudo subir a Google Drive: ${picked.fileName}. Quedó solo en este navegador.`,
         });
       }
     } catch (error) {
@@ -564,22 +600,17 @@ export function DiagnosticAidsSection({
           user,
         });
 
-        if (saved.driveUploadStatus === "error") {
-          setBanner({
-            tone: "error",
-            message:
-              saved.driveUploadError ||
-              `Archivo registrado localmente, pero falló la subida a Google Drive: ${file.name}`,
-          });
-        } else if (saved.driveFileId) {
+        if (saved.driveFileId && saved.driveUploadStatus === "uploaded") {
           setBanner({
             tone: "success",
             message: `Guardado en Google Drive: ${file.name}`,
           });
         } else {
           setBanner({
-            tone: "info",
-            message: `Archivo registrado en este navegador: ${file.name}. Conecte Google Drive en Perfil para sincronizar.`,
+            tone: "error",
+            message:
+              saved.driveUploadError ||
+              `No se pudo subir a Google Drive: ${file.name}. Quedó solo en este navegador.`,
           });
         }
       } catch (error) {
@@ -634,7 +665,7 @@ export function DiagnosticAidsSection({
     async (action: DiagnosticAidWebAction) => {
       if (!webMenuItem) return;
 
-      setOpeningId(webMenuItem.id);
+      setMenuBusy(true);
 
       setBanner(null);
 
@@ -671,20 +702,77 @@ export function DiagnosticAidsSection({
           message: result.message,
         });
 
-        if (
-          result.ok &&
-          action !== "preview_media" &&
-          action !== "view_in_app_3d"
-        ) {
+        // Cerrar menú tras éxito (salvo que se abrió preview/visor). Si falla, cerrar igual para no dejar botones grises.
+        if (result.previewUrl) {
+          // preview ya cerró el menú
+        } else {
           setWebMenuItem(null);
         }
+      } catch (error) {
+        setBanner({
+          tone: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "No se pudo completar la acción del archivo.",
+        });
       } finally {
+        setMenuBusy(false);
         setOpeningId(null);
       }
     },
 
     [user, webMenuItem],
   );
+
+  const handleRetryDrive = useCallback(
+    async (item: DiagnosticAid) => {
+      setRetryingId(item.id);
+      setBanner({
+        tone: "info",
+        message: `Reintentando subida a Google Drive: ${item.fileName}…`,
+      });
+      try {
+        const saved = await uploadDiagnosticAidToGoogleDrive(item);
+        if (saved.driveFileId && saved.driveUploadStatus === "uploaded") {
+          setBanner({
+            tone: "success",
+            message: `Guardado en Google Drive: ${item.fileName}`,
+          });
+        } else {
+          setBanner({
+            tone: "error",
+            message:
+              saved.driveUploadError ||
+              `No se pudo subir a Google Drive: ${item.fileName}`,
+          });
+        }
+      } catch (error) {
+        setBanner({
+          tone: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : `No se pudo subir a Google Drive: ${item.fileName}`,
+        });
+      } finally {
+        setRetryingId(null);
+      }
+    },
+    [],
+  );
+
+  const openWebMenu = useCallback((item: DiagnosticAid) => {
+    setOpeningId(null);
+    setMenuBusy(false);
+    setWebMenuItem(item);
+  }, []);
+
+  const closeWebMenu = useCallback(() => {
+    setMenuBusy(false);
+    setOpeningId(null);
+    setWebMenuItem(null);
+  }, []);
 
   const handleCommentsChange = useCallback(
     async (id: string, comments: string) => {
@@ -843,11 +931,15 @@ export function DiagnosticAidsSection({
 
               openingId={openingId}
 
+              retryingId={retryingId}
+
               onOpenNative={(id) => void handleOpenNative(id)}
 
-              onOpenWebMenu={setWebMenuItem}
+              onOpenWebMenu={openWebMenu}
 
               onOpenWithPicker={(id) => void handleOpenNative(id, true)}
+
+              onRetryDrive={(aid) => void handleRetryDrive(aid)}
 
               onDelete={handleDelete}
 
@@ -865,8 +957,8 @@ export function DiagnosticAidsSection({
         <DiagnosticAidOpenMenu
           item={webMenuItem}
           open
-          busy={openingId === webMenuItem.id}
-          onClose={() => setWebMenuItem(null)}
+          busy={menuBusy}
+          onClose={closeWebMenu}
           onSelect={(action) => void handleWebAction(action)}
         />
       )}

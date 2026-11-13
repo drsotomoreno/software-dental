@@ -1,9 +1,11 @@
 import { Router } from 'express'
+import multer from 'multer'
 import {
   resolveSubscriptionSession,
   sessionHintFromRequest,
 } from '../services/subscriptionAuthStore.js'
 import {
+  downloadClinicAttachmentFromDrive,
   GoogleDriveRequiredError,
   isGoogleDriveRequiredError,
   uploadClinicAttachmentToDrive,
@@ -20,6 +22,17 @@ import {
 
 const router = Router()
 
+/** Escaneos STL/PLY/OBJ clínicos: hasta 100 MB. */
+export const GOOGLE_DRIVE_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: GOOGLE_DRIVE_MAX_UPLOAD_BYTES,
+    fieldSize: GOOGLE_DRIVE_MAX_UPLOAD_BYTES,
+  },
+})
+
 function bearerToken(req) {
   const authHeader = req.headers.authorization ?? ''
   return authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
@@ -28,7 +41,12 @@ function bearerToken(req) {
 async function requireSessionUser(req, res) {
   const session = await resolveSubscriptionSession(bearerToken(req), sessionHintFromRequest(req))
   if (!session?.user) {
-    res.status(401).json({ success: false, ok: false, error: 'Sesión inválida o expirada.' })
+    res.status(401).json({
+      success: false,
+      ok: false,
+      error: 'Sesión inválida o expirada.',
+      code: 'UNAUTHORIZED',
+    })
     return null
   }
   return session.user
@@ -55,6 +73,29 @@ function mapOAuthError(error) {
   const message =
     error instanceof Error ? error.message : 'Error en la integración de Google Drive.'
   return { status: status >= 400 && status < 600 ? status : 500, code, message }
+}
+
+function parseMulterError(err) {
+  if (!err) return null
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return {
+      status: 400,
+      code: 'FILE_TOO_LARGE',
+      message: `El archivo supera el límite de ${Math.round(GOOGLE_DRIVE_MAX_UPLOAD_BYTES / (1024 * 1024))} MB.`,
+    }
+  }
+  if (err instanceof multer.MulterError) {
+    return {
+      status: 400,
+      code: err.code || 'UPLOAD_PARSE_ERROR',
+      message: err.message || 'No se pudo leer el archivo enviado.',
+    }
+  }
+  return {
+    status: 400,
+    code: 'UPLOAD_PARSE_ERROR',
+    message: err instanceof Error ? err.message : 'No se pudo leer el archivo enviado.',
+  }
 }
 
 /** Estado de conexión Drive de la clínica canónica de la sesión. */
@@ -171,60 +212,195 @@ router.post('/disconnect', async (req, res) => {
 })
 
 /**
- * Subida inmediata de adjunto clínico (exámenes / escaneos) a la carpeta
- * pacientes/{patientSyncId}/ayudas/ de la clínica en Google Drive.
- * Body JSON: { fileName, mimeType, dataBase64, patientSyncId?, aidId?, driveFileId? }
+ * Proxy de descarga: bytes del adjunto en Drive para el visor 3D / caché IndexedDB.
+ * GET /api/integrations/google-drive/file/:fileId
  */
-router.post('/upload', async (req, res) => {
+router.get('/file/:fileId', async (req, res) => {
   try {
     const user = await requireSessionUser(req, res)
     if (!user) return
 
-    const body = req.body && typeof req.body === 'object' ? req.body : {}
-    const fileName = String(body.fileName || body.name || '').trim()
-    const mimeType = String(body.mimeType || 'application/octet-stream').trim()
-    const dataBase64 = String(body.dataBase64 || body.data || '').trim()
-    const patientSyncId = String(
-      body.patientSyncId || body.patientId || body.patient_sync_id || 'sin-paciente',
-    ).trim()
-    const aidId = String(body.aidId || body.id || '').trim()
-    const existingFileId = String(body.driveFileId || '').trim() || undefined
-    const clinicId = resolveManagedClinicId(user, requestedClinicIdFrom(req))
+    const fileId = String(req.params.fileId || '').trim()
+    if (!fileId) {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error: 'fileId es obligatorio.',
+        code: 'INVALID_FILE_ID',
+      })
+    }
+
+    let clinicId
+    try {
+      clinicId = resolveManagedClinicId(user, requestedClinicIdFrom(req))
+    } catch (error) {
+      const mapped = mapOAuthError(error)
+      return res.status(mapped.status).json({
+        success: false,
+        ok: false,
+        error: mapped.message,
+        code: mapped.code,
+      })
+    }
 
     if (!clinicId) {
       return res.status(400).json({
         success: false,
         ok: false,
-        error: 'No se pudo resolver la clínica de la sesión.',
+        error: 'No se pudo resolver clinicId / clinicSyncId de la sesión.',
         code: 'CLINIC_REQUIRED',
       })
     }
-    if (!fileName || !dataBase64) {
-      return res.status(400).json({
+
+    const buffer = await downloadClinicAttachmentFromDrive({
+      clinicId,
+      driveFileId: fileId,
+    })
+    if (!buffer || !buffer.length) {
+      return res.status(404).json({
         success: false,
         ok: false,
-        error: 'fileName y dataBase64 son obligatorios.',
-        code: 'INVALID_UPLOAD_PAYLOAD',
+        error: 'Archivo no encontrado en Google Drive.',
+        code: 'DRIVE_FILE_NOT_FOUND',
       })
     }
 
-    let buffer
+    const mimeType = String(req.query.mimeType || 'application/octet-stream').trim()
+    const fileName = String(req.query.fileName || fileId).trim()
+    res.setHeader('Content-Type', mimeType || 'application/octet-stream')
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${fileName.replace(/"/g, '')}"`,
+    )
+    res.setHeader('Content-Length', String(buffer.length))
+    res.setHeader('Cache-Control', 'private, max-age=60')
+    return res.status(200).send(buffer)
+  } catch (error) {
+    console.error('[google-drive] GET /file:', error)
+    if (isGoogleDriveRequiredError(error) || error instanceof GoogleDriveRequiredError) {
+      return res.status(428).json({
+        success: false,
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'La clínica debe conectar Google Drive antes de descargar adjuntos.',
+        code: 'google_drive_required',
+      })
+    }
+    const mapped = mapOAuthError(error)
+    return res.status(mapped.status).json({
+      success: false,
+      ok: false,
+      error: mapped.message,
+      code: mapped.code,
+    })
+  }
+})
+
+/**
+ * Subida inmediata de adjunto clínico (exámenes / escaneos).
+ * Acepta multipart (`file`) hasta 100 MB o JSON legacy `{ dataBase64 }` (también ≤ 100 MB).
+ */
+router.post('/upload', (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    const parsed = parseMulterError(err)
+    if (parsed) {
+      return res.status(parsed.status).json({
+        success: false,
+        ok: false,
+        error: parsed.message,
+        code: parsed.code,
+      })
+    }
+    return next()
+  })
+}, async (req, res) => {
+  try {
+    const user = await requireSessionUser(req, res)
+    if (!user) return
+
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const fileName = String(
+      req.file?.originalname || body.fileName || body.name || '',
+    ).trim()
+    const mimeType = String(
+      req.file?.mimetype || body.mimeType || 'application/octet-stream',
+    ).trim()
+    const patientSyncId = String(
+      body.patientSyncId || body.patientId || body.patient_sync_id || 'sin-paciente',
+    ).trim()
+    const aidId = String(body.aidId || body.id || '').trim()
+    const existingFileId = String(body.driveFileId || '').trim() || undefined
+
+    let clinicId
     try {
-      buffer = Buffer.from(dataBase64, 'base64')
-    } catch {
+      clinicId = resolveManagedClinicId(user, requestedClinicIdFrom(req))
+    } catch (error) {
+      const mapped = mapOAuthError(error)
+      return res.status(mapped.status).json({
+        success: false,
+        ok: false,
+        error: mapped.message,
+        code: mapped.code,
+        clinicId: null,
+      })
+    }
+
+    if (!clinicId) {
       return res.status(400).json({
         success: false,
         ok: false,
-        error: 'dataBase64 inválido.',
-        code: 'INVALID_BASE64',
+        error: 'No se pudo resolver clinicId / clinicSyncId de la sesión autenticada.',
+        code: 'CLINIC_REQUIRED',
       })
     }
-    if (!buffer.length) {
+
+    let buffer = req.file?.buffer || null
+    if (!buffer) {
+      const dataBase64 = String(body.dataBase64 || body.data || '').trim()
+      if (!dataBase64) {
+        return res.status(400).json({
+          success: false,
+          ok: false,
+          error: 'Envíe el archivo en multipart (campo "file") o dataBase64.',
+          code: 'INVALID_UPLOAD_PAYLOAD',
+        })
+      }
+      try {
+        buffer = Buffer.from(dataBase64, 'base64')
+      } catch {
+        return res.status(400).json({
+          success: false,
+          ok: false,
+          error: 'dataBase64 inválido.',
+          code: 'INVALID_BASE64',
+        })
+      }
+    }
+
+    if (!fileName) {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error: 'fileName es obligatorio.',
+        code: 'INVALID_UPLOAD_PAYLOAD',
+      })
+    }
+    if (!buffer || !buffer.length) {
       return res.status(400).json({
         success: false,
         ok: false,
         error: 'El archivo está vacío.',
         code: 'EMPTY_ATTACHMENT_BUFFER',
+      })
+    }
+    if (buffer.length > GOOGLE_DRIVE_MAX_UPLOAD_BYTES) {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error: `El archivo supera el límite de ${Math.round(GOOGLE_DRIVE_MAX_UPLOAD_BYTES / (1024 * 1024))} MB.`,
+        code: 'FILE_TOO_LARGE',
       })
     }
 
@@ -264,7 +440,7 @@ router.post('/upload', async (req, res) => {
       })
     }
     const mapped = mapOAuthError(error)
-    return res.status(mapped.status).json({
+    return res.status(mapped.status >= 400 ? mapped.status : 500).json({
       success: false,
       ok: false,
       error: mapped.message,

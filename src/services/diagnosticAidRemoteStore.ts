@@ -4,6 +4,7 @@ import {
   getDiagnosticAidBlobByAidId,
   saveDiagnosticAidBlobFromBuffer,
 } from '@/services/diagnosticAidBlobStore'
+import { getCurrentClinicId } from '@/services/clinicalSyncState'
 import {
   isGoogleDriveRequiredResponse,
   notifyGoogleDriveRequired,
@@ -11,6 +12,11 @@ import {
 import type { DiagnosticAid, DiagnosticAidBlobRecord } from '@/types/diagnosticAid'
 import { base64ToArrayBuffer } from '@/utils/base64Binary'
 import { mimeTypeForDiagnosticFile } from '@/utils/diagnosticAidWebClassification'
+
+const FETCH_TIMEOUT_MS = 45_000
+
+export const DIAGNOSTIC_AID_UNAVAILABLE_MESSAGE =
+  'Archivo no disponible localmente ni en Google Drive; elimínelo y vuelva a adjuntarlo'
 
 function identityHeaders() {
   const auth = getStoredApiAuth()
@@ -24,11 +30,33 @@ function identityHeaders() {
   }
 }
 
+function clinicQuery(): string {
+  const auth = getStoredApiAuth()
+  const clinicId = String(
+    getCurrentClinicId() || auth?.user?.clinicId || auth?.user?.id || '',
+  ).trim()
+  return clinicId ? `?clinicId=${encodeURIComponent(clinicId)}` : ''
+}
+
 function payloadOf(record: unknown): Record<string, unknown> {
   if (!record || typeof record !== 'object') return {}
   const value = record as { payload?: Record<string, unknown> }
   if (value.payload && typeof value.payload === 'object') return value.payload
   return record as Record<string, unknown>
+}
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {},
+  timeoutMs = FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    window.clearTimeout(timer)
+  }
 }
 
 async function persistRemoteBlob(
@@ -49,7 +77,65 @@ async function persistRemoteBlob(
   return (await getDiagnosticAidBlobByAidId(entry.id)) ?? null
 }
 
-async function fetchClinicAttachment(params: Record<string, string>): Promise<Record<string, unknown> | null> {
+async function persistArrayBuffer(
+  entry: DiagnosticAid,
+  data: ArrayBuffer,
+  mimeType?: string,
+): Promise<DiagnosticAidBlobRecord | null> {
+  if (!data || data.byteLength === 0) return null
+  const blobId = await saveDiagnosticAidBlobFromBuffer(entry.id, {
+    fileName: entry.fileName,
+    mimeType: mimeType || mimeTypeForDiagnosticFile(entry.fileName),
+    data,
+  })
+  await db.diagnosticAids.update(entry.id, {
+    blobId,
+    storageBackend: entry.driveFileId ? 'google_drive' : entry.storageBackend,
+  })
+  entry.blobId = blobId
+  return (await getDiagnosticAidBlobByAidId(entry.id)) ?? null
+}
+
+/** Descarga bytes desde el proxy Drive del backend. */
+export async function fetchDiagnosticAidFromGoogleDrive(
+  entry: Pick<DiagnosticAid, 'driveFileId' | 'fileName' | 'id'>,
+): Promise<ArrayBuffer | null> {
+  const driveFileId = String(entry.driveFileId || '').trim()
+  if (!driveFileId) return null
+  const auth = getStoredApiAuth()
+  if (!auth?.token) return null
+
+  const mimeType = encodeURIComponent(mimeTypeForDiagnosticFile(entry.fileName))
+  const fileName = encodeURIComponent(entry.fileName || 'archivo.bin')
+  const sep = clinicQuery().includes('?') ? '&' : '?'
+  const url = `/api/integrations/google-drive/file/${encodeURIComponent(driveFileId)}${clinicQuery()}${sep}mimeType=${mimeType}&fileName=${fileName}`
+
+  try {
+    const response = await fetchWithTimeout(url, {
+      headers: {
+        Accept: 'application/octet-stream, application/json',
+        ...identityHeaders(),
+      },
+    })
+    if (response.status === 404 || response.status === 401) return null
+    const contentType = response.headers.get('content-type') || ''
+    if (contentType.includes('application/json')) {
+      const body = await response.json().catch(() => ({}))
+      if (isGoogleDriveRequiredResponse(response, body)) {
+        notifyGoogleDriveRequired()
+      }
+      return null
+    }
+    if (!response.ok) return null
+    return await response.arrayBuffer()
+  } catch {
+    return null
+  }
+}
+
+async function fetchClinicAttachment(
+  params: Record<string, string>,
+): Promise<Record<string, unknown> | null> {
   const auth = getStoredApiAuth()
   if (!auth?.token) return null
   const search = new URLSearchParams()
@@ -64,20 +150,24 @@ async function fetchClinicAttachment(params: Record<string, string>): Promise<Re
 
   let driveRequired = false
   for (const path of paths) {
-    const response = await fetch(path, {
-      headers: {
-        Accept: 'application/json',
-        ...identityHeaders(),
-      },
-    })
-    const body = await response.json().catch(() => ({}))
-    if (isGoogleDriveRequiredResponse(response, body)) {
-      driveRequired = true
-      continue
+    try {
+      const response = await fetchWithTimeout(path, {
+        headers: {
+          Accept: 'application/json',
+          ...identityHeaders(),
+        },
+      })
+      const body = await response.json().catch(() => ({}))
+      if (isGoogleDriveRequiredResponse(response, body)) {
+        driveRequired = true
+        continue
+      }
+      if (!response.ok) continue
+      if (!body?.attachment) continue
+      return payloadOf(body.attachment)
+    } catch {
+      // siguiente ruta
     }
-    if (!response.ok) continue
-    if (!body?.attachment) continue
-    return payloadOf(body.attachment)
   }
   if (driveRequired) {
     notifyGoogleDriveRequired()
@@ -86,8 +176,8 @@ async function fetchClinicAttachment(params: Record<string, string>): Promise<Re
 }
 
 /**
- * Garantiza una copia local del adjunto. Si el hash no está en IndexedDB,
- * lo descarga del snapshot de la clínica usando paciente/evolución.
+ * Garantiza una copia local del adjunto.
+ * Orden: IndexedDB → proxy Google Drive (`driveFileId`) → sync clinic attachment.
  */
 export async function ensureLocalDiagnosticAidBlob(
   entry: DiagnosticAid,
@@ -110,6 +200,18 @@ export async function ensureLocalDiagnosticAidBlob(
       await db.diagnosticAids.update(entry.id, { blobId })
       entry.blobId = blobId
       return (await getDiagnosticAidBlobByAidId(entry.id)) ?? null
+    }
+  }
+
+  if (entry.driveFileId) {
+    const fromDrive = await fetchDiagnosticAidFromGoogleDrive(entry)
+    if (fromDrive) {
+      const saved = await persistArrayBuffer(
+        entry,
+        fromDrive,
+        mimeTypeForDiagnosticFile(entry.fileName),
+      )
+      if (saved) return saved
     }
   }
 
