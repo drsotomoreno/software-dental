@@ -1,0 +1,172 @@
+# Cierre: liberar RAM huérfana, reaplicar flags 43/39/24, PM2 online + save.
+# NO modifica .bak-20261112 / .bak-20261113-pre-merge / .bak-20261113-dedup.
+name: Fix PM2 flags RAM
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fix:
+    name: Clean RAM restore flags start PM2
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: SSH fix
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 12m
+          script: |
+            set -euo pipefail
+            APP_DIR="/home/ubuntu/software-dental"
+            CANONICAL="/var/www/mihistoriadental"
+            [[ -f "$APP_DIR/server.js" ]] || APP_DIR="$CANONICAL"
+
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL"
+              git fetch origin main || true
+              git reset --hard origin/main || true
+              rsync -a "$CANONICAL/scripts/" "$APP_DIR/scripts/" || true
+            fi
+            chmod +x "$APP_DIR/scripts/"*.sh 2>/dev/null || true
+
+            echo "==== 1) RAM / procesos ===="
+            free -m
+            echo "---- top mem ----"
+            ps aux --sort=-%mem | head -n 25 || true
+            echo "---- node/vite/pm2 ----"
+            ps aux | grep -E '[n]ode|[v]ite|[p]m2' || true
+
+            # Matar node huérfanos (no el daemon PM2 God ni systemd esenciales).
+            # Conservar: PM2 God Daemon, y luego relanzaremos software-dental.
+            mapfile -t NODE_PIDS < <(ps -eo pid,user,cmd --sort=-%mem | awk '
+              /node/ && $0 !~ /PM2.*God/ && $0 !~ /pm2-god/ && $0 !~ /grep/ {print $1}
+            ' || true)
+            for pid in "${NODE_PIDS[@]+"${NODE_PIDS[@]}"}"; do
+              [[ -n "$pid" ]] || continue
+              cmd=$(ps -p "$pid" -o cmd= 2>/dev/null || true)
+              echo "KILL_ORPHAN_NODE pid=$pid cmd=$cmd"
+              kill -TERM "$pid" 2>/dev/null || true
+            done
+            sleep 2
+            for pid in "${NODE_PIDS[@]+"${NODE_PIDS[@]}"}"; do
+              [[ -n "$pid" ]] || continue
+              if kill -0 "$pid" 2>/dev/null; then
+                echo "KILL_FORCE pid=$pid"
+                kill -KILL "$pid" 2>/dev/null || true
+              fi
+            done
+
+            # vite huérfanos
+            pkill -f '[v]ite' 2>/dev/null || true
+            # cursor/agent residuales en home (si existen y consumen)
+            pkill -f 'cursor-agent' 2>/dev/null || true
+            pkill -f 'openclaw' 2>/dev/null || true
+
+            sleep 2
+            echo "---- free tras limpieza ----"
+            free -m
+            ps aux --sort=-%mem | head -n 15 || true
+
+            HEAP_MB="$(bash "$APP_DIR/scripts/pm2-heap-from-ram.sh")"
+            echo "HEAP_MB=$HEAP_MB"
+
+            SYNC="$APP_DIR/server/data/clinical-sync.json"
+            test -f "$SYNC" || { echo "MISSING_SYNC"; exit 1; }
+            BAK_DEDUP="$SYNC.bak-20261113-dedup"
+            test -f "$BAK_DEDUP" || { echo "MISSING_DEDUP_BAK"; exit 1; }
+            BAK12_BEFORE=$(stat -c%s "$SYNC.bak-20261112")
+            PRE_BEFORE=$(stat -c%s "$SYNC.bak-20261113-pre-merge")
+            DEDUP_BEFORE=$(stat -c%s "$BAK_DEDUP")
+            echo "SYNC_BYTES_BEFORE=$(stat -c%s "$SYNC")"
+            echo "BAK12=$BAK12_BEFORE PRE=$PRE_BEFORE DEDUP=$DEDUP_BEFORE"
+
+            echo "==== 2) Reaplicar flags (PM2 detenido) ===="
+            pm2 stop software-dental 2>/dev/null || true
+            sleep 1
+            node --max-old-space-size="${HEAP_MB}" \
+              "$APP_DIR/scripts/restore-patient-classification-flags.cjs" "$SYNC"
+            node --max-old-space-size="${HEAP_MB}" \
+              "$APP_DIR/scripts/restore-patient-classification-flags.cjs" "$SYNC" --verify-only
+
+            BYTES=$(stat -c%s "$SYNC")
+            echo "SYNC_BYTES_AFTER=$BYTES"
+            [[ "$BYTES" -lt 12000000 ]] || { echo "SYNC_TOO_LARGE"; exit 1; }
+            [[ "$(stat -c%s "$SYNC.bak-20261112")" == "$BAK12_BEFORE" ]] || { echo "BAK12_CHANGED"; exit 1; }
+            [[ "$(stat -c%s "$SYNC.bak-20261113-pre-merge")" == "$PRE_BEFORE" ]] || { echo "PRE_CHANGED"; exit 1; }
+            [[ "$(stat -c%s "$BAK_DEDUP")" == "$DEDUP_BEFORE" ]] || { echo "DEDUP_CHANGED"; exit 1; }
+
+            echo "==== 3) PM2 restart + save ===="
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+            export NODE_ENV="${NODE_ENV:-production}"
+            [[ -n "${DATABASE_URL:-}" ]] || { echo "DATABASE_URL_EMPTY"; exit 1; }
+
+            # Asegurar definición PM2 (si está deleted, start; si stopped, restart).
+            if ! pm2 describe software-dental >/dev/null 2>&1; then
+              cd "$APP_DIR"
+              pm2 start "$APP_DIR/server.js" \
+                --name software-dental \
+                --cwd "$APP_DIR" \
+                --update-env \
+                --node-args="--max-old-space-size=${HEAP_MB}"
+            else
+              cd "$APP_DIR"
+              # Recrear con node-args correctos si estaba stopped
+              pm2 delete software-dental || true
+              pm2 start "$APP_DIR/server.js" \
+                --name software-dental \
+                --cwd "$APP_DIR" \
+                --update-env \
+                --node-args="--max-old-space-size=${HEAP_MB}"
+            fi
+            pm2 restart software-dental --update-env
+            pm2 save
+            sleep 18
+
+            STATUS=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental");console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
+            echo "PM2_STATUS=$STATUS"
+            if [[ "$STATUS" != "online" ]]; then
+              echo "---- retry start ----"
+              pm2 delete software-dental 2>/dev/null || true
+              sleep 2
+              cd "$APP_DIR"
+              pm2 start "$APP_DIR/server.js" \
+                --name software-dental \
+                --cwd "$APP_DIR" \
+                --update-env \
+                --node-args="--max-old-space-size=${HEAP_MB}"
+              pm2 save
+              sleep 20
+              STATUS=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental");console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
+              echo "PM2_STATUS_RETRY=$STATUS"
+            fi
+            [[ "$STATUS" == "online" ]] || {
+              pm2 logs software-dental --lines 50 --err --nostream || true
+              pm2 logs software-dental --lines 30 --out --nostream || true
+              exit 1
+            }
+
+            echo "==== Verify ===="
+            pm2 status
+            free -m
+            echo "SYNC_BYTES_FINAL=$(stat -c%s "$SYNC")"
+            node --max-old-space-size="${HEAP_MB}" \
+              "$APP_DIR/scripts/restore-patient-classification-flags.cjs" "$SYNC" --verify-only
+            HEAD=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -Ik "https://www.mihistoriadental.com/pacientes-valorados" || echo 000)
+            echo "PUBLIC_HEAD_/pacientes-valorados=$HEAD"
+            [[ "$HEAD" == "200" ]] || exit 1
+            # Confirmar sigue online 5s después
+            sleep 5
+            STATUS2=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental");console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
+            echo "PM2_STATUS_STABLE=$STATUS2"
+            [[ "$STATUS2" == "online" ]] || exit 1
+            echo "FIX_PM2_FLAGS_RAM_OK"
