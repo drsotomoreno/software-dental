@@ -37,9 +37,12 @@ check "socket.io polling" "$BASE/socket.io/?EIO=4&transport=polling" "200"
 # El index servido por Express debe existir.
 check "frontend index" "$BASE/" "200"
 
+# SPA clínica: /pacientes debe servir el index (200). 502 = upstream caído.
+check "frontend /pacientes" "$BASE/pacientes" "200"
+
 if [ "$fail" -ne 0 ]; then
   echo "Smoke falló: el proceso reiniciado no tiene el API/socket del kiosco." >&2
   exit 1
 fi
 
-echo "Smoke OK: kiosco API + Socket.IO listos."
+echo "Smoke OK: kiosco API + Socket.IO + /pacientes listos."

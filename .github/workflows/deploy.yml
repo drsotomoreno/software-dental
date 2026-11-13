@@ -212,21 +212,58 @@ jobs:
               exit 1
             fi
 
-            echo "---- Reinicio ----"
-            if pm2 describe software-dental >/dev/null 2>&1; then
-              pm2 restart software-dental --update-env || pm2 start software-dental --update-env
-            elif pm2 describe mihistoriadental >/dev/null 2>&1; then
-              pm2 restart mihistoriadental --update-env || pm2 start mihistoriadental --update-env
-            else
-              pm2 restart all --update-env || pm2 resurrect || true
-            fi
-            pm2 save || true
-            sleep 3
+            echo "---- Reinicio PM2 (debe quedar online; heap 4096 para clinical-sync ~72MB) ----"
+            export NODE_OPTIONS="--max-old-space-size=4096"
+            ensure_pm2_online() {
+              local name=""
+              if pm2 describe software-dental >/dev/null 2>&1; then
+                name="software-dental"
+              elif pm2 describe mihistoriadental >/dev/null 2>&1; then
+                name="mihistoriadental"
+              fi
+              if [[ -n "$name" ]]; then
+                # Tras `pm2 stop`, restart a veces no basta: delete+start limpio.
+                pm2 delete "$name" || true
+              fi
+              local app_dir="$CANONICAL"
+              if [[ -f /home/ubuntu/software-dental/server.js ]]; then
+                app_dir="/home/ubuntu/software-dental"
+              fi
+              cd "$app_dir"
+              NODE_OPTIONS="--max-old-space-size=4096" pm2 start "$app_dir/server.js" \
+                --name software-dental \
+                --cwd "$app_dir" \
+                --update-env \
+                --node-args="--max-old-space-size=4096"
+              pm2 save || true
+              sleep 15
+              local status
+              status=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental")||apps[0];console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
+              echo "PM2_STATUS=$status"
+              [[ "$status" == "online" ]] || {
+                echo "PM2 no quedó online tras el deploy" >&2
+                pm2 logs --lines 80 --err --nostream || true
+                exit 1
+              }
+            }
+            ensure_pm2_online
             sudo systemctl reload nginx || true
 
             APP_PORT="$(resolve_app_port)"
+            for cand in "$APP_PORT" 3000 8080; do
+              if curl -sS -o /dev/null --max-time 3 "http://127.0.0.1:${cand}/" 2>/dev/null; then
+                APP_PORT="$cand"
+                break
+              fi
+            done
             echo "Puerto smoke: $APP_PORT"
             bash "$CANONICAL/scripts/post-deploy-smoke.sh" "$APP_PORT"
+            PAC_CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "http://127.0.0.1:${APP_PORT}/pacientes" || echo 000)
+            echo "SMOKE_/pacientes=$PAC_CODE"
+            [[ "$PAC_CODE" == "200" ]] || { echo "Deploy rechazado: /pacientes != 200" >&2; exit 1; }
+            PUB_PAC=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://www.mihistoriadental.com/pacientes" || echo 000)
+            echo "PUBLIC_/pacientes=$PUB_PAC"
+            [[ "$PUB_PAC" == "200" ]] || { echo "Deploy rechazado: público /pacientes != 200" >&2; exit 1; }
 
             echo "---- Estado final ----"
             pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};console.log([app.name,env.status,env.pm_cwd].join(" | "));}});'
