@@ -1,0 +1,38 @@
+---
+description: Reglas estrictas FEV-RIPS MinSalud (RVG01, RVG06, SQL y memoria) al transmitir, serializar o actualizar atenciones
+alwaysApply: true
+---
+
+# FEV-RIPS MinSalud (Colombia)
+
+Aplica al transmitir RIPS, serializar el JSON del MUV o consultar `atenciones`. El saneamiento vive en `shared/ripsEstructura.js` (`normalizarEstructuraRips`, `completarRipsSinFactura`) y corre antes de `JSON.stringify` en `sisproMuvService.js`, `fevRipsService.js` y `ripsTransmissionService.js`.
+
+## Estructura (RVG01)
+
+Antes de serializar:
+
+- `consultas`, `urgencias`, `hospitalizacion`, `recienNacidos`, `medicamentos`, `otrosServicios` y `procedimientos` con longitud 0 pasan a `null`. Nunca `[]`.
+- `incapacidad` es `"SI"` o `"NO"`. `"02"` y cualquier otro código pasan a `"NO"`. `"01"` pasa a `"SI"`.
+- En cada procedimiento, `codigoVIDA`, `codDiagnosticoRelacionadoCIE11` y `codComplicacionCIE11` nulos o ausentes van en `""`.
+- Borrar `nomComplicacionCIE11`, `nomCodDiagnosticoPrincipalCIE11` y `nomCodDiagnosticoRelacionadoCIE11`. El MUV rechaza esas llaves.
+
+## RIPS sin factura (RVG06)
+
+Solo en `CargarRipsSinFactura` (`canal === 'sin_factura'`):
+
+- `numFactura` es `null`. Prohibido `"SINFEV"` y `""`.
+- `tipoNota` es `"RS"` si venía vacío.
+- `numNota` es un identificador único `NOTA-${Date.now()}` si venía vacío.
+- No aplicar esto a un FEV con CUFE o XML.
+
+## Postgres y memoria
+
+- PM2 usa `--max-old-space-size=4096`. No cargar miles de atenciones en memoria; usar paginación o streams.
+- Todo parámetro de `UPDATE` o `INSERT` lleva cast explícito (`$1::text`) para evitar `42P08`.
+- El id de la evolución en `atenciones` es `evolution_note_id`. No usar `evolucion_id`.
+
+```sql
+UPDATE atenciones
+SET rips_estado = $1::text
+WHERE id::text = $2::text OR evolution_note_id::text = $2::text
+```

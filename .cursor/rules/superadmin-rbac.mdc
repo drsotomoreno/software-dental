@@ -1,0 +1,44 @@
+---
+description: RBAC God Mode — Superadministrador exclusivo de mihistoriadental.com
+alwaysApply: true
+---
+
+# Superadministrador (God Mode)
+
+Cuenta maestra exclusiva: `doctormauriciosoto@gmail.com`.
+Ningún otro email, rol de clínica ni `estado_pago: exento` otorga este nivel.
+
+Tablas Postgres: `clinicas` (tenants) + `usuarios` (`is_superadmin`, `clinica_id` NULL para el maestro).
+Migración: `server/db/migrations/20261102143000_clinicas_usuarios_rbac.sql`.
+
+Middleware: `verificarToken` + `aislarClinica` (bypass si `is_superadmin`) + `soloSuperAdmin`.
+JWT claims: `{ id, clinica_id, is_superadmin, rol }`. Archivo: `server/middleware/tenantAuth.middleware.js`.
+
+Clínico Postgres: `pacientes` + `historias_clinicas` (siempre con `clinica_id`; soft-delete `deleted_at`).
+Evoluciones: solo firma profesional (`firma_rethus` + `firmado_en`), nunca firma de paciente.
+
+Dexie espejo (v33): `pacientes`, `historias_clinicas`, `usuarios`, `clinicas` + `sync_queue`.
+Helper: `guardarLocalYEncolar` en `src/db/offlineMirror.ts` (no encolar en pull remoto).
+
+## Al generar o editar código
+
+1. **Identidad**: `isSuperAdmin` / `is_superadmin` solo por email maestro (o flag de sesión emitido tras login de esa cuenta). No confiar solo en `rol === 'superadmin'` ni en `localStorage`.
+2. **Multi-tenant**: el Superadmin omite filtros de `clinicId` / `tenant_id` / REPS / ReTHUS. El resto de roles queda aislado a su clínica.
+3. **Backend**: middleware y SQL con sesión Superadmin → acceso irrestricto a historias, DIAN, RIPS, suscripciones y sync offline-first.
+4. **Frontend**: rutas/panel globales solo para Superadmin. Impersonation de odontólogos = soporte técnico con **auditoría explícita** (actor = Superadmin).
+5. **Blindaje**: nadie (ni admin de clínica) puede crear, asignar, revocar, editar o listar el privilegio Superadmin sobre otra cuenta. La cuenta maestra no es modificable por APIs de equipo.
+
+## Ejemplos
+
+```js
+// ❌ BAD — cualquiera "exento" o con rol local gana God Mode
+return rol === 'superadmin' || user.estado_pago === 'exento'
+
+// ✅ GOOD — solo la cuenta maestra
+return normalizeEmail(user.email) === MASTER_EMAIL
+```
+
+```js
+// ❌ BAD — admin de clínica cambia el rol del maestro o se autoasigna superadmin
+// ✅ GOOD — rechazar mutaciones sobre MASTER_EMAIL y rechazar rol `superadmin` en invites
+```

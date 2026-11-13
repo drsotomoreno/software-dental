@@ -604,30 +604,67 @@ export function PatientDetailPage() {
   }, [patient?.id, id, audit])
 
   useEffect(() => {
-    if (!id || patient === undefined || patient === null) return
+    if (!id) return
+    // No esperar patient ni red: Dexie con patientForeignKey de la ruta.
     if (clinicalInitForPatientRef.current === id) return
 
     let cancelled = false
     let loadCompleted = false
+    const foreignKey = patientForeignKey || toPatientForeignKey(id)
+    const emptyForm = createEmptyClinicalForm(professionalLicense, professionalLicense)
+    const shellForm: ClinicalRecordFormData = {
+      ...emptyForm,
+      ...(draftClinicalData ?? {}),
+      diagnosticChart: normalizeClinicalDiagnosticChart(draftClinicalData?.diagnosticChart),
+      specializedAnnexes: normalizeSpecializedAnnexes(
+        draftClinicalData?.specializedAnnexes ?? emptyForm.specializedAnnexes,
+      ),
+    }
 
-    async function initClinicalData() {
+    // Offline-first: libera "Cargando historia clínica..." en el mismo tick.
+    setClinicalData(shellForm)
+    clinicalInitForPatientRef.current = id
+    loadCompleted = true
+
+    const dexieTimeoutMs = 2_500
+
+    function withDexieTimeout<T>(promise: Promise<T>, label: string): Promise<T | null> {
+      return new Promise((resolve) => {
+        const timer = window.setTimeout(() => {
+          console.warn(`[PatientDetail] ${label} superó ${dexieTimeoutMs}ms; se usa formulario base.`)
+          resolve(null)
+        }, dexieTimeoutMs)
+        promise.then(
+          (value) => {
+            window.clearTimeout(timer)
+            resolve(value)
+          },
+          () => {
+            window.clearTimeout(timer)
+            resolve(null)
+          },
+        )
+      })
+    }
+
+    async function hydrateFromDexie(options?: { quiet?: boolean }) {
+      let base: ClinicalRecordFormData = { ...shellForm }
+      let loadedWithWarning = false
+      let signedRecord: ClinicalRecord | null = null
+      let loadedAgendaNotes = false
+      let loadedDraft = false
+
       try {
-        const emptyForm = createEmptyClinicalForm(professionalLicense, professionalLicense)
-        let base: ClinicalRecordFormData = {
-          ...emptyForm,
-          ...(draftClinicalData ?? {}),
-          diagnosticChart: normalizeClinicalDiagnosticChart(draftClinicalData?.diagnosticChart),
-          specializedAnnexes: normalizeSpecializedAnnexes(
-            draftClinicalData?.specializedAnnexes ?? emptyForm.specializedAnnexes,
-          ),
-        }
-        let loadedWithWarning = false
-        let signedRecord: ClinicalRecord | null = null
-
-        if (patientForeignKey && !draftClinicalData) {
-          signedRecord = await getLatestSignedClinicalRecord(patientForeignKey)
+        if (foreignKey && !draftClinicalData) {
+          signedRecord = await withDexieTimeout(
+            getLatestSignedClinicalRecord(foreignKey),
+            'getLatestSignedClinicalRecord',
+          )
           if (!signedRecord && patient?.treatmentCompleted) {
-            signedRecord = await getLatestClinicalRecord(patientForeignKey)
+            signedRecord = await withDexieTimeout(
+              getLatestClinicalRecord(foreignKey),
+              'getLatestClinicalRecord',
+            )
           }
           if (signedRecord) {
             try {
@@ -637,9 +674,11 @@ export function PatientDetailPage() {
               )
             } catch {
               loadedWithWarning = true
-              setMessage(
-                'La historia guardada tiene un formato antiguo. Se muestra la estructura base.',
-              )
+              if (!options?.quiet) {
+                setMessage(
+                  'La historia guardada tiene un formato antiguo. Se muestra la estructura base.',
+                )
+              }
             }
           }
         }
@@ -648,13 +687,12 @@ export function PatientDetailPage() {
           base.valuationConsent = patient.valuationConsent
         }
 
-        let loadedAgendaNotes = false
-        let loadedDraft = false
-
-        if (patientForeignKey) {
+        if (foreignKey) {
           try {
-            const draft = await getPatientClinicalDraft(patientForeignKey)
-            // Conserva presupuesto/pagos de valuationDraft aunque clinicalDraft exista.
+            const draft = await withDexieTimeout(
+              getPatientClinicalDraft(foreignKey),
+              'getPatientClinicalDraft',
+            )
             const livingRaw = draft?.clinicalDraft ?? draft?.valuationDraft
             const living =
               draft?.clinicalDraft && draft?.valuationDraft
@@ -697,7 +735,7 @@ export function PatientDetailPage() {
               }
             }
           } catch {
-            // Borrador opcional: no bloquear la carga de la historia.
+            // Borrador opcional.
           }
         }
 
@@ -710,66 +748,107 @@ export function PatientDetailPage() {
           }
         }
 
-        if (cancelled) return
+        if (cancelled) return base
 
-        if (evolutionNotes !== originalNotes && patientForeignKey) {
-          try {
-            await persistCorrectedEvolutionSessionClocks(patientForeignKey)
-          } catch {
-            // La pantalla ya muestra la hora de Bogotá; el próximo guardado la persiste.
+        if (evolutionNotes !== originalNotes && foreignKey) {
+          void persistCorrectedEvolutionSessionClocks(foreignKey).catch(() => undefined)
+        }
+
+        if (cancelled) return base
+
+        setClinicalData((prev) => {
+          // Tras sync en segundo plano: solo reemplaza si hay contenido más rico/nuevo.
+          if (options?.quiet && prev) {
+            const prevStamp = String(
+              (prev as ClinicalRecordFormData & { updatedAt?: string }).updatedAt ||
+                prev.evolutionNotes?.[0]?.createdAt ||
+                '',
+            )
+            const nextStamp = String(
+              signedRecord?.updatedAt ||
+                signedRecord?.signedAt ||
+                signedRecord?.createdAt ||
+                '',
+            )
+            if (prevStamp && nextStamp && !isRemoteDraftNewer(prevStamp, nextStamp)) {
+              return prev
+            }
           }
-        }
+          return base
+        })
 
-        if (cancelled) return
-
-        setClinicalData(base)
-        clinicalInitForPatientRef.current = id
-        loadCompleted = true
-        if (!loadedWithWarning && signedRecord && !loadedDraft) {
-          setMessage(
-            'Historia clínica activa. Las evoluciones firmadas son inmutables (Res. 1995/1999); odontograma, demografía, plan y exámenes siguen editables.',
-          )
-        }
-        if (patient?.treatmentCompleted) {
-          setActiveSection('all')
-          if (loadedDraft) {
-            setMessage('Historia clínica cargada desde borrador guardado.')
+        if (!options?.quiet) {
+          if (!loadedWithWarning && signedRecord && !loadedDraft) {
+            setMessage(
+              'Historia clínica activa. Las evoluciones firmadas son inmutables (Res. 1995/1999); odontograma, demografía, plan y exámenes siguen editables.',
+            )
           }
-        }
-
-        if (draftClinicalData) {
-          setMessage('Borrador de historia clínica cargado desde el registro del paciente.')
-          setActiveSection('all')
-        } else if (loadedAgendaNotes) {
-          setMessage(
-            'Se cargaron notas de evolución pendientes desde la agenda (p. ej. inasistencias).',
-          )
+          if (patient?.treatmentCompleted) {
+            setActiveSection('all')
+            if (loadedDraft) {
+              setMessage('Historia clínica cargada desde borrador guardado.')
+            }
+          }
+          if (draftClinicalData) {
+            setMessage('Borrador de historia clínica cargado desde el registro del paciente.')
+            setActiveSection('all')
+          } else if (loadedAgendaNotes) {
+            setMessage(
+              'Se cargaron notas de evolución pendientes desde la agenda (p. ej. inasistencias).',
+            )
+          }
         }
       } catch {
-        if (cancelled) return
-        setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
-        clinicalInitForPatientRef.current = id
-        loadCompleted = true
-        setMessage('No se pudo cargar la historia clínica. Intente abrir el paciente de nuevo.')
+        if (!cancelled) {
+          setClinicalData((prev) => prev ?? shellForm)
+          if (!options?.quiet) {
+            setMessage('No se pudo cargar la historia clínica. Intente abrir el paciente de nuevo.')
+          }
+        }
       }
+      return base
     }
 
-    void initClinicalData()
+    void hydrateFromDexie()
+
+    // Sync en segundo plano (máx. 12s): no bloquea la UI.
+    const backgroundAbort = new AbortController()
+    const backgroundTimer = window.setTimeout(() => backgroundAbort.abort(), 12_000)
+    void (async () => {
+      try {
+        const { runClinicalSyncCycle } = await import('@/services/clinicalSyncService')
+        if (backgroundAbort.signal.aborted || cancelled) return
+        await Promise.race([
+          runClinicalSyncCycle(),
+          new Promise<boolean>((resolve) => {
+            backgroundAbort.signal.addEventListener('abort', () => resolve(false), { once: true })
+          }),
+        ])
+        if (cancelled || backgroundAbort.signal.aborted) return
+        await hydrateFromDexie({ quiet: true })
+      } catch {
+        // Red lenta/caída: la ficha ya está usable desde Dexie.
+      } finally {
+        window.clearTimeout(backgroundTimer)
+      }
+    })()
 
     return () => {
       cancelled = true
+      backgroundAbort.abort()
+      window.clearTimeout(backgroundTimer)
       if (!loadCompleted) {
         clinicalInitForPatientRef.current = null
       }
     }
   }, [
     id,
-    patient?.id,
-    patient?.treatmentCompleted,
-    patient?.valuationConsent,
+    patientForeignKey,
     professionalLicense,
     draftClinicalData,
-    patientForeignKey,
+    // Solo ids estables: valuationConsent/objeto patient re-disparaba el efecto en cada sync.
+    patient?.id,
+    patient?.treatmentCompleted,
   ])
 
 

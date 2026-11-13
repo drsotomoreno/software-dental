@@ -149,18 +149,34 @@ function identityHeaders() {
   }
 }
 
+const SNAPSHOT_SYNC_FETCH_TIMEOUT_MS = 12_000
+
 async function syncFetch(url: string, init?: RequestInit) {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...identityHeaders(),
-      ...(init?.headers ?? {}),
-    },
-  })
-  const payload = await response.json().catch(() => ({}))
-  return { response, payload }
+  const controller = new AbortController()
+  const timer = globalThis.setTimeout(() => controller.abort(), SNAPSHOT_SYNC_FETCH_TIMEOUT_MS)
+  const parentSignal = init?.signal
+  const onParentAbort = () => controller.abort()
+  if (parentSignal) {
+    if (parentSignal.aborted) controller.abort()
+    else parentSignal.addEventListener('abort', onParentAbort, { once: true })
+  }
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...identityHeaders(),
+        ...(init?.headers ?? {}),
+      },
+    })
+    const payload = await response.json().catch(() => ({}))
+    return { response, payload }
+  } finally {
+    globalThis.clearTimeout(timer)
+    parentSignal?.removeEventListener('abort', onParentAbort)
+  }
 }
 
 function notifyIfGoogleDriveRequired(response: Response, payload: unknown): boolean {

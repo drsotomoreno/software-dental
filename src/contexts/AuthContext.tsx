@@ -167,7 +167,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await ensureDentalDatabaseForAuth(sessionUser.id, clinicSyncId)
       await retireOrphanUuidDentalEmrDatabase(sessionUser.id, clinicSyncId)
       if (accessTier(sessionUser) !== 'none') {
-        await pullCompleteClinicOnLogin()
+        // Offline-first: no bloquear login ni la ficha clínica esperando sync.
+        void pullCompleteClinicOnLogin().catch((error) => {
+          console.error('[auth] Pull clínico tras login:', error)
+        })
       }
       const authUser = await sessionUserFromApi(sessionUser, token)
       try {

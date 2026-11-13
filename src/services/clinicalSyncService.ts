@@ -32,6 +32,9 @@ declare global {
 
 const POLL_MS = 2_000
 const DIRTY_DEBOUNCE_MS = 800
+/** Cada fetch de sync: 12s. Evita inFlight colgado y UI congelada. */
+export const CLINICAL_SYNC_FETCH_TIMEOUT_MS = 12_000
+const CLINICAL_SYNC_CYCLE_TIMEOUT_MS = 36_000
 
 const LOCAL_ONLY_KEYS = new Set(['id', 'pendingSync', 'lastSyncedAt'])
 const HEAVY_BINARY_KEYS = new Set([
@@ -85,17 +88,49 @@ function identityHeaders() {
 }
 
 async function syncFetch(url: string, init?: RequestInit) {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...identityHeaders(),
-      ...(init?.headers ?? {}),
-    },
+  const controller = new AbortController()
+  const timer = globalThis.setTimeout(() => controller.abort(), CLINICAL_SYNC_FETCH_TIMEOUT_MS)
+  const parentSignal = init?.signal
+  const onParentAbort = () => controller.abort()
+  if (parentSignal) {
+    if (parentSignal.aborted) controller.abort()
+    else parentSignal.addEventListener('abort', onParentAbort, { once: true })
+  }
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...identityHeaders(),
+        ...(init?.headers ?? {}),
+      },
+    })
+    const payload = await response.json().catch(() => ({}))
+    return { response, payload }
+  } finally {
+    globalThis.clearTimeout(timer)
+    parentSignal?.removeEventListener('abort', onParentAbort)
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => {
+      reject(new Error(`${label} superó ${Math.round(ms / 1000)}s`))
+    }, ms)
+    promise.then(
+      (value) => {
+        globalThis.clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        globalThis.clearTimeout(timer)
+        reject(error)
+      },
+    )
   })
-  const payload = await response.json().catch(() => ({}))
-  return { response, payload }
 }
 
 function toSyncPayload(entity: Patient | Appointment): Record<string, unknown> {
@@ -421,40 +456,46 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
   const auth = getStoredApiAuth()
   if (!auth?.token) return false
   try {
-    const clinicId = getCurrentClinicId()
-    const { ensureDentalDatabaseForAuth } = await import('@/db/database')
-    // Misma resolución canónica que AuthContext / purge (nunca UUID crudo del maestro).
-    await ensureDentalDatabaseForAuth(auth.user?.id, clinicId)
-    if (clinicId) {
-      const { ensureClinicLocalIsolation } = await import('@/services/clinicLocalIsolation')
-      await ensureClinicLocalIsolation(clinicId)
-    }
+    return await withTimeout(
+      (async () => {
+        const clinicId = getCurrentClinicId()
+        const { ensureDentalDatabaseForAuth } = await import('@/db/database')
+        // Misma resolución canónica que AuthContext / purge (nunca UUID crudo del maestro).
+        await ensureDentalDatabaseForAuth(auth.user?.id, clinicId)
+        if (clinicId) {
+          const { ensureClinicLocalIsolation } = await import('@/services/clinicLocalIsolation')
+          await ensureClinicLocalIsolation(clinicId)
+        }
 
-    const { clinicIdsMatch } = await import('@/services/clinicLocalIsolation')
-    if (typeof window !== 'undefined' && typeof window.__doctorSEOForceClinicPull === 'function') {
-      const forced = await window.__doctorSEOForceClinicPull(auth.token, auth.user)
-      if (forced) {
+        const { clinicIdsMatch } = await import('@/services/clinicLocalIsolation')
+        if (typeof window !== 'undefined' && typeof window.__doctorSEOForceClinicPull === 'function') {
+          const forced = await window.__doctorSEOForceClinicPull(auth.token, auth.user)
+          if (forced) {
+            const cached = await readCachedClinicPull()
+            if (
+              cached &&
+              clinicId &&
+              cached.clinicId &&
+              clinicIdsMatch(cached.clinicId, clinicId)
+            ) {
+              await applyFullClinicPull(cached)
+            }
+            return true
+          }
+        }
         const cached = await readCachedClinicPull()
-        if (
-          cached &&
-          clinicId &&
-          cached.clinicId &&
-          clinicIdsMatch(cached.clinicId, clinicId)
-        ) {
+        if (cached && clinicId && cached.clinicId && clinicIdsMatch(cached.clinicId, clinicId)) {
           await applyFullClinicPull(cached)
         }
-        return true
-      }
-    }
-    const cached = await readCachedClinicPull()
-    if (cached && clinicId && cached.clinicId && clinicIdsMatch(cached.clinicId, clinicId)) {
-      await applyFullClinicPull(cached)
-    }
-    if (!clinicId) return false
-    const merged = await pullAndMerge(true)
-    await syncCitasToLocalStorage()
-    renderCitas()
-    return merged.ok
+        if (!clinicId) return false
+        const merged = await pullAndMerge(true)
+        await syncCitasToLocalStorage()
+        renderCitas()
+        return merged.ok
+      })(),
+      CLINICAL_SYNC_CYCLE_TIMEOUT_MS,
+      'Pull clínico al login',
+    )
   } catch {
     return false
   }
@@ -474,7 +515,7 @@ async function performClinicalSyncCycle(): Promise<boolean> {
   const clinicId = getCurrentClinicId()
   if (!auth?.token || !clinicId) return false
 
-  try {
+  const run = async () => {
     await flushPendingClinicalDraft().catch(() => undefined)
     // Secuencial: nunca /clinical y /push en paralelo (t3.micro).
     await pushAllLocal(clinicId).catch(() => false)
@@ -483,6 +524,10 @@ async function performClinicalSyncCycle(): Promise<boolean> {
     await syncCitasToLocalStorage()
     renderCitas()
     return changed.ok
+  }
+
+  try {
+    return await withTimeout(run(), CLINICAL_SYNC_CYCLE_TIMEOUT_MS, 'Ciclo de sync clínico')
   } catch {
     return false
   }
@@ -494,11 +539,12 @@ export function runClinicalSyncCycle(): Promise<boolean> {
     queued = true
     return inFlight
   }
-  inFlight = performClinicalSyncCycle().finally(() => {
+  const cycle = performClinicalSyncCycle()
+  inFlight = cycle.finally(() => {
+    // Siempre libera el lock, incluso tras timeout/abort.
     inFlight = null
     if (queued) {
       queued = false
-      // Una sola repetición coalescida (no ráfaga).
       void runClinicalSyncCycle()
     }
   })
