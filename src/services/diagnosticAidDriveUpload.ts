@@ -1,7 +1,11 @@
 import { db } from '@/db/database'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import { getDiagnosticAidBlobByAidId } from '@/services/diagnosticAidBlobStore'
-import { getCurrentClinicId } from '@/services/clinicalSyncState'
+import {
+  driveClinicQuery,
+  driveIdentityHeaders,
+  resolveActiveDriveClinicId,
+} from '@/services/googleDriveClinicContext'
 import {
   isGoogleDriveRequiredResponse,
   notifyGoogleDriveRequired,
@@ -26,32 +30,13 @@ type DriveStatusPayload = {
   code?: string
 }
 
-function identityHeaders() {
-  const auth = getStoredApiAuth()
-  return {
-    ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
-    ...(auth?.user?.email ? { 'X-Client-Email': String(auth.user.email) } : {}),
-    ...(auth?.user?.id ? { 'X-Client-User-Id': String(auth.user.id) } : {}),
-    ...(auth?.user?.documentNumber
-      ? { 'X-Client-Document': String(auth.user.documentNumber) }
-      : {}),
-  }
-}
-
-function clinicQuery(): string {
-  const auth = getStoredApiAuth()
-  const clinicId = String(
-    getCurrentClinicId() || auth?.user?.clinicId || auth?.user?.id || '',
-  ).trim()
-  return clinicId ? `?clinicId=${encodeURIComponent(clinicId)}` : ''
-}
-
 async function readDriveStatus(): Promise<{
   connected: boolean
   clinicId: string | null
   message: string | null
 }> {
   const auth = getStoredApiAuth()
+  const clinicId = resolveActiveDriveClinicId()
   if (!auth?.token) {
     return {
       connected: false,
@@ -60,11 +45,8 @@ async function readDriveStatus(): Promise<{
     }
   }
   try {
-    const response = await fetch(`/api/integrations/google-drive/status${clinicQuery()}`, {
-      headers: {
-        Accept: 'application/json',
-        ...identityHeaders(),
-      },
+    const response = await fetch(`/api/integrations/google-drive/status${driveClinicQuery(clinicId)}`, {
+      headers: driveIdentityHeaders(clinicId),
     })
     const body = (await response.json().catch(() => ({}))) as DriveStatusPayload
     if (response.status === 401) {
@@ -77,7 +59,7 @@ async function readDriveStatus(): Promise<{
     if (!response.ok) {
       return {
         connected: false,
-        clinicId: typeof body.clinicId === 'string' ? body.clinicId : null,
+        clinicId: typeof body.clinicId === 'string' ? body.clinicId : clinicId || null,
         message:
           typeof body.error === 'string'
             ? body.error
@@ -87,7 +69,8 @@ async function readDriveStatus(): Promise<{
     const connected = Boolean(body.connected) || body.status === 'connected'
     return {
       connected,
-      clinicId: typeof body.clinicId === 'string' ? body.clinicId : null,
+      clinicId:
+        (typeof body.clinicId === 'string' && body.clinicId.trim()) || clinicId || null,
       message: connected
         ? null
         : 'Google Drive no está conectado. Conéctelo en Perfil → Google Drive.',
@@ -95,7 +78,7 @@ async function readDriveStatus(): Promise<{
   } catch (error) {
     return {
       connected: false,
-      clinicId: null,
+      clinicId: clinicId || null,
       message:
         error instanceof Error
           ? `No se pudo verificar Google Drive: ${error.message}`
@@ -115,7 +98,7 @@ async function markUploadError(aidId: string, message: string): Promise<Diagnost
 
 /**
  * Sube (o reintenta) un examen complementario a Google Drive vía multipart.
- * Nunca oculta el fallo: deja `driveUploadStatus: 'error'` + mensaje legible.
+ * Envía clinicId en query, FormData y header X-Clinic-Id (igual que /perfil).
  */
 export async function uploadDiagnosticAidToGoogleDrive(
   entry: DiagnosticAid,
@@ -164,14 +147,8 @@ export async function uploadDiagnosticAidToGoogleDrive(
   }
 
   emit('uploading', 'Subiendo a Google Drive…')
-  const auth = getStoredApiAuth()
   const clinicId = String(
-    status.clinicId ||
-      entry.clinicId ||
-      getCurrentClinicId() ||
-      auth?.user?.clinicId ||
-      auth?.user?.id ||
-      '',
+    status.clinicId || entry.clinicId || resolveActiveDriveClinicId() || '',
   ).trim()
 
   try {
@@ -189,14 +166,14 @@ export async function uploadDiagnosticAidToGoogleDrive(
     if (clinicId) form.append('clinicId', clinicId)
     if (entry.driveFileId) form.append('driveFileId', entry.driveFileId)
 
-    const response = await fetch(`/api/integrations/google-drive/upload${clinicQuery()}`, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        ...identityHeaders(),
+    const response = await fetch(
+      `/api/integrations/google-drive/upload${driveClinicQuery(clinicId)}`,
+      {
+        method: 'POST',
+        headers: driveIdentityHeaders(clinicId),
+        body: form,
       },
-      body: form,
-    })
+    )
     const body = await response.json().catch(() => ({}))
 
     if (isGoogleDriveRequiredResponse(response, body)) {
@@ -234,6 +211,7 @@ export async function uploadDiagnosticAidToGoogleDrive(
     const webViewLink =
       String(body.webViewLink || '').trim() ||
       `https://drive.google.com/file/d/${driveFileId}/view`
+    const resolvedClinicId = String(body.clinicId || clinicId || '').trim()
 
     await db.diagnosticAids.update(aidId, {
       driveFileId,
@@ -241,7 +219,7 @@ export async function uploadDiagnosticAidToGoogleDrive(
       storageBackend: 'google_drive',
       driveUploadStatus: 'uploaded',
       driveUploadError: null,
-      clinicId: clinicId || entry.clinicId,
+      clinicId: resolvedClinicId || entry.clinicId,
       pendingSync: true,
     })
 

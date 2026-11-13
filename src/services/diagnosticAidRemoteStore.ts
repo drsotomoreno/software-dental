@@ -4,7 +4,11 @@ import {
   getDiagnosticAidBlobByAidId,
   saveDiagnosticAidBlobFromBuffer,
 } from '@/services/diagnosticAidBlobStore'
-import { getCurrentClinicId } from '@/services/clinicalSyncState'
+import {
+  driveClinicQuery,
+  driveIdentityHeaders,
+  resolveActiveDriveClinicId,
+} from '@/services/googleDriveClinicContext'
 import {
   isGoogleDriveRequiredResponse,
   notifyGoogleDriveRequired,
@@ -19,23 +23,11 @@ export const DIAGNOSTIC_AID_UNAVAILABLE_MESSAGE =
   'Archivo no disponible localmente ni en Google Drive; elimínelo y vuelva a adjuntarlo'
 
 function identityHeaders() {
-  const auth = getStoredApiAuth()
-  return {
-    ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
-    ...(auth?.user?.email ? { 'X-Client-Email': String(auth.user.email) } : {}),
-    ...(auth?.user?.id ? { 'X-Client-User-Id': String(auth.user.id) } : {}),
-    ...(auth?.user?.documentNumber
-      ? { 'X-Client-Document': String(auth.user.documentNumber) }
-      : {}),
-  }
+  return driveIdentityHeaders(resolveActiveDriveClinicId())
 }
 
 function clinicQuery(): string {
-  const auth = getStoredApiAuth()
-  const clinicId = String(
-    getCurrentClinicId() || auth?.user?.clinicId || auth?.user?.id || '',
-  ).trim()
-  return clinicId ? `?clinicId=${encodeURIComponent(clinicId)}` : ''
+  return driveClinicQuery(resolveActiveDriveClinicId())
 }
 
 function payloadOf(record: unknown): Record<string, unknown> {

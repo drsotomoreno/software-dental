@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Cloud, HardDrive, Link2Off, Loader2 } from 'lucide-react'
 import { getStoredApiAuth } from '@/services/apiAuthService'
+import {
+  driveClinicQuery,
+  driveIdentityHeaders,
+  resolveActiveDriveClinicId,
+} from '@/services/googleDriveClinicContext'
 import { showGlobalToast } from '@/services/globalToast'
 import { canManageClinicTeam } from '@/utils/permissions'
 import { sessionIsSuperAdmin } from '@/utils/superadminAccess'
@@ -16,12 +21,8 @@ type DriveStatus = {
   oauthConfigured?: boolean
 }
 
-function authHeaders(): HeadersInit {
-  const auth = getStoredApiAuth()
-  return {
-    Accept: 'application/json',
-    ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
-  }
+function authHeaders(clinicId = resolveActiveDriveClinicId()): HeadersInit {
+  return driveIdentityHeaders(clinicId)
 }
 
 /**
@@ -49,13 +50,9 @@ export function GoogleDriveIntegration() {
   const [error, setError] = useState('')
 
   const clinicQuery = useCallback(() => {
-    if (!isSuperAdmin) return ''
-    const auth = getStoredApiAuth()
-    // Solo si hay sede explícita (impersonación/contexto). Si no, el backend usa clinic:email maestro.
-    const clinicId = String(auth?.user?.clinicId || '').trim()
-    if (clinicId) return `?clinicId=${encodeURIComponent(clinicId)}`
-    return ''
-  }, [isSuperAdmin])
+    // Misma clave que Exámenes: clinicSyncId activo + header X-Clinic-Id.
+    return driveClinicQuery(resolveActiveDriveClinicId())
+  }, [])
 
   const loadStatus = useCallback(async () => {
     const auth = getStoredApiAuth()
@@ -68,8 +65,9 @@ export function GoogleDriveIntegration() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(`/api/integrations/google-drive/status${clinicQuery()}`, {
-        headers: authHeaders(),
+      const clinicId = resolveActiveDriveClinicId()
+      const response = await fetch(`/api/integrations/google-drive/status${driveClinicQuery(clinicId)}`, {
+        headers: authHeaders(clinicId),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) {

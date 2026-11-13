@@ -14,6 +14,7 @@ import { decryptSecret, encryptSecret } from '../utils/tokenEncryption.js'
 import {
   clearClinicGoogleDriveConnection,
   ensureClinicGoogleDriveSchema,
+  findClinicGoogleDriveRecordAmong,
   getClinicGoogleDriveRecord,
   getClinicGoogleDriveStatus,
   saveClinicGoogleDriveConnection,
@@ -89,6 +90,125 @@ export function resolveManagedClinicId(user, requestedClinicId) {
   }
 
   return own
+}
+
+/**
+ * Recolecta todas las variantes posibles de clinicId desde la request + sesión.
+ * Orden: body → query → header → clinicSyncId → clinicId → prefijos → email.
+ */
+export function collectClinicIdCandidatesFromRequest(req, user) {
+  const query = req?.query && typeof req.query === 'object' ? req.query : {}
+  const body = req?.body && typeof req.body === 'object' ? req.body : {}
+  const headers = req?.headers && typeof req.headers === 'object' ? req.headers : {}
+  const headerClinic = String(
+    headers['x-clinic-id'] || headers['X-Clinic-Id'] || '',
+  ).trim()
+
+  const raw = [
+    body.clinicId,
+    body.tenant_id,
+    body.clinica_id,
+    query.clinicId,
+    query.tenant_id,
+    query.clinica_id,
+    headerClinic,
+    user?.clinicSyncId,
+    user?.clinicId,
+    user?.id,
+    user?.email,
+  ]
+
+  const out = []
+  const seen = new Set()
+  const push = (value) => {
+    const v = String(value || '').trim()
+    if (!v) return
+    const lowerEmail =
+      v.includes('@') && !v.startsWith('clinic:') ? v.toLowerCase() : v
+    for (const key of [lowerEmail, v]) {
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      out.push(key)
+      if (key.startsWith('clinic:')) {
+        const bare = key.slice('clinic:'.length)
+        if (bare && !seen.has(bare)) {
+          seen.add(bare)
+          out.push(bare)
+        }
+      } else {
+        const prefixed = `clinic:${key}`
+        if (!seen.has(prefixed)) {
+          seen.add(prefixed)
+          out.push(prefixed)
+        }
+      }
+    }
+  }
+
+  for (const item of raw) push(item)
+
+  try {
+    const { canonical, aliases } = clinicSyncAliasIds(user)
+    push(canonical)
+    for (const alias of aliases || []) push(alias)
+  } catch {
+    // ignore
+  }
+
+  const email = normalizeEmail(user?.email)
+  if (email) {
+    push(email)
+    push(`clinic:${email}`)
+  }
+
+  return out
+}
+
+/**
+ * Resolución unificada de credenciales Drive para status/upload/file/disconnect.
+ * Prueba todas las variantes de clinicId hasta hallar una fila conectada.
+ *
+ * @returns {Promise<{
+ *   clinicId: string | null,
+ *   storageKey: string | null,
+ *   connected: boolean,
+ *   record: object | null,
+ *   candidates: string[],
+ * }>}
+ */
+export async function findClinicDriveCredentials(req, user) {
+  const candidates = collectClinicIdCandidatesFromRequest(req, user)
+  const found = await findClinicGoogleDriveRecordAmong(candidates)
+  if (found?.record) {
+    const connected =
+      String(found.record.status || '') === 'connected' &&
+      Boolean(found.record.refreshTokenEnc && found.record.rootFolderId)
+    return {
+      clinicId: String(found.record.clinicId || found.storageKey || '').trim() || null,
+      storageKey: found.storageKey,
+      connected,
+      record: found.record,
+      candidates,
+    }
+  }
+
+  let fallback = null
+  try {
+    fallback = resolveManagedClinicId(
+      user,
+      candidates[0] || '',
+    )
+  } catch {
+    fallback = canonicalClinicIdOf(user) || null
+  }
+
+  return {
+    clinicId: fallback,
+    storageKey: null,
+    connected: false,
+    record: null,
+    candidates,
+  }
 }
 
 function clinicDisplayName(user) {
@@ -356,8 +476,14 @@ export async function completeGoogleDriveOAuthCallback({ code, state }) {
 
 export async function readGoogleDriveStatusForUser(user, options = {}) {
   const canManage = canManageClinicGoogleDrive(user)
-  const clinicId = resolveManagedClinicId(user, options.clinicId)
   const oauth = getGoogleOAuthConfigStatus()
+  const reqLike = options.req || {
+    query: { clinicId: options.clinicId || '' },
+    body: {},
+    headers: options.headers || {},
+  }
+  const resolved = await findClinicDriveCredentials(reqLike, user)
+  const clinicId = resolved.clinicId || resolveManagedClinicId(user, options.clinicId)
   if (!clinicId) {
     return {
       success: true,
@@ -371,10 +497,19 @@ export async function readGoogleDriveStatusForUser(user, options = {}) {
       rootFolderId: null,
     }
   }
-  const row = await getClinicGoogleDriveStatus(clinicId)
+  const row = resolved.record
+    ? {
+        connected: resolved.connected,
+        status: resolved.record.status || (resolved.connected ? 'connected' : 'disconnected'),
+        googleDriveEmail: resolved.record.googleDriveEmail || null,
+        rootFolderId: resolved.record.rootFolderId || null,
+        clinicName: resolved.record.clinicName || null,
+        connectedAt: resolved.record.connectedAt || null,
+      }
+    : await getClinicGoogleDriveStatus(clinicId)
   return {
     success: true,
-    clinicId,
+    clinicId: resolved.storageKey || clinicId,
     canManage,
     isSuperAdmin: isGoogleDriveSuperAdmin(user),
     oauthConfigured: oauth.configured,
@@ -391,17 +526,35 @@ export async function disconnectGoogleDriveForUser(user, options = {}) {
     err.status = 403
     throw err
   }
-  const clinicId = resolveManagedClinicId(user, options.clinicId)
+  const reqLike = options.req || {
+    query: { clinicId: options.clinicId || '' },
+    body: {},
+    headers: options.headers || {},
+  }
+  const resolved = await findClinicDriveCredentials(reqLike, user)
+  const clinicId =
+    resolved.storageKey ||
+    resolved.clinicId ||
+    resolveManagedClinicId(user, options.clinicId)
   const status = await clearClinicGoogleDriveConnection(clinicId)
   return { ...status, clinicId }
 }
 
 /**
  * Cliente autenticado para la clínica (usa refresh_token cifrado).
- * Fase 2+ (upload/download de adjuntos).
+ * Acepta una clave o lista de candidatos; prueba variantes clinic:/bare.
  */
-export async function getAuthorizedDriveClient(canonicalClinicId) {
-  const record = await getClinicGoogleDriveRecord(canonicalClinicId)
+export async function getAuthorizedDriveClient(canonicalClinicId, candidateIds = []) {
+  const candidates = [
+    ...(Array.isArray(candidateIds) ? candidateIds : []),
+    canonicalClinicId,
+  ].filter(Boolean)
+  const found = await findClinicGoogleDriveRecordAmong(candidates)
+  const record = found?.record || (await getClinicGoogleDriveRecord(canonicalClinicId))
+  const storageKey =
+    found?.storageKey ||
+    String(record?.clinicId || canonicalClinicId || '').trim()
+
   if (!record?.refreshTokenEnc || record.status !== 'connected') {
     const err = new Error(
       'La clínica no tiene Google Drive conectado. El dueño/admin debe vincular el Gmail antes de subir adjuntos.',
@@ -424,7 +577,7 @@ export async function getAuthorizedDriveClient(canonicalClinicId) {
       if (tokens.expiry_date) patch.tokenExpiresAt = new Date(Number(tokens.expiry_date)).toISOString()
       if (tokens.refresh_token) patch.refreshTokenEnc = encryptSecret(tokens.refresh_token)
       if (Object.keys(patch).length) {
-        await saveClinicGoogleDriveConnection(canonicalClinicId, {
+        await saveClinicGoogleDriveConnection(storageKey, {
           ...record,
           ...patch,
           status: 'connected',
@@ -442,6 +595,7 @@ export async function getAuthorizedDriveClient(canonicalClinicId) {
     drive: google.drive({ version: 'v3', auth: client }),
     rootFolderId: record.rootFolderId,
     googleDriveEmail: record.googleDriveEmail,
+    clinicId: storageKey,
   }
 }
 

@@ -181,15 +181,7 @@ async function upsertPostgres(canonicalClinicId, row) {
   }
 }
 
-/** Estado público (sin tokens). */
-export async function getClinicGoogleDriveStatus(canonicalClinicId) {
-  const id = String(canonicalClinicId || '').trim()
-  if (!id) return publicRow(null)
-  const store = await loadStore()
-  return publicRow(store.clinics[id] || null)
-}
-
-function clinicIdLookupKeys(canonicalClinicId) {
+export function clinicIdLookupKeys(canonicalClinicId) {
   const id = String(canonicalClinicId || '').trim()
   if (!id) return []
   const keys = [id]
@@ -198,16 +190,35 @@ function clinicIdLookupKeys(canonicalClinicId) {
   return [...new Set(keys.filter(Boolean))]
 }
 
-/** Fila interna con ciphertext (solo servicios de servidor). */
-export async function getClinicGoogleDriveRecord(canonicalClinicId) {
-  const id = String(canonicalClinicId || '').trim()
-  if (!id) return null
+/**
+ * Busca la primera fila conectada entre varias claves candidatas
+ * (p. ej. clinic:uuid, uuid, clinic:email, email).
+ * @returns {{ record: object, storageKey: string } | null}
+ */
+export async function findClinicGoogleDriveRecordAmong(candidateIds = []) {
   const store = await loadStore()
-  for (const key of clinicIdLookupKeys(id)) {
-    const row = store.clinics[key]
-    if (row) return row
+  const tried = new Set()
+  for (const raw of candidateIds) {
+    for (const key of clinicIdLookupKeys(raw)) {
+      if (!key || tried.has(key)) continue
+      tried.add(key)
+      const row = store.clinics[key]
+      if (row) return { record: row, storageKey: key }
+    }
   }
   return null
+}
+
+/** Estado público (sin tokens). Prueba variantes clinic:/bare. */
+export async function getClinicGoogleDriveStatus(canonicalClinicId) {
+  const found = await findClinicGoogleDriveRecordAmong([canonicalClinicId])
+  return publicRow(found?.record || null)
+}
+
+/** Fila interna con ciphertext (solo servicios de servidor). */
+export async function getClinicGoogleDriveRecord(canonicalClinicId) {
+  const found = await findClinicGoogleDriveRecordAmong([canonicalClinicId])
+  return found?.record || null
 }
 
 export async function saveClinicGoogleDriveConnection(canonicalClinicId, patch) {

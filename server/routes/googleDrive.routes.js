@@ -14,10 +14,10 @@ import {
   buildGoogleDriveConnectUrl,
   completeGoogleDriveOAuthCallback,
   disconnectGoogleDriveForUser,
+  findClinicDriveCredentials,
   frontendRedirectAfterOAuth,
   getGoogleOAuthConfigStatus,
   readGoogleDriveStatusForUser,
-  resolveManagedClinicId,
 } from '../services/googleDriveOAuth.service.js'
 
 const router = Router()
@@ -49,20 +49,20 @@ async function requireSessionUser(req, res) {
     })
     return null
   }
+  req.user = session.user
   return session.user
 }
 
-/** Clínica objetivo (superadmin puede elegir otra sede vía query/body). */
-function requestedClinicIdFrom(req) {
+/** clinicId desde header/query (disponible antes de que multer llene body). */
+function earlyClinicIdFrom(req) {
   const query = req.query && typeof req.query === 'object' ? req.query : {}
-  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  const headers = req.headers && typeof req.headers === 'object' ? req.headers : {}
   return String(
-    query.clinicId ||
+    headers['x-clinic-id'] ||
+      headers['X-Clinic-Id'] ||
+      query.clinicId ||
       query.tenant_id ||
       query.clinica_id ||
-      body.clinicId ||
-      body.tenant_id ||
-      body.clinica_id ||
       '',
   ).trim()
 }
@@ -98,14 +98,12 @@ function parseMulterError(err) {
   }
 }
 
-/** Estado de conexión Drive de la clínica canónica de la sesión. */
+/** Estado de conexión Drive — misma resolución de claves que upload/file/disconnect. */
 router.get('/status', async (req, res) => {
   try {
     const user = await requireSessionUser(req, res)
     if (!user) return
-    const status = await readGoogleDriveStatusForUser(user, {
-      clinicId: requestedClinicIdFrom(req),
-    })
+    const status = await readGoogleDriveStatusForUser(user, { req })
     return res.json({ success: true, ok: true, ...status })
   } catch (error) {
     console.error('[google-drive] GET /status:', error)
@@ -121,15 +119,15 @@ router.get('/status', async (req, res) => {
 
 /**
  * Inicia OAuth: genera URL con access_type=offline, prompt=consent, scope drive.file.
- * Por defecto responde JSON `{ url }` para el SPA. `?redirect=1` redirige al navegador.
  */
 router.get('/connect', async (req, res) => {
   try {
     const user = await requireSessionUser(req, res)
     if (!user) return
 
+    const resolved = await findClinicDriveCredentials(req, user)
     const { url, clinicId } = buildGoogleDriveConnectUrl(user, {
-      clinicId: requestedClinicIdFrom(req),
+      clinicId: earlyClinicIdFrom(req) || resolved.clinicId || '',
     })
     if (String(req.query?.redirect || '') === '1') {
       return res.redirect(302, url)
@@ -153,10 +151,6 @@ router.get('/connect', async (req, res) => {
   }
 })
 
-/**
- * Callback de Google: intercambia code, cifra refresh_token, crea carpeta raíz
- * `mihistoriadental - [Nombre]` y redirige al frontend.
- */
 router.get('/callback', async (req, res) => {
   try {
     const query = req.query && typeof req.query === 'object' ? req.query : {}
@@ -190,14 +184,12 @@ router.get('/callback', async (req, res) => {
   }
 })
 
-/** Desconecta Drive de la clínica (borra tokens cifrados y metadatos). */
+/** Desconecta Drive — misma resolución de claves que status/upload. */
 router.post('/disconnect', async (req, res) => {
   try {
     const user = await requireSessionUser(req, res)
     if (!user) return
-    const status = await disconnectGoogleDriveForUser(user, {
-      clinicId: requestedClinicIdFrom(req),
-    })
+    const status = await disconnectGoogleDriveForUser(user, { req })
     return res.json({ success: true, ok: true, ...status })
   } catch (error) {
     console.error('[google-drive] POST /disconnect:', error)
@@ -212,7 +204,7 @@ router.post('/disconnect', async (req, res) => {
 })
 
 /**
- * Proxy de descarga: bytes del adjunto en Drive para el visor 3D / caché IndexedDB.
+ * Proxy de descarga: bytes del adjunto en Drive.
  * GET /api/integrations/google-drive/file/:fileId
  */
 router.get('/file/:fileId', async (req, res) => {
@@ -230,19 +222,8 @@ router.get('/file/:fileId', async (req, res) => {
       })
     }
 
-    let clinicId
-    try {
-      clinicId = resolveManagedClinicId(user, requestedClinicIdFrom(req))
-    } catch (error) {
-      const mapped = mapOAuthError(error)
-      return res.status(mapped.status).json({
-        success: false,
-        ok: false,
-        error: mapped.message,
-        code: mapped.code,
-      })
-    }
-
+    const resolved = await findClinicDriveCredentials(req, user)
+    const clinicId = resolved.storageKey || resolved.clinicId
     if (!clinicId) {
       return res.status(400).json({
         success: false,
@@ -251,9 +232,20 @@ router.get('/file/:fileId', async (req, res) => {
         code: 'CLINIC_REQUIRED',
       })
     }
+    if (!resolved.connected) {
+      return res.status(428).json({
+        success: false,
+        ok: false,
+        error:
+          'La clínica debe conectar Google Drive antes de descargar adjuntos.',
+        code: 'google_drive_required',
+        clinicId,
+      })
+    }
 
     const buffer = await downloadClinicAttachmentFromDrive({
       clinicId,
+      clinicIdCandidates: resolved.candidates,
       driveFileId: fileId,
     })
     if (!buffer || !buffer.length) {
@@ -299,10 +291,11 @@ router.get('/file/:fileId', async (req, res) => {
 })
 
 /**
- * Subida inmediata de adjunto clínico (exámenes / escaneos).
- * Acepta multipart (`file`) hasta 100 MB o JSON legacy `{ dataBase64 }` (también ≤ 100 MB).
+ * Subida inmediata. Lee X-Clinic-Id / query.clinicId antes y después de multer.
  */
 router.post('/upload', (req, res, next) => {
+  // Capturar clinicId temprano (header/query) por si body aún no existe.
+  req.driveClinicIdHint = earlyClinicIdFrom(req)
   upload.single('file')(req, res, (err) => {
     const parsed = parseMulterError(err)
     if (parsed) {
@@ -321,6 +314,12 @@ router.post('/upload', (req, res, next) => {
     if (!user) return
 
     const body = req.body && typeof req.body === 'object' ? req.body : {}
+    // Reinyectar hint pre-multer si body no trae clinicId.
+    if (req.driveClinicIdHint && !body.clinicId) {
+      body.clinicId = req.driveClinicIdHint
+      req.body = body
+    }
+
     const fileName = String(
       req.file?.originalname || body.fileName || body.name || '',
     ).trim()
@@ -333,19 +332,8 @@ router.post('/upload', (req, res, next) => {
     const aidId = String(body.aidId || body.id || '').trim()
     const existingFileId = String(body.driveFileId || '').trim() || undefined
 
-    let clinicId
-    try {
-      clinicId = resolveManagedClinicId(user, requestedClinicIdFrom(req))
-    } catch (error) {
-      const mapped = mapOAuthError(error)
-      return res.status(mapped.status).json({
-        success: false,
-        ok: false,
-        error: mapped.message,
-        code: mapped.code,
-        clinicId: null,
-      })
-    }
+    const resolved = await findClinicDriveCredentials(req, user)
+    const clinicId = resolved.storageKey || resolved.clinicId
 
     if (!clinicId) {
       return res.status(400).json({
@@ -353,6 +341,17 @@ router.post('/upload', (req, res, next) => {
         ok: false,
         error: 'No se pudo resolver clinicId / clinicSyncId de la sesión autenticada.',
         code: 'CLINIC_REQUIRED',
+      })
+    }
+    if (!resolved.connected) {
+      return res.status(428).json({
+        success: false,
+        ok: false,
+        error:
+          'Google Drive no está conectado. Conéctelo en Perfil → Google Drive.',
+        code: 'google_drive_required',
+        clinicId,
+        triedKeys: resolved.candidates?.slice(0, 12),
       })
     }
 
@@ -406,6 +405,7 @@ router.post('/upload', (req, res, next) => {
 
     const uploaded = await uploadClinicAttachmentToDrive({
       clinicId,
+      clinicIdCandidates: resolved.candidates,
       patientSyncId,
       fileName,
       mimeType,

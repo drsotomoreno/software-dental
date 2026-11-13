@@ -142,9 +142,9 @@ export async function ensurePatientFolder(driveClient, rootFolderId, patientSync
   return ayudasId
 }
 
-async function resolveClinicDrive(canonicalClinicId) {
+async function resolveClinicDrive(canonicalClinicId, candidateIds = []) {
   try {
-    return await getAuthorizedDriveClient(canonicalClinicId)
+    return await getAuthorizedDriveClient(canonicalClinicId, candidateIds)
   } catch (error) {
     if (isGoogleDriveRequiredError(error)) {
       throw new GoogleDriveRequiredError(
@@ -163,6 +163,7 @@ async function resolveClinicDrive(canonicalClinicId) {
  */
 export async function uploadClinicAttachmentToDrive({
   clinicId,
+  clinicIdCandidates = [],
   patientSyncId,
   fileName,
   mimeType,
@@ -176,7 +177,7 @@ export async function uploadClinicAttachmentToDrive({
     throw err
   }
 
-  const { drive, rootFolderId } = await resolveClinicDrive(clinicId)
+  const { drive, rootFolderId } = await resolveClinicDrive(clinicId, clinicIdCandidates)
   if (!rootFolderId) {
     throw new GoogleDriveRequiredError(
       'La clínica no tiene carpeta raíz en Google Drive. Vuelva a conectar la integración.',
@@ -252,11 +253,15 @@ export async function uploadClinicAttachmentToDrive({
  * Descarga bytes de Drive por fileId.
  * @returns {Promise<Buffer|null>}
  */
-export async function downloadClinicAttachmentFromDrive({ clinicId, driveFileId }) {
+export async function downloadClinicAttachmentFromDrive({
+  clinicId,
+  clinicIdCandidates = [],
+  driveFileId,
+}) {
   const fileId = String(driveFileId || '').trim()
   if (!fileId) return null
 
-  const { drive } = await resolveClinicDrive(clinicId)
+  const { drive } = await resolveClinicDrive(clinicId, clinicIdCandidates)
   const res = await drive.files.get(
     { fileId, alt: 'media' },
     { responseType: 'arraybuffer' },
