@@ -1,0 +1,123 @@
+# OOM: swap + heap 70% RAM; Nginx SPA estatica; dedup clinical-sync aliases.
+# NO toca .bak-20261112 ni .bak-20261113-pre-merge.
+name: Harden EC2 OOM SPA dedup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harden:
+    name: Swap heap nginx dedup verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: SSH harden
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            CANONICAL="/var/www/mihistoriadental"
+            HOME_APP="/home/ubuntu/software-dental"
+            APP_DIR="$HOME_APP"
+            [[ -f "$APP_DIR/server.js" ]] || APP_DIR="$CANONICAL"
+
+            echo "==== 1) Memoria / OOM ===="
+            free -m || true
+            dmesg -T 2>/dev/null | grep -i -E 'oom|killed process' | tail -n 30 || true
+            journalctl -k -b --no-pager 2>/dev/null | grep -i -E 'oom|killed process' | tail -n 20 || true
+
+            echo "==== Swap 2G si falta ===="
+            if ! swapon --show 2>/dev/null | grep -q .; then
+              echo "Creando /swapfile 2G..."
+              sudo fallocate -l 2G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=progress
+              sudo chmod 600 /swapfile
+              sudo mkswap /swapfile
+              sudo swapon /swapfile
+              grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+            else
+              echo "Swap ya activo:"
+              swapon --show || true
+            fi
+            free -m
+
+            echo "==== Sync codigo (sin server/data) ===="
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL"
+              git fetch origin main || true
+              git reset --hard origin/main || true
+            fi
+            if [[ "$APP_DIR" != "$CANONICAL" ]]; then
+              rsync -a --exclude 'server/data/' --exclude '.env' --exclude 'node_modules/' --exclude '.git/' \
+                "$CANONICAL/" "$APP_DIR/" || true
+            fi
+            chmod +x "$APP_DIR/scripts/"*.sh 2>/dev/null || true
+
+            HEAP_MB="$("$APP_DIR/scripts/pm2-heap-from-ram.sh")"
+            echo "HEAP_MB=$HEAP_MB (70% RAM, max 1536)"
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+
+            SYNC="$APP_DIR/server/data/clinical-sync.json"
+            test -f "$SYNC" || { echo "MISSING_SYNC"; exit 1; }
+            echo "SYNC_BYTES_BEFORE=$(stat -c%s "$SYNC")"
+            ls -la "$SYNC.bak-20261112" "$SYNC.bak-20261113-pre-merge" 2>/dev/null || true
+
+            echo "==== Pause PM2 + dedup aliases ===="
+            pm2 stop software-dental || pm2 stop all || true
+            sleep 2
+            node --max-old-space-size="${HEAP_MB}" "$APP_DIR/scripts/dedup-clinical-sync-aliases.cjs" "$SYNC"
+            echo "SYNC_BYTES_AFTER=$(stat -c%s "$SYNC")"
+            test -f "$SYNC.bak-20261113-dedup" || { echo "MISSING_DEDUP_BAK"; exit 1; }
+            # Protegidos intactos
+            test -f "$SYNC.bak-20261112" || { echo "BAK12_MISSING"; exit 1; }
+            BAK12=$(stat -c%s "$SYNC.bak-20261112")
+            echo "BAK12_BYTES=$BAK12"
+            [[ "$BAK12" == "72014840" ]] || echo "WARN bak-20261112 size changed: $BAK12"
+
+            PORT=3000
+            if [[ -f "$APP_DIR/.env" ]]; then
+              PORT="$(grep -E '^PORT=' "$APP_DIR/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || echo 3000)"
+            fi
+            PORT="${PORT:-3000}"
+
+            echo "==== Nginx SPA static ===="
+            DIST="$APP_DIR/dist"
+            test -f "$DIST/index.html" || DIST="$CANONICAL/dist"
+            test -f "$DIST/index.html" || { echo "MISSING_DIST"; exit 1; }
+            bash "$APP_DIR/scripts/configure-nginx-spa-static.sh" "$DIST" "$PORT"
+
+            echo "==== Restart PM2 heap=$HEAP_MB ===="
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+            export NODE_ENV="${NODE_ENV:-production}"
+            if pm2 describe software-dental >/dev/null 2>&1; then pm2 delete software-dental || true; fi
+            if pm2 describe mihistoriadental >/dev/null 2>&1; then pm2 delete mihistoriadental || true; fi
+            cd "$APP_DIR"
+            pm2 start "$APP_DIR/server.js" \
+              --name software-dental \
+              --cwd "$APP_DIR" \
+              --update-env \
+              --node-args="--max-old-space-size=${HEAP_MB}"
+            pm2 save || true
+            sleep 12
+            sudo systemctl reload nginx || true
+
+            echo "==== Verify ===="
+            pm2 status
+            free -m
+            echo "SYNC_BYTES_FINAL=$(stat -c%s "$SYNC")"
+            HEAD=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 8 -I "https://www.mihistoriadental.com/pacientes-valorados" || echo 000)
+            echo "PUBLIC_HEAD_/pacientes-valorados=$HEAD"
+            [[ "$HEAD" == "200" ]] || exit 1
+            # Cabecera Server/nginx: cuerpo HTML no debe venir de Node lento
+            curl -sS -D - -o /tmp/mhd-spa.html --max-time 8 -I "https://www.mihistoriadental.com/pacientes-valorados" | head -n 20 || true
+            echo "HARDEN_OK heap=${HEAP_MB} sync=$(stat -c%s "$SYNC")"
