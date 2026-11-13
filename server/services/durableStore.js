@@ -98,19 +98,36 @@ function decodeConnectionPart(value) {
   }
 }
 
+function isConnectionTerminatedError(error) {
+  const code = error && typeof error === 'object' ? String(error.code || '') : ''
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return (
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'EPIPE' ||
+    code === '57P01' ||
+    /connection terminated/i.test(message) ||
+    /Connection terminated/i.test(message) ||
+    /timeout expired/i.test(message) ||
+    /Client has encountered a connection error/i.test(message)
+  )
+}
+
 export function poolConfig(url) {
   const remoteSsl = postgresSslOption(url)
   const isRemote = remoteSsl !== false
 
-  // AWS RDS / hosts remotos: connectionString limpio + ssl explícito.
-  // Timeout corto: nunca congelar HTTP/SPA si RDS no responde.
+  // AWS RDS / hosts remotos: un solo pool compartido (withPgClient) con keepAlive.
+  // max:5 evita saturar una instancia RDS micro.
   if (isRemote) {
     return {
       connectionString: stripSslModeFromConnectionString(url),
       ssl: { rejectUnauthorized: false },
-      connectionTimeoutMillis: 3_000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10_000,
+      connectionTimeoutMillis: 20_000,
       idleTimeoutMillis: 30_000,
-      max: 10,
+      max: 5,
       allowExitOnIdle: true,
     }
   }
@@ -118,8 +135,10 @@ export function poolConfig(url) {
   // Localhost / host interno: sin TLS; params discretos evitan ambigüedad.
   const common = {
     max: 2,
-    connectionTimeoutMillis: 3_000,
-    idleTimeoutMillis: 20_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+    connectionTimeoutMillis: 8_000,
+    idleTimeoutMillis: 30_000,
     ssl: false,
     allowExitOnIdle: true,
   }
@@ -143,7 +162,7 @@ export function poolConfig(url) {
 
 /**
  * Ejecuta trabajo contra el Postgres de mihistoriadental.
- * No convierte un error de SQL en enfriamiento: solo un fallo de conexión.
+ * Si el socket se corta (`Connection terminated`), reintenta 1 vez antes del enfriamiento.
  * @param {(client: import('pg').PoolClient) => Promise<unknown>} fn
  */
 export async function withPgClient(fn) {
@@ -158,17 +177,50 @@ export async function withPgClient(fn) {
     error.code = 'PG_UNAVAILABLE'
     throw error
   }
-  let client
-  try {
-    client = await db.connect()
-  } catch (error) {
-    markPostgresUnavailable(error)
-    throw error
+
+  const runOnce = async () => {
+    let client
+    try {
+      client = await db.connect()
+    } catch (error) {
+      throw error
+    }
+    try {
+      return await fn(client)
+    } finally {
+      try {
+        client.release()
+      } catch {
+        // ignore
+      }
+    }
   }
+
   try {
-    return await fn(client)
-  } finally {
-    client.release()
+    return await runOnce()
+  } catch (error) {
+    if (!isConnectionTerminatedError(error)) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        (error.code === 'ECONNREFUSED' ||
+          error.code === 'ENOTFOUND' ||
+          error.code === 'EAI_AGAIN')
+      ) {
+        markPostgresUnavailable(error)
+      }
+      throw error
+    }
+    console.warn(
+      '[store] Conexión PostgreSQL terminada; reintento único…',
+      connectionErrorText(error),
+    )
+    try {
+      return await runOnce()
+    } catch (retryError) {
+      markPostgresUnavailable(retryError)
+      throw retryError
+    }
   }
 }
 

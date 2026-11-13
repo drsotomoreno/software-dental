@@ -53,6 +53,14 @@ export interface DiagnosticAidBlobRecord {
   createdAt: string
 }
 
+/** Tumba local: evita que el merge del sync reinserta un examen ya quitado (F5). */
+export interface DeletedDiagnosticAidTombstone {
+  id: string
+  clinicId?: string
+  fileName?: string
+  deletedAt: string
+}
+
 export const DIAGNOSTIC_AID_FILE_TYPE_LABELS: Record<DiagnosticAidFileType, string> = {
   DICOM: 'DICOM',
   STL: 'STL (CAD)',

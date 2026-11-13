@@ -330,6 +330,27 @@ async function mergeDiagnosticAids(records: ClinicalSyncRecord[]): Promise<boole
     const payload = payloadOf(remote)
     const id = String(payload.id || remote.syncId || '').trim()
     if (!id) continue
+
+    const tombstone = await db.deletedDiagnosticAids.get(id)
+    const remoteDeletedAt = String(remote.deletedAt || payload.deletedAt || '').trim()
+    if (tombstone || remoteDeletedAt) {
+      const existing = await db.diagnosticAids.get(id)
+      if (existing) {
+        await db.diagnosticAids.delete(id)
+        changed = true
+      }
+      if (!tombstone) {
+        await db.deletedDiagnosticAids.put({
+          id,
+          clinicId: remote.clinicId || String(payload.clinicId || ''),
+          fileName: String(payload.fileName || ''),
+          deletedAt: remoteDeletedAt || new Date().toISOString(),
+        })
+        changed = true
+      }
+      continue
+    }
+
     const patientId = (await resolveLocalPatientId(payload)) || String(payload.patientId || '')
     const next: DiagnosticAid = {
       ...(payload as unknown as DiagnosticAid),
@@ -702,12 +723,28 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
     }),
   )
 
-  const diagnosticAidsPayload = await Promise.all(
-    diagnosticAids.map(async (row) => {
+  const tombstones = await db.deletedDiagnosticAids.toArray()
+  const diagnosticAidsPayload = await Promise.all([
+    ...diagnosticAids.map(async (row) => {
       const withPatient = await withPatientSyncId({ ...row, clinicId })
       return toEntityRecord({ ...withPatient } as unknown as Record<string, unknown>, clinicId, row.id)
     }),
-  )
+    ...tombstones.map(async (row) => {
+      const deletedAt = row.deletedAt || new Date().toISOString()
+      return {
+        syncId: row.id,
+        clinicId: row.clinicId || clinicId,
+        updatedAt: deletedAt,
+        deletedAt,
+        payload: {
+          id: row.id,
+          fileName: row.fileName || '',
+          deletedAt,
+          clinicId: row.clinicId || clinicId,
+        },
+      }
+    }),
+  ])
 
   const draftsPayload = await Promise.all(
     drafts.map(async (row) => {
@@ -724,13 +761,34 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
 
   const builtQueue = await Promise.all(
     pendingQueue.map(async (item) => {
+      const syncId = item.id || item.aidId
+      const updatedAt = item.updatedAt || new Date().toISOString()
+
+      if (item.action === 'DELETE') {
+        const record: ClinicalSyncRecord = {
+          syncId: item.aidId || syncId,
+          clinicId,
+          updatedAt,
+          deletedAt: updatedAt,
+          payload: {
+            ...item,
+            id: item.aidId,
+            entityType: 'diagnostic_aid',
+            action: 'DELETE',
+            clinicId,
+            deletedAt: updatedAt,
+            hasBinary: false,
+          },
+        }
+        return record
+      }
+
       // Si ya se subió a Drive desde el cliente, solo sincroniza metadatos.
       if (item.driveFileId && item.binarySynced) {
-        const syncId = item.id || item.aidId
         const record: ClinicalSyncRecord = {
           syncId,
           clinicId,
-          updatedAt: item.updatedAt || new Date().toISOString(),
+          updatedAt,
           payload: {
             ...item,
             entityType: 'diagnostic_aid',
@@ -744,11 +802,10 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
       }
       const dataBase64 = await blobBase64ForAid(item.aidId)
       if (!dataBase64) return null
-      const syncId = item.id || item.aidId
       const record: ClinicalSyncRecord = {
         syncId,
         clinicId,
-        updatedAt: item.updatedAt || new Date().toISOString(),
+        updatedAt,
         payload: {
           ...item,
           dataBase64,

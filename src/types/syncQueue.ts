@@ -6,7 +6,7 @@ export type SyncQueueStatus = 'pending' | 'synced' | 'error'
 export interface SyncQueueAttachment {
   id: string
   entityType: SyncQueueEntityType
-  action?: 'CREATE' | 'UPSERT'
+  action?: 'CREATE' | 'UPSERT' | 'DELETE'
   status: SyncQueueStatus
   patientId: string
   /** ID de evolución / encuentro clínico. */

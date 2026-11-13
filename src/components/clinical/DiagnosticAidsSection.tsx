@@ -783,7 +783,25 @@ export function DiagnosticAidsSection({
 
   const handleDelete = useCallback(
     async (id: string) => {
-      await deleteDiagnosticAid(id, user);
+      setBanner({
+        tone: "info",
+        message: "Eliminando examen y sincronizando…",
+      });
+      try {
+        await deleteDiagnosticAid(id, user);
+        setBanner({
+          tone: "success",
+          message: "Examen eliminado y cambio enviado al servidor.",
+        });
+      } catch (error) {
+        setBanner({
+          tone: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "No se pudo eliminar el examen.",
+        });
+      }
     },
 
     [user],

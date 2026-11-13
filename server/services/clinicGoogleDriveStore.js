@@ -190,22 +190,153 @@ export function clinicIdLookupKeys(canonicalClinicId) {
   return [...new Set(keys.filter(Boolean))]
 }
 
+function recordFromPostgresRow(row) {
+  if (!row) return null
+  return {
+    clinicId: String(row.clinic_canonical_id || '').trim(),
+    status: String(row.google_drive_status || 'disconnected'),
+    googleDriveEmail: row.google_drive_email || null,
+    refreshTokenEnc: row.google_drive_refresh_token || null,
+    accessTokenEnc: row.google_drive_access_token || null,
+    tokenExpiresAt: row.google_drive_token_expires_at
+      ? new Date(row.google_drive_token_expires_at).toISOString()
+      : null,
+    rootFolderId: row.google_drive_root_folder_id || null,
+    clinicName: row.clinic_name || null,
+    connectedAt: row.google_drive_connected_at
+      ? new Date(row.google_drive_connected_at).toISOString()
+      : null,
+    connectedByUserId: row.connected_by_user_id || null,
+  }
+}
+
+function isConnectedDriveRecord(record) {
+  return (
+    Boolean(record) &&
+    String(record.status || '') === 'connected' &&
+    Boolean(record.refreshTokenEnc && record.rootFolderId)
+  )
+}
+
 /**
- * Busca la primera fila conectada entre varias claves candidatas
- * (p. ej. clinic:uuid, uuid, clinic:email, email).
+ * Busca la primera fila entre varias claves candidatas
+ * (JSON durable + Postgres `clinic_canonical_id IN (...)`).
  * @returns {{ record: object, storageKey: string } | null}
  */
 export async function findClinicGoogleDriveRecordAmong(candidateIds = []) {
   const store = await loadStore()
   const tried = new Set()
+  const keys = []
   for (const raw of candidateIds) {
     for (const key of clinicIdLookupKeys(raw)) {
       if (!key || tried.has(key)) continue
       tried.add(key)
+      keys.push(key)
       const row = store.clinics[key]
       if (row) return { record: row, storageKey: key }
     }
   }
+
+  if (keys.length) {
+    try {
+      const pgHit = await withPgClient(async (client) => {
+        const { rows } = await client.query(
+          `SELECT clinic_canonical_id,
+                  google_drive_email,
+                  google_drive_refresh_token,
+                  google_drive_root_folder_id,
+                  google_drive_access_token,
+                  google_drive_token_expires_at,
+                  google_drive_connected_at,
+                  google_drive_status,
+                  clinic_name,
+                  connected_by_user_id
+             FROM clinica_google_drive
+            WHERE clinic_canonical_id = ANY($1::text[])
+            ORDER BY CASE
+              WHEN google_drive_status = 'connected'
+               AND google_drive_refresh_token IS NOT NULL
+               AND btrim(google_drive_refresh_token) <> ''
+              THEN 0 ELSE 1 END,
+              updated_at DESC NULLS LAST
+            LIMIT 1`,
+          [keys],
+        )
+        return rows[0] || null
+      })
+      const mapped = recordFromPostgresRow(pgHit)
+      if (mapped?.clinicId) {
+        // Espejo best-effort en JSON para siguientes lecturas offline.
+        store.clinics[mapped.clinicId] = {
+          ...(store.clinics[mapped.clinicId] || {}),
+          ...mapped,
+          updatedAt: new Date().toISOString(),
+        }
+        await saveStore(store).catch(() => undefined)
+        return { record: mapped, storageKey: mapped.clinicId }
+      }
+    } catch (error) {
+      console.warn(
+        '[google-drive] Lookup Postgres clinica_google_drive falló:',
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
+
+  return null
+}
+
+/**
+ * Respaldo: única fila conectada (o la del superadmin) cuando no hay match exacto.
+ * Evita "Google Drive no está conectado" si la clave local ≠ clinic_canonical_id en RDS.
+ */
+export async function findSoleConnectedGoogleDriveRecord({ allowFallback = false } = {}) {
+  if (!allowFallback) return null
+
+  const store = await loadStore()
+  const connectedLocal = Object.entries(store.clinics || {})
+    .filter(([, row]) => isConnectedDriveRecord(row))
+    .map(([key, row]) => ({ record: row, storageKey: key }))
+
+  if (connectedLocal.length === 1) return connectedLocal[0]
+
+  try {
+    const pgRows = await withPgClient(async (client) => {
+      const { rows } = await client.query(
+        `SELECT clinic_canonical_id,
+                google_drive_email,
+                google_drive_refresh_token,
+                google_drive_root_folder_id,
+                google_drive_access_token,
+                google_drive_token_expires_at,
+                google_drive_connected_at,
+                google_drive_status,
+                clinic_name,
+                connected_by_user_id
+           FROM clinica_google_drive
+          WHERE google_drive_refresh_token IS NOT NULL
+            AND btrim(google_drive_refresh_token) <> ''
+            AND google_drive_status = 'connected'
+          ORDER BY updated_at DESC NULLS LAST
+          LIMIT 2`,
+      )
+      return rows
+    })
+    if (Array.isArray(pgRows) && pgRows.length === 1) {
+      const mapped = recordFromPostgresRow(pgRows[0])
+      if (mapped?.clinicId) {
+        return { record: mapped, storageKey: mapped.clinicId }
+      }
+    }
+  } catch (error) {
+    console.warn(
+      '[google-drive] Fallback Postgres clinica_google_drive falló:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+
+  // Si el JSON tiene exactamente una conectada tras fallo PG, úsala.
+  if (connectedLocal.length === 1) return connectedLocal[0]
   return null
 }
 

@@ -32,7 +32,11 @@ import type {
 } from '@/types/offlineMirror'
 import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
 import type { CatalogItem, CatalogMeta } from '@/types/catalog'
-import type { DiagnosticAid, DiagnosticAidBlobRecord } from '@/types/diagnosticAid'
+import type {
+  DeletedDiagnosticAidTombstone,
+  DiagnosticAid,
+  DiagnosticAidBlobRecord,
+} from '@/types/diagnosticAid'
 import type {
   DentalService,
   DentalServiceAuthorizedSpecialty,
@@ -116,6 +120,8 @@ export class DentalDatabase extends Dexie {
   catalogItems!: EntityTable<CatalogItem, 'id'>
   diagnosticAids!: EntityTable<DiagnosticAid, 'id'>
   diagnosticAidBlobs!: EntityTable<DiagnosticAidBlobRecord, 'id'>
+  /** IDs de exámenes quitados: el pull no debe reinsertarlos. */
+  deletedDiagnosticAids!: EntityTable<DeletedDiagnosticAidTombstone, 'id'>
   dentalServices!: EntityTable<DentalService, 'id'>
   dentalServiceSpecialties!: EntityTable<DentalServiceAuthorizedSpecialty, 'id'>
   professionals!: EntityTable<Professional, 'id'>
@@ -919,6 +925,11 @@ export class DentalDatabase extends Dexie {
     // v36 — dexie-encrypted: tabla interna `_encryptionSettings` + re-cifrado
     // de patients / clinicalRecords / odontograms / patientClinicalDrafts.
     this.version(36).stores({})
+
+    // v37 — tumbas de exámenes complementarios (Quitar → no reaparecen tras F5/sync).
+    this.version(37).stores({
+      deletedDiagnosticAids: 'id, clinicId, deletedAt',
+    })
   }
 }
 

@@ -49,13 +49,15 @@ test('stripSslModeFromConnectionString elimina sslmode conflictivo', () => {
   assert.match(cleaned, /rds\.amazonaws\.com/)
 })
 
-test('URL remota RDS usa connectionString limpio + SSL + timeout corto 3s + max 10', () => {
+test('URL remota RDS usa connectionString limpio + SSL + keepAlive + max 5', () => {
   const config = poolConfig(
     'postgresql://user:secret@mydb.xxxxx.us-east-1.rds.amazonaws.com:5432/mydb?sslmode=require',
   )
   assert.deepEqual(config.ssl, { rejectUnauthorized: false })
-  assert.equal(config.max, 10)
-  assert.equal(config.connectionTimeoutMillis, 3_000)
+  assert.equal(config.max, 5)
+  assert.equal(config.keepAlive, true)
+  assert.equal(config.keepAliveInitialDelayMillis, 10_000)
+  assert.equal(config.connectionTimeoutMillis, 20_000)
   assert.equal(config.idleTimeoutMillis, 30_000)
   assert.equal(typeof config.connectionString, 'string')
   assert.equal(String(config.connectionString).includes('sslmode'), false)
@@ -67,7 +69,8 @@ test('URL externa legacy (Render) también usa connectionString limpio + SSL', (
     'postgresql://user:secret@dpg-abc123-a.oregon-postgres.render.com:5432/mydb?sslmode=require',
   )
   assert.deepEqual(config.ssl, { rejectUnauthorized: false })
-  assert.equal(config.max, 10)
+  assert.equal(config.max, 5)
+  assert.equal(config.keepAlive, true)
   assert.equal(String(config.connectionString).includes('sslmode'), false)
 })
 

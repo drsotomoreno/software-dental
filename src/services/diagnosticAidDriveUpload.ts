@@ -166,14 +166,36 @@ export async function uploadDiagnosticAidToGoogleDrive(
     if (clinicId) form.append('clinicId', clinicId)
     if (entry.driveFileId) form.append('driveFileId', entry.driveFileId)
 
-    const response = await fetch(
-      `/api/integrations/google-drive/upload${driveClinicQuery(clinicId)}`,
-      {
-        method: 'POST',
-        headers: driveIdentityHeaders(clinicId),
-        body: form,
-      },
-    )
+    const controller = new AbortController()
+    const timeoutMs = 45_000
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+    let response: Response
+    try {
+      response = await fetch(
+        `/api/integrations/google-drive/upload${driveClinicQuery(clinicId)}`,
+        {
+          method: 'POST',
+          headers: driveIdentityHeaders(clinicId),
+          body: form,
+          signal: controller.signal,
+        },
+      )
+    } catch (error) {
+      window.clearTimeout(timer)
+      const aborted =
+        (error instanceof DOMException && error.name === 'AbortError') ||
+        (error instanceof Error && /aborted|AbortError/i.test(error.message))
+      const message = aborted
+        ? `La subida a Google Drive superó ${Math.round(timeoutMs / 1000)} s. Reintente con «Subir a Drive».`
+        : error instanceof Error
+          ? error.message
+          : 'No se pudo subir el archivo a Google Drive.'
+      const failed = await markUploadError(aidId, message)
+      emit('error', message)
+      return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
+    } finally {
+      window.clearTimeout(timer)
+    }
     const body = await response.json().catch(() => ({}))
 
     if (isGoogleDriveRequiredResponse(response, body)) {

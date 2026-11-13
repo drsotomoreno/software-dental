@@ -7,7 +7,7 @@ import {
 } from '@/services/diagnosticAidBlobStore'
 import { uploadDiagnosticAidToGoogleDrive } from '@/services/diagnosticAidDriveUpload'
 import { ensureLocalDiagnosticAidBlob } from '@/services/diagnosticAidRemoteStore'
-import { getCurrentClinicId } from '@/services/clinicalSyncState'
+import { getCurrentClinicId, notifyClinicalRecordDirty } from '@/services/clinicalSyncState'
 import { enqueueDiagnosticAidForSync, resolvePatientSyncId } from '@/services/syncQueueService'
 import type { UserProfile } from '@/types/user'
 import type { DiagnosticAid, DiagnosticAidFileType } from '@/types/diagnosticAid'
@@ -435,8 +435,62 @@ export async function updateDiagnosticAidReceivedAt(
 export async function deleteDiagnosticAid(id: string, user?: UserProfile | null): Promise<void> {
   const entry = await db.diagnosticAids.get(id)
   if (!entry) return
+
+  const deletedAt = new Date().toISOString()
+  const clinicId = entry.clinicId || getCurrentClinicId() || undefined
+
+  // 1) Binario IndexedDB + fila clínica + tumba (anti-reinserción en merge/F5).
   await deleteDiagnosticAidBlob(id)
-  await db.diagnosticAids.delete(id)
+  await db.transaction(
+    'rw',
+    db.diagnosticAids,
+    db.deletedDiagnosticAids,
+    db.syncQueue,
+    async () => {
+      await db.diagnosticAids.delete(id)
+      await db.deletedDiagnosticAids.put({
+        id,
+        clinicId,
+        fileName: entry.fileName,
+        deletedAt,
+      })
+      const existing = await db.syncQueue.where('aidId').equals(id).first()
+      const queueItem = {
+        id: existing?.id || generateId(),
+        entityType: 'diagnostic_aid' as const,
+        action: 'DELETE' as const,
+        status: 'pending' as const,
+        patientId: String(entry.patientId),
+        encounterId: String(entry.encounterId || ''),
+        patientSyncId: entry.patientSyncId,
+        aidId: id,
+        blobId: null,
+        fileName: entry.fileName,
+        fileHash: entry.fileHash || '',
+        mimeType: mimeTypeForDiagnosticFile(entry.fileName),
+        absolutePath: entry.absolutePath,
+        clinicId,
+        driveFileId: entry.driveFileId ?? null,
+        webViewLink: entry.webViewLink ?? null,
+        binarySynced: true,
+        createdAt: existing?.createdAt || deletedAt,
+        updatedAt: deletedAt,
+      }
+      if (existing?.id) await db.syncQueue.put({ ...existing, ...queueItem })
+      else await db.syncQueue.add(queueItem)
+    },
+  )
+
+  notifyClinicalRecordDirty()
+
+  // 2) Push inmediato a /api/sync (clinical-sync / app_json_store).
+  try {
+    const { runClinicalSyncCycle } = await import('@/services/clinicalSyncService')
+    await runClinicalSyncCycle()
+  } catch {
+    // El dirty listener reintentará; la tumba local ya evita reaparición en F5.
+  }
+
   await logAuditEvent({
     action: 'DELETE_DIAGNOSTIC_AID',
     resourceType: 'diagnostic_aid',

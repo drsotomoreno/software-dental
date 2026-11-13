@@ -15,6 +15,7 @@ import {
   clearClinicGoogleDriveConnection,
   ensureClinicGoogleDriveSchema,
   findClinicGoogleDriveRecordAmong,
+  findSoleConnectedGoogleDriveRecord,
   getClinicGoogleDriveRecord,
   getClinicGoogleDriveStatus,
   saveClinicGoogleDriveConnection,
@@ -178,7 +179,31 @@ export function collectClinicIdCandidatesFromRequest(req, user) {
  */
 export async function findClinicDriveCredentials(req, user) {
   const candidates = collectClinicIdCandidatesFromRequest(req, user)
-  const found = await findClinicGoogleDriveRecordAmong(candidates)
+  // Incluir explícitamente clinic:${user.id} y clinic:${email} (orden del contrato).
+  const userId = String(user?.id || '').trim()
+  const email = normalizeEmail(user?.email)
+  if (userId) {
+    candidates.unshift(`clinic:${userId}`, userId)
+  }
+  if (email) {
+    candidates.unshift(`clinic:${email}`, email)
+  }
+
+  let found = await findClinicGoogleDriveRecordAmong(candidates)
+  const connectedExact =
+    found?.record &&
+    String(found.record.status || '') === 'connected' &&
+    Boolean(found.record.refreshTokenEnc && found.record.rootFolderId)
+
+  if (!connectedExact) {
+    const allowFallback = isGoogleDriveSuperAdmin(user)
+    const sole = await findSoleConnectedGoogleDriveRecord({ allowFallback: true })
+    // Superadmin o única fila conectada en RDS/JSON → nunca "no conectado" por mismatch de clave.
+    if (sole?.record && (allowFallback || !found?.record)) {
+      found = sole
+    }
+  }
+
   if (found?.record) {
     const connected =
       String(found.record.status || '') === 'connected' &&
@@ -194,10 +219,7 @@ export async function findClinicDriveCredentials(req, user) {
 
   let fallback = null
   try {
-    fallback = resolveManagedClinicId(
-      user,
-      candidates[0] || '',
-    )
+    fallback = resolveManagedClinicId(user, candidates[0] || '')
   } catch {
     fallback = canonicalClinicIdOf(user) || null
   }
