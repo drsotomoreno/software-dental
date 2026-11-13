@@ -22,6 +22,9 @@ export interface SyncQueueAttachment {
   dataBase64?: string
   byteLength?: number
   clinicId?: string
+  /** Id en Google Drive si ya se subió el binario. */
+  driveFileId?: string | null
+  webViewLink?: string | null
   createdAt: string
   updatedAt: string
   lastSyncedAt?: string

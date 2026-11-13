@@ -4,12 +4,18 @@ import {
   sessionHintFromRequest,
 } from '../services/subscriptionAuthStore.js'
 import {
+  GoogleDriveRequiredError,
+  isGoogleDriveRequiredError,
+  uploadClinicAttachmentToDrive,
+} from '../services/googleDriveAttachments.service.js'
+import {
   buildGoogleDriveConnectUrl,
   completeGoogleDriveOAuthCallback,
   disconnectGoogleDriveForUser,
   frontendRedirectAfterOAuth,
   getGoogleOAuthConfigStatus,
   readGoogleDriveStatusForUser,
+  resolveManagedClinicId,
 } from '../services/googleDriveOAuth.service.js'
 
 const router = Router()
@@ -154,6 +160,109 @@ router.post('/disconnect', async (req, res) => {
     return res.json({ success: true, ok: true, ...status })
   } catch (error) {
     console.error('[google-drive] POST /disconnect:', error)
+    const mapped = mapOAuthError(error)
+    return res.status(mapped.status).json({
+      success: false,
+      ok: false,
+      error: mapped.message,
+      code: mapped.code,
+    })
+  }
+})
+
+/**
+ * Subida inmediata de adjunto clínico (exámenes / escaneos) a la carpeta
+ * pacientes/{patientSyncId}/ayudas/ de la clínica en Google Drive.
+ * Body JSON: { fileName, mimeType, dataBase64, patientSyncId?, aidId?, driveFileId? }
+ */
+router.post('/upload', async (req, res) => {
+  try {
+    const user = await requireSessionUser(req, res)
+    if (!user) return
+
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const fileName = String(body.fileName || body.name || '').trim()
+    const mimeType = String(body.mimeType || 'application/octet-stream').trim()
+    const dataBase64 = String(body.dataBase64 || body.data || '').trim()
+    const patientSyncId = String(
+      body.patientSyncId || body.patientId || body.patient_sync_id || 'sin-paciente',
+    ).trim()
+    const aidId = String(body.aidId || body.id || '').trim()
+    const existingFileId = String(body.driveFileId || '').trim() || undefined
+    const clinicId = resolveManagedClinicId(user, requestedClinicIdFrom(req))
+
+    if (!clinicId) {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error: 'No se pudo resolver la clínica de la sesión.',
+        code: 'CLINIC_REQUIRED',
+      })
+    }
+    if (!fileName || !dataBase64) {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error: 'fileName y dataBase64 son obligatorios.',
+        code: 'INVALID_UPLOAD_PAYLOAD',
+      })
+    }
+
+    let buffer
+    try {
+      buffer = Buffer.from(dataBase64, 'base64')
+    } catch {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error: 'dataBase64 inválido.',
+        code: 'INVALID_BASE64',
+      })
+    }
+    if (!buffer.length) {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error: 'El archivo está vacío.',
+        code: 'EMPTY_ATTACHMENT_BUFFER',
+      })
+    }
+
+    const uploaded = await uploadClinicAttachmentToDrive({
+      clinicId,
+      patientSyncId,
+      fileName,
+      mimeType,
+      buffer,
+      driveFileId: existingFileId,
+      appProperties: {
+        source: 'diagnostic_aid',
+        ...(aidId ? { aidId } : {}),
+      },
+    })
+
+    return res.json({
+      success: true,
+      ok: true,
+      clinicId,
+      driveFileId: uploaded.driveFileId,
+      webViewLink: uploaded.webViewLink,
+      byteLength: uploaded.byteLength,
+      storageBackend: uploaded.storageBackend,
+    })
+  } catch (error) {
+    console.error('[google-drive] POST /upload:', error)
+    if (isGoogleDriveRequiredError(error) || error instanceof GoogleDriveRequiredError) {
+      return res.status(428).json({
+        success: false,
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'La clínica debe conectar Google Drive antes de subir adjuntos.',
+        code: 'google_drive_required',
+      })
+    }
     const mapped = mapOAuthError(error)
     return res.status(mapped.status).json({
       success: false,

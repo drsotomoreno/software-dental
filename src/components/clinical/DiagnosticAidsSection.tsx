@@ -4,6 +4,8 @@ import { useLiveQuery } from "dexie-react-hooks";
 
 import {
   ChevronDown,
+  Cloud,
+  CloudOff,
   ExternalLink,
   FileUp,
   Loader2,
@@ -58,6 +60,28 @@ import {
   DiagnosticAidOpenMenu,
   DiagnosticAidPreviewModal,
 } from "./DiagnosticAidOpenMenu";
+
+function storageLabel(item: DiagnosticAid): {
+  text: string;
+  tone: "drive" | "uploading" | "error" | "local";
+} {
+  if (item.driveUploadStatus === "uploading" || item.driveUploadStatus === "pending") {
+    return { text: "Subiendo a Google Drive…", tone: "uploading" };
+  }
+  if (item.driveFileId || item.driveUploadStatus === "uploaded") {
+    return { text: "Guardado en Google Drive", tone: "drive" };
+  }
+  if (item.driveUploadStatus === "error") {
+    return {
+      text: item.driveUploadError || "Error al subir a Google Drive",
+      tone: "error",
+    };
+  }
+  if (item.driveUploadStatus === "local_only" || isBrowserStoredDiagnosticAid(item)) {
+    return { text: "Almacenado en este navegador", tone: "local" };
+  }
+  return { text: item.absolutePath, tone: "local" };
+}
 
 interface DiagnosticAidsSectionProps {
   patientId: string;
@@ -261,7 +285,7 @@ function DiagnosticAidCard({
 
   const useWebMenu = shouldOpenDiagnosticAidWithWebMenu(item);
 
-  const browserStored = isBrowserStoredDiagnosticAid(item);
+  const storage = storageLabel(item);
 
   return (
     <article className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -288,12 +312,27 @@ function DiagnosticAidCard({
         </span>
       </div>
 
-      <p
-        className="truncate font-mono text-[10px] text-slate-400"
-        title={item.absolutePath}
+      <div
+        className={`flex items-start gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium ${
+          storage.tone === "drive"
+            ? "bg-emerald-50 text-emerald-800"
+            : storage.tone === "uploading"
+              ? "bg-sky-50 text-sky-800"
+              : storage.tone === "error"
+                ? "bg-red-50 text-red-800"
+                : "bg-slate-50 text-slate-600"
+        }`}
+        title={item.driveUploadError || item.webViewLink || item.absolutePath}
       >
-        {browserStored ? "Almacenado en este navegador" : item.absolutePath}
-      </p>
+        {storage.tone === "uploading" ? (
+          <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+        ) : storage.tone === "drive" ? (
+          <Cloud className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        ) : storage.tone === "error" ? (
+          <CloudOff className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        ) : null}
+        <span className="min-w-0 break-words">{storage.text}</span>
+      </div>
 
       <p className="font-mono text-[10px] text-slate-400" title={item.fileHash}>
         SHA-256: {item.fileHash.slice(0, 16)}…
@@ -400,7 +439,11 @@ export function DiagnosticAidsSection({
 
     url: string;
 
-    kind: "image" | "pdf";
+    kind: "image" | "pdf" | "mesh3d";
+
+    driveUrl?: string | null;
+
+    aidId?: string;
   } | null>(null);
 
   const [showOpenerSettings, setShowOpenerSettings] = useState(false);
@@ -448,7 +491,12 @@ export function DiagnosticAidsSection({
 
       if (!picked) return;
 
-      await registerDiagnosticAid({
+      setBanner({
+        tone: "info",
+        message: `Registrando y subiendo a Google Drive: ${picked.fileName}…`,
+      });
+
+      const saved = await registerDiagnosticAid({
         patientId,
 
         encounterId,
@@ -462,11 +510,24 @@ export function DiagnosticAidsSection({
         user,
       });
 
-      setBanner({
-        tone: "success",
-
-        message: `Archivo registrado: ${picked.fileName}`,
-      });
+      if (saved.driveUploadStatus === "error") {
+        setBanner({
+          tone: "error",
+          message:
+            saved.driveUploadError ||
+            `Archivo registrado localmente, pero falló la subida a Google Drive: ${picked.fileName}`,
+        });
+      } else if (saved.driveFileId) {
+        setBanner({
+          tone: "success",
+          message: `Guardado en Google Drive: ${picked.fileName}`,
+        });
+      } else {
+        setBanner({
+          tone: "info",
+          message: `Archivo registrado en este navegador: ${picked.fileName}. Conecte Google Drive en Perfil para sincronizar.`,
+        });
+      }
     } catch (error) {
       setBanner({
         tone: "error",
@@ -488,7 +549,12 @@ export function DiagnosticAidsSection({
       setBanner(null);
 
       try {
-        await registerDiagnosticAidFromBrowserFile(file, {
+        setBanner({
+          tone: "info",
+          message: `Registrando y subiendo a Google Drive: ${file.name}…`,
+        });
+
+        const saved = await registerDiagnosticAidFromBrowserFile(file, {
           patientId,
 
           encounterId,
@@ -498,11 +564,24 @@ export function DiagnosticAidsSection({
           user,
         });
 
-        setBanner({
-          tone: "success",
-
-          message: `Archivo registrado: ${file.name}`,
-        });
+        if (saved.driveUploadStatus === "error") {
+          setBanner({
+            tone: "error",
+            message:
+              saved.driveUploadError ||
+              `Archivo registrado localmente, pero falló la subida a Google Drive: ${file.name}`,
+          });
+        } else if (saved.driveFileId) {
+          setBanner({
+            tone: "success",
+            message: `Guardado en Google Drive: ${file.name}`,
+          });
+        } else {
+          setBanner({
+            tone: "info",
+            message: `Archivo registrado en este navegador: ${file.name}. Conecte Google Drive en Perfil para sincronizar.`,
+          });
+        }
       } catch (error) {
         setBanner({
           tone: "error",
@@ -573,6 +652,14 @@ export function DiagnosticAidsSection({
             url: result.previewUrl,
 
             kind: result.previewKind,
+
+            driveUrl:
+              webMenuItem.webViewLink ||
+              (webMenuItem.driveFileId
+                ? `https://drive.google.com/file/d/${webMenuItem.driveFileId}/view`
+                : null),
+
+            aidId: webMenuItem.id,
           });
 
           setWebMenuItem(null);
@@ -584,7 +671,11 @@ export function DiagnosticAidsSection({
           message: result.message,
         });
 
-        if (result.ok && action !== "preview_media") {
+        if (
+          result.ok &&
+          action !== "preview_media" &&
+          action !== "view_in_app_3d"
+        ) {
           setWebMenuItem(null);
         }
       } finally {
@@ -788,6 +879,18 @@ export function DiagnosticAidsSection({
         previewUrl={preview?.url ?? null}
 
         previewKind={preview?.kind ?? "image"}
+
+        driveUrl={preview?.driveUrl}
+
+        onDownload={
+          preview?.kind === "mesh3d" && preview.aidId
+            ? () => {
+                const item = items.find((row) => row.id === preview.aidId);
+                if (!item) return;
+                void executeDiagnosticAidWebAction(item, "download_mesh", user);
+              }
+            : undefined
+        }
 
         onClose={closePreview}
       />

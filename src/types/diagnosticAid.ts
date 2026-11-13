@@ -1,6 +1,13 @@
 /** Tipos de archivo para exámenes complementarios y escaneos */
 export type DiagnosticAidFileType = 'DICOM' | 'STL' | 'IMG' | 'OTHER'
 
+export type DiagnosticAidDriveUploadStatus =
+  | 'pending'
+  | 'uploading'
+  | 'uploaded'
+  | 'error'
+  | 'local_only'
+
 /**
  * Modelo `diagnostic_aids` — almacenamiento local de referencias a archivos
  * (DICOM, STL, imágenes, etc.) sin cargar el binario en la aplicación.
@@ -28,6 +35,12 @@ export interface DiagnosticAid {
   patientSyncId?: string
   pendingSync?: boolean
   lastSyncedAt?: string
+  /** Metadatos Google Drive (bytes en la nube; IndexedDB es caché offline). */
+  driveFileId?: string | null
+  webViewLink?: string | null
+  storageBackend?: 'google_drive' | 'indexeddb' | 'disk' | null
+  driveUploadStatus?: DiagnosticAidDriveUploadStatus | null
+  driveUploadError?: string | null
 }
 
 /** Copia binaria local para archivos cargados desde el navegador web */

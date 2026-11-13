@@ -16,18 +16,21 @@ export const EXOCAD_WEBVIEW_URL = 'https://webview.dental/'
 export const DICOM_VIEWER_ONLINE_URL = 'https://dicomviewer.net/'
 
 export type DiagnosticAidWebAction =
+  | 'view_in_app_3d'
   | 'open_exocad_webview'
   | 'download_mesh'
   | 'open_dicom_viewer'
   | 'download_dicom'
   | 'preview_media'
   | 'download_media'
+  | 'open_google_drive'
 
 export interface DiagnosticAidWebActionResult {
   ok: boolean
   message: string
   previewUrl?: string
-  previewKind?: 'image' | 'pdf'
+  previewKind?: 'image' | 'pdf' | 'mesh3d'
+  openDriveUrl?: string
 }
 
 async function auditWebOpen(
@@ -71,22 +74,41 @@ function meshDownloadLabel(fileName: string): string {
   return 'Descargar escaneo (.stl)'
 }
 
+function driveLinkOf(entry: DiagnosticAid): string | null {
+  const link = String(entry.webViewLink || '').trim()
+  if (link) return link
+  const id = String(entry.driveFileId || '').trim()
+  if (id) return `https://drive.google.com/file/d/${id}/view`
+  return null
+}
+
 export function getWebOpenActions(entry: DiagnosticAid): Array<{
   id: DiagnosticAidWebAction
   label: string
-  icon: 'globe' | 'download' | 'eye'
+  icon: 'globe' | 'download' | 'eye' | 'box' | 'cloud'
   disabled?: boolean
 }> {
   const category = classifyDiagnosticAidForWeb(entry.fileName)
+  const driveLink = driveLinkOf(entry)
+  const driveAction = driveLink
+    ? ([
+        {
+          id: 'open_google_drive' as const,
+          label: 'Ver en Google Drive',
+          icon: 'cloud' as const,
+        },
+      ] as const)
+    : []
 
   if (category === 'mesh3d') {
     return [
-      { id: 'open_exocad_webview', label: 'Abrir en exocad webview', icon: 'globe' },
+      { id: 'view_in_app_3d', label: 'Ver en visor 3D', icon: 'box' },
       {
         id: 'download_mesh',
         label: meshDownloadLabel(entry.fileName),
         icon: 'download',
       },
+      ...driveAction,
     ]
   }
 
@@ -98,6 +120,7 @@ export function getWebOpenActions(entry: DiagnosticAid): Array<{
         label: 'Descargar archivo / carpeta DICOM (.zip)',
         icon: 'download',
       },
+      ...driveAction,
     ]
   }
 
@@ -115,6 +138,7 @@ export function getWebOpenActions(entry: DiagnosticAid): Array<{
         label: 'Descargar archivo',
         icon: 'download',
       },
+      ...driveAction,
     ]
   }
 
@@ -124,6 +148,7 @@ export function getWebOpenActions(entry: DiagnosticAid): Array<{
       label: 'Descargar archivo',
       icon: 'download',
     },
+    ...driveAction,
   ]
 }
 
@@ -134,22 +159,54 @@ export async function executeDiagnosticAidWebAction(
 ): Promise<DiagnosticAidWebActionResult> {
   try {
     switch (action) {
-      case 'open_exocad_webview': {
-        const downloaded = await downloadStoredBlob(entry)
-        openExternalTab(EXOCAD_WEBVIEW_URL)
-        await auditWebOpen(
-          entry,
-          action,
-          true,
-          `${downloadNameFor(entry)} — exocad webview${downloaded ? ' + descarga' : ''}`,
-          user,
-        )
+      case 'view_in_app_3d': {
+        const local = await ensureLocalDiagnosticAidBlob(entry)
+        if (!local) {
+          const drive = driveLinkOf(entry)
+          if (drive) {
+            openExternalTab(drive)
+            await auditWebOpen(entry, action, true, `Drive fallback: ${entry.fileName}`, user)
+            return {
+              ok: true,
+              message: 'No hay caché local; se abrió el archivo en Google Drive.',
+              openDriveUrl: drive,
+            }
+          }
+          const message =
+            'No se pudo cargar el escaneo 3D. Reintente con conexión o descárguelo.'
+          await auditWebOpen(entry, action, false, message, user)
+          return { ok: false, message }
+        }
+        const previewUrl = await getDiagnosticAidBlobUrl(entry.id)
+        if (!previewUrl) {
+          const message = 'No se pudo preparar el visor 3D.'
+          await auditWebOpen(entry, action, false, message, user)
+          return { ok: false, message }
+        }
+        await auditWebOpen(entry, action, true, `Visor 3D: ${entry.fileName}`, user)
         return {
           ok: true,
-          message: downloaded
-            ? 'Visor exocad webview abierto. El escaneo se descargó con su extensión para importarlo.'
-            : 'Visor exocad webview abierto. Descargue el escaneo si necesita importarlo.',
+          message: 'Visor 3D listo.',
+          previewUrl,
+          previewKind: 'mesh3d',
         }
+      }
+
+      case 'open_exocad_webview': {
+        // Legacy: redirige al visor 3D integrado (exocad no puede leer blobs locales).
+        return executeDiagnosticAidWebAction(entry, 'view_in_app_3d', user)
+      }
+
+      case 'open_google_drive': {
+        const drive = driveLinkOf(entry)
+        if (!drive) {
+          const message = 'Este archivo aún no tiene enlace en Google Drive.'
+          await auditWebOpen(entry, action, false, message, user)
+          return { ok: false, message }
+        }
+        openExternalTab(drive)
+        await auditWebOpen(entry, action, true, drive, user)
+        return { ok: true, message: 'Abriendo en Google Drive…', openDriveUrl: drive }
       }
 
       case 'download_mesh':
@@ -158,6 +215,16 @@ export async function executeDiagnosticAidWebAction(
         const fileName = downloadNameFor(entry)
         const downloaded = await downloadStoredBlob(entry)
         if (!downloaded) {
+          const drive = driveLinkOf(entry)
+          if (drive) {
+            openExternalTab(drive)
+            await auditWebOpen(entry, action, true, `Drive download: ${fileName}`, user)
+            return {
+              ok: true,
+              message: 'No hay caché local; se abrió el archivo en Google Drive para descargarlo.',
+              openDriveUrl: drive,
+            }
+          }
           const message =
             'No se pudo descargar el archivo desde el servidor de la clínica. Reintente con conexión.'
           await auditWebOpen(entry, action, false, message, user)
@@ -182,6 +249,16 @@ export async function executeDiagnosticAidWebAction(
       case 'preview_media': {
         const local = await ensureLocalDiagnosticAidBlob(entry)
         if (!local) {
+          const drive = driveLinkOf(entry)
+          if (drive) {
+            openExternalTab(drive)
+            await auditWebOpen(entry, action, true, `Drive preview: ${entry.fileName}`, user)
+            return {
+              ok: true,
+              message: 'Vista previa abierta desde Google Drive.',
+              openDriveUrl: drive,
+            }
+          }
           const message = 'No se pudo descargar la vista previa desde la clínica.'
           await auditWebOpen(entry, action, false, message, user)
           return { ok: false, message }

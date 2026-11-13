@@ -724,6 +724,24 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
 
   const builtQueue = await Promise.all(
     pendingQueue.map(async (item) => {
+      // Si ya se subió a Drive desde el cliente, solo sincroniza metadatos.
+      if (item.driveFileId && item.binarySynced) {
+        const syncId = item.id || item.aidId
+        const record: ClinicalSyncRecord = {
+          syncId,
+          clinicId,
+          updatedAt: item.updatedAt || new Date().toISOString(),
+          payload: {
+            ...item,
+            entityType: 'diagnostic_aid',
+            clinicId,
+            hasBinary: true,
+            driveFileId: item.driveFileId,
+            webViewLink: item.webViewLink || undefined,
+          },
+        }
+        return record
+      }
       const dataBase64 = await blobBase64ForAid(item.aidId)
       if (!dataBase64) return null
       const syncId = item.id || item.aidId

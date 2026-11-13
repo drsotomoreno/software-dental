@@ -159,7 +159,7 @@ async function resolveClinicDrive(canonicalClinicId) {
 
 /**
  * Sube un buffer a Drive (multipart/resumable vía googleapis).
- * @returns {{ driveFileId: string, byteLength: number, storageBackend: 'google_drive' }}
+ * @returns {{ driveFileId: string, webViewLink: string, byteLength: number, storageBackend: 'google_drive' }}
  */
 export async function uploadClinicAttachmentToDrive({
   clinicId,
@@ -197,6 +197,18 @@ export async function uploadClinicAttachmentToDrive({
     if (k && v) props[k] = v
   }
 
+  function resultPayload(id, webViewLink) {
+    const link =
+      String(webViewLink || '').trim() ||
+      (id ? `https://drive.google.com/file/d/${id}/view` : '')
+    return {
+      driveFileId: id,
+      webViewLink: link,
+      byteLength: buffer.length,
+      storageBackend: 'google_drive',
+    }
+  }
+
   if (existingFileId) {
     try {
       const updated = await drive.files.update({
@@ -206,14 +218,10 @@ export async function uploadClinicAttachmentToDrive({
           appProperties: Object.keys(props).length ? props : undefined,
         },
         media,
-        fields: 'id, size',
+        fields: 'id, size, webViewLink',
       })
       const id = updated.data?.id || String(existingFileId)
-      return {
-        driveFileId: id,
-        byteLength: buffer.length,
-        storageBackend: 'google_drive',
-      }
+      return resultPayload(id, updated.data?.webViewLink)
     } catch (error) {
       console.warn(
         '[google-drive] update falló; se crea archivo nuevo:',
@@ -229,7 +237,7 @@ export async function uploadClinicAttachmentToDrive({
       appProperties: Object.keys(props).length ? props : undefined,
     },
     media,
-    fields: 'id, name, size',
+    fields: 'id, name, size, webViewLink',
   })
   const driveFileId = created.data?.id
   if (!driveFileId) {
@@ -237,11 +245,7 @@ export async function uploadClinicAttachmentToDrive({
     err.code = 'DRIVE_UPLOAD_FAILED'
     throw err
   }
-  return {
-    driveFileId,
-    byteLength: buffer.length,
-    storageBackend: 'google_drive',
-  }
+  return resultPayload(driveFileId, created.data?.webViewLink)
 }
 
 /**

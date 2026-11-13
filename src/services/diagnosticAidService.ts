@@ -5,7 +5,9 @@ import {
   saveDiagnosticAidBlob,
   saveDiagnosticAidBlobFromBuffer,
 } from '@/services/diagnosticAidBlobStore'
+import { uploadDiagnosticAidToGoogleDrive } from '@/services/diagnosticAidDriveUpload'
 import { ensureLocalDiagnosticAidBlob } from '@/services/diagnosticAidRemoteStore'
+import { getCurrentClinicId } from '@/services/clinicalSyncState'
 import { enqueueDiagnosticAidForSync, resolvePatientSyncId } from '@/services/syncQueueService'
 import type { UserProfile } from '@/types/user'
 import type { DiagnosticAid, DiagnosticAidFileType } from '@/types/diagnosticAid'
@@ -166,6 +168,9 @@ export async function registerDiagnosticAid(
     receivedAt: input.receivedAt?.trim() || new Date().toISOString(),
     comments: input.comments?.trim() ?? '',
     patientSyncId: await resolvePatientSyncId(input.patientId),
+    clinicId: getCurrentClinicId() || undefined,
+    storageBackend: blobId ? 'indexeddb' : 'disk',
+    driveUploadStatus: blobId ? 'pending' : 'local_only',
   }
 
   await db.diagnosticAids.add(entry)
@@ -180,6 +185,9 @@ export async function registerDiagnosticAid(
     user: input.user ?? null,
   })
 
+  if (blobId) {
+    return uploadDiagnosticAidToGoogleDrive(entry)
+  }
   return entry
 }
 
@@ -231,6 +239,9 @@ export async function registerDiagnosticAidFromBrowserFile(
     receivedAt: input.receivedAt?.trim() || new Date().toISOString(),
     comments: input.comments?.trim() ?? '',
     patientSyncId: await resolvePatientSyncId(input.patientId),
+    clinicId: getCurrentClinicId() || undefined,
+    storageBackend: blobId ? 'indexeddb' : absolutePath.startsWith('[navegador]/') ? 'indexeddb' : 'disk',
+    driveUploadStatus: blobId ? 'pending' : 'local_only',
   }
 
   await db.diagnosticAids.add(entry)
@@ -245,6 +256,9 @@ export async function registerDiagnosticAidFromBrowserFile(
     user: input.user ?? null,
   })
 
+  if (blobId) {
+    return uploadDiagnosticAidToGoogleDrive(entry)
+  }
   return entry
 }
 

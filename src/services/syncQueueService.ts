@@ -37,7 +37,10 @@ export async function enqueueDiagnosticAidForSync(
     createdAt: existing?.createdAt || entry.createdAt || now,
     updatedAt: now,
   }
-  Object.assign(item, extras, { status: 'pending' as const, binarySynced: false })
+  Object.assign(item, { binarySynced: false }, extras, { status: 'pending' as const })
+  if (item.driveFileId && item.binarySynced !== false) {
+    item.binarySynced = true
+  }
 
   if (existing?.id) {
     await db.syncQueue.update(existing.id, item)
