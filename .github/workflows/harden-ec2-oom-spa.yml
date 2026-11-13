@@ -87,9 +87,16 @@ jobs:
             PORT="${PORT:-3000}"
 
             echo "==== Nginx SPA static ===="
-            DIST="$APP_DIR/dist"
-            test -f "$DIST/index.html" || DIST="$CANONICAL/dist"
+            # Preferir /var/www (legible por www-data); /home/ubuntu suele ser 750 → 500.
+            DIST="$CANONICAL/dist"
+            test -f "$DIST/index.html" || DIST="$APP_DIR/dist"
             test -f "$DIST/index.html" || { echo "MISSING_DIST"; exit 1; }
+            # Sincronizar dist canónico si PM2 corre desde home
+            if [[ "$DIST" != "$CANONICAL/dist" ]] && [[ -d "$CANONICAL" ]]; then
+              sudo mkdir -p "$CANONICAL/dist"
+              sudo rsync -a "$DIST/" "$CANONICAL/dist/"
+              DIST="$CANONICAL/dist"
+            fi
             bash "$APP_DIR/scripts/configure-nginx-spa-static.sh" "$DIST" "$PORT"
 
             echo "==== Restart PM2 heap=$HEAP_MB ===="
