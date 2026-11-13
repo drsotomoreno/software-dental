@@ -88,6 +88,52 @@ import {
 } from '@/utils/diagnosticAidWebClassification'
 
 const LOCAL_ONLY_KEYS = new Set(['id', 'pendingSync', 'lastSyncedAt'])
+/** Binarios: solo metadatos en /api/sync/push y /api/sync/clinical. */
+const HEAVY_BINARY_KEYS = new Set([
+  'dataUrl',
+  'dataBase64',
+  'base64',
+  'fileData',
+  'arrayBuffer',
+  'blob',
+  'data',
+  'buffer',
+  'bytes',
+])
+const DIAGNOSTIC_AID_META_KEYS = new Set([
+  'id',
+  'syncId',
+  'clinicId',
+  'patientId',
+  'patientSyncId',
+  'encounterId',
+  'name',
+  'fileName',
+  'mimeType',
+  'fileType',
+  'size',
+  'byteLength',
+  'fileHash',
+  'sha256',
+  'driveFileId',
+  'driveWebViewLink',
+  'webViewLink',
+  'storageStatus',
+  'storageBackend',
+  'driveUploadStatus',
+  'receivedAt',
+  'notes',
+  'comments',
+  'createdAt',
+  'updatedAt',
+  'deletedAt',
+  'entityType',
+  'action',
+  'hasBinary',
+  'binarySynced',
+  'aidId',
+  'deletedDiagnosticAids',
+])
 const PULL_CACHE_DB = 'ClinicSyncPullCache'
 const PULL_CACHE_STORE = 'snapshots'
 
@@ -123,11 +169,42 @@ function notifyIfGoogleDriveRequired(response: Response, payload: unknown): bool
   return true
 }
 
+function stripHeavyBinaryFields(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map((row) => stripHeavyBinaryFields(row))
+  const out: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (HEAVY_BINARY_KEYS.has(key) || LOCAL_ONLY_KEYS.has(key)) continue
+    if (
+      typeof entry === 'string' &&
+      entry.length > 64 * 1024 &&
+      (/^data:/i.test(entry) || /^[A-Za-z0-9+/=\s]{256,}/.test(entry.slice(0, 80)))
+    ) {
+      continue
+    }
+    out[key] = entry && typeof entry === 'object' ? stripHeavyBinaryFields(entry) : entry
+  }
+  return out
+}
+
 function toSyncPayload(entity: Record<string, unknown>): Record<string, unknown> {
+  return stripHeavyBinaryFields(entity) as Record<string, unknown>
+}
+
+/** Metadatos ligeros de ayudas diagnósticas (sin binarios). */
+function toDiagnosticAidMetaPayload(entity: Record<string, unknown>): Record<string, unknown> {
+  const stripped = stripHeavyBinaryFields(entity) as Record<string, unknown>
   const payload: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(entity)) {
-    if (LOCAL_ONLY_KEYS.has(key) || key === 'data' || key === 'dataBase64') continue
-    payload[key] = value
+  for (const [key, value] of Object.entries(stripped)) {
+    if (DIAGNOSTIC_AID_META_KEYS.has(key) || key.startsWith('drive')) {
+      payload[key] = value
+    }
+  }
+  if (!payload.name && payload.fileName) payload.name = payload.fileName
+  if (!payload.size && payload.byteLength != null) payload.size = payload.byteLength
+  if (!payload.sha256 && payload.fileHash) payload.sha256 = payload.fileHash
+  if (!payload.driveWebViewLink && payload.webViewLink) {
+    payload.driveWebViewLink = payload.webViewLink
   }
   return payload
 }
@@ -699,9 +776,15 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
       await enqueueDiagnosticAidForSync(aid)
       continue
     }
-    if (queued.binarySynced === true) continue
-    const hasBlob = Boolean(await blobBase64ForAid(aid.id))
-    if (hasBlob) await enqueueDiagnosticAidForSync(aid)
+    // Solo metadatos / Drive: no encolar binarios Base64.
+    if (queued.binarySynced === true || queued.driveFileId) continue
+    if (aid.driveFileId) {
+      await enqueueDiagnosticAidForSync(aid, {
+        driveFileId: aid.driveFileId,
+        binarySynced: true,
+        mimeType: mimeTypeForDiagnosticFile(aid.fileName),
+      })
+    }
   }
   const pendingQueue = await listPendingSyncQueue()
 
@@ -727,7 +810,16 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
   const diagnosticAidsPayload = await Promise.all([
     ...diagnosticAids.map(async (row) => {
       const withPatient = await withPatientSyncId({ ...row, clinicId })
-      return toEntityRecord({ ...withPatient } as unknown as Record<string, unknown>, clinicId, row.id)
+      const meta = toDiagnosticAidMetaPayload({
+        ...(withPatient as unknown as Record<string, unknown>),
+      })
+      return {
+        syncId: row.id,
+        clinicId,
+        updatedAt: String(row.updatedAt || row.createdAt || new Date().toISOString()),
+        deletedAt: null,
+        payload: meta,
+      } satisfies ClinicalSyncRecord
     }),
     ...tombstones.map(async (row) => {
       const deletedAt = row.deletedAt || new Date().toISOString()
@@ -759,112 +851,74 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
     }),
   )
 
-  const builtQueue = await Promise.all(
-    pendingQueue.map(async (item) => {
-      const syncId = item.id || item.aidId
-      const updatedAt = item.updatedAt || new Date().toISOString()
+  const builtQueue = pendingQueue.map((item) => {
+    const syncId = item.id || item.aidId
+    const updatedAt = item.updatedAt || new Date().toISOString()
+    const meta = toDiagnosticAidMetaPayload({
+      ...(item as unknown as Record<string, unknown>),
+      id: item.aidId,
+      entityType: 'diagnostic_aid',
+      clinicId,
+    })
 
-      if (item.action === 'DELETE') {
-        const record: ClinicalSyncRecord = {
-          syncId: item.aidId || syncId,
-          clinicId,
-          updatedAt,
-          deletedAt: updatedAt,
-          payload: {
-            ...item,
-            id: item.aidId,
-            entityType: 'diagnostic_aid',
-            action: 'DELETE',
-            clinicId,
-            deletedAt: updatedAt,
-            hasBinary: false,
-          },
-        }
-        return record
-      }
-
-      // Si ya se subió a Drive desde el cliente, solo sincroniza metadatos.
-      if (item.driveFileId && item.binarySynced) {
-        const record: ClinicalSyncRecord = {
-          syncId,
-          clinicId,
-          updatedAt,
-          payload: {
-            ...item,
-            entityType: 'diagnostic_aid',
-            clinicId,
-            hasBinary: true,
-            driveFileId: item.driveFileId,
-            webViewLink: item.webViewLink || undefined,
-          },
-        }
-        return record
-      }
-      const dataBase64 = await blobBase64ForAid(item.aidId)
-      if (!dataBase64) return null
+    if (item.action === 'DELETE') {
       const record: ClinicalSyncRecord = {
-        syncId,
+        syncId: item.aidId || syncId,
         clinicId,
         updatedAt,
+        deletedAt: updatedAt,
         payload: {
-          ...item,
-          dataBase64,
-          entityType: 'diagnostic_aid',
-          clinicId,
-          hasBinary: true,
+          ...meta,
+          action: 'DELETE',
+          deletedAt: updatedAt,
+          hasBinary: false,
         },
       }
       return record
-    }),
-  )
+    }
+
+    // Sin Base64: solo metadatos (driveFileId / webViewLink tras subida a Drive).
+    const record: ClinicalSyncRecord = {
+      syncId,
+      clinicId,
+      updatedAt,
+      payload: {
+        ...meta,
+        hasBinary: Boolean(item.driveFileId || item.binarySynced),
+        driveFileId: item.driveFileId || undefined,
+        webViewLink: item.webViewLink || undefined,
+        driveWebViewLink: item.webViewLink || undefined,
+      },
+    }
+    return record
+  })
   const syncQueuePayload = builtQueue.filter((row): row is ClinicalSyncRecord => row != null)
+
+  const pushBody = stripHeavyBinaryFields({
+    clinicalRecords: clinicalRecordsPayload,
+    odontograms: odontogramsPayload,
+    diagnosticAids: diagnosticAidsPayload,
+    drafts: draftsPayload,
+    sync_queue: syncQueuePayload,
+    attachments: syncQueuePayload,
+    deletedDiagnosticAids: tombstones.map((row) => ({
+      id: row.id,
+      fileName: row.fileName || '',
+      deletedAt: row.deletedAt,
+      clinicId: row.clinicId || clinicId,
+    })),
+  })
 
   const metadataResponse = await syncFetch('/api/sync/push', {
     method: 'POST',
-    body: JSON.stringify({
-      clinicalRecords: clinicalRecordsPayload,
-      odontograms: odontogramsPayload,
-      diagnosticAids: diagnosticAidsPayload,
-      drafts: draftsPayload,
-    }),
+    body: JSON.stringify(pushBody),
   })
   if (notifyIfGoogleDriveRequired(metadataResponse.response, metadataResponse.payload)) {
     return false
   }
   if (!metadataResponse.response.ok) return false
 
-  const MAX_BATCH_CHARS = 18 * 1024 * 1024
-  const batches: ClinicalSyncRecord[][] = []
-  let current: ClinicalSyncRecord[] = []
-  let currentSize = 0
-  for (const record of syncQueuePayload) {
-    const size = String(record.payload.dataBase64 || '').length
-    if (current.length && currentSize + size > MAX_BATCH_CHARS) {
-      batches.push(current)
-      current = []
-      currentSize = 0
-    }
-    current.push(record)
-    currentSize += size
-  }
-  if (current.length) batches.push(current)
-
-  const syncedIds: string[] = []
-  for (const batch of batches) {
-    const { response, payload } = await syncFetch('/api/sync/push', {
-      method: 'POST',
-      body: JSON.stringify({
-        sync_queue: batch,
-        attachments: batch,
-      }),
-    })
-    if (notifyIfGoogleDriveRequired(response, payload)) {
-      return false
-    }
-    if (!response.ok) continue
-    syncedIds.push(...batch.map((row) => row.syncId))
-  }
-  await markSyncQueueSynced(syncedIds)
+  await markSyncQueueSynced(pendingQueue.map((item) => item.id).filter(Boolean))
   return true
 }
 

@@ -257,7 +257,12 @@ export async function uploadDiagnosticAidToGoogleDrive(
       driveFileId,
       binarySynced: true,
       mimeType,
+      webViewLink,
     })
+
+    // Sync metadatos solo tras confirmar Drive (evita ráfaga push+clinical).
+    const { scheduleClinicalSync } = await import('@/services/clinicalSyncService')
+    scheduleClinicalSync(1_200)
 
     emit('done', 'Guardado en Google Drive.')
     return updated

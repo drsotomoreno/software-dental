@@ -2,7 +2,9 @@
  * Subida/bajada de adjuntos clínicos a Google Drive (scope drive.file).
  * Ruta: {root}/pacientes/{patientSyncId}/ayudas/{fileName}
  * Caché en memoria de IDs de carpeta para no agotar cuota en lotes.
+ * Preferir filePath + createReadStream (t3.micro) frente a Buffer en RAM.
  */
+import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import { getAuthorizedDriveClient } from './googleDriveOAuth.service.js'
 
@@ -158,7 +160,8 @@ async function resolveClinicDrive(canonicalClinicId, candidateIds = []) {
 }
 
 /**
- * Sube un buffer a Drive (multipart/resumable vía googleapis).
+ * Sube a Drive por stream (filePath) o buffer pequeño.
+ * Preferir `filePath` + createReadStream para STL/PLY grandes (≤5 MB RAM).
  * @returns {{ driveFileId: string, webViewLink: string, byteLength: number, storageBackend: 'google_drive' }}
  */
 export async function uploadClinicAttachmentToDrive({
@@ -168,14 +171,25 @@ export async function uploadClinicAttachmentToDrive({
   fileName,
   mimeType,
   buffer,
+  filePath,
+  byteLength: knownByteLength,
   driveFileId: existingFileId,
   appProperties = {},
 }) {
-  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
-    const err = new Error('Buffer de adjunto vacío.')
+  const path = String(filePath || '').trim()
+  const hasPath = Boolean(path)
+  const hasBuffer = Boolean(buffer && Buffer.isBuffer(buffer) && buffer.length > 0)
+  if (!hasPath && !hasBuffer) {
+    const err = new Error('Adjunto vacío (ni filePath ni buffer).')
     err.code = 'EMPTY_ATTACHMENT_BUFFER'
     throw err
   }
+
+  const byteLength = hasPath
+    ? Number(knownByteLength) > 0
+      ? Number(knownByteLength)
+      : 0
+    : buffer.length
 
   const { drive, rootFolderId } = await resolveClinicDrive(clinicId, clinicIdCandidates)
   if (!rootFolderId) {
@@ -186,9 +200,10 @@ export async function uploadClinicAttachmentToDrive({
 
   const parentId = await ensurePatientFolder(drive, rootFolderId, patientSyncId)
   const name = safeFileName(fileName)
+  const mediaBody = hasPath ? createReadStream(path) : Readable.from(buffer)
   const media = {
     mimeType: String(mimeType || 'application/octet-stream'),
-    body: Readable.from(buffer),
+    body: mediaBody,
   }
 
   const props = {}
@@ -198,55 +213,70 @@ export async function uploadClinicAttachmentToDrive({
     if (k && v) props[k] = v
   }
 
-  function resultPayload(id, webViewLink) {
+  function resultPayload(id, webViewLink, sizeHint) {
     const link =
       String(webViewLink || '').trim() ||
       (id ? `https://drive.google.com/file/d/${id}/view` : '')
+    const size = Number(sizeHint) > 0 ? Number(sizeHint) : byteLength
     return {
       driveFileId: id,
       webViewLink: link,
-      byteLength: buffer.length,
+      byteLength: size,
       storageBackend: 'google_drive',
     }
   }
 
-  if (existingFileId) {
+  try {
+    if (existingFileId) {
+      try {
+        const updated = await drive.files.update({
+          fileId: String(existingFileId),
+          requestBody: {
+            name,
+            appProperties: Object.keys(props).length ? props : undefined,
+          },
+          media,
+          fields: 'id, size, webViewLink',
+        })
+        const id = updated.data?.id || String(existingFileId)
+        return resultPayload(id, updated.data?.webViewLink, updated.data?.size)
+      } catch (error) {
+        console.warn(
+          '[google-drive] update falló; se crea archivo nuevo:',
+          error instanceof Error ? error.message : error,
+        )
+        // Reabrir stream si el update consumió el anterior.
+        if (hasPath) {
+          media.body = createReadStream(path)
+        } else {
+          media.body = Readable.from(buffer)
+        }
+      }
+    }
+
+    const created = await drive.files.create({
+      requestBody: {
+        name,
+        parents: [parentId],
+        appProperties: Object.keys(props).length ? props : undefined,
+      },
+      media,
+      fields: 'id, name, size, webViewLink',
+    })
+    const driveFileId = created.data?.id
+    if (!driveFileId) {
+      const err = new Error('Google Drive no devolvió fileId tras la subida.')
+      err.code = 'DRIVE_UPLOAD_FAILED'
+      throw err
+    }
+    return resultPayload(driveFileId, created.data?.webViewLink, created.data?.size)
+  } finally {
     try {
-      const updated = await drive.files.update({
-        fileId: String(existingFileId),
-        requestBody: {
-          name,
-          appProperties: Object.keys(props).length ? props : undefined,
-        },
-        media,
-        fields: 'id, size, webViewLink',
-      })
-      const id = updated.data?.id || String(existingFileId)
-      return resultPayload(id, updated.data?.webViewLink)
-    } catch (error) {
-      console.warn(
-        '[google-drive] update falló; se crea archivo nuevo:',
-        error instanceof Error ? error.message : error,
-      )
+      if (mediaBody && typeof mediaBody.destroy === 'function') mediaBody.destroy()
+    } catch {
+      // ignore
     }
   }
-
-  const created = await drive.files.create({
-    requestBody: {
-      name,
-      parents: [parentId],
-      appProperties: Object.keys(props).length ? props : undefined,
-    },
-    media,
-    fields: 'id, name, size, webViewLink',
-  })
-  const driveFileId = created.data?.id
-  if (!driveFileId) {
-    const err = new Error('Google Drive no devolvió fileId tras la subida.')
-    err.code = 'DRIVE_UPLOAD_FAILED'
-    throw err
-  }
-  return resultPayload(driveFileId, created.data?.webViewLink)
 }
 
 /**

@@ -60,6 +60,7 @@ app.use(
       'X-Client-Email',
       'X-Client-User-Id',
       'X-Client-Document',
+      'X-Clinic-Id',
     ],
   }),
 )
@@ -100,9 +101,9 @@ if (isProduction && hasFrontendBuild) {
   })
 }
 
-/** Multipart Drive (multer) limita a 100 MB; JSON sync admite overhead base64. */
-app.use(express.json({ limit: '150mb' }))
-app.use(express.urlencoded({ extended: true, limit: '150mb' }))
+/** Sync solo metadatos (sin Base64); Drive usa multer disco + stream. */
+app.use(express.json({ limit: '8mb' }))
+app.use(express.urlencoded({ extended: true, limit: '8mb' }))
 
 app.use('/api/health', healthRoutes)
 app.use('/api/rips', ripsRoutes)

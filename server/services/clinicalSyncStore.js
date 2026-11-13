@@ -244,6 +244,38 @@ export function mergeClinicalStores(primary, secondary) {
   return { clinics }
 }
 
+/** Campos binarios pesados: nunca persistir en app_json_store / clinical-sync.json. */
+const HEAVY_BINARY_KEYS = [
+  'dataUrl',
+  'dataBase64',
+  'base64',
+  'fileData',
+  'arrayBuffer',
+  'blob',
+  'data',
+  'buffer',
+  'bytes',
+]
+
+function stripHeavyBinaryFields(value) {
+  if (!value || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map((row) => stripHeavyBinaryFields(row))
+  const out = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (HEAVY_BINARY_KEYS.includes(key)) continue
+    if (
+      typeof entry === 'string' &&
+      entry.length > 64 * 1024 &&
+      (/^data:/i.test(entry) || /^[A-Za-z0-9+/=\s]+$/.test(entry.slice(0, 120)))
+    ) {
+      continue
+    }
+    out[key] =
+      entry && typeof entry === 'object' ? stripHeavyBinaryFields(entry) : entry
+  }
+  return out
+}
+
 function normalizeRecord(raw, clinicId) {
   if (!raw || typeof raw !== 'object') return null
   const payloadSource =
@@ -254,9 +286,9 @@ function normalizeRecord(raw, clinicId) {
     raw.payload && typeof raw.payload === 'object' && !Array.isArray(raw.payload)
       ? { ...raw.payload }
       : { ...raw }
-  delete payloadRaw.dataBase64
-  delete payloadRaw.data
-  const payload = stripClinicalPayloadEvolutionPatientSignatures(payloadRaw)
+  const payload = stripClinicalPayloadEvolutionPatientSignatures(
+    stripHeavyBinaryFields(payloadRaw),
+  )
   const updatedAt = String(raw.updatedAt || payload.updatedAt || payload.createdAt || new Date().toISOString())
   const deletedAt = raw.deletedAt || payload.deletedAt || null
   const now = new Date().toISOString()
@@ -303,51 +335,37 @@ function attachmentPatientSyncId(record, raw) {
 }
 
 /**
- * Sube el binario a Google Drive. Sin Drive conectado → GoogleDriveRequiredError (428).
- * Ya no escribe en server/data/clinic-attachments/.
+ * Solo metadatos ligeros: binarios van por POST /google-drive/upload (stream).
+ * Ignora cualquier Base64 residual del cliente para no saturar RAM en t3.micro.
  */
-async function persistAttachmentBinary(clinicId, record, raw, _aliasIds = []) {
-  const base64 = extractBase64(raw)
-  const buffer = base64ToBuffer(base64)
-  if (!buffer) {
-    // Metadato sin binario nuevo: conservar driveFileId previo si existe.
-    const prevId = String(record?.payload?.driveFileId || '').trim()
-    if (prevId) {
-      return {
-        ...record,
-        payload: {
-          ...record.payload,
-          storageBackend: 'google_drive',
-          driveFileId: prevId,
-          hasBinary: true,
-        },
-      }
-    }
-    return record
-  }
-
-  const payload = record.payload && typeof record.payload === 'object' ? record.payload : {}
-  const attachmentKey = String(
-    record.syncId || payload.id || payload.aidId || payload.blobId || 'archivo',
+async function persistAttachmentBinary(_clinicId, record, raw, _aliasIds = []) {
+  const payload = stripHeavyBinaryFields(
+    record.payload && typeof record.payload === 'object' ? record.payload : {},
+  )
+  const prevId = String(
+    payload.driveFileId ||
+      raw?.driveFileId ||
+      raw?.payload?.driveFileId ||
+      '',
   ).trim()
-  const uploaded = await writeAttachmentBytes(clinicId, attachmentKey, buffer, {
-    patientSyncId: attachmentPatientSyncId(record, raw),
-    fileName: String(payload.fileName || attachmentKey),
-    mimeType: String(payload.mimeType || 'application/octet-stream'),
-    driveFileId: String(payload.driveFileId || '').trim() || null,
-    aidId: String(payload.aidId || payload.id || '').trim(),
-    fileHash: String(payload.fileHash || '').trim(),
-    syncId: String(record.syncId || '').trim(),
-  })
-
+  if (prevId) {
+    return {
+      ...record,
+      payload: {
+        ...payload,
+        storageBackend: 'google_drive',
+        driveFileId: prevId,
+        driveWebViewLink:
+          payload.driveWebViewLink || payload.webViewLink || raw?.webViewLink || undefined,
+        hasBinary: true,
+      },
+    }
+  }
   return {
     ...record,
     payload: {
       ...payload,
-      storageBackend: 'google_drive',
-      driveFileId: uploaded.driveFileId,
-      byteLength: uploaded.byteLength,
-      hasBinary: true,
+      hasBinary: Boolean(payload.hasBinary),
     },
   }
 }
@@ -459,11 +477,31 @@ async function saveStore(store) {
   await writeDurableJsonWithMerge(STORE_FILE, store, STORE_KEY, mergeClinicalStores)
 }
 
-function replicateAliases(store, canonical, clinic, aliasIds) {
+/**
+ * Una sola fuente de verdad: el cubo canónico.
+ * Los alias (email sin prefijo, UUID, superadmin-session) NO se duplican en disco;
+ * se fusionan una vez hacia canónico y se eliminan para no multiplicar ~72MB.
+ */
+function foldAliasesIntoCanonical(store, canonical, aliasIds = []) {
+  if (!store.clinics || typeof store.clinics !== 'object') store.clinics = {}
+  const ids = scopeIds(canonical, aliasIds)
+  const folded = mergeClinicBuckets(store, ids)
+  store.clinics[canonical] = folded
+  for (const key of Object.keys(store.clinics)) {
+    if (key === canonical) continue
+    if (!ids.includes(key)) continue
+    delete store.clinics[key]
+  }
+  return folded
+}
+
+function replicateAliases(store, canonical, clinic, aliasIds = []) {
+  if (!store.clinics || typeof store.clinics !== 'object') store.clinics = {}
   store.clinics[canonical] = clinic
+  // Borrar copias legacy; pull/push usan clinicKeyInScope + cubo canónico.
   for (const key of scopeIds(canonical, aliasIds)) {
     if (key === canonical) continue
-    store.clinics[key] = cloneClinic(clinic)
+    if (store.clinics[key]) delete store.clinics[key]
   }
 }
 
@@ -476,9 +514,9 @@ export async function resetClinicClinicalBucket(clinicId, aliasIds = []) {
   if (!canonical) return { ok: false, error: 'clinicId vacío' }
   return enqueueWrite(async () => {
     const store = await loadStore()
-    const empty = emptyClinic()
+    store.clinics[canonical] = cloneClinic(emptyClinic())
     for (const key of scopeIds(canonical, aliasIds)) {
-      store.clinics[key] = cloneClinic(empty)
+      if (key !== canonical && store.clinics[key]) delete store.clinics[key]
     }
     await saveStore(store)
     return { ok: true, clinicId: canonical }
@@ -606,10 +644,14 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
     return { accepted: emptyAccepted, serverTime: new Date().toISOString() }
   }
 
+  // Purga Base64/DataURL antes de tocar memoria/disco (t3.micro).
+  const safeBody = stripHeavyBinaryFields(body && typeof body === 'object' ? body : {})
+
   return enqueueWrite(async () => {
     const store = await loadStore()
     const clinic = mergeClinicBuckets(store, scopeIds(canonical, aliasIds))
     const accepted = { ...emptyAccepted }
+    const body = safeBody
 
     for (const raw of Array.isArray(body.patients) ? body.patients : []) {
       if (!clinicKeyInScope(rawClinicId(raw), canonical, aliasIds)) {

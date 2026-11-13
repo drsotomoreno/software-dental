@@ -52,14 +52,8 @@ export async function enqueueDiagnosticAidForSync(
 }
 
 export async function listPendingSyncQueue(): Promise<SyncQueueAttachment[]> {
-  const pending = await db.syncQueue.where('status').equals('pending').toArray()
-  const all = await db.syncQueue.toArray()
-  const needsBinary = all.filter((item) => item.status === 'synced' && item.binarySynced !== true)
-  const byId = new Map<string, SyncQueueAttachment>()
-  for (const item of [...pending, ...needsBinary]) {
-    byId.set(item.id, item)
-  }
-  return [...byId.values()]
+  // Solo pendientes: binarios van a Drive por multipart, no por sync Base64.
+  return db.syncQueue.where('status').equals('pending').toArray()
 }
 
 export async function markSyncQueueSynced(ids: string[]): Promise<void> {

@@ -252,6 +252,7 @@ router.post('/push', async (req, res) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     if (denyTrialOverflow(auth, body, res)) return
     const aliases = auth.aliases
+    // pushClinicSnapshot ya purga Base64/DataURL antes de escribir.
     const result = await pushClinicSnapshot(auth.canonical, body, aliases)
     return res.json({
       success: true,

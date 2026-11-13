@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto'
+import { mkdir, unlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Router } from 'express'
 import multer from 'multer'
 import {
@@ -25,13 +29,40 @@ const router = Router()
 /** Escaneos STL/PLY/OBJ clínicos: hasta 100 MB. */
 export const GOOGLE_DRIVE_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: GOOGLE_DRIVE_MAX_UPLOAD_BYTES,
-    fieldSize: GOOGLE_DRIVE_MAX_UPLOAD_BYTES,
+/** Disco temporal: stream a Drive sin cargar el STL en RAM. */
+const DRIVE_UPLOAD_TMP_DIR = join(tmpdir(), 'drive-uploads')
+
+const diskStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    mkdir(DRIVE_UPLOAD_TMP_DIR, { recursive: true })
+      .then(() => cb(null, DRIVE_UPLOAD_TMP_DIR))
+      .catch((err) => cb(err))
+  },
+  filename: (_req, file, cb) => {
+    const safe = String(file.originalname || 'upload.bin')
+      .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '_')
+      .slice(0, 120)
+    cb(null, `${Date.now()}-${randomUUID()}-${safe}`)
   },
 })
+
+const upload = multer({
+  storage: diskStorage,
+  limits: {
+    fileSize: GOOGLE_DRIVE_MAX_UPLOAD_BYTES,
+    fieldSize: 2 * 1024 * 1024,
+  },
+})
+
+async function unlinkTempUpload(file) {
+  const path = file?.path
+  if (!path) return
+  try {
+    await unlink(path)
+  } catch {
+    // ignore
+  }
+}
 
 function bearerToken(req) {
   const authHeader = req.headers.authorization ?? ''
@@ -309,6 +340,7 @@ router.post('/upload', (req, res, next) => {
     return next()
   })
 }, async (req, res) => {
+  const tempFile = req.file
   try {
     const user = await requireSessionUser(req, res)
     if (!user) return
@@ -321,10 +353,10 @@ router.post('/upload', (req, res, next) => {
     }
 
     const fileName = String(
-      req.file?.originalname || body.fileName || body.name || '',
+      tempFile?.originalname || body.fileName || body.name || '',
     ).trim()
     const mimeType = String(
-      req.file?.mimetype || body.mimeType || 'application/octet-stream',
+      tempFile?.mimetype || body.mimeType || 'application/octet-stream',
     ).trim()
     const patientSyncId = String(
       body.patientSyncId || body.patientId || body.patient_sync_id || 'sin-paciente',
@@ -355,19 +387,31 @@ router.post('/upload', (req, res, next) => {
       })
     }
 
-    let buffer = req.file?.buffer || null
-    if (!buffer) {
+    const diskPath = String(tempFile?.path || '').trim()
+    const diskSize = Number(tempFile?.size) || 0
+    let smallBuffer = null
+
+    // Solo aceptar Base64 para payloads pequeños de respaldo (< 1 MB); STL va por disco.
+    if (!diskPath) {
       const dataBase64 = String(body.dataBase64 || body.data || '').trim()
       if (!dataBase64) {
         return res.status(400).json({
           success: false,
           ok: false,
-          error: 'Envíe el archivo en multipart (campo "file") o dataBase64.',
+          error: 'Envíe el archivo en multipart (campo "file").',
           code: 'INVALID_UPLOAD_PAYLOAD',
         })
       }
+      if (dataBase64.length > 1.4 * 1024 * 1024) {
+        return res.status(400).json({
+          success: false,
+          ok: false,
+          error: 'Use multipart/form-data para archivos grandes (sin Base64).',
+          code: 'BASE64_UPLOAD_DISABLED',
+        })
+      }
       try {
-        buffer = Buffer.from(dataBase64, 'base64')
+        smallBuffer = Buffer.from(dataBase64, 'base64')
       } catch {
         return res.status(400).json({
           success: false,
@@ -386,7 +430,8 @@ router.post('/upload', (req, res, next) => {
         code: 'INVALID_UPLOAD_PAYLOAD',
       })
     }
-    if (!buffer || !buffer.length) {
+    const byteLength = diskPath ? diskSize : smallBuffer?.length || 0
+    if (!byteLength) {
       return res.status(400).json({
         success: false,
         ok: false,
@@ -394,7 +439,7 @@ router.post('/upload', (req, res, next) => {
         code: 'EMPTY_ATTACHMENT_BUFFER',
       })
     }
-    if (buffer.length > GOOGLE_DRIVE_MAX_UPLOAD_BYTES) {
+    if (byteLength > GOOGLE_DRIVE_MAX_UPLOAD_BYTES) {
       return res.status(400).json({
         success: false,
         ok: false,
@@ -409,7 +454,9 @@ router.post('/upload', (req, res, next) => {
       patientSyncId,
       fileName,
       mimeType,
-      buffer,
+      filePath: diskPath || undefined,
+      byteLength,
+      buffer: smallBuffer || undefined,
       driveFileId: existingFileId,
       appProperties: {
         source: 'diagnostic_aid',
@@ -446,6 +493,8 @@ router.post('/upload', (req, res, next) => {
       error: mapped.message,
       code: mapped.code,
     })
+  } finally {
+    await unlinkTempUpload(tempFile)
   }
 })
 

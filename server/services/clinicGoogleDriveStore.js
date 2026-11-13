@@ -11,8 +11,15 @@ import { splitSqlStatements } from './consultasRepository.js'
 import {
   readDurableJsonWithMerge,
   withPgClient,
+  withPgClientInteractive,
   writeDurableJsonWithMerge,
 } from './durableStore.js'
+import {
+  getGoogleDriveCredentialCache,
+  listCachedConnectedDriveRecords,
+  putGoogleDriveCredentialCache,
+  clearGoogleDriveCredentialCache,
+} from './googleDriveCredentialCache.js'
 
 const STORE_FILE = join(config.dataDir, 'clinic-google-drive.json')
 const STORE_KEY = 'clinic-google-drive'
@@ -109,7 +116,7 @@ function publicRow(row) {
 async function upsertPostgres(canonicalClinicId, row) {
   try {
     await ensureClinicGoogleDriveSchema()
-    await withPgClient(async (client) => {
+    await withPgClientInteractive(async (client) => {
       await client.query(
         `INSERT INTO clinica_google_drive (
            clinic_canonical_id,
@@ -233,13 +240,19 @@ export async function findClinicGoogleDriveRecordAmong(candidateIds = []) {
       tried.add(key)
       keys.push(key)
       const row = store.clinics[key]
-      if (row) return { record: row, storageKey: key }
+      if (row) {
+        if (isConnectedDriveRecord(row)) {
+          void putGoogleDriveCredentialCache(key, row)
+        }
+        return { record: row, storageKey: key }
+      }
     }
   }
 
   if (keys.length) {
     try {
-      const pgHit = await withPgClient(async (client) => {
+      // Interactivo: nunca bloqueado por enfriamiento de Postgres.
+      const pgHit = await withPgClientInteractive(async (client) => {
         const { rows } = await client.query(
           `SELECT clinic_canonical_id,
                   google_drive_email,
@@ -266,23 +279,29 @@ export async function findClinicGoogleDriveRecordAmong(candidateIds = []) {
       })
       const mapped = recordFromPostgresRow(pgHit)
       if (mapped?.clinicId) {
-        // Espejo best-effort en JSON para siguientes lecturas offline.
         store.clinics[mapped.clinicId] = {
           ...(store.clinics[mapped.clinicId] || {}),
           ...mapped,
           updatedAt: new Date().toISOString(),
         }
         await saveStore(store).catch(() => undefined)
+        if (isConnectedDriveRecord(mapped)) {
+          await putGoogleDriveCredentialCache(mapped.clinicId, mapped)
+        }
         return { record: mapped, storageKey: mapped.clinicId }
       }
     } catch (error) {
       console.warn(
-        '[google-drive] Lookup Postgres clinica_google_drive falló:',
+        '[google-drive] Lookup Postgres clinica_google_drive falló; usando caché:',
         error instanceof Error ? error.message : error,
       )
+      const cached = await getGoogleDriveCredentialCache(keys)
+      if (cached?.record) return cached
     }
   }
 
+  const cached = await getGoogleDriveCredentialCache(candidateIds)
+  if (cached?.record) return cached
   return null
 }
 
@@ -301,7 +320,7 @@ export async function findSoleConnectedGoogleDriveRecord({ allowFallback = false
   if (connectedLocal.length === 1) return connectedLocal[0]
 
   try {
-    const pgRows = await withPgClient(async (client) => {
+    const pgRows = await withPgClientInteractive(async (client) => {
       const { rows } = await client.query(
         `SELECT clinic_canonical_id,
                 google_drive_email,
@@ -325,18 +344,22 @@ export async function findSoleConnectedGoogleDriveRecord({ allowFallback = false
     if (Array.isArray(pgRows) && pgRows.length === 1) {
       const mapped = recordFromPostgresRow(pgRows[0])
       if (mapped?.clinicId) {
+        await putGoogleDriveCredentialCache(mapped.clinicId, mapped)
         return { record: mapped, storageKey: mapped.clinicId }
       }
     }
   } catch (error) {
     console.warn(
-      '[google-drive] Fallback Postgres clinica_google_drive falló:',
+      '[google-drive] Fallback Postgres clinica_google_drive falló; usando caché:',
       error instanceof Error ? error.message : error,
     )
+    const cachedList = await listCachedConnectedDriveRecords()
+    if (cachedList.length === 1) return cachedList[0]
   }
 
-  // Si el JSON tiene exactamente una conectada tras fallo PG, úsala.
   if (connectedLocal.length === 1) return connectedLocal[0]
+  const cachedList = await listCachedConnectedDriveRecords()
+  if (cachedList.length === 1) return cachedList[0]
   return null
 }
 
@@ -369,6 +392,9 @@ export async function saveClinicGoogleDriveConnection(canonicalClinicId, patch) 
     store.clinics[id] = next
     await saveStore(store)
     await upsertPostgres(id, next)
+    if (isConnectedDriveRecord(next)) {
+      await putGoogleDriveCredentialCache(id, next)
+    }
     return publicRow(next)
   })
 }
@@ -379,6 +405,7 @@ export async function clearClinicGoogleDriveConnection(canonicalClinicId) {
 
   return enqueueWrite(async () => {
     const store = await loadStore()
+    await clearGoogleDriveCredentialCache(id)
     const next = {
       clinicId: id,
       status: 'disconnected',

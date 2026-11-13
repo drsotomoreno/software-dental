@@ -163,10 +163,17 @@ export function poolConfig(url) {
 /**
  * Ejecuta trabajo contra el Postgres de mihistoriadental.
  * Si el socket se corta (`Connection terminated`), reintenta 1 vez antes del enfriamiento.
+ *
  * @param {(client: import('pg').PoolClient) => Promise<unknown>} fn
+ * @param {{ bypassCooldown?: boolean, markCooldownOnFailure?: boolean }} [options]
+ *   - bypassCooldown: rutas interactivas (Google Drive) nunca se bloquean por enfriamiento.
+ *   - markCooldownOnFailure: false evita enfriar el pool tras fallos (uso interactivo).
  */
-export async function withPgClient(fn) {
-  if (postgresCoolingDown()) {
+export async function withPgClient(fn, options = {}) {
+  const bypassCooldown = Boolean(options.bypassCooldown)
+  const markCooldownOnFailure = options.markCooldownOnFailure !== false && !bypassCooldown
+
+  if (!bypassCooldown && postgresCoolingDown()) {
     const error = new Error('PostgreSQL en enfriamiento tras fallo de conexión.')
     error.code = 'PG_COOLDOWN'
     throw error
@@ -201,6 +208,7 @@ export async function withPgClient(fn) {
   } catch (error) {
     if (!isConnectionTerminatedError(error)) {
       if (
+        markCooldownOnFailure &&
         error &&
         typeof error === 'object' &&
         (error.code === 'ECONNREFUSED' ||
@@ -218,10 +226,15 @@ export async function withPgClient(fn) {
     try {
       return await runOnce()
     } catch (retryError) {
-      markPostgresUnavailable(retryError)
+      if (markCooldownOnFailure) markPostgresUnavailable(retryError)
       throw retryError
     }
   }
+}
+
+/** Atajo para rutas interactivas (Drive status/upload/file): ignora enfriamiento. */
+export function withPgClientInteractive(fn) {
+  return withPgClient(fn, { bypassCooldown: true, markCooldownOnFailure: false })
 }
 
 function getPool() {

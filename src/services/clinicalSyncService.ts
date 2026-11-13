@@ -31,9 +31,38 @@ declare global {
 }
 
 const POLL_MS = 2_000
-const DIRTY_DEBOUNCE_MS = 200
+const DIRTY_DEBOUNCE_MS = 800
 
 const LOCAL_ONLY_KEYS = new Set(['id', 'pendingSync', 'lastSyncedAt'])
+const HEAVY_BINARY_KEYS = new Set([
+  'dataUrl',
+  'dataBase64',
+  'base64',
+  'fileData',
+  'arrayBuffer',
+  'blob',
+  'data',
+  'buffer',
+  'bytes',
+])
+
+function stripHeavyBinaryFields(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map((row) => stripHeavyBinaryFields(row))
+  const out: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (HEAVY_BINARY_KEYS.has(key) || LOCAL_ONLY_KEYS.has(key)) continue
+    if (
+      typeof entry === 'string' &&
+      entry.length > 64 * 1024 &&
+      (/^data:/i.test(entry) || /^[A-Za-z0-9+/=\s]{256,}/.test(entry.slice(0, 80)))
+    ) {
+      continue
+    }
+    out[key] = entry && typeof entry === 'object' ? stripHeavyBinaryFields(entry) : entry
+  }
+  return out
+}
 
 export const CLINICAL_SYNC_POLL_MS = POLL_MS
 
@@ -72,10 +101,10 @@ async function syncFetch(url: string, init?: RequestInit) {
 function toSyncPayload(entity: Patient | Appointment): Record<string, unknown> {
   const payload: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(entity)) {
-    if (LOCAL_ONLY_KEYS.has(key)) continue
+    if (LOCAL_ONLY_KEYS.has(key) || HEAVY_BINARY_KEYS.has(key)) continue
     payload[key] = value
   }
-  return payload
+  return stripHeavyBinaryFields(payload) as Record<string, unknown>
 }
 
 function toSyncRecord(
@@ -296,7 +325,12 @@ async function pushAllLocal(clinicId: string): Promise<{
 
   const { response, payload } = await syncFetch('/api/sync/clinical', {
     method: 'POST',
-    body: JSON.stringify({ patients: patientRecords, appointments: appointmentRecords }),
+    body: JSON.stringify(
+      stripHeavyBinaryFields({
+        patients: patientRecords,
+        appointments: appointmentRecords,
+      }),
+    ),
   })
   if (!response.ok) return { ok: false, acceptedPatients: 0, rejected: 0 }
 
@@ -442,6 +476,7 @@ async function performClinicalSyncCycle(): Promise<boolean> {
 
   try {
     await flushPendingClinicalDraft().catch(() => undefined)
+    // Secuencial: nunca /clinical y /push en paralelo (t3.micro).
     await pushAllLocal(clinicId).catch(() => false)
     await pushClinicSnapshotLocal(clinicId).catch(() => false)
     const changed = await pullAndMerge(false).catch(() => ({ ok: false, patients: 0 }))
@@ -453,7 +488,7 @@ async function performClinicalSyncCycle(): Promise<boolean> {
   }
 }
 
-/** Ciclo silencioso: sube TODO lo local y baja el snapshot completo de la clínica. */
+/** Ciclo silencioso: un solo vuelo; coalesces ráfagas dirty tras Drive. */
 export function runClinicalSyncCycle(): Promise<boolean> {
   if (inFlight) {
     queued = true
@@ -463,6 +498,7 @@ export function runClinicalSyncCycle(): Promise<boolean> {
     inFlight = null
     if (queued) {
       queued = false
+      // Una sola repetición coalescida (no ráfaga).
       void runClinicalSyncCycle()
     }
   })
