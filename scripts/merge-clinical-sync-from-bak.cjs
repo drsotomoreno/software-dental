@@ -24,9 +24,10 @@ const ENTITY_KEYS = [
   'sync_queue',
 ]
 
-const activePath = process.argv[2]
+const verifyOnly = process.argv.includes('--verify-only')
+const activePath = process.argv.find((arg, i) => i >= 2 && !arg.startsWith('--'))
 if (!activePath) {
-  console.error('Usage: node merge-clinical-sync-from-bak.cjs /path/to/clinical-sync.json')
+  console.error('Usage: node merge-clinical-sync-from-bak.cjs /path/to/clinical-sync.json [--verify-only]')
   process.exit(2)
 }
 
@@ -169,6 +170,37 @@ function mergeEntityMaps(mergePayloadNonDestructive, mergeSyncedRecordNonDestruc
   return { map: out, restoredRecords, mergedPayloads, keysRestored }
 }
 
+function printFinalCounts(syncPath) {
+  const j = JSON.parse(fs.readFileSync(syncPath, 'utf8'))
+  const clinic = (j.clinics && j.clinics[CLINIC]) || {}
+  const counted = countPatients(clinic.patients)
+  const odontograms = Object.keys(clinic.odontograms || {}).length
+  const drafts = Object.keys(clinic.drafts || {}).length
+  const report = {
+    phase: 'verify',
+    activo: counted.naive.activo,
+    valorado: counted.naive.valorado,
+    terminado: counted.naive.terminado,
+    ui: counted.ui,
+    odontograms,
+    drafts,
+    patients: counted.n,
+    bytes: fs.statSync(syncPath).size,
+    bakBytes: fs.existsSync(bakPath) ? fs.statSync(bakPath).size : null,
+  }
+  console.log('FINAL_COUNTS_JSON=' + JSON.stringify(report))
+  const ok =
+    report.activo === 43 &&
+    report.valorado === 39 &&
+    report.terminado === 24 &&
+    report.odontograms >= 82
+  if (!ok) {
+    console.error('FINAL_COUNT_FAIL')
+    process.exit(1)
+  }
+  return report
+}
+
 async function main() {
   const { mergePayloadNonDestructive, mergeSyncedRecordNonDestructive } = await import(
     '../shared/clinicalSyncMerge.js'
@@ -180,6 +212,11 @@ async function main() {
   if (!fs.existsSync(bakPath)) {
     console.error('BAK_MISSING', bakPath)
     process.exit(1)
+  }
+
+  if (verifyOnly) {
+    printFinalCounts(activePath)
+    return
   }
 
   const bakStat = fs.statSync(bakPath)
@@ -195,7 +232,10 @@ async function main() {
   )
 
   // Copia de seguridad del estado actual (no toca bak-20261112).
-  fs.copyFileSync(activePath, preMergePath)
+  // Si ya existe de un intento previo, conservar la primera captura.
+  if (!fs.existsSync(preMergePath)) {
+    fs.copyFileSync(activePath, preMergePath)
+  }
   console.log(
     JSON.stringify({
       phase: 'pre_merge_backup',
@@ -288,6 +328,7 @@ async function main() {
   console.log('MERGE_REPORT_JSON_BEGIN')
   console.log(JSON.stringify(report, null, 2))
   console.log('MERGE_REPORT_JSON_END')
+  printFinalCounts(activePath)
   if (!report.patientsMatch) {
     console.error('COUNT_MISMATCH_PATIENTS_VS_43_39_24')
     process.exit(1)

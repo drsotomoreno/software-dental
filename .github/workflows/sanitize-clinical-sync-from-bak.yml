@@ -1,4 +1,4 @@
-# Parte B: fusión atómica única desde bak-20261112.
+# Parte B: fusion atomica unica desde bak-20261112.
 # NO modifica clinical-sync.json.bak-20261112.
 name: Sanitize clinical-sync from bak
 
@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: SSH sanitize
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
@@ -28,7 +28,6 @@ jobs:
             APP_DIR="$HOME_APP"
             if [[ ! -f "$APP_DIR/server.js" ]]; then APP_DIR="$CANONICAL"; fi
 
-            # Asegurar script + shared en APP_DIR (sin tocar server/data).
             if [[ -d "$CANONICAL/.git" ]]; then
               cd "$CANONICAL"
               git fetch origin main || true
@@ -36,10 +35,8 @@ jobs:
             fi
             if [[ "$APP_DIR" != "$CANONICAL" ]]; then
               mkdir -p "$APP_DIR/scripts" "$APP_DIR/shared"
-              rsync -a --exclude 'server/data/' --exclude '.env' --exclude 'node_modules/' \
-                "$CANONICAL/scripts/" "$APP_DIR/scripts/" || true
+              rsync -a "$CANONICAL/scripts/" "$APP_DIR/scripts/" || true
               rsync -a "$CANONICAL/shared/" "$APP_DIR/shared/" || true
-              # Código servidor (merge no destructivo) sin pisar data.
               rsync -a --exclude 'data/' "$CANONICAL/server/" "$APP_DIR/server/" || true
               rsync -a "$CANONICAL/server.js" "$APP_DIR/server.js" || true
               if [[ -d "$CANONICAL/dist" ]]; then
@@ -53,7 +50,6 @@ jobs:
             test -f "$BAK" || { echo "MISSING_BAK=$BAK"; exit 1; }
             BAK_BYTES=$(stat -c%s "$BAK")
             echo "BAK_BYTES_BEFORE=$BAK_BYTES"
-            [[ "$BAK_BYTES" == "72014840" ]] || echo "WARN: bak size != 72014840 (got $BAK_BYTES)"
 
             echo "==== Pause PM2 ===="
             pm2 stop software-dental || pm2 stop all || true
@@ -62,42 +58,14 @@ jobs:
             echo "==== Atomic merge from bak ===="
             cd "$APP_DIR"
             export NODE_OPTIONS="--max-old-space-size=4096"
-            MERGE_RC=0
-            node scripts/merge-clinical-sync-from-bak.cjs "$SYNC" || MERGE_RC=$?
+            node scripts/merge-clinical-sync-from-bak.cjs "$SYNC"
+            node scripts/merge-clinical-sync-from-bak.cjs "$SYNC" --verify-only
 
             echo "==== Verify bak intact ===="
             BAK_BYTES_AFTER=$(stat -c%s "$BAK")
             echo "BAK_BYTES_AFTER=$BAK_BYTES_AFTER"
             [[ "$BAK_BYTES_AFTER" == "$BAK_BYTES" ]] || { echo "BAK_CHANGED"; exit 1; }
             test -f "$SYNC.bak-20261113-pre-merge" || { echo "MISSING_PRE_MERGE"; exit 1; }
-
-            # Conteos finales (siempre, aunque merge previo haya dejado el archivo saneado).
-            SYNC="$SYNC" node <<'NODE'
-            const fs = require('fs')
-            const sync = process.env.SYNC
-            const j = JSON.parse(fs.readFileSync(sync, 'utf8'))
-            const clinic = j.clinics?.['clinic:doctormauriciosoto@gmail.com'] || {}
-            const patients = Object.values(clinic.patients || {})
-            let activo = 0, valorado = 0, terminado = 0
-            for (const rec of patients) {
-              const p = rec.payload || {}
-              if (p.valuationOnly === true) valorado++
-              else if (p.treatmentCompleted === true) terminado++
-              else activo++
-            }
-            const odontograms = Object.keys(clinic.odontograms || {}).length
-            const drafts = Object.keys(clinic.drafts || {}).length
-            console.log('FINAL_COUNTS_JSON=' + JSON.stringify({
-              activo, valorado, terminado, odontograms, drafts,
-              patients: patients.length,
-              bytes: fs.statSync(sync).size,
-              bakBytes: fs.statSync(sync + '.bak-20261112').size,
-            }))
-            if (!(activo === 43 && valorado === 39 && terminado === 24 && odontograms >= 82)) {
-              console.error('FINAL_COUNT_FAIL')
-              process.exit(1)
-            }
-NODE
 
             echo "==== Restart PM2 with env ===="
             set -a
@@ -125,6 +93,4 @@ NODE
             HEAD458=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 8 -I "https://www.mihistoriadental.com/pacientes/458" || echo 000)
             echo "PUBLIC_HEAD_/pacientes/458=$HEAD458"
             [[ "$HEAD458" == "200" ]] || exit 1
-
-            [[ "$MERGE_RC" == "0" ]] || echo "WARN: merge exit $MERGE_RC (counts revalidated above)"
             echo "SANITIZE_OK"
