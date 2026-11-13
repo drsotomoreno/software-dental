@@ -229,6 +229,19 @@ jobs:
               if [[ -f /home/ubuntu/software-dental/server.js ]]; then
                 app_dir="/home/ubuntu/software-dental"
               fi
+              # Garantizar dist en el cwd de PM2 (sin tocar server/data).
+              if [[ "$app_dir" != "$CANONICAL" ]]; then
+                rsync -a \
+                  --exclude '.env' \
+                  --exclude 'server/data/' \
+                  --exclude 'node_modules/' \
+                  --exclude '.git/' \
+                  "$CANONICAL/" "$app_dir/"
+              fi
+              test -f "$app_dir/dist/index.html" || {
+                echo "ERROR: falta dist/index.html en $app_dir tras el build" >&2
+                exit 1
+              }
               cd "$app_dir"
               NODE_OPTIONS="--max-old-space-size=4096" pm2 start "$app_dir/server.js" \
                 --name software-dental \

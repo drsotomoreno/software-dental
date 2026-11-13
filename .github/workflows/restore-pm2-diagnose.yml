@@ -1,4 +1,4 @@
-# Diagnóstico + restauración de PM2 tras 502. NO toca clinical-sync.json.
+# Diagnóstico + restauración de PM2 tras 502. NO toca clinical-sync.json ni .bak.
 name: Restore PM2 diagnose
 
 on:
@@ -23,6 +23,7 @@ jobs:
           script: |
             set -euo pipefail
             CANONICAL="/var/www/mihistoriadental"
+            HOME_APP="/home/ubuntu/software-dental"
             export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
 
             echo "==== PM2 status (antes) ===="
@@ -33,11 +34,11 @@ jobs:
             pm2 logs --lines 50 --err --nostream || true
 
             echo "==== Nginx error.log (últimas 40) ===="
-            sudo tail -n 40 /var/log/nginx/error.log 2>/dev/null || tail -n 40 /var/log/nginx/error.log 2>/dev/null || echo "nginx error.log no legible"
+            sudo tail -n 40 /var/log/nginx/error.log 2>/dev/null || true
 
             echo "==== clinical-sync intacto (solo lectura) ===="
             for p in \
-              /home/ubuntu/software-dental/server/data/clinical-sync.json \
+              "$HOME_APP/server/data/clinical-sync.json" \
               "$CANONICAL/server/data/clinical-sync.json"
             do
               if [[ -f "$p" ]]; then
@@ -45,35 +46,43 @@ jobs:
               fi
             done
 
-            echo "==== Restaurar PM2 online con heap 4096 ===="
-            cd "$CANONICAL"
-            # Asegurar ecosystem/env de memoria sin tocar clinical-sync.
+            # cwd con datos clínicos; dist siempre desde canónico (build).
+            APP_DIR="$CANONICAL"
+            if [[ -f "$HOME_APP/server.js" ]]; then
+              APP_DIR="$HOME_APP"
+            fi
+
+            echo "==== Sync código/dist → $APP_DIR (sin tocar server/data) ===="
+            if [[ "$APP_DIR" != "$CANONICAL" ]]; then
+              mkdir -p "$APP_DIR"
+              rsync -a \
+                --exclude '.env' \
+                --exclude 'server/data/' \
+                --exclude 'node_modules/' \
+                --exclude '.git/' \
+                "$CANONICAL/" "$APP_DIR/"
+            fi
+            test -f "$APP_DIR/dist/index.html" || {
+              echo "ERROR: falta dist/index.html en $APP_DIR" >&2
+              ls -la "$CANONICAL/dist" "$APP_DIR/dist" 2>/dev/null || true
+              exit 1
+            }
+            echo "DIST_OK=$APP_DIR/dist/index.html"
+
+            echo "==== Restaurar PM2 online heap 4096 ===="
             if pm2 describe software-dental >/dev/null 2>&1; then
               pm2 delete software-dental || true
             fi
             if pm2 describe mihistoriadental >/dev/null 2>&1; then
               pm2 delete mihistoriadental || true
             fi
-            # Arranque limpio desde canónico
-            # Preferir cwd real de PM2 si existía (p.ej. /home/ubuntu/software-dental).
-            APP_DIR="$CANONICAL"
-            if [[ -f /home/ubuntu/software-dental/server.js ]]; then
-              APP_DIR="/home/ubuntu/software-dental"
-            fi
             cd "$APP_DIR"
-            # Sincronizar dist/server desde canónico si hace falta (sin tocar data/).
-            if [[ "$APP_DIR" != "$CANONICAL" ]]; then
-              rsync -a --delete \
-                --exclude '.env' --exclude 'server/data/' --exclude 'node_modules/' \
-                "$CANONICAL/" "$APP_DIR/" || true
-            fi
             NODE_OPTIONS="--max-old-space-size=4096" pm2 start "$APP_DIR/server.js" \
               --name software-dental \
               --cwd "$APP_DIR" \
               --update-env \
               --node-args="--max-old-space-size=4096"
             pm2 save || true
-            # clinical-sync ~72MB: dar tiempo a boot antes del smoke.
             sleep 15
             sudo systemctl reload nginx || true
 
@@ -81,34 +90,24 @@ jobs:
             pm2 status
             STATUS=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental")||apps[0];console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
             echo "APP_STATUS=$STATUS"
-            [[ "$STATUS" == "online" ]] || { echo "PM2 no quedó online"; pm2 logs --lines 80 --err --nostream || true; exit 1; }
+            [[ "$STATUS" == "online" ]] || { pm2 logs --lines 80 --err --nostream || true; exit 1; }
 
-            resolve_port() {
-              local p=""
-              p=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{try{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental")||apps[0];const e=(app&&app.pm2_env)||{};const env=e.env||{};console.log(String(env.PORT||e.PORT||""))}catch(e){console.log("")}})' || true)
-              if [[ -z "$p" && -f "$APP_DIR/.env" ]]; then
-                p=$(grep -E '^PORT=' "$APP_DIR/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+            PORT=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{try{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental")||apps[0];const e=(app&&app.pm2_env)||{};const env=e.env||{};console.log(String(env.PORT||e.PORT||""))}catch(e){console.log("")}})' || true)
+            if [[ -z "$PORT" && -f "$APP_DIR/.env" ]]; then
+              PORT=$(grep -E '^PORT=' "$APP_DIR/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+            fi
+            PORT="${PORT:-3000}"
+            for cand in "$PORT" 3000 8080; do
+              if curl -sS -o /dev/null --max-time 3 "http://127.0.0.1:${cand}/" 2>/dev/null; then
+                PORT="$cand"
+                break
               fi
-              if [[ -z "$p" && -f "$CANONICAL/.env" ]]; then
-                p=$(grep -E '^PORT=' "$CANONICAL/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-              fi
-              # Probar candidatos si el declarado no responde.
-              local cand
-              for cand in "$p" 3000 8080 80; do
-                [[ -n "$cand" ]] || continue
-                if curl -sS -o /dev/null --max-time 3 "http://127.0.0.1:${cand}/" 2>/dev/null; then
-                  echo "$cand"
-                  return 0
-                fi
-              done
-              echo "${p:-3000}"
-            }
-            PORT="$(resolve_port)"
-            echo "==== Smoke local PORT=$PORT + /pacientes ===="
-            bash "$CANONICAL/scripts/post-deploy-smoke.sh" "$PORT" || bash "$APP_DIR/scripts/post-deploy-smoke.sh" "$PORT"
+            done
+            echo "SMOKE_PORT=$PORT"
+            bash "$APP_DIR/scripts/post-deploy-smoke.sh" "$PORT" || bash "$CANONICAL/scripts/post-deploy-smoke.sh" "$PORT"
             CODE=$(curl -sS -o /tmp/mhd-pacientes.txt -w "%{http_code}" --max-time 20 "http://127.0.0.1:${PORT}/pacientes" || echo 000)
             echo "LOCAL_/pacientes=$CODE"
-            [[ "$CODE" == "200" ]] || { head -c 300 /tmp/mhd-pacientes.txt; pm2 logs --lines 80 --err --nostream || true; exit 1; }
+            [[ "$CODE" == "200" ]] || { head -c 400 /tmp/mhd-pacientes.txt; pm2 logs --lines 40 --err --nostream || true; exit 1; }
             PUB=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://www.mihistoriadental.com/pacientes" || echo 000)
             echo "PUBLIC_/pacientes=$PUB"
             [[ "$PUB" == "200" ]] || exit 1
