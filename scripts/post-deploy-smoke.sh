@@ -37,8 +37,18 @@ check "socket.io polling" "$BASE/socket.io/?EIO=4&transport=polling" "200"
 # El index servido por Express debe existir.
 check "frontend index" "$BASE/" "200"
 
-# SPA clínica: /pacientes debe servir el index (200). 502 = upstream caído.
+# SPA clínica: /pacientes debe servir el index (200). 502/504 = upstream caído/lento.
 check "frontend /pacientes" "$BASE/pacientes" "200"
+check "frontend /pacientes/:id" "$BASE/pacientes/458" "200"
+
+# HEAD rápido (Nginx → Node): no debe colgarse.
+head_code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 8 -I "$BASE/pacientes/458" || echo 000)
+if [[ "$head_code" != "200" ]]; then
+  echo "FALLA HEAD /pacientes/458 → HTTP $head_code"
+  fail=1
+else
+  echo "OK HEAD /pacientes/458 → HTTP $head_code"
+fi
 
 if [ "$fail" -ne 0 ]; then
   echo "Smoke falló: el proceso reiniciado no tiene el API/socket del kiosco." >&2

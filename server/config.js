@@ -1,8 +1,31 @@
-import 'dotenv/config'
+import { existsSync } from 'node:fs'
+import { config as loadDotenv } from 'dotenv'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const projectRoot = join(__dirname, '..')
+
+/**
+ * Carga .env desde cwd (PM2 --cwd) o raíz del repo.
+ * Evita DATABASE_URL vacío cuando PM2 arranca sin env_file.
+ */
+function loadEnvFiles() {
+  const candidates = [
+    join(process.cwd(), '.env'),
+    join(projectRoot, '.env'),
+    join(__dirname, '.env'),
+  ]
+  const seen = new Set()
+  for (const envPath of candidates) {
+    const key = String(envPath)
+    if (seen.has(key) || !existsSync(envPath)) continue
+    seen.add(key)
+    loadDotenv({ path: envPath, override: false })
+  }
+}
+loadEnvFiles()
+
 const port = Number(process.env.PORT) || 3000
 
 const LOCAL_DATABASE_URL = 'postgresql://postgres:postgres@localhost:1234/software_dental'

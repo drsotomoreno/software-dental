@@ -52,7 +52,23 @@ jobs:
               APP_DIR="$HOME_APP"
             fi
 
-            echo "==== Sync código/dist → $APP_DIR (sin tocar server/data) ===="
+            echo "==== Pull origin/main en canónico (SPA + Valorados) ===="
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL"
+              git fetch origin main || true
+              git update-index --no-skip-worktree server/services/fevRipsService.js 2>/dev/null || true
+              git reset --hard origin/main || true
+              echo "CANONICAL_HEAD=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+              # Rebuild frontend si falta dist o el commit trae cambios de UI (tope 12m).
+              if [[ ! -f "$CANONICAL/dist/index.html" ]] || git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -qE '^(src/|index\.html|vite\.config)'; then
+                echo "==== Build canónico (PM2 pausado) ===="
+                pm2 stop all || true
+                export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
+                (cd "$CANONICAL" && timeout 12m npm run build) || echo "WARN: build falló; se reutiliza dist previo si existe"
+              fi
+            fi
+
+            echo "==== Sync código/dist → $APP_DIR (sin tocar server/data ni .env) ===="
             if [[ "$APP_DIR" != "$CANONICAL" ]]; then
               mkdir -p "$APP_DIR"
               rsync -a \
@@ -67,9 +83,66 @@ jobs:
               ls -la "$CANONICAL/dist" "$APP_DIR/dist" 2>/dev/null || true
               exit 1
             }
+            # Confirmar middleware SPA temprano en el server desplegado.
+            grep -q "isSpaNavigation" "$APP_DIR/server.js" || {
+              echo "ERROR: server.js sin middleware SPA temprano" >&2
+              exit 1
+            }
             echo "DIST_OK=$APP_DIR/dist/index.html"
 
-            echo "==== Restaurar PM2 online heap 4096 ===="
+            echo "==== .env / DATABASE_URL (solo lectura + ensure) ===="
+            for envf in "$APP_DIR/.env" "$CANONICAL/.env" "$HOME_APP/.env"; do
+              if [[ -f "$envf" ]]; then
+                if grep -qE '^DATABASE_URL=.+' "$envf" 2>/dev/null; then
+                  echo "ENV_HAS_DATABASE_URL=$envf"
+                else
+                  echo "ENV_MISSING_DATABASE_URL=$envf"
+                fi
+              else
+                echo "ENV_ABSENT=$envf"
+              fi
+            done
+            # Si el cwd de PM2 no tiene DATABASE_URL pero el canónico sí, copiar solo esa línea.
+            if [[ -f "$CANONICAL/.env" ]] && grep -qE '^DATABASE_URL=.+' "$CANONICAL/.env"; then
+              if [[ ! -f "$APP_DIR/.env" ]] || ! grep -qE '^DATABASE_URL=.+' "$APP_DIR/.env"; then
+                echo "Se añade DATABASE_URL al .env de $APP_DIR desde canónico (resto intacto)."
+                touch "$APP_DIR/.env"
+                grep -E '^DATABASE_URL=' "$CANONICAL/.env" | head -1 >> "$APP_DIR/.env"
+              fi
+            fi
+
+            echo "==== Auditoría readonly valorados (clinicId) ===="
+            SYNC_JSON=""
+            for cand in \
+              "$HOME_APP/server/data/clinical-sync.json" \
+              "$APP_DIR/server/data/clinical-sync.json" \
+              "$CANONICAL/server/data/clinical-sync.json"
+            do
+              if [[ -f "$cand" ]]; then SYNC_JSON="$cand"; break; fi
+            done
+            if [[ -n "$SYNC_JSON" ]]; then
+              SYNC_JSON="$SYNC_JSON" node <<'NODE'
+              const fs = require('fs')
+              const j = JSON.parse(fs.readFileSync(process.env.SYNC_JSON, 'utf8'))
+              const clinic = j.clinics?.['clinic:doctormauriciosoto@gmail.com'] || {}
+              const patients = Object.values(clinic.patients || {})
+              let valorados = 0
+              const clinicIdCounts = {}
+              for (const rec of patients) {
+                const p = rec?.payload && typeof rec.payload === 'object' ? rec.payload : {}
+                const valued = p.valuationOnly === true || p.phase === 'VALORACION_RAPIDA'
+                if (!valued) continue
+                valorados += 1
+                const cid = String(rec.clinicId || p.clinicId || '(empty)')
+                clinicIdCounts[cid] = (clinicIdCounts[cid] || 0) + 1
+              }
+              console.log(JSON.stringify({ syncFile: process.env.SYNC_JSON, valorados, clinicIdCounts }, null, 2))
+NODE
+            else
+              echo "SYNC_JSON missing (readonly skip)"
+            fi
+
+            echo "==== Restaurar PM2 online heap 4096 + env RDS ===="
             if pm2 describe software-dental >/dev/null 2>&1; then
               pm2 delete software-dental || true
             fi
@@ -77,7 +150,18 @@ jobs:
               pm2 delete mihistoriadental || true
             fi
             cd "$APP_DIR"
-            NODE_OPTIONS="--max-old-space-size=4096" pm2 start "$APP_DIR/server.js" \
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            export NODE_OPTIONS="--max-old-space-size=4096"
+            export NODE_ENV="${NODE_ENV:-production}"
+            if [[ -z "${DATABASE_URL:-}" ]]; then
+              echo "ERROR: DATABASE_URL vacío tras cargar .env de $APP_DIR" >&2
+              exit 1
+            fi
+            echo "DATABASE_URL_PRESENT=yes host=$(node -e 'try{const u=new URL(process.env.DATABASE_URL);console.log(u.hostname)}catch{console.log("bad")}')"
+            pm2 start "$APP_DIR/server.js" \
               --name software-dental \
               --cwd "$APP_DIR" \
               --update-env \
@@ -111,4 +195,9 @@ jobs:
             PUB=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://www.mihistoriadental.com/pacientes" || echo 000)
             echo "PUBLIC_/pacientes=$PUB"
             [[ "$PUB" == "200" ]] || exit 1
+            HEAD458=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 8 -I "https://www.mihistoriadental.com/pacientes/458" || echo 000)
+            echo "PUBLIC_HEAD_/pacientes/458=$HEAD458"
+            [[ "$HEAD458" == "200" ]] || exit 1
+            # Confirmar que el proceso ve DATABASE_URL (sin imprimir secreto).
+            pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental");const env=(app&&app.pm2_env&&app.pm2_env.env)||{};console.log("PM2_DATABASE_URL="+((env.DATABASE_URL||"").length>0?"PRESENT":"MISSING"))})'
             echo "RESTORE_OK"

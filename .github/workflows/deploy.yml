@@ -145,7 +145,11 @@ jobs:
               echo "---- Build (PM2 en pausa para liberar RAM) ----"
               pm2 stop all || true
               export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
-              npm run build || { pm2 restart all --update-env || true; exit 1; }
+              # Evitar cuelgue infinito de Vite (SSH timeout 35m): tope 12m.
+              if ! timeout 12m npm run build; then
+                echo "Build falló o excedió 12m; reintento una vez."
+                timeout 12m npm run build || { pm2 resurrect || pm2 restart all --update-env || true; exit 1; }
+              fi
               echo "Bundle canónico:"
               grep -o 'assets/index-[^"]*' dist/index.html || true
 
@@ -243,7 +247,24 @@ jobs:
                 exit 1
               }
               cd "$app_dir"
-              NODE_OPTIONS="--max-old-space-size=4096" pm2 start "$app_dir/server.js" \
+              # Asegurar DATABASE_URL en el .env del cwd PM2 (sin tocar clinical-sync).
+              if [[ -f "$CANONICAL/.env" ]] && grep -qE '^DATABASE_URL=.+' "$CANONICAL/.env"; then
+                if [[ ! -f "$app_dir/.env" ]] || ! grep -qE '^DATABASE_URL=.+' "$app_dir/.env"; then
+                  touch "$app_dir/.env"
+                  grep -E '^DATABASE_URL=' "$CANONICAL/.env" | head -1 >> "$app_dir/.env"
+                fi
+              fi
+              set -a
+              # shellcheck disable=SC1091
+              [[ -f "$app_dir/.env" ]] && . "$app_dir/.env"
+              set +a
+              export NODE_OPTIONS="--max-old-space-size=4096"
+              export NODE_ENV="${NODE_ENV:-production}"
+              [[ -n "${DATABASE_URL:-}" ]] || {
+                echo "ERROR: DATABASE_URL vacío en $app_dir/.env" >&2
+                exit 1
+              }
+              pm2 start "$app_dir/server.js" \
                 --name software-dental \
                 --cwd "$app_dir" \
                 --update-env \

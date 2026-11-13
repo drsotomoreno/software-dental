@@ -19,8 +19,17 @@ export function normalizePatientPhase(phase?: PatientPhase | string | null): Pat
   return phase === 'TRATAMIENTO_ACEPTADO' ? 'TRATAMIENTO_ACEPTADO' : DEFAULT_PATIENT_PHASE
 }
 
-export function isValuatedOnlyPatient(patient: Pick<Patient, 'valuationOnly'>): boolean {
-  return patient.valuationOnly === true
+/**
+ * Pacientes Valorados (EC2): valuationOnly=true o phase=VALORACION_RAPIDA.
+ * No depende de status (en sync suele venir null).
+ * valuationOnly=false (historia completa) nunca entra aquí.
+ */
+export function isValuatedOnlyPatient(
+  patient: Pick<Patient, 'valuationOnly' | 'phase' | 'treatmentCompleted'>,
+): boolean {
+  if (patient.treatmentCompleted === true) return false
+  if (patient.valuationOnly === false) return false
+  return patient.valuationOnly === true || patient.phase === 'VALORACION_RAPIDA'
 }
 
 export function isCompletedPatient(patient: Pick<Patient, 'treatmentCompleted'>): boolean {
@@ -28,7 +37,7 @@ export function isCompletedPatient(patient: Pick<Patient, 'treatmentCompleted'>)
 }
 
 export function isActivePatient(
-  patient: Pick<Patient, 'valuationOnly' | 'treatmentCompleted'>,
+  patient: Pick<Patient, 'valuationOnly' | 'phase' | 'treatmentCompleted'>,
 ): boolean {
   return !isValuatedOnlyPatient(patient) && !isCompletedPatient(patient)
 }

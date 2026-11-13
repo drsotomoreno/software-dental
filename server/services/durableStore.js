@@ -85,7 +85,8 @@ function connectionErrorText(error) {
 }
 
 function markPostgresUnavailable(error) {
-  postgresRetryAt = Date.now() + 20_000
+  // Enfriamiento breve: reintenta pronto sin martillar RDS en cada request.
+  postgresRetryAt = Date.now() + 15_000
   console.error('[store] Error de conexión a PostgreSQL:', connectionErrorText(error))
 }
 
@@ -102,22 +103,25 @@ export function poolConfig(url) {
   const isRemote = remoteSsl !== false
 
   // AWS RDS / hosts remotos: connectionString limpio + ssl explícito.
+  // Timeout corto: nunca congelar HTTP/SPA si RDS no responde.
   if (isRemote) {
     return {
       connectionString: stripSslModeFromConnectionString(url),
       ssl: { rejectUnauthorized: false },
-      connectionTimeoutMillis: 15_000,
+      connectionTimeoutMillis: 3_000,
       idleTimeoutMillis: 30_000,
       max: 10,
+      allowExitOnIdle: true,
     }
   }
 
   // Localhost / host interno: sin TLS; params discretos evitan ambigüedad.
   const common = {
     max: 2,
-    connectionTimeoutMillis: 8_000,
+    connectionTimeoutMillis: 3_000,
     idleTimeoutMillis: 20_000,
     ssl: false,
+    allowExitOnIdle: true,
   }
   try {
     const parsed = new URL(url)
@@ -143,6 +147,11 @@ export function poolConfig(url) {
  * @param {(client: import('pg').PoolClient) => Promise<unknown>} fn
  */
 export async function withPgClient(fn) {
+  if (postgresCoolingDown()) {
+    const error = new Error('PostgreSQL en enfriamiento tras fallo de conexión.')
+    error.code = 'PG_COOLDOWN'
+    throw error
+  }
   const db = getPool()
   if (!db) {
     const error = new Error('PostgreSQL no está configurado.')
@@ -174,6 +183,7 @@ function getPool() {
   pool = new Pool(poolConfig(url))
   // Sin este listener, node-pg emite 'error' en un cliente inactivo y Node apaga el proceso.
   pool.on('error', (err) => {
+    markPostgresUnavailable(err)
     console.error(
       '[store] Cliente PostgreSQL inactivo desconectado:',
       err instanceof Error ? err.message : err,

@@ -63,6 +63,43 @@ app.use(
     ],
   }),
 )
+
+const distDir = path.join(__dirname, 'dist')
+const distIndex = path.join(distDir, 'index.html')
+const hasFrontendBuild = existsSync(distIndex)
+const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true'
+
+export { config, DATABASE_URL }
+
+function isSpaNavigation(req) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false
+  const pathName = String(req.path || '')
+  if (pathName.startsWith('/api') || pathName.startsWith('/socket.io')) return false
+  // Assets con extensión (js/css/img) los sirve express.static.
+  if (/\.[a-zA-Z0-9]{2,8}$/.test(pathName)) return false
+  return true
+}
+
+function sendSpaIndex(_req, res) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+  res.sendFile(distIndex, (error) => {
+    if (error && !res.headersSent) {
+      res.status(500).type('text/plain').send('Frontend no disponible (dist/index.html).')
+    }
+  })
+}
+
+/**
+ * HTML de navegación (F5 en /pacientes/:id) ANTES de parsers/API/Postgres.
+ * Evita 504 de Nginx si RDS o el sync de 72MB saturan el event loop.
+ */
+if (isProduction && hasFrontendBuild) {
+  app.use((req, res, next) => {
+    if (!isSpaNavigation(req)) return next()
+    return sendSpaIndex(req, res)
+  })
+}
+
 /** Multipart Drive (multer) limita a 100 MB; JSON sync admite overhead base64. */
 app.use(express.json({ limit: '150mb' }))
 app.use(express.urlencoded({ extended: true, limit: '150mb' }))
@@ -76,13 +113,6 @@ app.use('/api/v1/kiosk', kioskRoutes)
 app.use('/api/superadmin', superadminRoutes)
 app.use('/api', authRoutes)
 
-const distDir = path.join(__dirname, 'dist')
-const distIndex = path.join(distDir, 'index.html')
-const hasFrontendBuild = existsSync(distIndex)
-const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true'
-
-export { config, DATABASE_URL }
-
 function mountStaticFrontend() {
   app.use(
     express.static(distDir, {
@@ -93,10 +123,10 @@ function mountStaticFrontend() {
       },
     }),
   )
-  app.get('/{*splat}', (req, res, next) => {
-    if (req.path.startsWith('/api')) return next()
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
-    res.sendFile(distIndex)
+  // Fallback SPA (por si el middleware temprano no aplicó).
+  app.get(/^(?!\/api(?:\/|$)|\/socket\.io(?:\/|$)).*/, (req, res, next) => {
+    if (!isSpaNavigation(req)) return next()
+    return sendSpaIndex(req, res)
   })
 }
 
