@@ -1,0 +1,108 @@
+# Restaura valuationOnly/phase/treatmentCompleted desde bak (solo lectura).
+# NO toca .bak-20261112 / .bak-20261113-pre-merge / .bak-20261113-dedup.
+# NO reintroduce aliases; mantiene clinical-sync ~3.8 MB.
+name: Restore patient classification flags
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore-flags:
+    name: Restore flags + verify 43/39/24
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: SSH restore flags
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 12m
+          script: |
+            set -euo pipefail
+            CANONICAL="/var/www/mihistoriadental"
+            HOME_APP="/home/ubuntu/software-dental"
+            APP_DIR="$HOME_APP"
+            [[ -f "$APP_DIR/server.js" ]] || APP_DIR="$CANONICAL"
+
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL"
+              git fetch origin main || true
+              git reset --hard origin/main || true
+            fi
+            if [[ "$APP_DIR" != "$CANONICAL" ]]; then
+              mkdir -p "$APP_DIR/scripts"
+              rsync -a "$CANONICAL/scripts/" "$APP_DIR/scripts/" || true
+            fi
+            chmod +x "$APP_DIR/scripts/"*.sh 2>/dev/null || true
+
+            HEAP_SCRIPT="$APP_DIR/scripts/pm2-heap-from-ram.sh"
+            if [[ -f "$HEAP_SCRIPT" ]]; then
+              HEAP_MB="$(bash "$HEAP_SCRIPT")"
+            else
+              MEM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
+              HEAP_MB=$((MEM_MB * 70 / 100))
+              [[ "$HEAP_MB" -gt 1536 ]] && HEAP_MB=1536
+              [[ "$HEAP_MB" -lt 512 ]] && HEAP_MB=512
+            fi
+            echo "HEAP_MB=$HEAP_MB"
+
+            SYNC="$APP_DIR/server/data/clinical-sync.json"
+            test -f "$SYNC" || { echo "MISSING_SYNC"; exit 1; }
+            echo "SYNC_BYTES_BEFORE=$(stat -c%s "$SYNC")"
+            for bak in "$SYNC.bak-20261112" "$SYNC.bak-20261113-pre-merge" "$SYNC.bak-20261113-dedup"; do
+              if [[ -f "$bak" ]]; then echo "PROTECTED $(basename "$bak")=$(stat -c%s "$bak")"; fi
+            done
+
+            echo "==== Pause PM2 + restore flags ===="
+            pm2 stop software-dental || pm2 stop all || true
+            sleep 2
+            node --max-old-space-size="${HEAP_MB}" \
+              "$APP_DIR/scripts/restore-patient-classification-flags.cjs" "$SYNC"
+            node --max-old-space-size="${HEAP_MB}" \
+              "$APP_DIR/scripts/restore-patient-classification-flags.cjs" "$SYNC" --verify-only
+
+            BYTES=$(stat -c%s "$SYNC")
+            echo "SYNC_BYTES_AFTER=$BYTES"
+            [[ "$BYTES" -lt 12000000 ]] || { echo "SYNC_TOO_LARGE=$BYTES"; exit 1; }
+            [[ "$BYTES" -gt 2000000 ]] || { echo "SYNC_TOO_SMALL=$BYTES"; exit 1; }
+
+            # Bak protegidos intactos
+            [[ "$(stat -c%s "$SYNC.bak-20261112")" == "72014840" ]] || echo "WARN bak12 size"
+            test -f "$SYNC.bak-20261113-pre-merge"
+            test -f "$SYNC.bak-20261113-dedup"
+
+            echo "==== Restart PM2 heap=$HEAP_MB ===="
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+            export NODE_ENV="${NODE_ENV:-production}"
+            if pm2 describe software-dental >/dev/null 2>&1; then pm2 delete software-dental || true; fi
+            if pm2 describe mihistoriadental >/dev/null 2>&1; then pm2 delete mihistoriadental || true; fi
+            cd "$APP_DIR"
+            pm2 start "$APP_DIR/server.js" \
+              --name software-dental \
+              --cwd "$APP_DIR" \
+              --update-env \
+              --node-args="--max-old-space-size=${HEAP_MB}"
+            pm2 save || true
+            sleep 12
+            sudo systemctl reload nginx || true
+
+            STATUS=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental")||apps[0];console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
+            echo "PM2_STATUS=$STATUS"
+            [[ "$STATUS" == "online" ]] || { pm2 logs --lines 40 --err --nostream || true; exit 1; }
+
+            pm2 status
+            free -m
+            echo "SYNC_BYTES_FINAL=$(stat -c%s "$SYNC")"
+            HEAD=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 8 -I "https://www.mihistoriadental.com/pacientes-valorados" || echo 000)
+            echo "PUBLIC_HEAD_/pacientes-valorados=$HEAD"
+            [[ "$HEAD" == "200" ]] || exit 1
+            echo "FLAGS_RESTORE_WORKFLOW_OK"
