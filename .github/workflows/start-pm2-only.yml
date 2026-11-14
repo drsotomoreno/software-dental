@@ -1,0 +1,59 @@
+# Arranca PM2 sin tocar clinical-sync.json ni .bak (sitio caído tras deploy fallido).
+name: Start PM2 only
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  start:
+    name: Start PM2 online
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: SSH start
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 8m
+          script: |
+            set -euo pipefail
+            APP_DIR="/home/ubuntu/software-dental"
+            [[ -f "$APP_DIR/server.js" ]] || APP_DIR="/var/www/mihistoriadental"
+            HEAP_MB="$(bash "$APP_DIR/scripts/pm2-heap-from-ram.sh" 2>/dev/null || echo 635)"
+            # Preferir ecosystem si existe (450 MB heap)
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            export NODE_ENV=production
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+            cd "$APP_DIR"
+            pm2 delete software-dental 2>/dev/null || true
+            if [[ -f "$APP_DIR/ecosystem.config.cjs" ]]; then
+              pm2 start "$APP_DIR/ecosystem.config.cjs" --update-env
+            else
+              pm2 start "$APP_DIR/server.js" \
+                --name software-dental \
+                --cwd "$APP_DIR" \
+                --update-env \
+                --node-args="--max-old-space-size=${HEAP_MB}"
+            fi
+            pm2 save
+            sleep 15
+            STATUS=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const a=JSON.parse(r||"[]").find(x=>x.name==="software-dental");console.log(a&&a.pm2_env?a.pm2_env.status:"missing")})')
+            echo "PM2_STATUS=$STATUS"
+            [[ "$STATUS" == "online" ]] || { pm2 logs --lines 40 --err --nostream; exit 1; }
+            HEAD=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -Ik "https://www.mihistoriadental.com/pacientes-valorados" || echo 000)
+            echo "PUBLIC_HEAD=$HEAD"
+            [[ "$HEAD" == "200" ]] || exit 1
+            # No tocar sync
+            SYNC="$APP_DIR/server/data/clinical-sync.json"
+            echo "SYNC_BYTES=$(stat -c%s "$SYNC")"
+            pm2 status
+            free -m
+            echo "START_PM2_OK"

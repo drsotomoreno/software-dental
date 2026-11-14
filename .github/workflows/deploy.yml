@@ -140,16 +140,40 @@ jobs:
               force_main "$CANONICAL" || exit 1
               chmod +x scripts/*.sh 2>/dev/null || true
               npm install || exit 1
-              # Vite + clinical-sync (~72MB) + PM2 saturan RAM pequeña: pausar PM2
+              # Vite + clinical-sync + PM2 saturan RAM pequeña: pausar PM2
               # antes del build evita cuelgues de 20m (timeout SSH).
               echo "---- Build (PM2 en pausa para liberar RAM) ----"
               pm2 stop all || true
-              export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
+              # Nginx/SPA puede dejar dist/ como root → EACCES en emptyDir de Vite.
+              sudo chown -R "$(whoami):$(whoami)" "$CANONICAL/dist" 2>/dev/null || true
+              sudo chmod -R u+rwX "$CANONICAL/dist" 2>/dev/null || true
+              # Heap de build acotado a RAM real (nunca 2048 en t3.micro).
+              BUILD_HEAP=768
+              if [[ -f "$CANONICAL/scripts/pm2-heap-from-ram.sh" ]]; then
+                BUILD_HEAP="$(bash "$CANONICAL/scripts/pm2-heap-from-ram.sh")"
+              fi
+              export NODE_OPTIONS="--max-old-space-size=${BUILD_HEAP}"
+              echo "BUILD_HEAP=$BUILD_HEAP"
               # Evitar cuelgue infinito de Vite (SSH timeout 35m): tope 12m.
               if ! timeout 12m npm run build; then
                 echo "Build falló o excedió 12m; reintento una vez."
-                timeout 12m npm run build || { pm2 resurrect || pm2 restart all --update-env || true; exit 1; }
+                sudo chown -R "$(whoami):$(whoami)" "$CANONICAL/dist" 2>/dev/null || true
+                if ! timeout 12m npm run build; then
+                  echo "Build falló; se restablece PM2 sin tocar clinical-sync."
+                  bash "$CANONICAL/scripts/pm2-heap-from-ram.sh" >/dev/null 2>&1 || true
+                  HEAP_MB="$(bash "$CANONICAL/scripts/pm2-heap-from-ram.sh" 2>/dev/null || echo 635)"
+                  pm2 delete software-dental 2>/dev/null || true
+                  cd /home/ubuntu/software-dental 2>/dev/null || cd "$CANONICAL"
+                  set -a; [[ -f .env ]] && . ./.env; set +a
+                  export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+                  pm2 start server.js --name software-dental --cwd "$(pwd)" --update-env \
+                    --node-args="--max-old-space-size=${HEAP_MB}" || true
+                  pm2 save || true
+                  exit 1
+                fi
               fi
+              # Tras build, asegurar que www-data pueda servir SPA estática.
+              sudo chmod -R a+rX "$CANONICAL/dist" 2>/dev/null || true
               echo "Bundle canónico:"
               grep -o 'assets/index-[^"]*' dist/index.html || true
 
