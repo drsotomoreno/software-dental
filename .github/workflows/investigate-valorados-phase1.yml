@@ -1,0 +1,62 @@
+# Fase 1 — investigación READ-ONLY en EC2 (no toca .bak-*).
+name: Investigate Valorados Phase1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  investigate:
+    name: Disk + PG + HTTP pull
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: SSH phase1 investigate
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 12m
+          script: |
+            set -euo pipefail
+            APP_DIR="/home/ubuntu/software-dental"
+            CANONICAL="/var/www/mihistoriadental"
+            [[ -f "$APP_DIR/server.js" ]] || APP_DIR="$CANONICAL"
+
+            # Traer solo el script de investigación (sin reset hard del data)
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL"
+              git fetch origin main
+              git checkout origin/main -- scripts/investigate-valorados-http-phase1.cjs || true
+              mkdir -p "$APP_DIR/scripts"
+              cp -f "$CANONICAL/scripts/investigate-valorados-http-phase1.cjs" \
+                "$APP_DIR/scripts/investigate-valorados-http-phase1.cjs"
+            fi
+
+            cd "$APP_DIR"
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            export PUBLIC_BASE_URL="http://127.0.0.1:${PORT:-3000}"
+
+            echo "APP_DIR=$APP_DIR"
+            echo "PM2:"; pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const a=JSON.parse(r||"[]").find(x=>x.name==="software-dental");console.log(a&&a.pm2_env?{status:a.pm2_env.status,cwd:a.pm2_env.pm_cwd,port:a.pm2_env.PORT}:"missing")})' || true
+
+            BAK12=$(stat -c%s "$APP_DIR/server/data/clinical-sync.json.bak-20261112" 2>/dev/null || echo 0)
+            PRE=$(stat -c%s "$APP_DIR/server/data/clinical-sync.json.bak-20261113-pre-merge" 2>/dev/null || echo 0)
+            DEDUP=$(stat -c%s "$APP_DIR/server/data/clinical-sync.json.bak-20261113-dedup" 2>/dev/null || echo 0)
+            echo "BAK_SIZES_BEFORE bak12=$BAK12 pre=$PRE dedup=$DEDUP"
+
+            node --max-old-space-size=635 scripts/investigate-valorados-http-phase1.cjs
+
+            BAK12b=$(stat -c%s "$APP_DIR/server/data/clinical-sync.json.bak-20261112" 2>/dev/null || echo 0)
+            PREb=$(stat -c%s "$APP_DIR/server/data/clinical-sync.json.bak-20261113-pre-merge" 2>/dev/null || echo 0)
+            DEDUPb=$(stat -c%s "$APP_DIR/server/data/clinical-sync.json.bak-20261113-dedup" 2>/dev/null || echo 0)
+            [[ "$BAK12" == "$BAK12b" ]] || { echo "BAK12_CHANGED"; exit 1; }
+            [[ "$PRE" == "$PREb" ]] || { echo "PRE_CHANGED"; exit 1; }
+            [[ "$DEDUP" == "$DEDUPb" ]] || { echo "DEDUP_CHANGED"; exit 1; }
+            echo "BAKS_INTACT_OK"
