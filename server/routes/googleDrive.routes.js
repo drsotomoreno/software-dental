@@ -26,6 +26,12 @@ import {
 
 const router = Router()
 
+/** Evita double-send / Connection reset by peer (104) si el socket ya cerró. */
+function sendJson(res, status, body) {
+  if (res.headersSent || res.writableEnded) return
+  return res.status(status).json(body)
+}
+
 /** Escaneos STL/PLY/OBJ clínicos: hasta 100 MB. */
 export const GOOGLE_DRIVE_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
@@ -72,7 +78,7 @@ function bearerToken(req) {
 async function requireSessionUser(req, res) {
   const session = await resolveSubscriptionSession(bearerToken(req), sessionHintFromRequest(req))
   if (!session?.user) {
-    res.status(401).json({
+    sendJson(res, 401, {
       success: false,
       ok: false,
       error: 'Sesión inválida o expirada.',
@@ -135,11 +141,11 @@ router.get('/status', async (req, res) => {
     const user = await requireSessionUser(req, res)
     if (!user) return
     const status = await readGoogleDriveStatusForUser(user, { req })
-    return res.json({ success: true, ok: true, ...status })
+    return sendJson(res, 200, { success: true, ok: true, ...status })
   } catch (error) {
     console.error('[google-drive] GET /status:', error)
     const mapped = mapOAuthError(error)
-    return res.status(mapped.status).json({
+    return sendJson(res, mapped.status, {
       success: false,
       ok: false,
       error: mapped.message,
@@ -161,9 +167,10 @@ router.get('/connect', async (req, res) => {
       clinicId: earlyClinicIdFrom(req) || resolved.clinicId || '',
     })
     if (String(req.query?.redirect || '') === '1') {
+      if (res.headersSent || res.writableEnded) return
       return res.redirect(302, url)
     }
-    return res.json({
+    return sendJson(res, 200, {
       success: true,
       ok: true,
       url,
@@ -173,7 +180,7 @@ router.get('/connect', async (req, res) => {
   } catch (error) {
     console.error('[google-drive] GET /connect:', error)
     const mapped = mapOAuthError(error)
-    return res.status(mapped.status).json({
+    return sendJson(res, mapped.status, {
       success: false,
       ok: false,
       error: mapped.message,
@@ -186,6 +193,7 @@ router.get('/callback', async (req, res) => {
   try {
     const query = req.query && typeof req.query === 'object' ? req.query : {}
     if (query.error) {
+      if (res.headersSent || res.writableEnded) return
       return res.redirect(
         302,
         frontendRedirectAfterOAuth({
@@ -197,6 +205,7 @@ router.get('/callback', async (req, res) => {
     const code = String(query.code || '').trim()
     const state = String(query.state || '').trim()
     if (!code || !state) {
+      if (res.headersSent || res.writableEnded) return
       return res.redirect(
         302,
         frontendRedirectAfterOAuth({ ok: false, errorCode: 'OAUTH_CALLBACK_INVALID' }),
@@ -204,10 +213,12 @@ router.get('/callback', async (req, res) => {
     }
 
     await completeGoogleDriveOAuthCallback({ code, state })
+    if (res.headersSent || res.writableEnded) return
     return res.redirect(302, frontendRedirectAfterOAuth({ ok: true }))
   } catch (error) {
     console.error('[google-drive] GET /callback:', error)
     const mapped = mapOAuthError(error)
+    if (res.headersSent || res.writableEnded) return
     return res.redirect(
       302,
       frontendRedirectAfterOAuth({ ok: false, errorCode: mapped.code }),
@@ -221,11 +232,11 @@ router.post('/disconnect', async (req, res) => {
     const user = await requireSessionUser(req, res)
     if (!user) return
     const status = await disconnectGoogleDriveForUser(user, { req })
-    return res.json({ success: true, ok: true, ...status })
+    return sendJson(res, 200, { success: true, ok: true, ...status })
   } catch (error) {
     console.error('[google-drive] POST /disconnect:', error)
     const mapped = mapOAuthError(error)
-    return res.status(mapped.status).json({
+    return sendJson(res, mapped.status, {
       success: false,
       ok: false,
       error: mapped.message,
@@ -245,7 +256,7 @@ router.get('/file/:fileId', async (req, res) => {
 
     const fileId = String(req.params.fileId || '').trim()
     if (!fileId) {
-      return res.status(400).json({
+      return sendJson(res, 400, {
         success: false,
         ok: false,
         error: 'fileId es obligatorio.',
@@ -256,7 +267,7 @@ router.get('/file/:fileId', async (req, res) => {
     const resolved = await findClinicDriveCredentials(req, user)
     const clinicId = resolved.storageKey || resolved.clinicId
     if (!clinicId) {
-      return res.status(400).json({
+      return sendJson(res, 400, {
         success: false,
         ok: false,
         error: 'No se pudo resolver clinicId / clinicSyncId de la sesión.',
@@ -264,7 +275,7 @@ router.get('/file/:fileId', async (req, res) => {
       })
     }
     if (!resolved.connected) {
-      return res.status(428).json({
+      return sendJson(res, 428, {
         success: false,
         ok: false,
         error:
@@ -280,7 +291,7 @@ router.get('/file/:fileId', async (req, res) => {
       driveFileId: fileId,
     })
     if (!buffer || !buffer.length) {
-      return res.status(404).json({
+      return sendJson(res, 404, {
         success: false,
         ok: false,
         error: 'Archivo no encontrado en Google Drive.',
@@ -288,6 +299,7 @@ router.get('/file/:fileId', async (req, res) => {
       })
     }
 
+    if (res.headersSent || res.writableEnded) return
     const mimeType = String(req.query.mimeType || 'application/octet-stream').trim()
     const fileName = String(req.query.fileName || fileId).trim()
     res.setHeader('Content-Type', mimeType || 'application/octet-stream')
@@ -301,7 +313,7 @@ router.get('/file/:fileId', async (req, res) => {
   } catch (error) {
     console.error('[google-drive] GET /file:', error)
     if (isGoogleDriveRequiredError(error) || error instanceof GoogleDriveRequiredError) {
-      return res.status(428).json({
+      return sendJson(res, 428, {
         success: false,
         ok: false,
         error:
@@ -312,7 +324,7 @@ router.get('/file/:fileId', async (req, res) => {
       })
     }
     const mapped = mapOAuthError(error)
-    return res.status(mapped.status).json({
+    return sendJson(res, mapped.status, {
       success: false,
       ok: false,
       error: mapped.message,
@@ -330,7 +342,7 @@ router.post('/upload', (req, res, next) => {
   upload.single('file')(req, res, (err) => {
     const parsed = parseMulterError(err)
     if (parsed) {
-      return res.status(parsed.status).json({
+      return sendJson(res, parsed.status, {
         success: false,
         ok: false,
         error: parsed.message,
@@ -368,7 +380,7 @@ router.post('/upload', (req, res, next) => {
     const clinicId = resolved.storageKey || resolved.clinicId
 
     if (!clinicId) {
-      return res.status(400).json({
+      return sendJson(res, 400, {
         success: false,
         ok: false,
         error: 'No se pudo resolver clinicId / clinicSyncId de la sesión autenticada.',
@@ -376,7 +388,7 @@ router.post('/upload', (req, res, next) => {
       })
     }
     if (!resolved.connected) {
-      return res.status(428).json({
+      return sendJson(res, 428, {
         success: false,
         ok: false,
         error:
@@ -395,7 +407,7 @@ router.post('/upload', (req, res, next) => {
     if (!diskPath) {
       const dataBase64 = String(body.dataBase64 || body.data || '').trim()
       if (!dataBase64) {
-        return res.status(400).json({
+        return sendJson(res, 400, {
           success: false,
           ok: false,
           error: 'Envíe el archivo en multipart (campo "file").',
@@ -403,7 +415,7 @@ router.post('/upload', (req, res, next) => {
         })
       }
       if (dataBase64.length > 1.4 * 1024 * 1024) {
-        return res.status(400).json({
+        return sendJson(res, 400, {
           success: false,
           ok: false,
           error: 'Use multipart/form-data para archivos grandes (sin Base64).',
@@ -413,7 +425,7 @@ router.post('/upload', (req, res, next) => {
       try {
         smallBuffer = Buffer.from(dataBase64, 'base64')
       } catch {
-        return res.status(400).json({
+        return sendJson(res, 400, {
           success: false,
           ok: false,
           error: 'dataBase64 inválido.',
@@ -423,7 +435,7 @@ router.post('/upload', (req, res, next) => {
     }
 
     if (!fileName) {
-      return res.status(400).json({
+      return sendJson(res, 400, {
         success: false,
         ok: false,
         error: 'fileName es obligatorio.',
@@ -432,7 +444,7 @@ router.post('/upload', (req, res, next) => {
     }
     const byteLength = diskPath ? diskSize : smallBuffer?.length || 0
     if (!byteLength) {
-      return res.status(400).json({
+      return sendJson(res, 400, {
         success: false,
         ok: false,
         error: 'El archivo está vacío.',
@@ -440,7 +452,7 @@ router.post('/upload', (req, res, next) => {
       })
     }
     if (byteLength > GOOGLE_DRIVE_MAX_UPLOAD_BYTES) {
-      return res.status(400).json({
+      return sendJson(res, 400, {
         success: false,
         ok: false,
         error: `El archivo supera el límite de ${Math.round(GOOGLE_DRIVE_MAX_UPLOAD_BYTES / (1024 * 1024))} MB.`,
@@ -464,7 +476,7 @@ router.post('/upload', (req, res, next) => {
       },
     })
 
-    return res.json({
+    return sendJson(res, 200, {
       success: true,
       ok: true,
       clinicId,
@@ -476,7 +488,7 @@ router.post('/upload', (req, res, next) => {
   } catch (error) {
     console.error('[google-drive] POST /upload:', error)
     if (isGoogleDriveRequiredError(error) || error instanceof GoogleDriveRequiredError) {
-      return res.status(428).json({
+      return sendJson(res, 428, {
         success: false,
         ok: false,
         error:
@@ -487,7 +499,7 @@ router.post('/upload', (req, res, next) => {
       })
     }
     const mapped = mapOAuthError(error)
-    return res.status(mapped.status >= 400 ? mapped.status : 500).json({
+    return sendJson(res, mapped.status >= 400 ? mapped.status : 500, {
       success: false,
       ok: false,
       error: mapped.message,

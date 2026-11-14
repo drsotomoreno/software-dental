@@ -257,19 +257,21 @@ const HEAVY_BINARY_KEYS = [
   'bytes',
 ]
 
+/** t3.micro: strings >50k con Base64/DataURL hinchan clinical-sync.json a decenas de MB. */
+const MAX_INLINE_BINARY_CHARS = 50_000
+
+function isHeavyBinaryString(entry) {
+  if (typeof entry !== 'string' || entry.length <= MAX_INLINE_BINARY_CHARS) return false
+  return /^data:/i.test(entry) || /^[A-Za-z0-9+/=\s]+$/.test(entry.slice(0, 120))
+}
+
 function stripHeavyBinaryFields(value) {
   if (!value || typeof value !== 'object') return value
   if (Array.isArray(value)) return value.map((row) => stripHeavyBinaryFields(row))
   const out = {}
   for (const [key, entry] of Object.entries(value)) {
     if (HEAVY_BINARY_KEYS.includes(key)) continue
-    if (
-      typeof entry === 'string' &&
-      entry.length > 64 * 1024 &&
-      (/^data:/i.test(entry) || /^[A-Za-z0-9+/=\s]+$/.test(entry.slice(0, 120)))
-    ) {
-      continue
-    }
+    if (isHeavyBinaryString(entry)) continue
     out[key] =
       entry && typeof entry === 'object' ? stripHeavyBinaryFields(entry) : entry
   }
@@ -474,7 +476,9 @@ async function loadStore() {
 }
 
 async function saveStore(store) {
-  await writeDurableJsonWithMerge(STORE_FILE, store, STORE_KEY, mergeClinicalStores)
+  // Antes de disco/Postgres: purgar Base64/DataURL >50k y claves binarias residuales.
+  const sanitized = stripHeavyBinaryFields(store && typeof store === 'object' ? store : emptyStore())
+  await writeDurableJsonWithMerge(STORE_FILE, sanitized, STORE_KEY, mergeClinicalStores)
 }
 
 /**

@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { DATABASE_URL } from '../config.js'
 import { keepStoredDocumentNumber } from '../../shared/professionalDocument.js'
@@ -381,6 +381,36 @@ export function mergeDurableStores(primary, secondary, { primaryUserWins = false
   return merged
 }
 
+/**
+ * Escritura atómica: .tmp + rename (evita clinical-sync.json a medias si OOM/kill).
+ */
+async function writeJsonFileAtomic(filePath, value) {
+  await mkdir(dirname(filePath), { recursive: true })
+  const tmpPath = `${filePath}.tmp`
+  const payload = JSON.stringify(value, null, 2)
+  await writeFile(tmpPath, payload, 'utf8')
+  try {
+    await rename(tmpPath, filePath)
+  } catch (error) {
+    // Windows no reemplaza destino existente; en EC2 Linux rename es atómico.
+    try {
+      await unlink(filePath)
+    } catch {
+      // ignore
+    }
+    try {
+      await rename(tmpPath, filePath)
+    } catch (retryError) {
+      try {
+        await unlink(tmpPath)
+      } catch {
+        // ignore
+      }
+      throw retryError || error
+    }
+  }
+}
+
 export async function readDurableJson(filePath, fallback, storeKey = STORE_KEY) {
   const fileValue = await readJsonFile(filePath)
   const pgValue = await readPostgresJson(storeKey)
@@ -392,8 +422,7 @@ export async function readDurableJson(filePath, fallback, storeKey = STORE_KEY) 
 }
 
 export async function writeDurableJson(filePath, value, storeKey = STORE_KEY) {
-  await mkdir(dirname(filePath), { recursive: true })
-  await writeFile(filePath, JSON.stringify(value, null, 2), 'utf8')
+  await writeJsonFileAtomic(filePath, value)
 
   if (postgresCoolingDown()) return
   const db = getPool()
@@ -497,10 +526,10 @@ export async function readDurableJsonWithMerge(filePath, fallback, storeKey, mer
 /**
  * Persistencia para almacenes que no son el de usuarios.
  * El fusionador opcional combina el valor nuevo con el JSON actual en Postgres.
+ * Disco: fs.promises.writeFile atómico vía .tmp + rename.
  */
 export async function writeDurableJsonWithMerge(filePath, value, storeKey, mergeFn) {
-  await mkdir(dirname(filePath), { recursive: true })
-  await writeFile(filePath, JSON.stringify(value, null, 2), 'utf8')
+  await writeJsonFileAtomic(filePath, value)
 
   if (postgresCoolingDown()) return
   const db = getPool()

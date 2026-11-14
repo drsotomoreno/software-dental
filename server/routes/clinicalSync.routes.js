@@ -28,6 +28,12 @@ function driveRequiredPayload(error) {
 
 const router = Router()
 
+/** Evita double-send / Connection reset by peer (104) si el socket ya cerró. */
+function sendJson(res, status, body) {
+  if (res.headersSent || res.writableEnded) return
+  return res.status(status).json(body)
+}
+
 function bearerToken(req) {
   const authHeader = req.headers.authorization ?? ''
   return authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
@@ -52,7 +58,7 @@ function denyForeignTenant(auth, req, res) {
   const requested = tenantIdFromRequest(req)
   if (!requested) return false
   if (clinicKeyInScope(requested, auth.canonical, auth.aliases)) return false
-  res.status(403).json({
+  sendJson(res, 403, {
     success: false,
     ok: false,
     error: 'Violación de seguridad. No tienes permisos para acceder a los datos de esta sede.',
@@ -63,12 +69,12 @@ function denyForeignTenant(auth, req, res) {
 async function requireClinicSession(req, res) {
   const session = await resolveSubscriptionSession(bearerToken(req), sessionHintFromRequest(req))
   if (!session?.user) {
-    res.status(401).json({ success: false, ok: false, error: 'Sesión inválida o expirada.' })
+    sendJson(res, 401, { success: false, ok: false, error: 'Sesión inválida o expirada.' })
     return null
   }
   const scope = clinicSyncAliasIds(session.user)
   if (!scope.canonical) {
-    res.status(400).json({ success: false, ok: false, error: 'La sesión no tiene clínica asociada.' })
+    sendJson(res, 400, { success: false, ok: false, error: 'La sesión no tiene clínica asociada.' })
     return null
   }
   const auth = { session, ...scope }
@@ -79,7 +85,7 @@ async function requireClinicSession(req, res) {
 function denyWithoutClinicalAccess(auth, res) {
   const tier = auth.session.accessTier
   if (tier === 'full' || tier === 'trial') return false
-  res.status(402).json({
+  sendJson(res, 402, {
     success: false,
     ok: false,
     error:
@@ -93,7 +99,7 @@ function denyWithoutClinicalAccess(auth, res) {
 function denyTrialOverflow(auth, body, res) {
   if (auth.session.accessTier !== 'trial') return false
   if (countDistinctClinicalPatients(body) <= TRIAL_MAX_PATIENTS) return false
-  res.status(403).json({
+  sendJson(res, 403, {
     success: false,
     ok: false,
     error: 'La prueba gratuita permite un solo paciente. Adquiera un plan para gestionar más historias.',
@@ -156,14 +162,14 @@ router.get('/clinical', async (req, res) => {
       auth.session.accessTier,
       await pullClinicSnapshot(auth.canonical, aliases, { includeBlobs }),
     )
-    return res.json({
+    return sendJson(res, 200, {
       ...snapshotResponse(auth, snapshot),
       patients: snapshot.patients,
       appointments: snapshot.appointments,
     })
   } catch (error) {
     console.error('[Sync] Error en GET /api/sync/clinical:', error)
-    return res.status(500).json({ success: false, ok: false, error: 'No se pudo leer la sincronización.' })
+    return sendJson(res, 500, { success: false, ok: false, error: 'No se pudo leer la sincronización.' })
   }
 })
 
@@ -179,10 +185,10 @@ router.get('/pull', async (req, res) => {
       auth.session.accessTier,
       await pullClinicSnapshot(auth.canonical, aliases, { includeBlobs }),
     )
-    return res.json(snapshotResponse(auth, snapshot))
+    return sendJson(res, 200, snapshotResponse(auth, snapshot))
   } catch (error) {
     console.error('[Sync] Error en GET /api/sync/pull:', error)
-    return res.status(500).json({
+    return sendJson(res, 500, {
       success: false,
       ok: false,
       error: 'No se pudo descargar el snapshot completo de la clínica.',
@@ -210,7 +216,7 @@ router.post('/clinical', async (req, res) => {
 
     if (hasExtended) {
       const result = await pushClinicSnapshot(auth.canonical, body, aliases)
-      return res.json({
+      return sendJson(res, 200, {
         success: true,
         ok: true,
         clinicId: auth.canonical,
@@ -226,7 +232,7 @@ router.post('/clinical', async (req, res) => {
       body.appointments,
       aliases,
     )
-    return res.json({
+    return sendJson(res, 200, {
       success: true,
       ok: true,
       clinicId: auth.canonical,
@@ -236,10 +242,10 @@ router.post('/clinical', async (req, res) => {
     })
   } catch (error) {
     if (isGoogleDriveRequiredError(error)) {
-      return res.status(error.status || 428).json(driveRequiredPayload(error))
+      return sendJson(res, error.status || 428, driveRequiredPayload(error))
     }
     console.error('[Sync] Error en POST /api/sync/clinical:', error)
-    return res.status(500).json({ success: false, ok: false, error: 'No se pudo guardar la sincronización.' })
+    return sendJson(res, 500, { success: false, ok: false, error: 'No se pudo guardar la sincronización.' })
   }
 })
 
@@ -254,7 +260,7 @@ router.post('/push', async (req, res) => {
     const aliases = auth.aliases
     // pushClinicSnapshot ya purga Base64/DataURL antes de escribir.
     const result = await pushClinicSnapshot(auth.canonical, body, aliases)
-    return res.json({
+    return sendJson(res, 200, {
       success: true,
       ok: true,
       clinicId: auth.canonical,
@@ -264,10 +270,10 @@ router.post('/push', async (req, res) => {
     })
   } catch (error) {
     if (isGoogleDriveRequiredError(error)) {
-      return res.status(error.status || 428).json(driveRequiredPayload(error))
+      return sendJson(res, error.status || 428, driveRequiredPayload(error))
     }
     console.error('[Sync] Error en POST /api/sync/push:', error)
-    return res.status(500).json({ success: false, ok: false, error: 'No se pudo guardar la sincronización.' })
+    return sendJson(res, 500, { success: false, ok: false, error: 'No se pudo guardar la sincronización.' })
   }
 })
 
@@ -292,13 +298,13 @@ router.get('/attachment', async (req, res) => {
       aliases,
     )
     if (!attachment) {
-      return res.status(404).json({
+      return sendJson(res, 404, {
         success: false,
         ok: false,
         error: 'El archivo no está en el snapshot de la clínica.',
       })
     }
-    return res.json({
+    return sendJson(res, 200, {
       success: true,
       ok: true,
       clinicId: auth.canonical,
@@ -307,10 +313,10 @@ router.get('/attachment', async (req, res) => {
     })
   } catch (error) {
     if (isGoogleDriveRequiredError(error)) {
-      return res.status(error.status || 428).json(driveRequiredPayload(error))
+      return sendJson(res, error.status || 428, driveRequiredPayload(error))
     }
     console.error('[Sync] Error en GET /api/sync/attachment:', error)
-    return res.status(500).json({ success: false, ok: false, error: 'No se pudo descargar el archivo.' })
+    return sendJson(res, 500, { success: false, ok: false, error: 'No se pudo descargar el archivo.' })
   }
 })
 
@@ -329,13 +335,13 @@ router.get('/files/:fileId', async (req, res) => {
     }
     const attachment = await findClinicAttachment(auth.canonical, query, aliases)
     if (!attachment) {
-      return res.status(404).json({
+      return sendJson(res, 404, {
         success: false,
         ok: false,
         error: 'El archivo no está en el snapshot de la clínica.',
       })
     }
-    return res.json({
+    return sendJson(res, 200, {
       success: true,
       ok: true,
       clinicId: auth.canonical,
@@ -344,10 +350,10 @@ router.get('/files/:fileId', async (req, res) => {
     })
   } catch (error) {
     if (isGoogleDriveRequiredError(error)) {
-      return res.status(error.status || 428).json(driveRequiredPayload(error))
+      return sendJson(res, error.status || 428, driveRequiredPayload(error))
     }
     console.error('[Sync] Error en GET /api/sync/files:', error)
-    return res.status(500).json({ success: false, ok: false, error: 'No se pudo descargar el archivo.' })
+    return sendJson(res, 500, { success: false, ok: false, error: 'No se pudo descargar el archivo.' })
   }
 })
 
