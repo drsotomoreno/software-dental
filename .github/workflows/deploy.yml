@@ -1,25 +1,5 @@
-# Despliegue automático a AWS EC2 (mihistoriadental.com).
-#
-# Se dispara en cada push a `main`. El runner abre SSH, construye en el
-# clon canónico y SIEMPRE sincroniza ese build al cwd real de PM2.
-# Si el smoke del kiosco/Socket.IO falla, el job sale con error.
-#
-# ---------------------------------------------------------------------------
-# Secretos (Settings → Secrets and variables → Actions)
-# ---------------------------------------------------------------------------
-#   EC2_HOST      IP o DNS público de la instancia
-#   EC2_USER      ubuntu | ec2-user
-#   EC2_SSH_KEY   clave privada completa (authorized_keys en la instancia)
-#
-# ---------------------------------------------------------------------------
-# Preparación de la instancia (una vez)
-# ---------------------------------------------------------------------------
-# - Clon en /var/www/mihistoriadental con origin = este repo
-# - .env con DATABASE_URL (RDS), PORT, NODE_ENV=production, JWT/KIOSK secrets
-# - PM2: pm2 start server.js --name software-dental && pm2 save
-# - nginx con proxy a Node y Upgrade para /socket.io/
-# - sudoers: usuario ALL=(ALL) NOPASSWD: /bin/systemctl reload nginx
-
+# Despliegue: build de Vite en GitHub Actions (RAM abundante) + sync a EC2.
+# NO toca clinical-sync.json ni .bak-* en el servidor.
 name: Deploy to EC2
 
 on:
@@ -29,310 +9,175 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # v2: desbloquea si un run anterior quedó fantasma en "queued" sin runner.
   group: deploy-ec2-main-v2
   cancel-in-progress: true
 
 permissions:
-  contents: none
+  contents: read
 
 jobs:
-  deploy:
-    name: Desplegar en EC2
+  build:
+    name: Build dist on GHA
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-
+    timeout-minutes: 20
     steps:
-      - name: Conectar por SSH y desplegar
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install and build
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          test -f dist/index.html
+          grep -o 'assets/index-[^"]*' dist/index.html || true
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mhd-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 3
+
+  deploy:
+    name: Sync to EC2 + PM2
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: mhd-dist
+          path: dist
+
+      - name: Pack dist
+        run: |
+          set -euo pipefail
+          tar -czf dist.tgz -C dist .
+          ls -lh dist.tgz
+
+      - name: SCP dist to EC2
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          command_timeout: 35m
+          source: dist.tgz
+          target: /tmp/
+          overwrite: true
+
+      - name: Apply on EC2 (no vite, no touch clinical-sync)
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 12m
           script: |
             set -euo pipefail
             CANONICAL="/var/www/mihistoriadental"
+            APP_DIR="/home/ubuntu/software-dental"
+            [[ -f "$APP_DIR/server.js" ]] || APP_DIR="$CANONICAL"
 
-            # ------------------------------------------------------------------
-            # Respaldo PREVIO al deploy: solo cp -a; NUNCA escribe el activo.
-            # ------------------------------------------------------------------
-            backup_clinical_sync_before_deploy() {
-              local bak_suffix="bak-20261112"
-              local sync_file=""
-              local cand p dir bak before_size before_mtime after_size after_mtime
-              for cand in \
-                "$CANONICAL/server/data/clinical-sync.json" \
-                /home/ubuntu/software-dental/server/data/clinical-sync.json \
-                /home/ec2-user/software-dental/server/data/clinical-sync.json
-              do
-                if [[ -f "$cand" ]]; then
-                  sync_file="$cand"
-                fi
+            # Snapshot tamaños sync (solo lectura; no modificar)
+            SYNC="$APP_DIR/server/data/clinical-sync.json"
+            if [[ -f "$SYNC" ]]; then
+              echo "SYNC_BYTES_BEFORE=$(stat -c%s "$SYNC")"
+              for bak in "$SYNC.bak-20261112" "$SYNC.bak-20261113-pre-merge" "$SYNC.bak-20261113-dedup"; do
+                [[ -f "$bak" ]] && echo "PROTECTED $(basename "$bak")=$(stat -c%s "$bak")"
               done
-              pm2 jlist 2>/dev/null | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{try{for(const a of JSON.parse(r||"[]")){const cwd=(a.pm2_env||{}).pm_cwd; if(cwd) console.log(cwd+"/server/data/clinical-sync.json")}}catch(e){}})' | while read -r p; do
-                if [[ -f "$p" ]]; then
-                  echo "$p" > /tmp/mhd_sync_path_deploy.txt
-                fi
-              done || true
-              if [[ -f /tmp/mhd_sync_path_deploy.txt ]]; then
-                sync_file=$(cat /tmp/mhd_sync_path_deploy.txt)
-              fi
-              if [[ -z "$sync_file" || ! -f "$sync_file" ]]; then
-                echo "AVISO: clinical-sync.json no encontrado; se continúa sin bak."
-                return 0
-              fi
-              dir=$(dirname "$sync_file")
-              bak="$dir/clinical-sync.json.$bak_suffix"
-              before_size=$(stat -c%s "$sync_file")
-              before_mtime=$(stat -c%Y "$sync_file")
-              if [[ -f "$bak" ]]; then
-                echo "BACKUP_EXISTS=$bak (intacto; no se sobrescribe)"
-              else
-                echo "BACKUP_CREATE=$bak (cp -a; activo no se modifica)"
-                cp -a "$sync_file" "$bak"
-              fi
-              after_size=$(stat -c%s "$sync_file")
-              after_mtime=$(stat -c%Y "$sync_file")
-              if [[ "$before_size" != "$after_size" || "$before_mtime" != "$after_mtime" ]]; then
-                echo "ERROR: clinical-sync.json activo cambió durante el backup" >&2
-                exit 1
-              fi
-              ls -la "$sync_file" "$bak"
-              echo "BACKUP_OK=$bak bytes=$(stat -c%s "$bak")"
-            }
+            fi
 
-            echo "---- Backup clinical-sync (antes de tocar código) ----"
-            backup_clinical_sync_before_deploy
-
-            echo "Procesos PM2:"
-            pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};console.log([app.name,env.status,env.pm_cwd,env.pm_exec_path,env.PORT||""].join(" | "));}});'
-
-            force_main() {
-              local dir="$1"
-              cd "$dir" || return 1
-              git fetch origin main || return 1
-              git update-index --no-skip-worktree server/services/fevRipsService.js 2>/dev/null || true
-              local attempt
-              for attempt in 1 2 3; do
-                git add -A >/dev/null 2>&1 || true
-                if git reset --hard origin/main; then
-                  break
-                fi
-                echo "Intento $attempt: reset bloqueado; se eliminan paths conflictivos."
-                git diff --name-only HEAD origin/main 2>/dev/null | while IFS= read -r path; do
-                  [ -n "$path" ] && rm -f "$path"
-                done
-                rm -f server/services/fevRipsService.js
-              done
-              local head origin_rev
-              head=$(git rev-parse HEAD)
-              origin_rev=$(git rev-parse origin/main)
-              echo "Commit: $head (origin/main $origin_rev)"
-              [ "$head" = "$origin_rev" ] || return 1
-            }
-
-            deploy_canonical() {
-              echo "---- Desplegando canónico $CANONICAL ----"
-              cd "$CANONICAL" || exit 1
-              git remote get-url origin || exit 1
-              git status --short --branch || true
-              force_main "$CANONICAL" || exit 1
+            # Código servidor desde origin/main (sin build)
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL"
+              git fetch origin main
+              git reset --hard origin/main
               chmod +x scripts/*.sh 2>/dev/null || true
-              npm install || exit 1
-              # Vite + clinical-sync + PM2 saturan RAM pequeña: pausar PM2
-              # antes del build evita cuelgues de 20m (timeout SSH).
-              echo "---- Build (PM2 en pausa para liberar RAM) ----"
-              pm2 stop all || true
-              # Nginx/SPA puede dejar dist/ como root → EACCES en emptyDir de Vite.
-              sudo chown -R "$(whoami):$(whoami)" "$CANONICAL/dist" 2>/dev/null || true
-              sudo chmod -R u+rwX "$CANONICAL/dist" 2>/dev/null || true
-              # Heap de build acotado a RAM real (nunca 2048 en t3.micro).
-              BUILD_HEAP=768
-              if [[ -f "$CANONICAL/scripts/pm2-heap-from-ram.sh" ]]; then
-                BUILD_HEAP="$(bash "$CANONICAL/scripts/pm2-heap-from-ram.sh")"
-              fi
-              export NODE_OPTIONS="--max-old-space-size=${BUILD_HEAP}"
-              echo "BUILD_HEAP=$BUILD_HEAP"
-              # Evitar cuelgue infinito de Vite (SSH timeout 35m): tope 12m.
-              if ! timeout 12m npm run build; then
-                echo "Build falló o excedió 12m; reintento una vez."
-                sudo chown -R "$(whoami):$(whoami)" "$CANONICAL/dist" 2>/dev/null || true
-                if ! timeout 12m npm run build; then
-                  echo "Build falló; se restablece PM2 sin tocar clinical-sync."
-                  bash "$CANONICAL/scripts/pm2-heap-from-ram.sh" >/dev/null 2>&1 || true
-                  HEAP_MB="$(bash "$CANONICAL/scripts/pm2-heap-from-ram.sh" 2>/dev/null || echo 635)"
-                  pm2 delete software-dental 2>/dev/null || true
-                  cd /home/ubuntu/software-dental 2>/dev/null || cd "$CANONICAL"
-                  set -a; [[ -f .env ]] && . ./.env; set +a
-                  export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
-                  pm2 start server.js --name software-dental --cwd "$(pwd)" --update-env \
-                    --node-args="--max-old-space-size=${HEAP_MB}" || true
-                  pm2 save || true
-                  exit 1
-                fi
-              fi
-              # Tras build, asegurar que www-data pueda servir SPA estática.
-              sudo chmod -R a+rX "$CANONICAL/dist" 2>/dev/null || true
-              echo "Bundle canónico:"
-              grep -o 'assets/index-[^"]*' dist/index.html || true
-
-              # Guardas de regresión: sin estas rutas vuelve el timeout/404 del kiosco.
-              test -f server/socket/kioskSocket.js || { echo "Falta kioskSocket.js"; exit 1; }
-              test -f server/controllers/kioskSignature.controller.js || { echo "Falta kioskSignature.controller.js"; exit 1; }
-              test -f server/controllers/kioskLan.controller.js || { echo "Falta kioskLan.controller.js"; exit 1; }
-              grep -q "maxHttpBufferSize" server/socket/kioskSocket.js || { echo "kioskSocket sin buffer ampliado"; exit 1; }
-              grep -q "createKioskSignature\|/signature" server/routes/kiosk.routes.js || { echo "Ruta /signature ausente"; exit 1; }
-              if ! grep -Rql "kiosk/signature" dist/assets --include='*.js'; then
-                echo "El bundle del kiosco no incluye el respaldo HTTP de firma."
-                exit 1
-              fi
-            }
-
-            sync_pm2_cwd() {
-              local dir="$1"
-              echo "---- Sincronizando PM2 cwd $dir ← canónico ----"
-              bash "$CANONICAL/scripts/sync-pm2-from-canonical.sh" "$CANONICAL" "$dir"
-            }
-
-            is_this_repo() {
-              local dir="$1"
-              local url
-              [ -d "$dir/.git" ] || return 1
-              url=$(git -C "$dir" remote get-url origin 2>/dev/null || true)
-              case "$url" in
-                *software-dental*) return 0 ;;
-                *) return 1 ;;
-              esac
-            }
-
-            resolve_app_port() {
-              local port=""
-              port=$(pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{try{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};const p=env.PORT||env.env&&env.env.PORT;if(p){console.log(String(p));return;}}}catch(e){}console.log("");});' || true)
-              if [ -z "$port" ] && [ -f "$CANONICAL/.env" ]; then
-                port=$(grep -E '^PORT=' "$CANONICAL/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
-              fi
-              echo "${port:-3000}"
-            }
-
-            deploy_canonical
-
-            pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);const seen=new Set();for(const app of apps){const cwd=app.pm2_env&&app.pm2_env.pm_cwd;if(cwd&&!seen.has(cwd)){seen.add(cwd);console.log(cwd);}}});' > /tmp/pm2-cwds.txt
-
-            SYNCED_ANY=0
-            while IFS= read -r dir; do
-              [ -n "$dir" ] || continue
-              if [ "$dir" = "$CANONICAL" ]; then
-                SYNCED_ANY=1
-                continue
-              fi
-              if is_this_repo "$dir" || { [ -f "$dir/server.js" ] && [ -f "$dir/package.json" ]; }; then
-                # Siempre: no confiar en git reset del clon sucio (fevRipsService, etc.).
-                sync_pm2_cwd "$dir" || exit 1
-                SYNCED_ANY=1
-              else
-                echo "Se omite $dir: no es este proyecto."
-              fi
-            done < /tmp/pm2-cwds.txt
-
-            if [ "$SYNCED_ANY" -eq 0 ]; then
-              echo "Ningún cwd de PM2 coincide con este proyecto." >&2
-              exit 1
+              # Dependencias de producción si faltan (sin vite build)
+              npm install --omit=dev || npm install || true
+            fi
+            if [[ "$APP_DIR" != "$CANONICAL" ]]; then
+              rsync -a \
+                --exclude 'server/data/' \
+                --exclude '.env' \
+                --exclude 'node_modules/' \
+                --exclude '.git/' \
+                --exclude 'dist/' \
+                "$CANONICAL/" "$APP_DIR/" || true
             fi
 
-            echo "---- Reinicio PM2 (heap = 70% RAM física, nunca 4096 en t3 pequeña) ----"
-            HEAP_SCRIPT="$CANONICAL/scripts/pm2-heap-from-ram.sh"
-            if [[ -f "$HEAP_SCRIPT" ]]; then
-              HEAP_MB="$(bash "$HEAP_SCRIPT")"
-            else
-              MEM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
-              HEAP_MB=$((MEM_MB * 70 / 100))
-              [[ "$HEAP_MB" -gt 1536 ]] && HEAP_MB=1536
-              [[ "$HEAP_MB" -lt 512 ]] && HEAP_MB=512
+            # Extraer dist construido en GHA
+            test -f /tmp/dist.tgz || { echo "MISSING_DIST_TGZ"; exit 1; }
+            for target in "$CANONICAL/dist" "$APP_DIR/dist"; do
+              sudo mkdir -p "$target"
+              sudo tar -xzf /tmp/dist.tgz -C "$target"
+              sudo chown -R "$(whoami):$(whoami)" "$target"
+              sudo chmod -R a+rX "$target"
+              test -f "$target/index.html"
+            done
+            rm -f /tmp/dist.tgz
+            echo "DIST_BUNDLE=$(grep -oE 'assets/index-[A-Za-z0-9_-]+' "$CANONICAL/dist/index.html" | head -1 || true)"
+
+            # Nginx SPA: permisos www-data
+            if [[ -f "$CANONICAL/scripts/configure-nginx-spa-static.sh" ]]; then
+              PORT=3000
+              [[ -f "$APP_DIR/.env" ]] && PORT="$(grep -E '^PORT=' "$APP_DIR/.env" | head -1 | cut -d= -f2- | tr -d \"\' || echo 3000)"
+              PORT="${PORT:-3000}"
+              bash "$CANONICAL/scripts/configure-nginx-spa-static.sh" "$CANONICAL/dist" "$PORT" || true
             fi
+            sudo nginx -t && sudo systemctl reload nginx || true
+
+            HEAP_MB=450
+            if [[ -f "$APP_DIR/scripts/pm2-heap-from-ram.sh" ]]; then
+              HEAP_MB="$(bash "$APP_DIR/scripts/pm2-heap-from-ram.sh")"
+            fi
+            # Preferir ecosystem (450) si existe
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            export NODE_ENV=production
             export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
-            echo "HEAP_MB=$HEAP_MB"
-            ensure_pm2_online() {
-              local name=""
-              if pm2 describe software-dental >/dev/null 2>&1; then
-                name="software-dental"
-              elif pm2 describe mihistoriadental >/dev/null 2>&1; then
-                name="mihistoriadental"
-              fi
-              if [[ -n "$name" ]]; then
-                # Tras `pm2 stop`, restart a veces no basta: delete+start limpio.
-                pm2 delete "$name" || true
-              fi
-              local app_dir="$CANONICAL"
-              if [[ -f /home/ubuntu/software-dental/server.js ]]; then
-                app_dir="/home/ubuntu/software-dental"
-              fi
-              # Garantizar dist en el cwd de PM2 (sin tocar server/data).
-              if [[ "$app_dir" != "$CANONICAL" ]]; then
-                rsync -a \
-                  --exclude '.env' \
-                  --exclude 'server/data/' \
-                  --exclude 'node_modules/' \
-                  --exclude '.git/' \
-                  "$CANONICAL/" "$app_dir/"
-              fi
-              test -f "$app_dir/dist/index.html" || {
-                echo "ERROR: falta dist/index.html en $app_dir tras el build" >&2
-                exit 1
-              }
-              cd "$app_dir"
-              # Asegurar DATABASE_URL en el .env del cwd PM2 (sin tocar clinical-sync).
-              if [[ -f "$CANONICAL/.env" ]] && grep -qE '^DATABASE_URL=.+' "$CANONICAL/.env"; then
-                if [[ ! -f "$app_dir/.env" ]] || ! grep -qE '^DATABASE_URL=.+' "$app_dir/.env"; then
-                  touch "$app_dir/.env"
-                  grep -E '^DATABASE_URL=' "$CANONICAL/.env" | head -1 >> "$app_dir/.env"
-                fi
-              fi
-              set -a
-              # shellcheck disable=SC1091
-              [[ -f "$app_dir/.env" ]] && . "$app_dir/.env"
-              set +a
-              export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
-              export NODE_ENV="${NODE_ENV:-production}"
-              [[ -n "${DATABASE_URL:-}" ]] || {
-                echo "ERROR: DATABASE_URL vacío en $app_dir/.env" >&2
-                exit 1
-              }
-              pm2 start "$app_dir/server.js" \
+            [[ -n "${DATABASE_URL:-}" ]] || { echo "DATABASE_URL_EMPTY"; exit 1; }
+
+            cd "$APP_DIR"
+            pm2 delete software-dental 2>/dev/null || true
+            if [[ -f "$APP_DIR/ecosystem.config.cjs" ]]; then
+              pm2 start "$APP_DIR/ecosystem.config.cjs" --update-env
+            else
+              pm2 start "$APP_DIR/server.js" \
                 --name software-dental \
-                --cwd "$app_dir" \
+                --cwd "$APP_DIR" \
                 --update-env \
                 --node-args="--max-old-space-size=${HEAP_MB}"
-              pm2 save || true
-              sleep 15
-              local status
-              status=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const apps=JSON.parse(r||"[]");const app=apps.find(a=>a.name==="software-dental")||apps[0];console.log(app&&app.pm2_env?app.pm2_env.status:"missing")})')
-              echo "PM2_STATUS=$status"
-              [[ "$status" == "online" ]] || {
-                echo "PM2 no quedó online tras el deploy" >&2
-                pm2 logs --lines 80 --err --nostream || true
-                exit 1
-              }
-            }
-            ensure_pm2_online
-            sudo systemctl reload nginx || true
+            fi
+            pm2 save
+            sleep 18
 
-            APP_PORT="$(resolve_app_port)"
-            for cand in "$APP_PORT" 3000 8080; do
-              if curl -sS -o /dev/null --max-time 3 "http://127.0.0.1:${cand}/" 2>/dev/null; then
-                APP_PORT="$cand"
-                break
-              fi
-            done
-            echo "Puerto smoke: $APP_PORT"
-            bash "$CANONICAL/scripts/post-deploy-smoke.sh" "$APP_PORT"
-            PAC_CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "http://127.0.0.1:${APP_PORT}/pacientes" || echo 000)
-            echo "SMOKE_/pacientes=$PAC_CODE"
-            [[ "$PAC_CODE" == "200" ]] || { echo "Deploy rechazado: /pacientes != 200" >&2; exit 1; }
-            PUB_PAC=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://www.mihistoriadental.com/pacientes" || echo 000)
-            echo "PUBLIC_/pacientes=$PUB_PAC"
-            [[ "$PUB_PAC" == "200" ]] || { echo "Deploy rechazado: público /pacientes != 200" >&2; exit 1; }
+            STATUS=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const a=JSON.parse(r||"[]").find(x=>x.name==="software-dental");console.log(a&&a.pm2_env?a.pm2_env.status:"missing")})')
+            echo "PM2_STATUS=$STATUS"
+            [[ "$STATUS" == "online" ]] || { pm2 logs --lines 50 --err --nostream; exit 1; }
 
-            echo "---- Estado final ----"
-            pm2 jlist | node -e 'let raw="";process.stdin.on("data",d=>raw+=d);process.stdin.on("end",()=>{const apps=JSON.parse(raw);for(const app of apps){const env=app.pm2_env||{};console.log([app.name,env.status,env.pm_cwd].join(" | "));}});'
+            # Sync intacto
+            if [[ -f "$SYNC" ]]; then
+              echo "SYNC_BYTES_AFTER=$(stat -c%s "$SYNC")"
+            fi
+
+            HEAD=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 12 -Ik "https://www.mihistoriadental.com/pacientes-valorados" || echo 000)
+            echo "PUBLIC_HEAD_/pacientes-valorados=$HEAD"
+            [[ "$HEAD" == "200" ]] || exit 1
+            PUB=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 12 "https://www.mihistoriadental.com/pacientes" || echo 000)
+            echo "PUBLIC_/pacientes=$PUB"
+            [[ "$PUB" == "200" ]] || exit 1
+            pm2 status
+            free -m
             echo "Despliegue OK."
