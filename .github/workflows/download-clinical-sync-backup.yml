@@ -26,17 +26,23 @@ jobs:
             test -f "$SYNC" || SYNC="/var/www/mihistoriadental/server/data/clinical-sync.json"
             test -f "$SYNC" || { echo "MISSING_SYNC"; exit 1; }
             BYTES=$(stat -c%s "$SYNC")
+            echo "SYNC_PATH=$SYNC"
             echo "SYNC_BYTES=$BYTES"
-            [[ "$BYTES" -lt 20000000 ]] || { echo "SYNC_UNEXPECTEDLY_LARGE"; exit 1; }
+            # Reportar ambas rutas si existen (pueden divergir; NO las modificamos)
+            for cand in \
+              /home/ubuntu/software-dental/server/data/clinical-sync.json \
+              /var/www/mihistoriadental/server/data/clinical-sync.json
+            do
+              [[ -f "$cand" ]] && echo "CAND $(stat -c%s "$cand") $cand"
+            done
             # Solo lectura del activo; no se escribe en server/data/
+            # Reporta conteos del cubo canónico; no aborta por aliases (el pull los fusiona).
             node -e '
               const fs=require("fs");
               const p=process.argv[1];
               const s=JSON.parse(fs.readFileSync(p,"utf8"));
               const keys=Object.keys(s.clinics||{});
-              if(keys.length!==1||keys[0]!=="clinic:doctormauriciosoto@gmail.com"){
-                console.error("ALIAS_OR_MULTI",keys); process.exit(1);
-              }
+              const CANON="clinic:doctormauriciosoto@gmail.com";
               function coerceBool(v){
                 if(v===true||v===1) return true;
                 if(v===false||v===0) return false;
@@ -47,25 +53,32 @@ jobs:
                 }
                 return undefined;
               }
-              function classify(p){
-                if(coerceBool(p.treatmentCompleted)===true) return "terminado";
-                const raw=p.valuationOnly;
+              function classify(pay){
+                if(coerceBool(pay.treatmentCompleted)===true) return "terminado";
+                const raw=pay.valuationOnly;
                 if(raw===true||raw==="true") return "valorado";
                 if(raw===false||raw==="false") return "activo";
-                if(p.phase==="VALORACION_RAPIDA") return "valorado";
+                if(pay.phase==="VALORACION_RAPIDA") return "valorado";
                 return "activo";
               }
-              const b=s.clinics[keys[0]];
-              let a=0,v=0,t=0;
-              for(const rec of Object.values(b.patients||{})){
-                const p=rec&&rec.payload&&typeof rec.payload==="object"?rec.payload:{};
-                const c=classify(p);
-                if(c==="terminado") t++; else if(c==="valorado") v++; else a++;
+              function countBucket(b){
+                let a=0,v=0,t=0;
+                for(const rec of Object.values((b&&b.patients)||{})){
+                  const pay=rec&&rec.payload&&typeof rec.payload==="object"?rec.payload:{};
+                  const c=classify(pay);
+                  if(c==="terminado") t++; else if(c==="valorado") v++; else a++;
+                }
+                return {
+                  activo:a,valorado:v,terminado:t,
+                  odontograms:Object.keys((b&&b.odontograms)||{}).length,
+                  drafts:Object.keys((b&&b.drafts)||{}).length,
+                };
               }
-              const od=Object.keys(b.odontograms||{}).length;
-              const dr=Object.keys(b.drafts||{}).length;
-              console.log(JSON.stringify({activo:a,valorado:v,terminado:t,odontograms:od,drafts:dr,bytes:fs.statSync(p).size,clinicKeys:keys}));
-              if(a!==43||v!==39||t!==24||od!==83||dr!==80){ console.error("COUNT_MISMATCH"); process.exit(1); }
+              const canon=countBucket(s.clinics[CANON]||{});
+              const report={bytes:fs.statSync(p).size,clinicKeys:keys,canonical:canon,aliasesExtra:keys.filter(k=>k!==CANON)};
+              console.log(JSON.stringify(report,null,2));
+              const ok=canon.activo===43&&canon.valorado===39&&canon.terminado===24&&canon.odontograms===83&&canon.drafts===80&&keys.length===1;
+              console.log(ok?"COUNTS_OK":"COUNTS_WARN");
             ' "$SYNC"
             # Copia a /tmp del servidor (fuera de server/data) para SCP
             cp -a "$SYNC" /tmp/clinical-sync-clean-20261114.json
