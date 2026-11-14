@@ -77,12 +77,21 @@ test('RipsExportPage filtra por clínica antes de listar atenciones', async () =
 test('pullCompleteClinicOnLogin aísla caché por clínica canónica', async () => {
   const src = await readFile(join(here, 'clinicalSyncService.ts'), 'utf8')
   assert.match(src, /ensureClinicLocalIsolation/)
+  assert.match(src, /ensureSyncSchemaEpoch/)
   assert.match(src, /getCurrentClinicId\(\)/)
   assert.match(src, /clinicIdsMatch\(cached\.clinicId, clinicId\)/)
   assert.doesNotMatch(
     src,
     /ensureDentalDatabaseForAuth\(auth\.user\?\.id,\s*clinicId\s*\|\|\s*auth\.user\?\.clinicId\s*\|\|\s*auth\.user\?\.id\)/,
   )
+})
+
+test('SYNC_SCHEMA_VERSION está definida para auto-wipe de caché cliente', async () => {
+  const src = await readFile(join(here, 'clinicLocalIsolation.ts'), 'utf8')
+  assert.match(src, /export const SYNC_SCHEMA_VERSION = 20261114/)
+  assert.match(src, /mihistoriadental\.syncSchemaVersion/)
+  assert.match(src, /ensureSyncSchemaEpoch/)
+  assert.match(src, /wipeLocalClinicalData/)
 })
 
 test('login + pull + reload: pacientes/odontogramas/drafts canónicos no se purgan', () => {

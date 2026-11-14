@@ -462,30 +462,35 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
         const { ensureDentalDatabaseForAuth } = await import('@/db/database')
         // Misma resolución canónica que AuthContext / purge (nunca UUID crudo del maestro).
         await ensureDentalDatabaseForAuth(auth.user?.id, clinicId)
+        const { ensureClinicLocalIsolation, ensureSyncSchemaEpoch, clinicIdsMatch } = await import(
+          '@/services/clinicLocalIsolation'
+        )
+        // Bump SYNC_SCHEMA_VERSION → wipe Dexie + ignorar caché vieja → pull fresco EC2.
+        const { upgraded } = await ensureSyncSchemaEpoch()
         if (clinicId) {
-          const { ensureClinicLocalIsolation } = await import('@/services/clinicLocalIsolation')
           await ensureClinicLocalIsolation(clinicId)
         }
 
-        const { clinicIdsMatch } = await import('@/services/clinicLocalIsolation')
-        if (typeof window !== 'undefined' && typeof window.__doctorSEOForceClinicPull === 'function') {
-          const forced = await window.__doctorSEOForceClinicPull(auth.token, auth.user)
-          if (forced) {
-            const cached = await readCachedClinicPull()
-            if (
-              cached &&
-              clinicId &&
-              cached.clinicId &&
-              clinicIdsMatch(cached.clinicId, clinicId)
-            ) {
-              await applyFullClinicPull(cached)
+        if (!upgraded) {
+          if (typeof window !== 'undefined' && typeof window.__doctorSEOForceClinicPull === 'function') {
+            const forced = await window.__doctorSEOForceClinicPull(auth.token, auth.user)
+            if (forced) {
+              const cached = await readCachedClinicPull()
+              if (
+                cached &&
+                clinicId &&
+                cached.clinicId &&
+                clinicIdsMatch(cached.clinicId, clinicId)
+              ) {
+                await applyFullClinicPull(cached)
+              }
+              return true
             }
-            return true
           }
-        }
-        const cached = await readCachedClinicPull()
-        if (cached && clinicId && cached.clinicId && clinicIdsMatch(cached.clinicId, clinicId)) {
-          await applyFullClinicPull(cached)
+          const cached = await readCachedClinicPull()
+          if (cached && clinicId && cached.clinicId && clinicIdsMatch(cached.clinicId, clinicId)) {
+            await applyFullClinicPull(cached)
+          }
         }
         if (!clinicId) return false
         const merged = await pullAndMerge(true)

@@ -1,0 +1,106 @@
+# Solo lectura: copia clinical-sync.json de EC2 a artifact (NO escribe ni altera el JSON ni .bak en el servidor).
+name: Download clinical-sync backup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    name: Fetch clinical-sync read-only
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Stage verified copy on EC2 (/tmp only)
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            SYNC="/home/ubuntu/software-dental/server/data/clinical-sync.json"
+            test -f "$SYNC" || SYNC="/var/www/mihistoriadental/server/data/clinical-sync.json"
+            test -f "$SYNC" || { echo "MISSING_SYNC"; exit 1; }
+            BYTES=$(stat -c%s "$SYNC")
+            echo "SYNC_BYTES=$BYTES"
+            [[ "$BYTES" -lt 20000000 ]] || { echo "SYNC_UNEXPECTEDLY_LARGE"; exit 1; }
+            # Solo lectura del activo; no se escribe en server/data/
+            node -e '
+              const fs=require("fs");
+              const p=process.argv[1];
+              const s=JSON.parse(fs.readFileSync(p,"utf8"));
+              const keys=Object.keys(s.clinics||{});
+              if(keys.length!==1||keys[0]!=="clinic:doctormauriciosoto@gmail.com"){
+                console.error("ALIAS_OR_MULTI",keys); process.exit(1);
+              }
+              function coerceBool(v){
+                if(v===true||v===1) return true;
+                if(v===false||v===0) return false;
+                if(typeof v==="string"){
+                  const t=v.trim().toLowerCase();
+                  if(t==="true"||t==="1") return true;
+                  if(t==="false"||t==="0") return false;
+                }
+                return undefined;
+              }
+              function classify(p){
+                if(coerceBool(p.treatmentCompleted)===true) return "terminado";
+                const raw=p.valuationOnly;
+                if(raw===true||raw==="true") return "valorado";
+                if(raw===false||raw==="false") return "activo";
+                if(p.phase==="VALORACION_RAPIDA") return "valorado";
+                return "activo";
+              }
+              const b=s.clinics[keys[0]];
+              let a=0,v=0,t=0;
+              for(const rec of Object.values(b.patients||{})){
+                const p=rec&&rec.payload&&typeof rec.payload==="object"?rec.payload:{};
+                const c=classify(p);
+                if(c==="terminado") t++; else if(c==="valorado") v++; else a++;
+              }
+              const od=Object.keys(b.odontograms||{}).length;
+              const dr=Object.keys(b.drafts||{}).length;
+              console.log(JSON.stringify({activo:a,valorado:v,terminado:t,odontograms:od,drafts:dr,bytes:fs.statSync(p).size,clinicKeys:keys}));
+              if(a!==43||v!==39||t!==24||od!==83||dr!==80){ console.error("COUNT_MISMATCH"); process.exit(1); }
+            ' "$SYNC"
+            # Copia a /tmp del servidor (fuera de server/data) para SCP
+            cp -a "$SYNC" /tmp/clinical-sync-clean-20261114.json
+            chmod 644 /tmp/clinical-sync-clean-20261114.json
+            # Confirmar baks intactos (tamaños)
+            ls -la "$SYNC" \
+              "$SYNC.bak-20261112" \
+              "$SYNC.bak-20261113-pre-merge" \
+              "$SYNC.bak-20261113-dedup" 2>/dev/null || true
+            echo "STAGE_OK"
+
+      - name: Download from EC2 to runner
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2.key
+          chmod 600 ~/.ssh/ec2.key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          scp -i ~/.ssh/ec2.key -o StrictHostKeyChecking=accept-new \
+            "${EC2_USER}@${EC2_HOST}:/tmp/clinical-sync-clean-20261114.json" \
+            ./clinical-sync-clean-20261114.json
+          test -f ./clinical-sync-clean-20261114.json
+          echo "LOCAL_BYTES=$(wc -c < ./clinical-sync-clean-20261114.json)"
+          # Limpieza del staging en EC2 (no toca server/data)
+          ssh -i ~/.ssh/ec2.key -o StrictHostKeyChecking=accept-new \
+            "${EC2_USER}@${EC2_HOST}" 'rm -f /tmp/clinical-sync-clean-20261114.json'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinical-sync-clean-20261114
+          path: clinical-sync-clean-20261114.json
+          if-no-files-found: error
+          retention-days: 14

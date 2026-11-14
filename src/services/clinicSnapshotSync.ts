@@ -943,7 +943,12 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
   const auth = getStoredApiAuth()
   if (!auth?.token || !getCurrentClinicId()) return false
   try {
-    return await pullAndApplyClinicSnapshot({ includeBlobs: true, useCache: true })
+    const { ensureSyncSchemaEpoch } = await import('@/services/clinicLocalIsolation')
+    const { upgraded } = await ensureSyncSchemaEpoch()
+    return await pullAndApplyClinicSnapshot({
+      includeBlobs: true,
+      useCache: !upgraded,
+    })
   } catch {
     return false
   }

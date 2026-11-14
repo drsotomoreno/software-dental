@@ -20,6 +20,14 @@ const LAST_CLINIC_KEY = 'doctorSEO_lastClinicSyncId'
 const LAST_DB_KEY = 'doctorSEO_lastDentalEmrDb'
 const PULL_CACHE_DB = 'ClinicSyncPullCache'
 
+/**
+ * Época de sincronización cliente. Al incrementar, el navegador limpia Dexie
+ * + caché de pull y fuerza un pull fresco (sin F12 / Clear site data).
+ * Bump: 20261114 — flags 43/39/24 + cubo canónico único en EC2.
+ */
+export const SYNC_SCHEMA_VERSION = 20261114
+const SYNC_SCHEMA_KEY = 'mihistoriadental.syncSchemaVersion'
+
 /** Claves legacy o compartidas que no deben sobrevivir un switch de cuenta. */
 const GLOBAL_LOCAL_STORAGE_KEYS = [
   CITAS_STORAGE_KEY_LEGACY,
@@ -131,6 +139,34 @@ export async function wipeLocalClinicalData(): Promise<void> {
   })
   await clearPullCache()
   clearTenantWebStorage()
+}
+
+/**
+ * Si `SYNC_SCHEMA_VERSION` cambió respecto a localStorage, limpia IndexedDB
+ * y marca la nueva época. Idempotente cuando ya está al día.
+ */
+export async function ensureSyncSchemaEpoch(): Promise<{ upgraded: boolean }> {
+  if (typeof window === 'undefined') return { upgraded: false }
+  let stored = ''
+  try {
+    stored = String(localStorage.getItem(SYNC_SCHEMA_KEY) || '').trim()
+  } catch {
+    stored = ''
+  }
+  const current = String(SYNC_SCHEMA_VERSION)
+  if (stored === current) return { upgraded: false }
+
+  console.warn('[Sync] Nueva SYNC_SCHEMA_VERSION — wipe Dexie local + pull fresco.', {
+    stored: stored || '(none)',
+    current,
+  })
+  await wipeLocalClinicalData()
+  try {
+    localStorage.setItem(SYNC_SCHEMA_KEY, current)
+  } catch {
+    /* ignore */
+  }
+  return { upgraded: true }
 }
 
 /**
