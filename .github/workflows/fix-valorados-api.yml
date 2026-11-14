@@ -1,0 +1,88 @@
+# Diagnostica GET /api/sync/pull (vía pullClinicSnapshot), restaura flags,
+# bump timestamps, preserva .bak-*. NO usa vite.
+name: Fix Valorados API pull
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fix:
+    name: Diagnose + fix flags + restart PM2
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: SSH fix valorados
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            CANONICAL="/var/www/mihistoriadental"
+            APP_DIR="/home/ubuntu/software-dental"
+            [[ -f "$APP_DIR/server.js" ]] || APP_DIR="$CANONICAL"
+
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL"
+              git fetch origin main
+              git reset --hard origin/main
+              rsync -a --exclude 'server/data/' --exclude '.env' --exclude 'node_modules/' --exclude 'dist/' \
+                "$CANONICAL/" "$APP_DIR/" || true
+            fi
+
+            SYNC="$APP_DIR/server/data/clinical-sync.json"
+            echo "SYNC_PATH=$SYNC bytes=$(stat -c%s "$SYNC")"
+            echo "PM2_CWD hint:"; pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const a=JSON.parse(r||"[]").find(x=>x.name==="software-dental");console.log(a&&a.pm2_env?a.pm2_env.pm_cwd:"missing")})' || true
+
+            BAK12=$(stat -c%s "$SYNC.bak-20261112")
+            PRE=$(stat -c%s "$SYNC.bak-20261113-pre-merge")
+            DEDUP=$(stat -c%s "$SYNC.bak-20261113-dedup")
+            echo "BAK12=$BAK12 PRE=$PRE DEDUP=$DEDUP"
+
+            echo "==== Diagnose BEFORE (PM2 still running) ===="
+            cd "$APP_DIR"
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            node --max-old-space-size=635 scripts/fix-valorados-pull-and-timestamps.cjs --diagnose-only || true
+
+            echo "==== Stop PM2 + apply fix ===="
+            pm2 stop software-dental || true
+            sleep 2
+            node --max-old-space-size=635 scripts/fix-valorados-pull-and-timestamps.cjs
+
+            [[ "$(stat -c%s "$SYNC.bak-20261112")" == "$BAK12" ]] || { echo "BAK12_CHANGED"; exit 1; }
+            [[ "$(stat -c%s "$SYNC.bak-20261113-pre-merge")" == "$PRE" ]] || { echo "PRE_CHANGED"; exit 1; }
+            [[ "$(stat -c%s "$SYNC.bak-20261113-dedup")" == "$DEDUP" ]] || { echo "DEDUP_CHANGED"; exit 1; }
+
+            echo "==== Restart PM2 ===="
+            HEAP_MB="$(bash scripts/pm2-heap-from-ram.sh 2>/dev/null || echo 450)"
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+            export NODE_ENV=production
+            pm2 delete software-dental 2>/dev/null || true
+            if [[ -f ecosystem.config.cjs ]]; then
+              pm2 start ecosystem.config.cjs --update-env
+            else
+              pm2 start server.js --name software-dental --cwd "$APP_DIR" --update-env \
+                --node-args="--max-old-space-size=${HEAP_MB}"
+            fi
+            pm2 save
+            sleep 15
+            STATUS=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const a=JSON.parse(r||"[]").find(x=>x.name==="software-dental");console.log(a&&a.pm2_env?a.pm2_env.status:"missing")})')
+            echo "PM2_STATUS=$STATUS"
+            [[ "$STATUS" == "online" ]] || exit 1
+
+            echo "==== Diagnose AFTER (live module) ===="
+            node --max-old-space-size=635 scripts/fix-valorados-pull-and-timestamps.cjs --diagnose-only
+
+            HEAD=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -Ik "https://www.mihistoriadental.com/pacientes-valorados" || echo 000)
+            echo "PUBLIC_HEAD=$HEAD"
+            echo "SYNC_BYTES_FINAL=$(stat -c%s "$SYNC")"
+            [[ "$HEAD" == "200" ]] || exit 1
+            echo "FIX_VALORADOS_WORKFLOW_OK"

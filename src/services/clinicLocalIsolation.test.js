@@ -86,12 +86,14 @@ test('pullCompleteClinicOnLogin aísla caché por clínica canónica', async () 
   )
 })
 
-test('SYNC_SCHEMA_VERSION está definida para auto-wipe de caché cliente', async () => {
+test('SYNC_SCHEMA_VERSION / mhd_sync_epoch fuerza auto-wipe de caché cliente', async () => {
   const src = await readFile(join(here, 'clinicLocalIsolation.ts'), 'utf8')
-  assert.match(src, /export const SYNC_SCHEMA_VERSION = 20261114/)
+  assert.match(src, /export const SYNC_SCHEMA_VERSION = '2026-11-14-v2'/)
+  assert.match(src, /mhd_sync_epoch/)
   assert.match(src, /mihistoriadental\.syncSchemaVersion/)
   assert.match(src, /ensureSyncSchemaEpoch/)
   assert.match(src, /wipeLocalClinicalData/)
+  assert.match(src, /lastSyncAt/)
 })
 
 test('login + pull + reload: pacientes/odontogramas/drafts canónicos no se purgan', () => {

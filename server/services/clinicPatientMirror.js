@@ -187,7 +187,56 @@ function recordFromRow(canonical, row) {
   }
 }
 
-/** Une el espejo al mapa del snapshot. Gana la ficha con updated_at más reciente. */
+/** Flags clínicas que viven en clinical-sync.json — Postgres NO las guarda. */
+const CLINICAL_FLAG_KEYS = ['valuationOnly', 'phase', 'treatmentCompleted']
+
+function pickClinicalFlags(payload) {
+  const out = {}
+  if (!payload || typeof payload !== 'object') return out
+  for (const key of CLINICAL_FLAG_KEYS) {
+    if (payload[key] !== undefined) out[key] = payload[key]
+  }
+  return out
+}
+
+/**
+ * Une demografía del espejo PG con el cubo JSON.
+ * Gana updated_at más reciente para demografía, pero las flags
+ * valuationOnly/phase/treatmentCompleted del JSON NUNCA se borran
+ * (recordFromRow de Postgres no las incluye → sin esto Valorados cae a 1).
+ */
+function mergeStoreAndMirror(storeRec, pgRec) {
+  if (!storeRec) return pgRec
+  if (!pgRec) return storeRec
+  const storeStamp =
+    Math.max(
+      Date.parse(storeRec.updatedAt || '') || 0,
+      Date.parse(storeRec.serverUpdatedAt || '') || 0,
+    ) || 0
+  const pgStamp = Date.parse(pgRec.updatedAt || '') || 0
+  const flags = pickClinicalFlags(storeRec.payload)
+  if (pgStamp >= storeStamp) {
+    return {
+      ...pgRec,
+      serverUpdatedAt: storeRec.serverUpdatedAt || pgRec.updatedAt,
+      payload: {
+        ...(storeRec.payload && typeof storeRec.payload === 'object' ? storeRec.payload : {}),
+        ...(pgRec.payload && typeof pgRec.payload === 'object' ? pgRec.payload : {}),
+        ...flags,
+      },
+    }
+  }
+  return {
+    ...storeRec,
+    payload: {
+      ...(pgRec.payload && typeof pgRec.payload === 'object' ? pgRec.payload : {}),
+      ...(storeRec.payload && typeof storeRec.payload === 'object' ? storeRec.payload : {}),
+      ...flags,
+    },
+  }
+}
+
+/** Une el espejo al mapa del snapshot. Demografía por stamp; flags clínicas del JSON. */
 export async function mergeMirroredPatients(canonical, patients = {}) {
   const clinicKey = String(canonical || '').trim()
   if (!clinicKey) return patients
@@ -212,10 +261,7 @@ export async function mergeMirroredPatients(canonical, patients = {}) {
   const next = { ...patients }
   for (const row of rows) {
     const record = recordFromRow(clinicKey, row)
-    const prev = next[record.syncId]
-    const prevStamp = Date.parse(prev?.updatedAt || '') || 0
-    const nextStamp = Date.parse(record.updatedAt || '') || 0
-    if (!prev || nextStamp >= prevStamp) next[record.syncId] = record
+    next[record.syncId] = mergeStoreAndMirror(next[record.syncId], record)
   }
   return next
 }

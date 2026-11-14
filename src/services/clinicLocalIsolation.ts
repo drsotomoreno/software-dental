@@ -23,10 +23,12 @@ const PULL_CACHE_DB = 'ClinicSyncPullCache'
 /**
  * Época de sincronización cliente. Al incrementar, el navegador limpia Dexie
  * + caché de pull y fuerza un pull fresco (sin F12 / Clear site data).
- * Bump: 20261114 — flags 43/39/24 + cubo canónico único en EC2.
+ * Bump: 2026-11-14-v2 — pull con flags preservadas vs espejo Postgres.
  */
-export const SYNC_SCHEMA_VERSION = 20261114
+export const SYNC_SCHEMA_VERSION = '2026-11-14-v2'
+/** @deprecated alias de lectura; la clave canónica es MHD_SYNC_EPOCH_KEY */
 const SYNC_SCHEMA_KEY = 'mihistoriadental.syncSchemaVersion'
+const MHD_SYNC_EPOCH_KEY = 'mhd_sync_epoch'
 
 /** Claves legacy o compartidas que no deben sobrevivir un switch de cuenta. */
 const GLOBAL_LOCAL_STORAGE_KEYS = [
@@ -149,19 +151,34 @@ export async function ensureSyncSchemaEpoch(): Promise<{ upgraded: boolean }> {
   if (typeof window === 'undefined') return { upgraded: false }
   let stored = ''
   try {
-    stored = String(localStorage.getItem(SYNC_SCHEMA_KEY) || '').trim()
+    stored = String(
+      localStorage.getItem(MHD_SYNC_EPOCH_KEY) ||
+        localStorage.getItem(SYNC_SCHEMA_KEY) ||
+        '',
+    ).trim()
   } catch {
     stored = ''
   }
   const current = String(SYNC_SCHEMA_VERSION)
   if (stored === current) return { upgraded: false }
 
-  console.warn('[Sync] Nueva SYNC_SCHEMA_VERSION — wipe Dexie local + pull fresco.', {
+  console.warn('[Sync] Nueva mhd_sync_epoch — wipe Dexie + lastSyncAt + pull fresco.', {
     stored: stored || '(none)',
     current,
   })
   await wipeLocalClinicalData()
   try {
+    localStorage.removeItem('lastSyncAt')
+    localStorage.removeItem('doctorSEO_lastSyncAt')
+    localStorage.removeItem('mihistoriadental.lastSyncAt')
+    const toRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i)
+      if (!key) continue
+      if (/lastSyncAt|LastSync|pullCache|clinicPull/i.test(key)) toRemove.push(key)
+    }
+    for (const key of toRemove) localStorage.removeItem(key)
+    localStorage.setItem(MHD_SYNC_EPOCH_KEY, current)
     localStorage.setItem(SYNC_SCHEMA_KEY, current)
   } catch {
     /* ignore */
