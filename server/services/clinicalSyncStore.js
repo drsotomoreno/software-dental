@@ -19,6 +19,7 @@ import { odontogramRecordHasMarks } from './odontogramMerge.js'
 import { conservarFechaApertura } from '../../shared/patientOpenedAt.js'
 import { clinicKeyInScope } from '../../shared/clinicalSyncScope.js'
 import { mergeSyncedRecordNonDestructive } from '../../shared/clinicalSyncMerge.js'
+import { omitHeavyClinicalDraftForms } from '../../shared/clinicalSyncHeavyPayload.js'
 import { clinicalSyncEvents, SNAPSHOT_PUSHED } from './clinicalSyncEvents.js'
 
 /**
@@ -288,9 +289,9 @@ function normalizeRecord(raw, clinicId) {
     raw.payload && typeof raw.payload === 'object' && !Array.isArray(raw.payload)
       ? { ...raw.payload }
       : { ...raw }
-  const payload = stripClinicalPayloadEvolutionPatientSignatures(
-    stripHeavyBinaryFields(payloadRaw),
-  )
+  // Borradores: sin clinicalDraft >50 KB ni Base64; Dexie local conserva el completo.
+  const lightPayload = omitHeavyClinicalDraftForms(stripHeavyBinaryFields(payloadRaw))
+  const payload = stripClinicalPayloadEvolutionPatientSignatures(lightPayload)
   const updatedAt = String(raw.updatedAt || payload.updatedAt || payload.createdAt || new Date().toISOString())
   const deletedAt = raw.deletedAt || payload.deletedAt || null
   const now = new Date().toISOString()
@@ -476,8 +477,9 @@ async function loadStore() {
 }
 
 async function saveStore(store) {
-  // Antes de disco/Postgres: purgar Base64/DataURL >50k y claves binarias residuales.
-  const sanitized = stripHeavyBinaryFields(store && typeof store === 'object' ? store : emptyStore())
+  // Antes de disco/Postgres: purgar Base64/DataURL >50k, claves binarias y clinicalDraft pesados.
+  const base = store && typeof store === 'object' ? store : emptyStore()
+  const sanitized = omitHeavyClinicalDraftForms(stripHeavyBinaryFields(base))
   await writeDurableJsonWithMerge(STORE_FILE, sanitized, STORE_KEY, mergeClinicalStores)
 }
 
@@ -605,7 +607,9 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
     odontograms: Object.values(clinic.odontograms).filter(Boolean),
     diagnosticAids: Object.values(clinic.diagnosticAids).filter(Boolean),
     attachments,
-    drafts: Object.values(clinic.drafts).filter(Boolean),
+    drafts: Object.values(clinic.drafts)
+      .filter(Boolean)
+      .map((row) => omitHeavyClinicalDraftForms(stripHeavyBinaryFields(row))),
     sync_queue: syncQueue,
     serverTime,
   }
@@ -648,8 +652,10 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
     return { accepted: emptyAccepted, serverTime: new Date().toISOString() }
   }
 
-  // Purga Base64/DataURL antes de tocar memoria/disco (t3.micro).
-  const safeBody = stripHeavyBinaryFields(body && typeof body === 'object' ? body : {})
+  // Purga Base64/DataURL y clinicalDraft >50 KB antes de tocar memoria/disco (t3.micro).
+  const safeBody = omitHeavyClinicalDraftForms(
+    stripHeavyBinaryFields(body && typeof body === 'object' ? body : {}),
+  )
 
   return enqueueWrite(async () => {
     const store = await loadStore()

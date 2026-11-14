@@ -131,6 +131,11 @@ function mergeDraftEvolutionNotes(
   return preserveImmutableEvolutionNotes(merged, existing)
 }
 
+/**
+ * Marca dirty para sync de metadatos/otras entidades.
+ * El push (clinicSnapshotSync) omite clinicalDraft/valuationDraft >50 KB:
+ * el formulario completo queda solo en Dexie local.
+ */
 function notifyDraftChanged(): void {
   if (isApplyingRemotePull()) return
   notifyClinicalRecordDirty()

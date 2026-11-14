@@ -172,6 +172,8 @@ export async function uploadClinicAttachmentToDrive({
   mimeType,
   buffer,
   filePath,
+  /** Factory opcional: () => fs.createReadStream(req.file.path) */
+  createReadStream: createReadStreamFn,
   byteLength: knownByteLength,
   driveFileId: existingFileId,
   appProperties = {},
@@ -198,9 +200,12 @@ export async function uploadClinicAttachmentToDrive({
     )
   }
 
+  const openFileStream = () =>
+    typeof createReadStreamFn === 'function' ? createReadStreamFn() : createReadStream(path)
+
   const parentId = await ensurePatientFolder(drive, rootFolderId, patientSyncId)
   const name = safeFileName(fileName)
-  const mediaBody = hasPath ? createReadStream(path) : Readable.from(buffer)
+  const mediaBody = hasPath ? openFileStream() : Readable.from(buffer)
   const media = {
     mimeType: String(mimeType || 'application/octet-stream'),
     body: mediaBody,
@@ -247,7 +252,7 @@ export async function uploadClinicAttachmentToDrive({
         )
         // Reabrir stream si el update consumió el anterior.
         if (hasPath) {
-          media.body = createReadStream(path)
+          media.body = openFileStream()
         } else {
           media.body = Readable.from(buffer)
         }

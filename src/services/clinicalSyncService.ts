@@ -49,6 +49,8 @@ const HEAVY_BINARY_KEYS = new Set([
   'bytes',
 ])
 
+const MAX_INLINE_BINARY_CHARS = 50 * 1024
+
 function stripHeavyBinaryFields(value: unknown): unknown {
   if (!value || typeof value !== 'object') return value
   if (Array.isArray(value)) return value.map((row) => stripHeavyBinaryFields(row))
@@ -57,7 +59,7 @@ function stripHeavyBinaryFields(value: unknown): unknown {
     if (HEAVY_BINARY_KEYS.has(key) || LOCAL_ONLY_KEYS.has(key)) continue
     if (
       typeof entry === 'string' &&
-      entry.length > 64 * 1024 &&
+      entry.length > MAX_INLINE_BINARY_CHARS &&
       (/^data:/i.test(entry) || /^[A-Za-z0-9+/=\s]{256,}/.test(entry.slice(0, 80)))
     ) {
       continue

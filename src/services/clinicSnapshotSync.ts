@@ -31,6 +31,7 @@ import {
   isSignedClinicalDocument,
   shouldReplaceClinicalDocument,
 } from '../../shared/clinicalRecordGuard.js'
+import { omitHeavyClinicalDraftForms } from '../../shared/clinicalSyncHeavyPayload.js'
 import { withMergedClinicalPayments } from '../../shared/paymentControlMerge.js'
 
 function paymentFingerprint(form: {
@@ -185,6 +186,9 @@ function notifyIfGoogleDriveRequired(response: Response, payload: unknown): bool
   return true
 }
 
+/** Strings Base64/DataURL >50 KB no viajan en /api/sync (viven en Dexie / Drive). */
+const MAX_INLINE_BINARY_CHARS = 50 * 1024
+
 function stripHeavyBinaryFields(value: unknown): unknown {
   if (!value || typeof value !== 'object') return value
   if (Array.isArray(value)) return value.map((row) => stripHeavyBinaryFields(row))
@@ -193,7 +197,7 @@ function stripHeavyBinaryFields(value: unknown): unknown {
     if (HEAVY_BINARY_KEYS.has(key) || LOCAL_ONLY_KEYS.has(key)) continue
     if (
       typeof entry === 'string' &&
-      entry.length > 64 * 1024 &&
+      entry.length > MAX_INLINE_BINARY_CHARS &&
       (/^data:/i.test(entry) || /^[A-Za-z0-9+/=\s]{256,}/.test(entry.slice(0, 80)))
     ) {
       continue
@@ -854,16 +858,18 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
     }),
   ])
 
+  // clinicalDraft pesado (>50 KB) solo en IndexedDB local; no inflar clinical-sync.json.
   const draftsPayload = await Promise.all(
     drafts.map(async (row) => {
       const withPatient = await withPatientSyncId({ ...row })
       const patientSyncId = await resolvePatientSyncId(String(withPatient.patientId))
       const syncId = `draft:${patientSyncId || withPatient.patientId}`
-      return toEntityRecord(
+      const record = toEntityRecord(
         { ...withPatient, patientSyncId } as unknown as Record<string, unknown>,
         clinicId,
         syncId,
       )
+      return omitHeavyClinicalDraftForms(record) as ClinicalSyncRecord
     }),
   )
 

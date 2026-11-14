@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { mkdir, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,6 +25,8 @@ import {
   readGoogleDriveStatusForUser,
 } from '../services/googleDriveOAuth.service.js'
 
+// Esta ruta NUNCA importa clinicalSyncStore ni lee/escribe clinical-sync.json.
+
 const router = Router()
 
 /** Evita double-send / Connection reset by peer (104) si el socket ya cerró. */
@@ -35,8 +38,13 @@ function sendJson(res, status, body) {
 /** Escaneos STL/PLY/OBJ clínicos: hasta 100 MB. */
 export const GOOGLE_DRIVE_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
-/** Disco temporal: stream a Drive sin cargar el STL en RAM. */
-const DRIVE_UPLOAD_TMP_DIR = join(tmpdir(), 'drive-uploads')
+/**
+ * Disco temporal: stream a Drive sin cargar el archivo en RAM.
+ * EC2 Linux: /tmp/drive-uploads. Windows local: os.tmpdir()/drive-uploads.
+ */
+const DRIVE_UPLOAD_TMP_DIR =
+  process.env.DRIVE_UPLOAD_TMP_DIR ||
+  (process.platform === 'win32' ? join(tmpdir(), 'drive-uploads') : '/tmp/drive-uploads')
 
 const diskStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
@@ -401,37 +409,15 @@ router.post('/upload', (req, res, next) => {
 
     const diskPath = String(tempFile?.path || '').trim()
     const diskSize = Number(tempFile?.size) || 0
-    let smallBuffer = null
 
-    // Solo aceptar Base64 para payloads pequeños de respaldo (< 1 MB); STL va por disco.
+    // Obliga multipart → disco. No Base64 en RAM; no toca clinical-sync.json.
     if (!diskPath) {
-      const dataBase64 = String(body.dataBase64 || body.data || '').trim()
-      if (!dataBase64) {
-        return sendJson(res, 400, {
-          success: false,
-          ok: false,
-          error: 'Envíe el archivo en multipart (campo "file").',
-          code: 'INVALID_UPLOAD_PAYLOAD',
-        })
-      }
-      if (dataBase64.length > 1.4 * 1024 * 1024) {
-        return sendJson(res, 400, {
-          success: false,
-          ok: false,
-          error: 'Use multipart/form-data para archivos grandes (sin Base64).',
-          code: 'BASE64_UPLOAD_DISABLED',
-        })
-      }
-      try {
-        smallBuffer = Buffer.from(dataBase64, 'base64')
-      } catch {
-        return sendJson(res, 400, {
-          success: false,
-          ok: false,
-          error: 'dataBase64 inválido.',
-          code: 'INVALID_BASE64',
-        })
-      }
+      return sendJson(res, 400, {
+        success: false,
+        ok: false,
+        error: 'Envíe el archivo en multipart (campo "file"); se guarda en /tmp/drive-uploads.',
+        code: 'INVALID_UPLOAD_PAYLOAD',
+      })
     }
 
     if (!fileName) {
@@ -442,7 +428,7 @@ router.post('/upload', (req, res, next) => {
         code: 'INVALID_UPLOAD_PAYLOAD',
       })
     }
-    const byteLength = diskPath ? diskSize : smallBuffer?.length || 0
+    const byteLength = diskSize
     if (!byteLength) {
       return sendJson(res, 400, {
         success: false,
@@ -460,15 +446,16 @@ router.post('/upload', (req, res, next) => {
       })
     }
 
+    // Stream desde disco: createReadStream → drive.files.create (sin Buffer del archivo).
     const uploaded = await uploadClinicAttachmentToDrive({
       clinicId,
       clinicIdCandidates: resolved.candidates,
       patientSyncId,
       fileName,
       mimeType,
-      filePath: diskPath || undefined,
+      filePath: diskPath,
       byteLength,
-      buffer: smallBuffer || undefined,
+      createReadStream: () => createReadStream(diskPath),
       driveFileId: existingFileId,
       appProperties: {
         source: 'diagnostic_aid',
