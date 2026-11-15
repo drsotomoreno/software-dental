@@ -164,16 +164,35 @@ router.get('/status', async (req, res) => {
   try {
     const user = await requireSessionUser(req, res)
     if (!user) return
-    const status = await readGoogleDriveStatusForUser(user, { req })
+    // Tope duro: Nginx 502 si Node cuelga en RDS. Preferir caché/JSON.
+    const status = await Promise.race([
+      readGoogleDriveStatusForUser(user, { req }),
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          const err = new Error('Timeout al consultar estado de Google Drive.')
+          err.code = 'DRIVE_STATUS_TIMEOUT'
+          err.status = 504
+          reject(err)
+        }, 4_000)
+      }),
+    ])
     return sendJson(res, 200, { success: true, ok: true, ...status })
   } catch (error) {
     console.error('[google-drive] GET /status:', error)
-    const mapped = mapOAuthError(error)
-    return sendJson(res, mapped.status, {
-      success: false,
-      ok: false,
-      error: mapped.message,
-      code: mapped.code,
+    // Nunca 5xx opaco: el FE puede seguir con upload usando clinicId de sesión.
+    const clinicHint = earlyClinicIdFrom(req) || null
+    return sendJson(res, 200, {
+      success: true,
+      ok: true,
+      connected: false,
+      status: 'unknown',
+      clinicId: clinicHint,
+      degraded: true,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'No se pudo verificar Google Drive a tiempo.',
+      code: error?.code || 'DRIVE_STATUS_DEGRADED',
     })
   }
 })

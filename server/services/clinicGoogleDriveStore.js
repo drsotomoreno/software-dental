@@ -225,9 +225,33 @@ function isConnectedDriveRecord(record) {
   )
 }
 
+function withShortTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err = new Error(`${label} superó ${ms}ms`)
+      err.code = 'PG_TIMEOUT'
+      reject(err)
+    }, ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+/** Timeout corto: status/upload no deben colgar Nginx (502) esperando RDS. */
+const DRIVE_PG_LOOKUP_MS = 2_500
+
 /**
  * Busca la primera fila entre varias claves candidatas
- * (JSON durable + Postgres `clinic_canonical_id IN (...)`).
+ * (JSON durable + caché disco + Postgres).
+ * Orden: JSON → caché local → Postgres (≤2.5s). Nunca bloquea minutos.
  * @returns {{ record: object, storageKey: string } | null}
  */
 export async function findClinicGoogleDriveRecordAmong(candidateIds = []) {
@@ -249,34 +273,41 @@ export async function findClinicGoogleDriveRecordAmong(candidateIds = []) {
     }
   }
 
+  // Caché ANTES de Postgres: evita 502 si RDS está lento/enfría.
+  const cachedEarly = await getGoogleDriveCredentialCache(keys.length ? keys : candidateIds)
+  if (cachedEarly?.record) return cachedEarly
+
   if (keys.length) {
     try {
-      // Interactivo: nunca bloqueado por enfriamiento de Postgres.
-      const pgHit = await withPgClientInteractive(async (client) => {
-        const { rows } = await client.query(
-          `SELECT clinic_canonical_id,
-                  google_drive_email,
-                  google_drive_refresh_token,
-                  google_drive_root_folder_id,
-                  google_drive_access_token,
-                  google_drive_token_expires_at,
-                  google_drive_connected_at,
-                  google_drive_status,
-                  clinic_name,
-                  connected_by_user_id
-             FROM clinica_google_drive
-            WHERE clinic_canonical_id = ANY($1::text[])
-            ORDER BY CASE
-              WHEN google_drive_status = 'connected'
-               AND google_drive_refresh_token IS NOT NULL
-               AND btrim(google_drive_refresh_token) <> ''
-              THEN 0 ELSE 1 END,
-              updated_at DESC NULLS LAST
-            LIMIT 1`,
-          [keys],
-        )
-        return rows[0] || null
-      })
+      const pgHit = await withShortTimeout(
+        withPgClientInteractive(async (client) => {
+          const { rows } = await client.query(
+            `SELECT clinic_canonical_id,
+                    google_drive_email,
+                    google_drive_refresh_token,
+                    google_drive_root_folder_id,
+                    google_drive_access_token,
+                    google_drive_token_expires_at,
+                    google_drive_connected_at,
+                    google_drive_status,
+                    clinic_name,
+                    connected_by_user_id
+               FROM clinica_google_drive
+              WHERE clinic_canonical_id = ANY($1::text[])
+              ORDER BY CASE
+                WHEN google_drive_status = 'connected'
+                 AND google_drive_refresh_token IS NOT NULL
+                 AND btrim(google_drive_refresh_token) <> ''
+                THEN 0 ELSE 1 END,
+                updated_at DESC NULLS LAST
+              LIMIT 1`,
+            [keys],
+          )
+          return rows[0] || null
+        }),
+        DRIVE_PG_LOOKUP_MS,
+        'Lookup clinica_google_drive',
+      )
       const mapped = recordFromPostgresRow(pgHit)
       if (mapped?.clinicId) {
         store.clinics[mapped.clinicId] = {
@@ -292,7 +323,7 @@ export async function findClinicGoogleDriveRecordAmong(candidateIds = []) {
       }
     } catch (error) {
       console.warn(
-        '[google-drive] Lookup Postgres clinica_google_drive falló; usando caché:',
+        '[google-drive] Lookup Postgres clinica_google_drive falló/timeout; usando caché:',
         error instanceof Error ? error.message : error,
       )
       const cached = await getGoogleDriveCredentialCache(keys)
@@ -319,28 +350,35 @@ export async function findSoleConnectedGoogleDriveRecord({ allowFallback = false
 
   if (connectedLocal.length === 1) return connectedLocal[0]
 
+  const cachedListEarly = await listCachedConnectedDriveRecords()
+  if (cachedListEarly.length === 1) return cachedListEarly[0]
+
   try {
-    const pgRows = await withPgClientInteractive(async (client) => {
-      const { rows } = await client.query(
-        `SELECT clinic_canonical_id,
-                google_drive_email,
-                google_drive_refresh_token,
-                google_drive_root_folder_id,
-                google_drive_access_token,
-                google_drive_token_expires_at,
-                google_drive_connected_at,
-                google_drive_status,
-                clinic_name,
-                connected_by_user_id
-           FROM clinica_google_drive
-          WHERE google_drive_refresh_token IS NOT NULL
-            AND btrim(google_drive_refresh_token) <> ''
-            AND google_drive_status = 'connected'
-          ORDER BY updated_at DESC NULLS LAST
-          LIMIT 2`,
-      )
-      return rows
-    })
+    const pgRows = await withShortTimeout(
+      withPgClientInteractive(async (client) => {
+        const { rows } = await client.query(
+          `SELECT clinic_canonical_id,
+                  google_drive_email,
+                  google_drive_refresh_token,
+                  google_drive_root_folder_id,
+                  google_drive_access_token,
+                  google_drive_token_expires_at,
+                  google_drive_connected_at,
+                  google_drive_status,
+                  clinic_name,
+                  connected_by_user_id
+             FROM clinica_google_drive
+            WHERE google_drive_refresh_token IS NOT NULL
+              AND btrim(google_drive_refresh_token) <> ''
+              AND google_drive_status = 'connected'
+            ORDER BY updated_at DESC NULLS LAST
+            LIMIT 2`,
+        )
+        return rows
+      }),
+      DRIVE_PG_LOOKUP_MS,
+      'Fallback clinica_google_drive',
+    )
     if (Array.isArray(pgRows) && pgRows.length === 1) {
       const mapped = recordFromPostgresRow(pgRows[0])
       if (mapped?.clinicId) {
@@ -350,7 +388,7 @@ export async function findSoleConnectedGoogleDriveRecord({ allowFallback = false
     }
   } catch (error) {
     console.warn(
-      '[google-drive] Fallback Postgres clinica_google_drive falló; usando caché:',
+      '[google-drive] Fallback Postgres clinica_google_drive falló/timeout; usando caché:',
       error instanceof Error ? error.message : error,
     )
     const cachedList = await listCachedConnectedDriveRecords()

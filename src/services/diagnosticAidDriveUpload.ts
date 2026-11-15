@@ -32,6 +32,8 @@ type DriveStatusPayload = {
 
 async function readDriveStatus(): Promise<{
   connected: boolean
+  /** true = status degradado (502/timeout); conviene intentar upload igual. */
+  softFail: boolean
   clinicId: string | null
   message: string | null
 }> {
@@ -40,49 +42,61 @@ async function readDriveStatus(): Promise<{
   if (!auth?.token) {
     return {
       connected: false,
+      softFail: false,
       clinicId: null,
       message: 'Sesión inválida o expirada. Vuelva a iniciar sesión para subir a Google Drive.',
     }
   }
   try {
-    const response = await fetch(`/api/integrations/google-drive/status${driveClinicQuery(clinicId)}`, {
-      headers: driveIdentityHeaders(clinicId),
-    })
-    const body = (await response.json().catch(() => ({}))) as DriveStatusPayload
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => controller.abort(), 5_000)
+    let response: Response
+    try {
+      response = await fetch(`/api/integrations/google-drive/status${driveClinicQuery(clinicId)}`, {
+        headers: driveIdentityHeaders(clinicId),
+        signal: controller.signal,
+      })
+    } finally {
+      window.clearTimeout(timer)
+    }
+    const body = (await response.json().catch(() => ({}))) as DriveStatusPayload & {
+      degraded?: boolean
+      status?: string
+    }
     if (response.status === 401) {
       return {
         connected: false,
+        softFail: false,
         clinicId: null,
         message: 'Sesión inválida o expirada. Vuelva a iniciar sesión.',
       }
     }
-    if (!response.ok) {
+    // 5xx / degradado: no bloquear la subida; el POST /upload decide.
+    if (!response.ok || body.degraded || body.status === 'unknown') {
       return {
-        connected: false,
+        connected: true,
+        softFail: true,
         clinicId: typeof body.clinicId === 'string' ? body.clinicId : clinicId || null,
-        message:
-          typeof body.error === 'string'
-            ? body.error
-            : `No se pudo verificar Google Drive (HTTP ${response.status}).`,
+        message: null,
       }
     }
     const connected = Boolean(body.connected) || body.status === 'connected'
     return {
       connected,
+      softFail: false,
       clinicId:
         (typeof body.clinicId === 'string' && body.clinicId.trim()) || clinicId || null,
       message: connected
         ? null
         : 'Google Drive no está conectado. Conéctelo en Perfil → Google Drive.',
     }
-  } catch (error) {
+  } catch {
+    // Red/502/timeout: intentar upload de todas formas.
     return {
-      connected: false,
+      connected: true,
+      softFail: true,
       clinicId: clinicId || null,
-      message:
-        error instanceof Error
-          ? `No se pudo verificar Google Drive: ${error.message}`
-          : 'No se pudo verificar Google Drive.',
+      message: null,
     }
   }
 }
@@ -121,13 +135,16 @@ export async function uploadDiagnosticAidToGoogleDrive(
   })
 
   const status = await readDriveStatus()
-  if (!status.connected) {
+  if (!status.connected && !status.softFail) {
     const message =
       status.message ||
       'Google Drive no está conectado. Conéctelo en Perfil → Google Drive.'
     const failed = await markUploadError(aidId, message)
     emit('error', message)
     return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
+  }
+  if (status.softFail) {
+    emit('uploading', 'Estado Drive no verificado (servidor ocupado); intentando subida…')
   }
 
   const blobRecord = await getDiagnosticAidBlobByAidId(aidId)
