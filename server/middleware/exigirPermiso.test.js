@@ -5,6 +5,7 @@ import { verifySessionToken } from '../utils/sessionJwt.js'
 import {
   CUPOS_PLAN,
   cupoDisponible,
+  datosDePerfil,
   identidadClinicaTitular,
   planEfectivo,
   signColaboradorToken,
@@ -17,6 +18,17 @@ test('superadmin omite el filtro de rol y de activo', () => {
   )
   assert.equal(decision.ok, true)
   assert.equal(decision.bypass, true)
+})
+
+test('el equipo toma REPS y ReTHUS del perfil del titular', () => {
+  const datos = datosDePerfil({
+    repsCode: '6800103898-01',
+    rethusNumber: '79904620',
+  })
+  assert.equal(datos.codigo_sede_reps, '6800103898-01')
+  assert.equal(datos.rethus, '79904620')
+  assert.equal(datos.codigo_sede_reps_db, '6800103898-01')
+  assert.equal(datosDePerfil({ repsCode: 'x'.repeat(21) }).codigo_sede_reps_db, null)
 })
 
 test('la cuenta maestra prueba el equipo con cupo corporativo', () => {

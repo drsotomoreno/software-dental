@@ -18,7 +18,9 @@ import {
   esSuperAdminSesion,
   esTitularDeClinica,
   exigirPermiso,
+  perfilSuscripcionDeSesion,
 } from '../middleware/exigirPermiso.js'
+import { ensureMasterUsuarioRow } from '../services/tenantRbacStore.js'
 
 const require = createRequire(import.meta.url)
 const bcrypt = require('bcryptjs')
@@ -66,6 +68,24 @@ function planCanonico(plan) {
 
 function expiresAt(from = new Date()) {
   return new Date(from.getTime() + INVITE_MS)
+}
+
+function esUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || ''),
+  )
+}
+
+/** REPS y ReTHUS del perfil (la ficha de arriba). El de la sede cabe en VARCHAR(20). */
+export function datosDePerfil(perfil) {
+  const reps = String(perfil?.repsCode || '').trim()
+  const rethus = String(perfil?.rethusNumber || '').trim()
+  return {
+    codigo_sede_reps: reps || null,
+    rethus: rethus || null,
+    codigo_sede_reps_db: reps && reps.length <= 20 ? reps : null,
+    rethus_db: rethus && rethus.length <= 50 ? rethus : null,
+  }
 }
 
 /**
@@ -140,20 +160,105 @@ async function queryUsuario(client, id) {
   return rows[0] || null
 }
 
-async function queryUsuarioDeSesion(client, req) {
-  const id = String(req.user?.id || '').trim()
-  const porId = id ? await queryUsuario(client, id) : null
-  if (porId) return porId
-  const email = normalizeEmail(req.user?.email)
-  if (!email) return null
+async function queryUsuarioPorEmail(client, email) {
+  const normalizado = normalizeEmail(email)
+  if (!normalizado) return null
   const { rows } = await client.query(
     `SELECT ${USUARIO_COLUMNS}
        FROM usuarios
       WHERE lower(email) = lower($1::text)
       LIMIT 1`,
-    [email],
+    [normalizado],
   )
   return rows[0] || null
+}
+
+async function filaDelPerfil(client, perfil, req) {
+  const porCorreo = await queryUsuarioPorEmail(client, perfil?.email || req.user?.email)
+  if (porCorreo) return porCorreo
+  const id = String(perfil?.id || req.user?.id || '').trim()
+  if (!id) return null
+  return queryUsuario(client, id)
+}
+
+function esDuenoDelPerfil(perfil) {
+  if (!perfil?.id) return false
+  if (normalizeEmail(perfil.email) === MASTER_EMAIL) return true
+  if (perfil.isClinicOwner === true) return true
+  return String(perfil.clinicId || '') === String(perfil.id)
+}
+
+async function crearFilaTitular(client, perfil) {
+  const email = normalizeEmail(perfil?.email)
+  if (!email || !esDuenoDelPerfil(perfil)) return null
+  const datos = datosDePerfil(perfil)
+  const id = esUuid(perfil.id) ? perfil.id : randomUUID()
+  const nombre = String(perfil.nombre || email).trim().slice(0, 255) || email
+  const passwordHash = bcrypt.hashSync(randomUUID(), BCRYPT_ROUNDS)
+  try {
+    await client.query(
+      `INSERT INTO usuarios (
+         id, clinica_id, email, password_hash, nombre_completo,
+         registro_rethus, is_superadmin, rol, estado,
+         codigo_sede_reps, rethus, activo
+       ) VALUES (
+         $1::uuid, NULL, $2::text, $3::text, $4::text,
+         $5::text, FALSE, 'admin', 'activo',
+         $6::text, $5::text, TRUE
+       )
+       ON CONFLICT (email) DO NOTHING`,
+      [id, email, passwordHash, nombre, datos.rethus_db, datos.codigo_sede_reps_db],
+    )
+  } catch (error) {
+    if (error?.code !== '23505') throw error
+  }
+  return queryUsuarioPorEmail(client, email)
+}
+
+async function aplicarPerfilAlTitular(client, fila, perfil) {
+  if (!fila) return fila
+  const datos = datosDePerfil(perfil)
+  const sedeDb = datos.codigo_sede_reps_db
+  const rethusDb = datos.rethus_db
+  let actual = fila
+  if (sedeDb || rethusDb) {
+    const { rows } = await client.query(
+      `UPDATE usuarios
+          SET codigo_sede_reps = CASE
+                WHEN $2::text IS NOT NULL THEN $2::text
+                ELSE codigo_sede_reps
+              END,
+              rethus = CASE
+                WHEN $3::text IS NOT NULL THEN $3::text
+                ELSE rethus
+              END,
+              registro_rethus = CASE
+                WHEN $3::text IS NOT NULL THEN $3::text
+                ELSE registro_rethus
+              END
+        WHERE id = $1::uuid
+        RETURNING ${USUARIO_COLUMNS}`,
+      [fila.id, sedeDb, rethusDb],
+    )
+    actual = rows[0] || fila
+  }
+  return {
+    ...actual,
+    codigo_sede_reps: datos.codigo_sede_reps || actual.codigo_sede_reps || null,
+    rethus: datos.rethus || actual.rethus || null,
+  }
+}
+
+async function titularConPerfil(client, fila) {
+  if (!fila) return fila
+  const perfil = await perfilSuscripcionDeSesion({ id: fila.id, email: fila.email })
+  return aplicarPerfilAlTitular(client, fila, perfil)
+}
+
+async function queryUsuarioDeSesion(client, req) {
+  const perfil = await perfilSuscripcionDeSesion(req.user)
+  if (perfil?.email && !req.user?.email) req.user = { ...req.user, email: perfil.email }
+  return filaDelPerfil(client, perfil, req)
 }
 
 function publico(row, { conInvitacion = false } = {}) {
@@ -243,41 +348,49 @@ export function cupoDisponible(plan, conteo, rol, { incluirEste = true } = {}) {
 }
 
 async function resolverTitular(client, req) {
+  const perfil = await perfilSuscripcionDeSesion(req.user)
+  if (perfil?.email && !req.user?.email) req.user = { ...req.user, email: perfil.email }
+
   if (esSuperAdminSesion(req.user)) {
     const requested = String(req.body?.titular_id || req.query?.titular_id || '').trim()
-    const propio = String(req.user?.id || '').trim()
-    const id = requested || propio
-    if (!id) return { error: 'Indique titular_id de la clínica.', status: 400 }
-    let titular = id ? await queryUsuario(client, id) : null
-    if (!titular && !requested) titular = await queryUsuarioDeSesion(client, req)
-    if (!titular || titular.titular_id) {
+    if (requested) {
+      const indicado = await queryUsuario(client, requested)
+      if (!indicado || indicado.titular_id || !esTitularDeClinica(indicado)) {
+        return { error: 'El titular indicado no existe.', status: 404 }
+      }
+      return { titular: await titularConPerfil(client, indicado) }
+    }
+    let fila = await filaDelPerfil(client, perfil, req)
+    if (!fila && (esDuenoDelPerfil(perfil) || normalizeEmail(perfil?.email) === MASTER_EMAIL)) {
+      await ensureMasterUsuarioRow()
+      fila = await queryUsuarioPorEmail(client, perfil?.email || MASTER_EMAIL)
+    }
+    if (!fila || fila.titular_id) {
       return { error: 'El titular indicado no existe.', status: 404 }
     }
-    const esPropio =
-      !requested ||
-      String(titular.id) === propio ||
-      normalizeEmail(titular.email) === normalizeEmail(req.user?.email)
-    if (!esPropio && !esTitularDeClinica(titular)) {
-      return { error: 'El titular indicado no existe.', status: 404 }
-    }
-    return { titular }
+    return { titular: await aplicarPerfilAlTitular(client, fila, perfil) }
   }
 
-  const fila = await queryUsuarioDeSesion(client, req)
+  let fila = await queryUsuarioDeSesion(client, req)
+  if (!fila && esDuenoDelPerfil(perfil)) {
+    fila = await crearFilaTitular(client, perfil)
+  }
   if (!fila) return { error: 'La cuenta no está en usuarios.', status: 403 }
 
   const vista = {
     ...fila,
     clinica_id: req.user?.clinica_id || fila.clinica_id,
-    clinicId: req.user?.clinicId,
-    isClinicOwner: req.user?.isClinicOwner,
+    clinicId: req.user?.clinicId || perfil?.clinicId,
+    isClinicOwner: req.user?.isClinicOwner === true || perfil?.isClinicOwner === true,
   }
-  if (esTitularDeClinica(vista)) return { titular: fila }
+  if (esTitularDeClinica(vista) || esDuenoDelPerfil(perfil)) {
+    return { titular: await aplicarPerfilAlTitular(client, fila, perfil) }
+  }
 
   if (fila.titular_id && ROLES_INVITABLES.has(fila.rol)) {
     const titular = await queryUsuario(client, fila.titular_id)
     if (!titular) return { error: 'No se encontró el titular de esta cuenta.', status: 404 }
-    return { titular, actor: fila }
+    return { titular: await titularConPerfil(client, titular), actor: fila }
   }
 
   return { error: 'Solo el titular puede administrar colaboradores.', status: 403 }
@@ -323,6 +436,12 @@ router.get(
         const plan = await planDelTitular(titular)
         const verInvitacion = esSuperAdminSesion(req.user) || esTitularDeClinica(req.user)
         const titularRow = rows.find((row) => row.id === titular.id) || titular
+        const titularVista = {
+          ...titularRow,
+          codigo_sede_reps: titular.codigo_sede_reps || titularRow.codigo_sede_reps,
+          rethus: titular.rethus || titularRow.rethus,
+          email: titular.email || titularRow.email,
+        }
         const colaboradores = rows.filter((row) => row.titular_id === titular.id)
         const conteo = await contarActivos(client, titular.id)
         const tope = plan ? CUPOS_PLAN[plan] : null
@@ -334,7 +453,7 @@ router.get(
                 administrativos: { usados: conteo.admins, max: tope.administrativos },
               }
             : null,
-          titular: publico(titularRow, { conInvitacion: false }),
+          titular: publico(titularVista, { conInvitacion: false }),
           colaboradores: colaboradores.map((row) => publico(row, { conInvitacion: verInvitacion })),
           clinicSyncId: identidadClinicaTitular(titular).clinicSyncId,
         }

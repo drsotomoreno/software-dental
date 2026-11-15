@@ -198,6 +198,9 @@ export function GestionColaboradores() {
   }
 
   const titular = equipo?.titular
+  const sesion = getStoredApiAuth()?.user
+  const repsSede = titular?.codigo_sede_reps || sesion?.repsCode || '—'
+  const rethusTitular = titular?.rethus || sesion?.rethusNumber || '—'
 
   return (
     <section className="card space-y-6">
@@ -214,11 +217,11 @@ export function GestionColaboradores() {
         <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-lg bg-slate-50 px-3 py-2">
             <dt className="text-xs uppercase tracking-wide text-slate-500">REPS de la sede</dt>
-            <dd className="text-sm font-medium text-slate-900">{titular?.codigo_sede_reps || '—'}</dd>
+            <dd className="text-sm font-medium text-slate-900">{repsSede}</dd>
           </div>
           <div className="rounded-lg bg-slate-50 px-3 py-2">
             <dt className="text-xs uppercase tracking-wide text-slate-500">ReTHUS del titular</dt>
-            <dd className="text-sm font-medium text-slate-900">{titular?.rethus || '—'}</dd>
+            <dd className="text-sm font-medium text-slate-900">{rethusTitular}</dd>
           </div>
           <div className="rounded-lg bg-slate-50 px-3 py-2">
             <dt className="text-xs uppercase tracking-wide text-slate-500">Clínicos</dt>

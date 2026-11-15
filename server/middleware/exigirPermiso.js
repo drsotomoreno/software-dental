@@ -6,7 +6,7 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { isSuperAdminUser } from '../services/subscriptionAuthStore.js'
+import { isSuperAdminUser, listAllSubscriptionUsers } from '../services/subscriptionAuthStore.js'
 import { withPgClientInteractive } from '../services/durableStore.js'
 import { splitSqlStatements } from '../services/consultasRepository.js'
 
@@ -92,9 +92,27 @@ export async function asegurarEsquemaColaboradores() {
  * Refresca activo, rol y rethus desde usuarios.
  * is_superadmin no se promueve desde la fila: solo vale el JWT ya verificado.
  */
+/** Perfil de suscripción de la sesión. El JWT no trae correo ni REPS. */
+export async function perfilSuscripcionDeSesion(user) {
+  const id = String(user?.id || user?.userId || '').trim()
+  const email = String(user?.email || '').trim().toLowerCase()
+  if (!id && !email) return null
+  const users = await listAllSubscriptionUsers()
+  return (
+    users.find((item) => id && String(item.id) === id) ||
+    users.find((item) => email && String(item.email || '').trim().toLowerCase() === email) ||
+    null
+  )
+}
+
 export async function refrescarUsuarioColaborador(req) {
   const id = String(req.user?.id || req.user?.userId || '').trim()
-  const email = String(req.user?.email || '').trim()
+  let email = String(req.user?.email || '').trim()
+  if (!email) {
+    const perfil = await perfilSuscripcionDeSesion(req.user)
+    email = String(perfil?.email || '').trim()
+    if (email) req.user = { ...req.user, email }
+  }
   if (!id && !email) return null
   await asegurarEsquemaColaboradores()
   const row = await withPgClientInteractive(async (client) => {
