@@ -147,6 +147,8 @@ function snapshotResponse(auth, snapshot) {
     drafts: snapshot.drafts,
     sync_queue: snapshot.sync_queue,
     serverTime: snapshot.serverTime,
+    // full=0 → slim (solo pacientes/citas); full=1 → historias/odontogramas sin drafts pesados.
+    slim: snapshot.slim === true,
   }
 }
 
@@ -180,18 +182,25 @@ router.get('/pull', async (req, res) => {
     if (denyWithoutClinicalAccess(auth, res)) return
 
     const aliases = auth.aliases
-    const includeBlobs = booleanQuery(req.query?.includeBlobs ?? req.query?.full, true)
+    // Default false: login usa ?full=0 (metadata). Evita OOM si alguien llama /pull sin query.
+    const includeBlobs = booleanQuery(req.query?.includeBlobs ?? req.query?.full, false)
+    const slim = !includeBlobs
     const snapshot = capTrialSnapshot(
       auth.session.accessTier,
-      await pullClinicSnapshot(auth.canonical, aliases, { includeBlobs }),
+      await pullClinicSnapshot(auth.canonical, aliases, { includeBlobs, slim }),
     )
     return sendJson(res, 200, snapshotResponse(auth, snapshot))
   } catch (error) {
     console.error('[Sync] Error en GET /api/sync/pull:', error)
-    return sendJson(res, 500, {
+    const message = error instanceof Error ? error.message : String(error)
+    // OOM / heap → 503 para que el cliente reintente slim; no fingir 500 genérico.
+    const oom = /heap|out of memory|ENOMEM/i.test(message)
+    return sendJson(res, oom ? 503 : 500, {
       success: false,
       ok: false,
-      error: 'No se pudo descargar el snapshot completo de la clínica.',
+      error: oom
+        ? 'El servidor agotó memoria al preparar el sync. Reintente con full=0.'
+        : 'No se pudo descargar el snapshot completo de la clínica.',
     })
   }
 })

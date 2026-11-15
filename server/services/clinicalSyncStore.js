@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
 import { config } from '../config.js'
 import {
   base64ToBuffer,
@@ -462,6 +463,17 @@ async function hydrateAttachment(clinicIds, record, includeBlobs) {
 
 let writeChain = Promise.resolve()
 
+/** Caché en memoria del JSON parseado (evita re-leer ~83MB en cada /pull). */
+let storeCache = {
+  mtimeMs: 0,
+  size: 0,
+  store: null,
+}
+
+function invalidateStoreCache() {
+  storeCache = { mtimeMs: 0, size: 0, store: null }
+}
+
 function enqueueWrite(fn) {
   const next = writeChain.then(fn, fn)
   writeChain = next.then(
@@ -471,18 +483,57 @@ function enqueueWrite(fn) {
   return next
 }
 
+/**
+ * Disco es la fuente de verdad del sync clínico (writeDurableJsonReplace).
+ * Evita merge con Postgres en cada pull (doble memoria / aliases stale).
+ */
 async function loadStore() {
-  const parsed = await readDurableJsonWithMerge(STORE_FILE, emptyStore(), STORE_KEY, mergeClinicalStores)
-  return mergeClinicalStores(emptyStore(), parsed)
+  try {
+    const st = await stat(STORE_FILE)
+    if (
+      storeCache.store &&
+      storeCache.mtimeMs === st.mtimeMs &&
+      storeCache.size === st.size
+    ) {
+      return storeCache.store
+    }
+    const raw = await readFile(STORE_FILE, 'utf8')
+    const parsed = JSON.parse(raw)
+    const store = mergeClinicalStores(
+      emptyStore(),
+      parsed && typeof parsed === 'object' ? parsed : emptyStore(),
+    )
+    storeCache = { mtimeMs: st.mtimeMs, size: st.size, store }
+    return store
+  } catch {
+    invalidateStoreCache()
+    const parsed = await readDurableJsonWithMerge(
+      STORE_FILE,
+      emptyStore(),
+      STORE_KEY,
+      mergeClinicalStores,
+    )
+    const store = mergeClinicalStores(emptyStore(), parsed)
+    storeCache = { mtimeMs: 0, size: 0, store }
+    return store
+  }
 }
 
 async function saveStore(store) {
   // Antes de disco/Postgres: purgar Base64/DataURL >50k, claves binarias y clinicalDraft pesados.
   // Reemplazo completo en app_json_store: un merge LWW con un documento stale
   // reintroducía aliases (UUID/email) y volvía a inflar clinical-sync.json.
+  invalidateStoreCache()
   const base = store && typeof store === 'object' ? store : emptyStore()
   const sanitized = omitHeavyClinicalDraftForms(stripHeavyBinaryFields(base))
   await writeDurableJsonReplace(STORE_FILE, sanitized, STORE_KEY)
+  // Re-cache tras escritura para el próximo pull (mtime fresco).
+  try {
+    const st = await stat(STORE_FILE)
+    storeCache = { mtimeMs: st.mtimeMs, size: st.size, store: sanitized }
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -566,23 +617,34 @@ export async function pullClinicalRecords(clinicId, _since, aliasIds = []) {
   }
 }
 
+/**
+ * Snapshot del cubo canónico + aliases.
+ *
+ * options.slim / includeBlobs===false → solo pacientes+citas (~0.06MB).
+ * Evita OOM/502 al serializar clinicalRecords+drafts (~45MB+) en t3.micro.
+ * El cliente (login) ya hace pull full=0 y luego full=1 en segundo plano.
+ */
 export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) {
-  const includeBlobs = options.includeBlobs !== false
+  const includeBlobs = options.includeBlobs === true
+  const slim =
+    options.slim === true ||
+    (options.slim !== false && options.includeBlobs === false)
   const ids = scopeIds(clinicId, aliasIds)
   const serverTime = new Date().toISOString()
-  if (ids.length === 0) {
-    return {
-      patients: [],
-      appointments: [],
-      clinicalRecords: [],
-      odontograms: [],
-      diagnosticAids: [],
-      attachments: [],
-      drafts: [],
-      sync_queue: [],
-      serverTime,
-    }
+  const empty = {
+    patients: [],
+    appointments: [],
+    clinicalRecords: [],
+    odontograms: [],
+    diagnosticAids: [],
+    attachments: [],
+    drafts: [],
+    sync_queue: [],
+    serverTime,
+    slim: Boolean(slim),
   }
+  if (ids.length === 0) return empty
+
   const store = await loadStore()
   const clinic = mergeClinicBuckets(store, ids)
   try {
@@ -594,6 +656,20 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
       error instanceof Error ? error.message : error,
     )
   }
+
+  const patients = Object.values(clinic.patients).filter(Boolean)
+  const appointments = Object.values(clinic.appointments).filter(Boolean)
+
+  // Metadata-only: restaura listados Activos/Valorados/Terminados sin matar el heap.
+  if (slim) {
+    return {
+      ...empty,
+      patients,
+      appointments,
+      slim: true,
+    }
+  }
+
   const attachments = []
   for (const record of Object.values(clinic.attachments).filter(Boolean)) {
     attachments.push(await hydrateAttachment(ids, record, includeBlobs))
@@ -602,18 +678,20 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
   for (const record of Object.values(clinic.sync_queue).filter(Boolean)) {
     syncQueue.push(await hydrateAttachment(ids, record, includeBlobs))
   }
+
+  // Drafts (~31MB) no van por HTTP: el cliente conserva Dexie local (merge no borra).
+  // full=1 prioriza historias/odontogramas (~13MB) sin reventar PM2.
   return {
-    patients: Object.values(clinic.patients).filter(Boolean),
-    appointments: Object.values(clinic.appointments).filter(Boolean),
+    patients,
+    appointments,
     clinicalRecords: Object.values(clinic.clinicalRecords).filter(Boolean),
     odontograms: Object.values(clinic.odontograms).filter(Boolean),
     diagnosticAids: Object.values(clinic.diagnosticAids).filter(Boolean),
     attachments,
-    drafts: Object.values(clinic.drafts)
-      .filter(Boolean)
-      .map((row) => omitHeavyClinicalDraftForms(stripHeavyBinaryFields(row))),
+    drafts: [],
     sync_queue: syncQueue,
     serverTime,
+    slim: false,
   }
 }
 
