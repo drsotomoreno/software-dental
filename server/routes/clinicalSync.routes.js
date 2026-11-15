@@ -149,7 +149,8 @@ function snapshotResponse(auth, snapshot) {
     drafts: snapshot.drafts,
     sync_queue: snapshot.sync_queue,
     serverTime: snapshot.serverTime,
-    // full=0 → slim (solo pacientes/citas); full=1 → historias/odontogramas sin drafts pesados.
+    // full=0 → slim (pacientes, citas y metadatos de exámenes, sin binarios);
+    // full=1 → historias/odontogramas sin drafts pesados.
     slim: snapshot.slim === true,
   }
 }

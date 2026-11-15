@@ -23,9 +23,12 @@ import {
   frontendRedirectAfterOAuth,
   getGoogleOAuthConfigStatus,
   readGoogleDriveStatusForUser,
+  resolveManagedClinicId,
 } from '../services/googleDriveOAuth.service.js'
+import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
+import { upsertDiagnosticAidMetadata } from '../services/clinicalSyncStore.js'
 
-// Esta ruta NUNCA importa clinicalSyncStore ni lee/escribe clinical-sync.json.
+// El binario no entra a clinical-sync. Tras Drive solo se hace upsert de metadatos livianos.
 
 const router = Router()
 
@@ -417,6 +420,9 @@ router.post('/upload', (req, res, next) => {
       body.patientSyncId || body.patientId || body.patient_sync_id || 'sin-paciente',
     ).trim()
     const aidId = String(body.aidId || body.id || '').trim()
+    const patientId = String(body.patientId || '').trim()
+    const receivedAt = String(body.receivedAt || '').trim()
+    const fileHash = String(body.fileHash || body.sha256 || '').trim()
     const existingFileId = String(body.driveFileId || '').trim() || undefined
 
     const resolved = await findClinicDriveCredentials(req, user)
@@ -482,6 +488,7 @@ router.post('/upload', (req, res, next) => {
     }
 
     // Stream desde disco: createReadStream → drive.files.create (sin Buffer del archivo).
+    // El JSON de clinical-sync solo recibe metadatos después, nunca este binario.
     const uploaded = await uploadClinicAttachmentToDrive({
       clinicId,
       clinicIdCandidates: resolved.candidates,
@@ -498,14 +505,56 @@ router.post('/upload', (req, res, next) => {
       },
     })
 
+    let metadataPersisted = false
+    try {
+      const scope = clinicSyncAliasIds(user)
+      const canonical =
+        resolveManagedClinicId(user, String(body.clinicId || clinicId || '').trim()) ||
+        scope.canonical
+      if (canonical && aidId) {
+        await upsertDiagnosticAidMetadata(canonical, scope.aliases, {
+          id: aidId,
+          aidId,
+          patientId: patientId || patientSyncId,
+          patientSyncId,
+          encounterId: String(body.encounterId || '').trim(),
+          fileName,
+          fileType: String(body.fileType || '').trim(),
+          mimeType,
+          receivedAt: receivedAt || new Date().toISOString(),
+          createdAt: String(body.createdAt || '').trim() || new Date().toISOString(),
+          comments: String(body.comments || '').trim(),
+          fileHash,
+          driveFileId: uploaded.driveFileId,
+          webViewLink: uploaded.webViewLink,
+          byteLength: uploaded.byteLength,
+          storageBackend: 'google_drive',
+          driveUploadStatus: 'uploaded',
+          updatedAt: new Date().toISOString(),
+        })
+        metadataPersisted = true
+      }
+    } catch (metaError) {
+      console.error(
+        '[google-drive] El archivo quedó en Drive; el metadato de clinical-sync no se guardó:',
+        metaError instanceof Error ? metaError.message : metaError,
+      )
+    }
+
     return sendJson(res, 200, {
       success: true,
       ok: true,
       clinicId,
+      aidId: aidId || null,
+      fileName,
+      mimeType,
+      receivedAt: receivedAt || null,
       driveFileId: uploaded.driveFileId,
       webViewLink: uploaded.webViewLink,
       byteLength: uploaded.byteLength,
       storageBackend: uploaded.storageBackend,
+      driveUploadStatus: 'uploaded',
+      metadataPersisted,
     })
   } catch (error) {
     console.error('[google-drive] POST /upload:', error)

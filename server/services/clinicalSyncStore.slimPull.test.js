@@ -19,12 +19,15 @@ test('pullClinicSnapshot: full=0/slim no serializa clinicalRecords/drafts', asyn
   assert.match(src, /mtimeMs/)
 })
 
-test('build-clinical-sync-meta.cjs genera índice patients+appointments', async () => {
+test('build-clinical-sync-meta.cjs genera índice patients+appointments+diagnosticAids', async () => {
   const src = await readFile(join(here, '../../scripts/build-clinical-sync-meta.cjs'), 'utf8')
   assert.match(src, /clinical-sync-meta\.json/)
   assert.match(src, /patients/)
   assert.match(src, /appointments/)
+  assert.match(src, /diagnosticAids/)
+  assert.match(src, /isHeavyBinaryString/)
   assert.doesNotMatch(src, /writeFileSync\(syncPath/)
+  assert.doesNotMatch(src, /dataBase64/)
 })
 
 test('GET /api/sync/pull default full=0 (no blobs) y marca slim', async () => {
@@ -48,6 +51,7 @@ test('slim sin meta: SyncMetaMissingError, sin fallback a clinical-sync.json en 
   assert.match(pullFn, /if \(slim\) \{/)
   assert.match(pullFn, /const meta = await ensureMetaStore\(\)/)
   assert.match(pullFn, /throw new SyncMetaMissingError/)
+  assert.match(pullFn, /diagnosticAids: listedDiagnosticAids\(clinic\)/)
   const slimStart = pullFn.indexOf('if (slim) {')
   const afterSlim = pullFn.indexOf('const store = await loadStore()', slimStart)
   assert.ok(afterSlim > slimStart)

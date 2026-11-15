@@ -23,10 +23,12 @@ import {
 import { uploadDiagnosticAidToGoogleDrive } from "@/services/diagnosticAidDriveUpload";
 
 import { ensureLocalDiagnosticAidBlob } from "@/services/diagnosticAidRemoteStore";
+import { getDiagnosticAidBlobUrl } from "@/services/diagnosticAidBlobStore";
 
 import {
   deleteDiagnosticAid,
   listDiagnosticAidsForPatient,
+  maintainDiagnosticAidRecords,
   openDiagnosticFile,
   pickDiagnosticApplicationProgram,
   registerDiagnosticAid,
@@ -46,7 +48,10 @@ import {
   type DiagnosticAid,
   type DiagnosticAidFileType,
 } from "@/types/diagnosticAid";
-import { classifyDiagnosticAidForWeb } from "@/utils/diagnosticAidWebClassification";
+import {
+  classifyDiagnosticAidForWeb,
+  getFileExtension,
+} from "@/utils/diagnosticAidWebClassification";
 
 import { getDesktopBridge, isDesktopApp } from "@/types/desktopBridge";
 
@@ -506,14 +511,18 @@ export function DiagnosticAidsSection({
   const [preview, setPreview] = useState<{
     fileName: string;
 
-    url: string;
+    url: string | null;
 
-    kind: "image" | "pdf" | "mesh3d";
+    kind: "image" | "pdf" | "mesh3d" | "error";
 
     driveUrl?: string | null;
 
     aidId?: string;
+
+    errorMessage?: string;
   } | null>(null);
+
+  const [previewRetrying, setPreviewRetrying] = useState(false);
 
   const [showOpenerSettings, setShowOpenerSettings] = useState(false);
 
@@ -535,6 +544,9 @@ export function DiagnosticAidsSection({
   /** Ocultación optimista: la tarjeta sale de la caja al confirmar, sin esperar liveQuery/sync. */
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
 
+  /** Alta recién devuelta por el registro, visible aunque el liveQuery aún no reemita. */
+  const [optimisticItems, setOptimisticItems] = useState<DiagnosticAid[]>([]);
+
   const items = useLiveQuery(
     () => listDiagnosticAidsForPatient(patientId),
 
@@ -543,10 +555,86 @@ export function DiagnosticAidsSection({
     [] as DiagnosticAid[],
   );
 
+  const mergedItems = useMemo(() => {
+    const byId = new Map<string, DiagnosticAid>();
+    for (const item of items) byId.set(String(item.id), item);
+    for (const item of optimisticItems) {
+      const id = String(item.id);
+      const live = byId.get(id);
+      if (!live) {
+        byId.set(id, item);
+        continue;
+      }
+      byId.set(id, {
+        ...live,
+        driveFileId: item.driveFileId || live.driveFileId,
+        webViewLink: item.webViewLink || live.webViewLink,
+        storageBackend: item.driveFileId ? item.storageBackend : live.storageBackend,
+        driveUploadStatus: item.driveUploadStatus || live.driveUploadStatus,
+        driveUploadError: item.driveUploadError ?? live.driveUploadError,
+        blobId: live.blobId ?? item.blobId,
+        comments: live.comments,
+      });
+    }
+    return [...byId.values()].sort((a, b) => {
+      const dateA = new Date(a.receivedAt ?? a.createdAt).getTime();
+      const dateB = new Date(b.receivedAt ?? b.createdAt).getTime();
+      return dateB - dateA;
+    });
+  }, [items, optimisticItems]);
+
   const visibleItems = useMemo(
-    () => items.filter((item) => !hiddenIds.has(String(item.id))),
-    [items, hiddenIds],
+    () => mergedItems.filter((item) => !hiddenIds.has(String(item.id))),
+    [mergedItems, hiddenIds],
   );
+
+  const rememberSaved = useCallback((saved: DiagnosticAid) => {
+    setOptimisticItems((prev) => {
+      const next = prev.filter((row) => String(row.id) !== String(saved.id));
+      next.push(saved);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!patientId) return;
+    void maintainDiagnosticAidRecords(patientId);
+  }, [patientId]);
+
+  useEffect(() => {
+    if (!patientId) return;
+    let cancelled = false;
+    void (async () => {
+      const local = await listDiagnosticAidsForPatient(patientId);
+      if (cancelled || local.length > 0) return;
+      const { pullSlimClinicMetadata } = await import(
+        "@/services/clinicalSyncService"
+      );
+      if (cancelled) return;
+      await pullSlimClinicMetadata();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  useEffect(() => {
+    if (optimisticItems.length === 0) return;
+    const liveById = new Map(items.map((row) => [String(row.id), row]));
+    const pending = optimisticItems.filter((row) => {
+      const live = liveById.get(String(row.id));
+      if (!live) return true;
+      if (row.driveFileId && live.driveFileId !== row.driveFileId) return true;
+      if (
+        row.driveUploadStatus === "uploaded" &&
+        live.driveUploadStatus !== "uploaded"
+      ) {
+        return true;
+      }
+      return false;
+    });
+    if (pending.length !== optimisticItems.length) setOptimisticItems(pending);
+  }, [items, optimisticItems]);
 
   useEffect(() => {
     for (const item of visibleItems) {
@@ -589,6 +677,8 @@ export function DiagnosticAidsSection({
 
         user,
       });
+
+      rememberSaved(saved);
 
       if (saved.driveFileId && saved.driveUploadStatus === "uploaded") {
         setBanner({
@@ -638,6 +728,8 @@ export function DiagnosticAidsSection({
 
           user,
         });
+
+        rememberSaved(saved);
 
         if (saved.driveFileId && saved.driveUploadStatus === "uploaded") {
           setBanner({
@@ -722,20 +814,23 @@ export function DiagnosticAidsSection({
           setWebMenuItem(null);
         } else if (
           !result.ok &&
-          action === "view_in_app_3d" &&
-          (item.webViewLink || item.driveFileId)
+          (action === "view_in_app_3d" ||
+            action === "preview_media" ||
+            action === "open_dicom_viewer")
         ) {
-          // Fallback: si el proxy Drive falla, abrir el archivo en Drive.
-          const drive =
-            item.webViewLink ||
-            `https://drive.google.com/file/d/${item.driveFileId}/view`;
-          window.open(drive, "_blank", "noopener,noreferrer");
-          setBanner({
-            tone: "info",
-            message: `${result.message} Se abrió el enlace de Google Drive.`,
+          setPreview({
+            fileName: item.fileName,
+            url: null,
+            kind: "error",
+            driveUrl:
+              item.webViewLink ||
+              (item.driveFileId
+                ? `https://drive.google.com/file/d/${item.driveFileId}/view`
+                : null),
+            aidId: item.id,
+            errorMessage: result.message,
           });
           setWebMenuItem(null);
-          return;
         }
 
         setBanner({
@@ -783,6 +878,7 @@ export function DiagnosticAidsSection({
       });
       try {
         const saved = await uploadDiagnosticAidToGoogleDrive(item);
+        rememberSaved(saved);
         if (saved.driveFileId && saved.driveUploadStatus === "uploaded") {
           setBanner({
             tone: "success",
@@ -893,6 +989,84 @@ export function DiagnosticAidsSection({
 
     setPreview(null);
   };
+
+  const retryPreviewDownload = useCallback(async () => {
+    if (!preview?.aidId) return;
+    const item = mergedItems.find((row) => String(row.id) === String(preview.aidId));
+    if (!item) return;
+    setPreviewRetrying(true);
+    try {
+      const local = await ensureLocalDiagnosticAidBlob(item);
+      if (!local) {
+        setPreview((current) =>
+          current
+            ? {
+                ...current,
+                kind: "error",
+                url: null,
+                errorMessage:
+                  "No se pudo descargar el archivo desde el proxy de Google Drive. Compruebe la conexión de la clínica e intente de nuevo.",
+              }
+            : current,
+        );
+        return;
+      }
+      const category = classifyDiagnosticAidForWeb(item.fileName);
+      if (category === "dicom") {
+        const result = await executeDiagnosticAidWebAction(
+          item,
+          "open_dicom_viewer",
+          user,
+        );
+        setBanner({
+          tone: result.ok ? "success" : "error",
+          message: result.message,
+        });
+        if (result.ok) {
+          setPreview((current) => {
+            if (current?.url) URL.revokeObjectURL(current.url);
+            return null;
+          });
+        } else {
+          setPreview((current) =>
+            current
+              ? { ...current, kind: "error", url: null, errorMessage: result.message }
+              : current,
+          );
+        }
+        return;
+      }
+      const url = await getDiagnosticAidBlobUrl(item.id);
+      if (!url) {
+        setPreview((current) =>
+          current
+            ? {
+                ...current,
+                kind: "error",
+                url: null,
+                errorMessage: "No se pudo preparar la vista previa local.",
+              }
+            : current,
+        );
+        return;
+      }
+      const extension = getFileExtension(item.fileName);
+      const kind =
+        category === "mesh3d" ? "mesh3d" : extension === "pdf" ? "pdf" : "image";
+      setPreview((current) => {
+        if (current?.url && current.url !== url) URL.revokeObjectURL(current.url);
+        return {
+          fileName: item.fileName,
+          url,
+          kind,
+          driveUrl: current?.driveUrl ?? null,
+          aidId: item.id,
+        };
+      });
+    } finally {
+      setPreviewRetrying(false);
+    }
+  }, [preview?.aidId, mergedItems, user]);
 
   return (
     <section id="clinical-section-examenes" className="card space-y-4">
@@ -1063,10 +1237,26 @@ export function DiagnosticAidsSection({
 
         driveUrl={preview?.driveUrl}
 
+        errorMessage={preview?.errorMessage}
+
+        retrying={previewRetrying}
+
+        onRetry={
+          preview?.kind === "error" ? () => void retryPreviewDownload() : undefined
+        }
+
+        onOpenDrive={
+          preview?.kind === "error" && preview.driveUrl
+            ? () => {
+                window.open(preview.driveUrl as string, "_blank", "noopener,noreferrer");
+              }
+            : undefined
+        }
+
         onDownload={
           preview?.kind === "mesh3d" && preview.aidId
             ? () => {
-                const item = items.find((row) => row.id === preview.aidId);
+                const item = mergedItems.find((row) => row.id === preview.aidId);
                 if (!item) return;
                 void executeDiagnosticAidWebAction(item, "download_mesh", user);
               }

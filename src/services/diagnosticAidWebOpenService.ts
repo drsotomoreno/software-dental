@@ -165,7 +165,8 @@ export async function executeDiagnosticAidWebAction(
       case 'view_in_app_3d': {
         const local = await ensureLocalDiagnosticAidBlob(entry)
         if (!local) {
-          const message = DIAGNOSTIC_AID_UNAVAILABLE_MESSAGE
+          const message =
+            'No se pudo descargar el escaneo desde el proxy de Google Drive. El visor 3D no abre enlaces de Drive.'
           await auditWebOpen(entry, action, false, message, user)
           return { ok: false, message }
         }
@@ -216,31 +217,34 @@ export async function executeDiagnosticAidWebAction(
       }
 
       case 'open_dicom_viewer': {
-        openExternalTab(DICOM_VIEWER_ONLINE_URL)
+        const local = await ensureLocalDiagnosticAidBlob(entry)
+        if (!local) {
+          const message =
+            'No se pudo descargar el DICOM desde el proxy de Google Drive. El visor externo no se abrió.'
+          await auditWebOpen(entry, action, false, message, user)
+          return { ok: false, message }
+        }
         const downloaded = await downloadStoredBlob(entry)
+        if (!downloaded) {
+          const message =
+            'El DICOM está en caché local, pero no se pudo guardar la descarga. El visor externo no se abrió.'
+          await auditWebOpen(entry, action, false, message, user)
+          return { ok: false, message }
+        }
+        openExternalTab(DICOM_VIEWER_ONLINE_URL)
         await auditWebOpen(entry, action, true, `${downloadNameFor(entry)} — dicomviewer.net`, user)
         return {
           ok: true,
-          message: downloaded
-            ? 'Visor DICOM abierto. El archivo se descargó con su extensión para importarlo en el visor.'
-            : 'Visor DICOM online abierto en una nueva pestaña.',
+          message:
+            'Visor DICOM abierto. El archivo se descargó con su extensión para importarlo en el visor.',
         }
       }
 
       case 'preview_media': {
         const local = await ensureLocalDiagnosticAidBlob(entry)
         if (!local) {
-          const drive = driveLinkOf(entry)
-          if (drive) {
-            openExternalTab(drive)
-            await auditWebOpen(entry, action, true, `Drive preview: ${entry.fileName}`, user)
-            return {
-              ok: true,
-              message: 'Vista previa abierta desde Google Drive.',
-              openDriveUrl: drive,
-            }
-          }
-          const message = DIAGNOSTIC_AID_UNAVAILABLE_MESSAGE
+          const message =
+            'No se pudo descargar la imagen o el PDF desde el proxy de Google Drive.'
           await auditWebOpen(entry, action, false, message, user)
           return { ok: false, message }
         }

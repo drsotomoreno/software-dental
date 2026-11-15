@@ -13,6 +13,7 @@ import type { UserProfile } from '@/types/user'
 import type { DiagnosticAid, DiagnosticAidFileType } from '@/types/diagnosticAid'
 import { getDesktopBridge, isDesktopApp } from '@/types/desktopBridge'
 import { generateId } from '@/utils/crypto'
+import { getPatientByRouteId, toDexiePrimaryKey } from '@/utils/patientId'
 import {
   hasLocalDiskPath,
   inferDiagnosticAidFileTypeFromName,
@@ -117,19 +118,38 @@ async function readFileInChunks(file: File): Promise<ArrayBuffer> {
   return merged.buffer
 }
 
-async function patientIdLookupKeys(patientId: string): Promise<string[]> {
-  const keys = new Set<string>()
+function rememberLookupKey(keys: Array<string | number>, key: string | number): void {
+  if (key == null || key === '') return
+  if (!keys.some((existing) => existing === key)) keys.push(key)
+}
+
+/**
+ * Lectura pura para useLiveQuery. Sin import() dinámico ni escrituras:
+ * Dexie aborta un liveQuery que hace update/delete (ReadOnly) y la lista se queda en [].
+ * IndexedDB no trata iguales "123" y 123.
+ */
+async function patientIdLookupKeys(patientId: string): Promise<Array<string | number>> {
+  const keys: Array<string | number> = []
   const raw = String(patientId || '').trim()
-  if (raw) keys.add(raw)
-  try {
-    const { getPatientByRouteId } = await import('@/utils/patientId')
-    const patient = await getPatientByRouteId(raw)
-    if (patient?.id != null) keys.add(String(patient.id))
-    if (patient?.syncId) keys.add(String(patient.syncId))
-  } catch {
-    // ignore
+  rememberLookupKey(keys, raw)
+  const numeric = toDexiePrimaryKey(raw)
+  if (typeof numeric === 'number') rememberLookupKey(keys, numeric)
+
+  const patient = await getPatientByRouteId(raw)
+  if (patient?.id != null) {
+    rememberLookupKey(keys, String(patient.id))
+    if (typeof patient.id === 'number') rememberLookupKey(keys, patient.id)
   }
-  return [...keys]
+  if (patient?.syncId) rememberLookupKey(keys, String(patient.syncId))
+  return keys
+}
+
+function sortDiagnosticAids(rows: DiagnosticAid[]): DiagnosticAid[] {
+  return [...rows].sort((a, b) => {
+    const dateA = new Date(a.receivedAt ?? a.createdAt).getTime()
+    const dateB = new Date(b.receivedAt ?? b.createdAt).getTime()
+    return dateB - dateA
+  })
 }
 
 export async function listDiagnosticAids(
@@ -146,52 +166,73 @@ export async function listDiagnosticAids(
     for (const row of rows) byId.set(String(row.id), row)
   }
 
-  // Huérfanos: patientId desfasado tras rehidratación, pero patientSyncId coincide.
-  try {
-    const { getPatientByRouteId } = await import('@/utils/patientId')
-    const patient = await getPatientByRouteId(String(patientId || '').trim())
-    const syncId = String(patient?.syncId || '').trim()
-    const localId = patient?.id != null ? String(patient.id) : ''
-    if (syncId) {
-      const orphans = await db.diagnosticAids
-        .filter((row) => String(row.patientSyncId || '') === syncId)
-        .toArray()
-      for (const row of orphans) {
-        const rid = String(row.id)
-        if (byId.has(rid)) continue
-        if (encounterId && String(row.encounterId || '') !== String(encounterId)) continue
-        if (localId && String(row.patientId) !== localId) {
-          void db.diagnosticAids.update(row.id, { patientId: localId })
-          byId.set(rid, { ...row, patientId: localId })
-        } else {
-          byId.set(rid, row)
-        }
-      }
+  // Huérfanos: misma lectura, sin reescribir patientId (eso lo hace el mantenimiento).
+  const patient = await getPatientByRouteId(String(patientId || '').trim())
+  const syncId = String(patient?.syncId || '').trim()
+  if (syncId) {
+    const orphans = await db.diagnosticAids
+      .filter((row) => String(row.patientSyncId || '') === syncId)
+      .toArray()
+    for (const row of orphans) {
+      const rid = String(row.id)
+      if (byId.has(rid)) continue
+      if (encounterId && String(row.encounterId || '') !== String(encounterId)) continue
+      byId.set(rid, row)
     }
-  } catch {
-    // ignore
   }
 
-  // Tumbas locales (Quitar): excluir de la caja y limpiar filas zombies reinsertadas por sync.
+  let tombIds = new Set<string>()
+  try {
+    const tombs = await db.deletedDiagnosticAids.toArray()
+    tombIds = new Set(
+      tombs.map((tomb) => String(tomb.id || '').trim()).filter(Boolean),
+    )
+  } catch {
+    tombIds = new Set()
+  }
+
+  return sortDiagnosticAids(
+    [...byId.values()].filter((row) => !tombIds.has(String(row.id))),
+  )
+}
+
+/**
+ * Reparación fuera del liveQuery: reetiqueta huérfanos y quita filas cuya tumba
+ * ya existe. No llamarla desde listDiagnosticAids.
+ */
+export async function maintainDiagnosticAidRecords(patientId: string): Promise<void> {
+  const patient = await getPatientByRouteId(String(patientId || '').trim())
+  const syncId = String(patient?.syncId || '').trim()
+  const localId = patient?.id != null ? String(patient.id) : ''
+  if (syncId && localId) {
+    const orphans = await db.diagnosticAids
+      .filter((row) => String(row.patientSyncId || '') === syncId)
+      .toArray()
+    for (const row of orphans) {
+      if (String(row.patientId) === localId) continue
+      await db.diagnosticAids.update(row.id, { patientId: localId })
+    }
+  }
+
   try {
     const tombs = await db.deletedDiagnosticAids.toArray()
     for (const tomb of tombs) {
       const tid = String(tomb.id || '').trim()
       if (!tid) continue
-      if (byId.has(tid)) {
-        byId.delete(tid)
-        void db.diagnosticAids.delete(tid).catch(() => undefined)
-      }
+      const row = await db.diagnosticAids.get(tid)
+      if (row) await db.diagnosticAids.delete(tid)
     }
   } catch {
-    // sin tabla de tumbas
+    // Bases anteriores a la tabla de tumbas.
   }
+}
 
-  return [...byId.values()].sort((a, b) => {
-    const dateA = new Date(a.receivedAt ?? a.createdAt).getTime()
-    const dateB = new Date(b.receivedAt ?? b.createdAt).getTime()
-    return dateB - dateA
-  })
+async function forgetDiagnosticAidTombstone(id: string): Promise<void> {
+  try {
+    await db.deletedDiagnosticAids.delete(id)
+  } catch {
+    // Sin tabla de tumbas.
+  }
 }
 
 export async function listDiagnosticAidsForPatient(patientId: string): Promise<DiagnosticAid[]> {
@@ -235,6 +276,7 @@ export async function registerDiagnosticAid(
     driveUploadStatus: blobId ? 'pending' : 'local_only',
   }
 
+  await forgetDiagnosticAidTombstone(entry.id)
   await db.diagnosticAids.add(entry)
   await enqueueDiagnosticAidForSync(entry)
 
@@ -306,6 +348,7 @@ export async function registerDiagnosticAidFromBrowserFile(
     driveUploadStatus: blobId ? 'pending' : 'local_only',
   }
 
+  await forgetDiagnosticAidTombstone(entry.id)
   await db.diagnosticAids.add(entry)
   await enqueueDiagnosticAidForSync(entry)
 

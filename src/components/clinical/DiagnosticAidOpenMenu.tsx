@@ -109,8 +109,12 @@ interface DiagnosticAidPreviewModalProps {
   open: boolean
   fileName: string
   previewUrl: string | null
-  previewKind: 'image' | 'pdf' | 'mesh3d'
+  previewKind: 'image' | 'pdf' | 'mesh3d' | 'error'
   driveUrl?: string | null
+  errorMessage?: string | null
+  retrying?: boolean
+  onRetry?: () => void
+  onOpenDrive?: () => void
   onClose: () => void
   onDownload?: () => void
 }
@@ -121,10 +125,15 @@ export function DiagnosticAidPreviewModal({
   previewUrl,
   previewKind,
   driveUrl,
+  errorMessage,
+  retrying = false,
+  onRetry,
+  onOpenDrive,
   onClose,
   onDownload,
 }: DiagnosticAidPreviewModalProps) {
-  if (!open || !previewUrl) return null
+  const showError = previewKind === 'error' || !previewUrl
+  if (!open || (showError && !errorMessage)) return null
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/70 p-4">
@@ -132,7 +141,7 @@ export function DiagnosticAidPreviewModal({
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <p className="truncate text-sm font-semibold text-slate-900">{fileName}</p>
           <div className="flex shrink-0 items-center gap-2">
-            {onDownload && (
+            {onDownload && previewUrl && previewKind === 'mesh3d' && (
               <button
                 type="button"
                 onClick={onDownload}
@@ -141,7 +150,7 @@ export function DiagnosticAidPreviewModal({
                 Descargar escaneo
               </button>
             )}
-            {driveUrl && (
+            {driveUrl && previewUrl && (
               <a
                 href={driveUrl}
                 target="_blank"
@@ -162,17 +171,43 @@ export function DiagnosticAidPreviewModal({
           </div>
         </div>
         <div className="flex-1 overflow-auto bg-slate-100 p-4">
-          {previewKind === 'mesh3d' ? (
-            <DiagnosticAid3DViewer fileName={fileName} objectUrl={previewUrl} />
+          {showError ? (
+            <div className="mx-auto flex max-w-lg flex-col items-start gap-4 rounded-xl border border-amber-200 bg-white px-5 py-6">
+              <p className="text-sm font-semibold text-slate-900">No se pudo abrir el archivo</p>
+              <p className="text-sm text-slate-600">{errorMessage}</p>
+              <div className="flex flex-wrap gap-2">
+                {onRetry && (
+                  <button
+                    type="button"
+                    disabled={retrying}
+                    onClick={onRetry}
+                    className="rounded-lg bg-dental-600 px-3 py-2 text-xs font-semibold text-white hover:bg-dental-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {retrying ? 'Reintentando…' : 'Reintentar descarga'}
+                  </button>
+                )}
+                {onOpenDrive && driveUrl && (
+                  <button
+                    type="button"
+                    onClick={onOpenDrive}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Abrir en Google Drive
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : previewKind === 'mesh3d' ? (
+            <DiagnosticAid3DViewer fileName={fileName} objectUrl={previewUrl as string} />
           ) : previewKind === 'pdf' ? (
             <iframe
               title={fileName}
-              src={previewUrl}
+              src={previewUrl as string}
               className="h-[75vh] w-full rounded-lg border border-slate-200 bg-white"
             />
           ) : (
             <img
-              src={previewUrl}
+              src={previewUrl as string}
               alt={fileName}
               className="mx-auto max-h-[75vh] max-w-full rounded-lg object-contain shadow"
             />

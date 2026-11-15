@@ -147,9 +147,16 @@ export async function uploadDiagnosticAidToGoogleDrive(
         entry.fileName || 'archivo.bin',
       )
       form.append('aidId', aidId)
+      form.append('patientId', String(entry.patientId || ''))
+      form.append('patientSyncId', entry.patientSyncId || entry.patientId || 'sin-paciente')
       form.append('fileName', entry.fileName)
       form.append('mimeType', mimeType)
-      form.append('patientSyncId', entry.patientSyncId || entry.patientId || 'sin-paciente')
+      form.append('receivedAt', entry.receivedAt || entry.createdAt || '')
+      form.append('fileHash', entry.fileHash || '')
+      form.append('fileType', entry.fileType || '')
+      form.append('encounterId', entry.encounterId || '')
+      form.append('createdAt', entry.createdAt || '')
+      if (entry.comments) form.append('comments', entry.comments)
       if (clinicId) form.append('clinicId', clinicId)
       if (entry.driveFileId) form.append('driveFileId', entry.driveFileId)
 
@@ -235,6 +242,7 @@ export async function uploadDiagnosticAidToGoogleDrive(
     }
 
     // put + suppress: evita dirty/purge a mitad de escritura y asegura campos Drive en Dexie.
+    // No devolver el objeto en memoria si IndexedDB no confirmó la fila.
     await withClinicalSyncSuppressed(async () => {
       await db.diagnosticAids.put(patched)
     })
@@ -244,7 +252,10 @@ export async function uploadDiagnosticAidToGoogleDrive(
       await withClinicalSyncSuppressed(async () => {
         await db.diagnosticAids.put(patched)
       })
-      updated = (await db.diagnosticAids.get(aidId)) ?? patched
+      updated = await db.diagnosticAids.get(aidId)
+    }
+    if (!updated?.driveFileId || updated.driveUploadStatus !== 'uploaded') {
+      throw new Error('No se pudo confirmar el guardado local del examen en este equipo.')
     }
 
     await enqueueDiagnosticAidForSync(updated, {

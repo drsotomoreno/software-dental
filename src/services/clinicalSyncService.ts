@@ -501,6 +501,15 @@ export async function applyFullClinicPull(
   return extraChanged || patients.length > 0 || appointments.length > 0
 }
 
+/**
+ * Pull full=0. Incluye pacientes, citas y metadatos livianos de exámenes
+ * (sin base64). Sirve para rehidratar la sección 5 cuando IndexedDB está vacío.
+ */
+export async function pullSlimClinicMetadata(): Promise<boolean> {
+  const result = await pullAndMerge(false)
+  return result.ok
+}
+
 async function pullAndMerge(
   includeBlobs = false,
   options?: { timeoutMs?: number },

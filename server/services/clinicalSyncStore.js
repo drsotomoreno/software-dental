@@ -44,7 +44,7 @@ function emitSnapshotPushed(clinicId, payload, accepted) {
 }
 
 const STORE_FILE = join(config.dataDir, 'clinical-sync.json')
-/** Índice liviano: solo patients + appointments (pull full=0 sin parsear ~83MB). */
+/** Índice liviano: patients, appointments y metadatos de exámenes (pull full=0 sin parsear ~83MB). */
 const META_FILE = join(config.dataDir, 'clinical-sync-meta.json')
 const STORE_KEY = 'clinical-sync'
 
@@ -246,6 +246,129 @@ export function mergeClinicalStores(primary, secondary) {
     clinics[clinicId] = merged
   }
   return { clinics }
+}
+
+/**
+ * Metadatos de exámenes complementarios que sí viajan en clinical-sync.
+ * Nunca incluyen base64, buffers ni rutas locales.
+ */
+const DIAGNOSTIC_AID_LIGHT_KEYS = [
+  'id',
+  'patientId',
+  'patientSyncId',
+  'clinicId',
+  'encounterId',
+  'fileName',
+  'fileType',
+  'mimeType',
+  'receivedAt',
+  'createdAt',
+  'comments',
+  'fileHash',
+  'sha256',
+  'driveFileId',
+  'webViewLink',
+  'driveWebViewLink',
+  'byteLength',
+  'storageBackend',
+  'driveUploadStatus',
+  'updatedAt',
+]
+
+function lightweightDiagnosticAidPayload(source, clinicId) {
+  const raw = source && typeof source === 'object' ? source : {}
+  const payload = {}
+  for (const key of DIAGNOSTIC_AID_LIGHT_KEYS) {
+    const value = raw[key]
+    if (value == null || value === '') continue
+    if (typeof value === 'string' && isHeavyBinaryString(value)) continue
+    payload[key] = value
+  }
+  if (!payload.id && raw.aidId) payload.id = String(raw.aidId)
+  if (clinicId) payload.clinicId = clinicId
+  if (payload.fileHash && !payload.sha256) payload.sha256 = payload.fileHash
+  if (payload.webViewLink && !payload.driveWebViewLink) {
+    payload.driveWebViewLink = payload.webViewLink
+  }
+  if (payload.driveFileId) {
+    payload.storageBackend = 'google_drive'
+    if (!payload.driveUploadStatus) payload.driveUploadStatus = 'uploaded'
+  }
+  if (payload.byteLength != null) payload.byteLength = Number(payload.byteLength) || 0
+  return payload
+}
+
+/** Registro listo para pull: solo metadatos livianos, sin binario. */
+export function lightweightDiagnosticAidRecord(record) {
+  if (!record || typeof record !== 'object') return null
+  const payloadIn =
+    record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+      ? record.payload
+      : record
+  const payload = lightweightDiagnosticAidPayload(payloadIn, record.clinicId)
+  const syncId = String(record.syncId || payload.id || '').trim()
+  if (!syncId) return null
+  payload.id = payload.id || syncId
+  return {
+    syncId,
+    clinicId: record.clinicId || payload.clinicId || '',
+    updatedAt: String(record.updatedAt || payload.updatedAt || ''),
+    deletedAt: record.deletedAt ? String(record.deletedAt) : null,
+    payload,
+  }
+}
+
+/**
+ * Upsert atómico de UNA ayuda diagnóstica tras subir el binario a Drive.
+ * No escribe base64. Corre en la misma cola que el resto de clinical-sync.
+ */
+export async function upsertDiagnosticAidMetadata(clinicId, aliasIds = [], meta = {}) {
+  const canonical = String(clinicId || '').trim()
+  const aidId = String(meta.id || meta.aidId || '').trim()
+  if (!canonical) {
+    const err = new Error('clinicId canónico vacío; no se guardó el metadato del examen.')
+    err.code = 'CLINIC_REQUIRED'
+    throw err
+  }
+  if (!aidId) {
+    const err = new Error('aidId es obligatorio para persistir el examen.')
+    err.code = 'INVALID_AID'
+    throw err
+  }
+
+  return enqueueWrite(async () => {
+    const store = await loadStore()
+    const clinic = foldAliasesIntoCanonical(store, canonical, aliasIds)
+    const now = new Date().toISOString()
+    const prev = clinic.diagnosticAids[aidId]
+    const incomingAt = String(meta.updatedAt || now)
+    if (prev?.deletedAt && stamp(prev) > (Date.parse(incomingAt) || 0)) {
+      return { ok: true, aidId, skipped: 'deleted' }
+    }
+    const prevPayload =
+      prev?.payload && typeof prev.payload === 'object' ? prev.payload : {}
+    const payload = lightweightDiagnosticAidPayload(
+      {
+        ...prevPayload,
+        ...meta,
+        id: aidId,
+        updatedAt: incomingAt,
+        storageBackend: 'google_drive',
+        driveUploadStatus: 'uploaded',
+      },
+      canonical,
+    )
+    clinic.diagnosticAids[aidId] = {
+      syncId: aidId,
+      clinicId: canonical,
+      updatedAt: incomingAt,
+      deletedAt: null,
+      payload,
+    }
+    replicateAliases(store, canonical, clinic, aliasIds)
+    await saveStore(store)
+    return { ok: true, aidId, metadataPersisted: true }
+  })
 }
 
 /** Campos binarios pesados: nunca persistir en app_json_store / clinical-sync.json. */
@@ -472,7 +595,7 @@ let storeCache = {
   store: null,
 }
 
-/** Caché del índice liviano (patients + appointments). */
+/** Caché del índice liviano (patients, appointments y metadatos de exámenes). */
 let metaCache = {
   mtimeMs: 0,
   size: 0,
@@ -487,6 +610,21 @@ function invalidateMetaCache() {
   metaCache = { mtimeMs: 0, size: 0, meta: null }
 }
 
+function listedDiagnosticAids(clinic) {
+  return Object.values(clinic?.diagnosticAids || {})
+    .filter(Boolean)
+    .map((record) => lightweightDiagnosticAidRecord(record))
+    .filter((record) => record && record.syncId)
+}
+
+function metaDiagnosticAids(clinic) {
+  const out = {}
+  for (const record of listedDiagnosticAids(clinic)) {
+    out[record.syncId] = record
+  }
+  return out
+}
+
 function buildMetaFromStore(store, sourceStat = null) {
   const clinicsIn = store?.clinics && typeof store.clinics === 'object' ? store.clinics : {}
   const clinics = {}
@@ -499,6 +637,7 @@ function buildMetaFromStore(store, sourceStat = null) {
         clinic.appointments && typeof clinic.appointments === 'object'
           ? clinic.appointments
           : {},
+      diagnosticAids: metaDiagnosticAids(clinic),
     }
   }
   return {
@@ -580,7 +719,7 @@ export class SyncMetaMissingError extends Error {
   }
 }
 
-/** Fusiona solo patients/appointments desde el índice meta (sin drafts/historias). */
+/** Fusiona patients, appointments y metadatos de exámenes desde el índice (sin drafts/historias). */
 function mergeMetaClinicBuckets(meta, ids) {
   const clinic = emptyClinic()
   const clinics = meta?.clinics && typeof meta.clinics === 'object' ? meta.clinics : {}
@@ -596,6 +735,15 @@ function mergeMetaClinicBuckets(meta, ids) {
       if (!record) continue
       const prev = clinic.appointments[syncId]
       clinic.appointments[syncId] = prev
+        ? stamp(record) >= stamp(prev)
+          ? record
+          : prev
+        : record
+    }
+    for (const [syncId, record] of Object.entries(bucket.diagnosticAids || {})) {
+      if (!record) continue
+      const prev = clinic.diagnosticAids[syncId]
+      clinic.diagnosticAids[syncId] = prev
         ? stamp(record) >= stamp(prev)
           ? record
           : prev
@@ -924,8 +1072,9 @@ export async function pullPatientDraft(clinicId, patientSyncId, aliasIds = []) {
 /**
  * Snapshot del cubo canónico + aliases.
  *
- * options.slim / includeBlobs===false → solo pacientes+citas (~0.06MB).
- * Evita OOM/502 al serializar clinicalRecords+drafts (~45MB+) en t3.micro.
+ * options.slim / includeBlobs===false → pacientes, citas y metadatos de exámenes.
+ * Esos metadatos son livianos (sin base64). Historias y drafts siguen fuera del slim
+ * para no serializar ~45MB+ en t3.micro.
  * El cliente (login) ya hace pull full=0 y luego full=1 en segundo plano.
  */
 export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) {
@@ -949,7 +1098,8 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
   }
   if (ids.length === 0) return empty
 
-  // Metadata-only: lee índice liviano (~pacientes+citas). NUNCA parsea el JSON de 83MB.
+  // Metadata-only: lee índice liviano. NUNCA parsea el JSON de 83MB.
+  // diagnosticAids aquí son solo metadatos (driveFileId, nombre, hash); el binario queda en Drive.
   if (slim) {
     const meta = await ensureMetaStore()
     if (!meta) {
@@ -969,6 +1119,7 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
       ...empty,
       patients: Object.values(clinic.patients).filter(Boolean),
       appointments: Object.values(clinic.appointments).filter(Boolean),
+      diagnosticAids: listedDiagnosticAids(clinic),
       slim: true,
     }
   }
@@ -1004,7 +1155,7 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
     appointments,
     clinicalRecords: Object.values(clinic.clinicalRecords).filter(Boolean),
     odontograms: Object.values(clinic.odontograms).filter(Boolean),
-    diagnosticAids: Object.values(clinic.diagnosticAids).filter(Boolean),
+    diagnosticAids: listedDiagnosticAids(clinic),
     attachments,
     drafts: [],
     sync_queue: syncQueue,
