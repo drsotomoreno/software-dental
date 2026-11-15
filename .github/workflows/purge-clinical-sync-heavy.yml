@@ -1,0 +1,78 @@
+# Purga Base64/drafts pesados de clinical-sync.json (causa OOM → 502 Drive).
+# NO toca .bak-20261112 ni .bak-20261113-pre-merge.
+name: Purge clinical-sync heavy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  purge:
+    name: Purge heavy + restart PM2
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: SSH purge
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            CANONICAL="/var/www/mihistoriadental"
+            HOME_APP="/home/ubuntu/software-dental"
+            APP_DIR="$HOME_APP"
+            [[ -f "$APP_DIR/server.js" ]] || APP_DIR="$CANONICAL"
+
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL"
+              git fetch origin main || true
+              git reset --hard origin/main || true
+            fi
+            if [[ "$APP_DIR" != "$CANONICAL" ]]; then
+              rsync -a --exclude 'server/data/' --exclude '.env' --exclude 'node_modules/' --exclude '.git/' \
+                "$CANONICAL/" "$APP_DIR/" || true
+            fi
+
+            SYNC="$APP_DIR/server/data/clinical-sync.json"
+            test -f "$SYNC" || { echo "MISSING_SYNC"; exit 1; }
+            echo "SYNC_BYTES_BEFORE=$(stat -c%s "$SYNC")"
+            HEAP_MB="$(bash "$APP_DIR/scripts/pm2-heap-from-ram.sh" 2>/dev/null || echo 700)"
+            # Heap alto solo para el script de purga (PM2 parado).
+            PURGE_HEAP=1536
+
+            echo "==== Stop PM2 + purge ===="
+            pm2 stop software-dental || pm2 stop all || true
+            sleep 2
+            node --max-old-space-size="${PURGE_HEAP}" \
+              "$APP_DIR/scripts/purge-clinical-sync-heavy.cjs" "$SYNC"
+            echo "SYNC_BYTES_AFTER=$(stat -c%s "$SYNC")"
+
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            export NODE_ENV=production
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+            cd "$APP_DIR"
+            pm2 delete software-dental 2>/dev/null || true
+            if [[ -f "$APP_DIR/ecosystem.config.cjs" ]]; then
+              pm2 start "$APP_DIR/ecosystem.config.cjs" --update-env
+            else
+              pm2 start "$APP_DIR/server.js" \
+                --name software-dental \
+                --cwd "$APP_DIR" \
+                --update-env \
+                --node-args="--max-old-space-size=${HEAP_MB}"
+            fi
+            pm2 save || true
+            sleep 12
+            STATUS=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const a=JSON.parse(r||"[]").find(x=>x.name==="software-dental");console.log(a&&a.pm2_env?a.pm2_env.status:"missing")})')
+            echo "PM2_STATUS=$STATUS"
+            [[ "$STATUS" == "online" ]] || { pm2 logs --lines 40 --err --nostream; exit 1; }
+            curl -sS -o /dev/null -w "LOCAL_HEALTH=%{http_code}\n" --max-time 10 "http://127.0.0.1:3000/api/health" || true
+            echo "PURGE_OK"

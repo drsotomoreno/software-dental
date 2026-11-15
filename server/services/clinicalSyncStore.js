@@ -576,7 +576,7 @@ function enqueueWrite(fn) {
  * Evita merge con Postgres en cada pull (doble memoria / aliases stale).
  */
 /** Por encima de esto, un parse en frío en t3.micro (~635 MB heap) suele OOM. */
-const CLINICAL_SYNC_COLD_LOAD_WARN_BYTES = 80 * 1024 * 1024
+const CLINICAL_SYNC_COLD_LOAD_WARN_BYTES = 100 * 1024 * 1024
 
 async function loadStore() {
   try {
