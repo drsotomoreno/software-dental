@@ -147,6 +147,7 @@ export async function listDiagnosticAids(
   }
 
   // Huérfanos: patientId desfasado tras rehidratación, pero patientSyncId coincide.
+  // Nunca reintroducir ids con tumba local (Quitar).
   try {
     const { getPatientByRouteId } = await import('@/utils/patientId')
     const patient = await getPatientByRouteId(String(patientId || '').trim())
@@ -159,6 +160,15 @@ export async function listDiagnosticAids(
       for (const row of orphans) {
         if (byId.has(row.id)) continue
         if (encounterId && String(row.encounterId || '') !== String(encounterId)) continue
+        try {
+          const tomb = await db.deletedDiagnosticAids.get(row.id)
+          if (tomb) {
+            await db.diagnosticAids.delete(row.id)
+            continue
+          }
+        } catch {
+          // sin tabla de tumbas
+        }
         if (localId && String(row.patientId) !== localId) {
           void db.diagnosticAids.update(row.id, { patientId: localId })
           byId.set(row.id, { ...row, patientId: localId })
@@ -479,69 +489,95 @@ export async function updateDiagnosticAidReceivedAt(
 }
 
 export async function deleteDiagnosticAid(id: string, user?: UserProfile | null): Promise<void> {
-  const entry = await db.diagnosticAids.get(id)
-  if (!entry) return
+  const aidId = String(id || '').trim()
+  if (!aidId) {
+    throw new Error('No se pudo identificar el examen a eliminar.')
+  }
+
+  const entry =
+    (await db.diagnosticAids.get(aidId)) ||
+    (await db.diagnosticAids.filter((row) => String(row.id) === aidId).first())
 
   const deletedAt = new Date().toISOString()
-  const clinicId = entry.clinicId || getCurrentClinicId() || undefined
+  const clinicId =
+    entry?.clinicId || getCurrentClinicId() || undefined
+  const fileName = entry?.fileName || 'examen'
 
-  // 1) Binario IndexedDB + fila clínica + tumba (anti-reinserción en merge/F5).
-  await deleteDiagnosticAidBlob(id)
-  await db.transaction(
-    'rw',
-    db.diagnosticAids,
-    db.deletedDiagnosticAids,
-    db.syncQueue,
-    async () => {
-      await db.diagnosticAids.delete(id)
-      await db.deletedDiagnosticAids.put({
-        id,
-        clinicId,
-        fileName: entry.fileName,
-        deletedAt,
-      })
-      const existing = await db.syncQueue.where('aidId').equals(id).first()
-      const queueItem = {
-        id: existing?.id || generateId(),
-        entityType: 'diagnostic_aid' as const,
-        action: 'DELETE' as const,
-        status: 'pending' as const,
-        patientId: String(entry.patientId),
-        encounterId: String(entry.encounterId || ''),
-        patientSyncId: entry.patientSyncId,
-        aidId: id,
-        blobId: null,
-        fileName: entry.fileName,
-        fileHash: entry.fileHash || '',
-        mimeType: mimeTypeForDiagnosticFile(entry.fileName),
-        absolutePath: entry.absolutePath,
-        clinicId,
-        driveFileId: entry.driveFileId ?? null,
-        webViewLink: entry.webViewLink ?? null,
-        binarySynced: true,
-        createdAt: existing?.createdAt || deletedAt,
-        updatedAt: deletedAt,
-      }
-      if (existing?.id) await db.syncQueue.put({ ...existing, ...queueItem })
-      else await db.syncQueue.add(queueItem)
-    },
-  )
+  // 1) Binario local (best-effort).
+  try {
+    await deleteDiagnosticAidBlob(aidId)
+  } catch {
+    // Continuar: lo crítico es quitar la fila y registrar tumba.
+  }
+
+  // 2) Borrar fila + tumba + cola DELETE. Pasos separados: una tabla rota no anula el resto.
+  try {
+    await db.diagnosticAids.delete(aidId)
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? `No se pudo quitar el examen de IndexedDB: ${error.message}`
+        : 'No se pudo quitar el examen de IndexedDB.',
+    )
+  }
+
+  try {
+    await db.deletedDiagnosticAids.put({
+      id: aidId,
+      clinicId,
+      fileName,
+      deletedAt,
+    })
+  } catch (error) {
+    console.warn('[diagnosticAid] No se pudo guardar tumba local:', error)
+  }
+
+  try {
+    const existing = await db.syncQueue.where('aidId').equals(aidId).first()
+    const queueItem = {
+      id: existing?.id || generateId(),
+      entityType: 'diagnostic_aid' as const,
+      action: 'DELETE' as const,
+      status: 'pending' as const,
+      patientId: String(entry?.patientId || ''),
+      encounterId: String(entry?.encounterId || ''),
+      patientSyncId: entry?.patientSyncId,
+      aidId,
+      blobId: null as string | null,
+      fileName,
+      fileHash: entry?.fileHash || '',
+      mimeType: mimeTypeForDiagnosticFile(fileName),
+      absolutePath: entry?.absolutePath || '',
+      clinicId,
+      driveFileId: entry?.driveFileId ?? null,
+      webViewLink: entry?.webViewLink ?? null,
+      binarySynced: true,
+      createdAt: existing?.createdAt || deletedAt,
+      updatedAt: deletedAt,
+    }
+    if (existing?.id) await db.syncQueue.put({ ...existing, ...queueItem })
+    else await db.syncQueue.add(queueItem)
+  } catch (error) {
+    console.warn('[diagnosticAid] No se pudo encolar DELETE:', error)
+  }
+
+  const stillThere = await db.diagnosticAids.get(aidId)
+  if (stillThere) {
+    throw new Error('El examen sigue en el expediente local tras intentar eliminarlo. Recargue e intente de nuevo.')
+  }
 
   notifyClinicalRecordDirty()
 
-  // 2) Push inmediato a /api/sync (clinical-sync / app_json_store).
-  try {
-    const { runClinicalSyncCycle } = await import('@/services/clinicalSyncService')
-    await runClinicalSyncCycle()
-  } catch {
-    // El dirty listener reintentará; la tumba local ya evita reaparición en F5.
-  }
+  // 3) Sync en segundo plano: no bloquear el botón Quitar (antes esperaba hasta 36s).
+  void import('@/services/clinicalSyncService')
+    .then(({ runClinicalSyncCycle }) => runClinicalSyncCycle())
+    .catch(() => undefined)
 
   await logAuditEvent({
     action: 'DELETE_DIAGNOSTIC_AID',
     resourceType: 'diagnostic_aid',
-    resourceId: id,
-    details: entry.fileName,
+    resourceId: aidId,
+    details: fileName,
     success: true,
     user: user ?? null,
   })

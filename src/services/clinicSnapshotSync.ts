@@ -428,22 +428,33 @@ async function mergeDiagnosticAids(records: ClinicalSyncRecord[]): Promise<boole
     const id = String(payload.id || remote.syncId || '').trim()
     if (!id) continue
 
-    const tombstone = await db.deletedDiagnosticAids.get(id)
+    let tombstone: { id: string } | undefined
+    try {
+      tombstone = await db.deletedDiagnosticAids.get(id)
+    } catch {
+      tombstone = undefined
+    }
     const remoteDeletedAt = String(remote.deletedAt || payload.deletedAt || '').trim()
-    if (tombstone || remoteDeletedAt) {
+    const remoteAction = String(payload.action || '').toUpperCase()
+    // Tumba local o DELETE remoto: nunca reinsertar (Quitar debe prevalecer sobre pull).
+    if (tombstone || remoteDeletedAt || remoteAction === 'DELETE') {
       const existing = await db.diagnosticAids.get(id)
       if (existing) {
         await db.diagnosticAids.delete(id)
         changed = true
       }
       if (!tombstone) {
-        await db.deletedDiagnosticAids.put({
-          id,
-          clinicId: remote.clinicId || String(payload.clinicId || ''),
-          fileName: String(payload.fileName || ''),
-          deletedAt: remoteDeletedAt || new Date().toISOString(),
-        })
-        changed = true
+        try {
+          await db.deletedDiagnosticAids.put({
+            id,
+            clinicId: remote.clinicId || String(payload.clinicId || ''),
+            fileName: String(payload.fileName || ''),
+            deletedAt: remoteDeletedAt || new Date().toISOString(),
+          })
+          changed = true
+        } catch {
+          // Sin tabla de tumbas: al menos no reinsertamos si remoteDeletedAt.
+        }
       }
       continue
     }

@@ -824,15 +824,23 @@ export function DiagnosticAidsSection({
 
   const handleDelete = useCallback(
     async (id: string) => {
+      const target = items.find((row) => row.id === id);
+      const label = target?.fileName || "este examen";
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm(`¿Quitar «${label}» del expediente? Esta acción se sincronizará con la clínica.`)
+      ) {
+        return;
+      }
       setBanner({
         tone: "info",
-        message: "Eliminando examen y sincronizando…",
+        message: `Eliminando ${label}…`,
       });
       try {
         await deleteDiagnosticAid(id, user);
         setBanner({
           tone: "success",
-          message: "Examen eliminado y cambio enviado al servidor.",
+          message: `«${label}» eliminado del expediente.`,
         });
       } catch (error) {
         setBanner({
@@ -845,7 +853,7 @@ export function DiagnosticAidsSection({
       }
     },
 
-    [user],
+    [user, items],
   );
 
   const handlePickFile = () => {

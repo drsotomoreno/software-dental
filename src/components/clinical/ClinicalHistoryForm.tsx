@@ -540,10 +540,11 @@ export function ClinicalHistoryForm({
       )}
 
       {showClinicalSection(activeSection, 'examenes') && patientId && (
+          // Res. 1995: adjuntos en cualquier momento; no bloquear por evolución firmada.
           <DiagnosticAidsSection
             patientId={patientId}
             encounterId={encounterId || `patient-${patientId}`}
-            disabled={livingLocked}
+            disabled={snapshotLocked}
             user={clinicalUser}
           />
       )}
