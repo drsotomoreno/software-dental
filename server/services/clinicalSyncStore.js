@@ -487,6 +487,9 @@ function enqueueWrite(fn) {
  * Disco es la fuente de verdad del sync clínico (writeDurableJsonReplace).
  * Evita merge con Postgres en cada pull (doble memoria / aliases stale).
  */
+/** Por encima de esto, un parse en frío en t3.micro (~635 MB heap) suele OOM. */
+const CLINICAL_SYNC_COLD_LOAD_WARN_BYTES = 80 * 1024 * 1024
+
 async function loadStore() {
   try {
     const st = await stat(STORE_FILE)
@@ -497,6 +500,16 @@ async function loadStore() {
     ) {
       return storeCache.store
     }
+    // Sin caché: no intentar parsear 160MB+ (mata Node → 502 en Drive).
+    if (!storeCache.store && st.size > CLINICAL_SYNC_COLD_LOAD_WARN_BYTES) {
+      const err = new Error(
+        `clinical-sync.json (${Math.round(st.size / (1024 * 1024))} MB) supera el límite de carga en frío. Ejecute dedup/harden.`,
+      )
+      err.code = 'CLINICAL_SYNC_TOO_LARGE'
+      err.status = 503
+      console.error('[clinical-sync]', err.message)
+      throw err
+    }
     const raw = await readFile(STORE_FILE, 'utf8')
     const parsed = JSON.parse(raw)
     const store = mergeClinicalStores(
@@ -505,8 +518,22 @@ async function loadStore() {
     )
     storeCache = { mtimeMs: st.mtimeMs, size: st.size, store }
     return store
-  } catch {
+  } catch (error) {
+    if (error?.code === 'CLINICAL_SYNC_TOO_LARGE') throw error
     invalidateStoreCache()
+    try {
+      const st = await stat(STORE_FILE)
+      if (st.size > CLINICAL_SYNC_COLD_LOAD_WARN_BYTES) {
+        const err = new Error(
+          `clinical-sync.json (${Math.round(st.size / (1024 * 1024))} MB) no se puede recuperar en frío sin OOM.`,
+        )
+        err.code = 'CLINICAL_SYNC_TOO_LARGE'
+        err.status = 503
+        throw err
+      }
+    } catch (inner) {
+      if (inner?.code === 'CLINICAL_SYNC_TOO_LARGE') throw inner
+    }
     const parsed = await readDurableJsonWithMerge(
       STORE_FILE,
       emptyStore(),

@@ -24,7 +24,14 @@ jobs:
             set -euo pipefail
             CANONICAL="/var/www/mihistoriadental"
             HOME_APP="/home/ubuntu/software-dental"
-            export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
+            # No forzar 4096 aquí: en t3.micro provoca presión de RAM del host.
+            HEAP_BOOT=700
+            if [[ -f /home/ubuntu/software-dental/scripts/pm2-heap-from-ram.sh ]]; then
+              HEAP_BOOT="$(bash /home/ubuntu/software-dental/scripts/pm2-heap-from-ram.sh 2>/dev/null || echo 700)"
+            elif [[ -f /var/www/mihistoriadental/scripts/pm2-heap-from-ram.sh ]]; then
+              HEAP_BOOT="$(bash /var/www/mihistoriadental/scripts/pm2-heap-from-ram.sh 2>/dev/null || echo 700)"
+            fi
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_BOOT}"
 
             echo "==== PM2 status (antes) ===="
             pm2 status || true

@@ -30,14 +30,35 @@ declare global {
   }
 }
 
-const POLL_MS = 2_000
-const DIRTY_DEBOUNCE_MS = 800
+/** Antes 2s: martillaba clinical-sync.json (~160MB) y OOMeaba EC2 → 502 en Drive. */
+const POLL_MS = 60_000
+const DIRTY_DEBOUNCE_MS = 2_500
 /** Cada fetch de sync: 12s. Evita inFlight colgado y UI congelada. */
 export const CLINICAL_SYNC_FETCH_TIMEOUT_MS = 12_000
 /** Login / rehidratación: payload completo (~100 pacientes) puede superar 12s. */
 const CLINICAL_SYNC_LOGIN_FETCH_TIMEOUT_MS = 60_000
 const CLINICAL_SYNC_CYCLE_TIMEOUT_MS = 36_000
 const CLINICAL_SYNC_LOGIN_CYCLE_TIMEOUT_MS = 90_000
+
+/** Pausas (p. ej. subida Drive): no disparar /clinical ni /push. */
+const clinicalSyncPauseReasons = new Set<string>()
+let dirtyTimer: number | null = null
+
+export function pauseClinicalSync(reason = 'manual'): void {
+  clinicalSyncPauseReasons.add(String(reason || 'manual'))
+  if (typeof window !== 'undefined' && dirtyTimer) {
+    window.clearTimeout(dirtyTimer)
+    dirtyTimer = null
+  }
+}
+
+export function resumeClinicalSync(reason = 'manual'): void {
+  clinicalSyncPauseReasons.delete(String(reason || 'manual'))
+}
+
+export function isClinicalSyncPaused(): boolean {
+  return clinicalSyncPauseReasons.size > 0
+}
 
 const LOCAL_ONLY_KEYS = new Set(['id', 'pendingSync', 'lastSyncedAt'])
 const HEAVY_BINARY_KEYS = new Set([
@@ -610,7 +631,6 @@ if (typeof window !== 'undefined') {
 
 let inFlight: Promise<boolean> | null = null
 let queued = false
-let dirtyTimer: number | null = null
 
 async function performClinicalSyncCycle(): Promise<boolean> {
   const auth = getStoredApiAuth()
@@ -637,6 +657,7 @@ async function performClinicalSyncCycle(): Promise<boolean> {
 
 /** Ciclo silencioso: un solo vuelo; coalesces ráfagas dirty tras Drive. */
 export function runClinicalSyncCycle(): Promise<boolean> {
+  if (isClinicalSyncPaused()) return Promise.resolve(false)
   if (inFlight) {
     queued = true
     return inFlight
@@ -647,7 +668,8 @@ export function runClinicalSyncCycle(): Promise<boolean> {
     inFlight = null
     if (queued) {
       queued = false
-      void runClinicalSyncCycle()
+      if (!isClinicalSyncPaused()) void runClinicalSyncCycle()
+      else queued = false
     }
   })
   return inFlight
@@ -655,6 +677,7 @@ export function runClinicalSyncCycle(): Promise<boolean> {
 
 export function scheduleClinicalSync(delayMs = DIRTY_DEBOUNCE_MS): void {
   if (typeof window === 'undefined') return
+  if (isClinicalSyncPaused()) return
   if (dirtyTimer) window.clearTimeout(dirtyTimer)
   dirtyTimer = window.setTimeout(() => {
     dirtyTimer = null

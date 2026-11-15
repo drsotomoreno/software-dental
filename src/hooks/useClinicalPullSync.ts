@@ -5,7 +5,8 @@ import {
 } from '@/services/clinicalSyncService'
 
 /**
- * Pull silencioso al recuperar el foco, al volver online y cada 2s.
+ * Pull silencioso al recuperar el foco, al volver online y cada 60s.
+ * (Antes 2s: saturaba EC2 con clinical-sync y provocaba OOM/502 en Drive.)
  * Solo corre con sesión autenticada.
  */
 export function useClinicalPullSync(enabled: boolean): void {

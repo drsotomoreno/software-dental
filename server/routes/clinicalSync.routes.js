@@ -12,6 +12,7 @@ import {
   pushClinicSnapshot,
   pushClinicalRecords,
 } from '../services/clinicalSyncStore.js'
+import { heapPressurePayload, isHeapNearLimit } from '../utils/heapPressure.js'
 
 function driveRequiredPayload(error) {
   return {
@@ -152,11 +153,18 @@ function snapshotResponse(auth, snapshot) {
   }
 }
 
+function denyIfHeapPressure(res) {
+  if (!isHeapNearLimit(0.68)) return false
+  sendJson(res, 503, heapPressurePayload(25))
+  return true
+}
+
 router.get('/clinical', async (req, res) => {
   try {
     const auth = await requireClinicSession(req, res)
     if (!auth) return
     if (denyWithoutClinicalAccess(auth, res)) return
+    if (denyIfHeapPressure(res)) return
 
     const aliases = auth.aliases
     const includeBlobs = booleanQuery(req.query?.includeBlobs ?? req.query?.full, false)
@@ -171,6 +179,10 @@ router.get('/clinical', async (req, res) => {
     })
   } catch (error) {
     console.error('[Sync] Error en GET /api/sync/clinical:', error)
+    const code = error?.code || ''
+    if (code === 'CLINICAL_SYNC_TOO_LARGE' || code === 'HEAP_PRESSURE') {
+      return sendJson(res, 503, heapPressurePayload(30))
+    }
     return sendJson(res, 500, { success: false, ok: false, error: 'No se pudo leer la sincronización.' })
   }
 })
@@ -180,6 +192,7 @@ router.get('/pull', async (req, res) => {
     const auth = await requireClinicSession(req, res)
     if (!auth) return
     if (denyWithoutClinicalAccess(auth, res)) return
+    if (denyIfHeapPressure(res)) return
 
     const aliases = auth.aliases
     // Default false: login usa ?full=0 (metadata). Evita OOM si alguien llama /pull sin query.
@@ -193,14 +206,19 @@ router.get('/pull', async (req, res) => {
   } catch (error) {
     console.error('[Sync] Error en GET /api/sync/pull:', error)
     const message = error instanceof Error ? error.message : String(error)
+    const code = error?.code || ''
     // OOM / heap → 503 para que el cliente reintente slim; no fingir 500 genérico.
-    const oom = /heap|out of memory|ENOMEM/i.test(message)
+    const oom =
+      code === 'CLINICAL_SYNC_TOO_LARGE' ||
+      code === 'HEAP_PRESSURE' ||
+      /heap|out of memory|ENOMEM/i.test(message)
     return sendJson(res, oom ? 503 : 500, {
       success: false,
       ok: false,
       error: oom
         ? 'El servidor agotó memoria al preparar el sync. Reintente con full=0.'
         : 'No se pudo descargar el snapshot completo de la clínica.',
+      code: oom ? code || 'HEAP_PRESSURE' : undefined,
     })
   }
 })
@@ -210,6 +228,7 @@ router.post('/clinical', async (req, res) => {
     const auth = await requireClinicSession(req, res)
     if (!auth) return
     if (denyWithoutClinicalAccess(auth, res)) return
+    if (denyIfHeapPressure(res)) return
 
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     if (denyTrialOverflow(auth, body, res)) return
@@ -254,6 +273,10 @@ router.post('/clinical', async (req, res) => {
       return sendJson(res, error.status || 428, driveRequiredPayload(error))
     }
     console.error('[Sync] Error en POST /api/sync/clinical:', error)
+    const code = error?.code || ''
+    if (code === 'CLINICAL_SYNC_TOO_LARGE' || code === 'HEAP_PRESSURE') {
+      return sendJson(res, 503, heapPressurePayload(30))
+    }
     return sendJson(res, 500, { success: false, ok: false, error: 'No se pudo guardar la sincronización.' })
   }
 })
@@ -263,6 +286,7 @@ router.post('/push', async (req, res) => {
     const auth = await requireClinicSession(req, res)
     if (!auth) return
     if (denyWithoutClinicalAccess(auth, res)) return
+    if (denyIfHeapPressure(res)) return
 
     const body = req.body && typeof req.body === 'object' ? req.body : {}
     if (denyTrialOverflow(auth, body, res)) return

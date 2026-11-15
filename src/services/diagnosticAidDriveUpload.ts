@@ -14,6 +14,8 @@ import { enqueueDiagnosticAidForSync } from '@/services/syncQueueService'
 import type { DiagnosticAid } from '@/types/diagnosticAid'
 import { mimeTypeForDiagnosticFile } from '@/utils/diagnosticAidWebClassification'
 
+const DRIVE_UPLOAD_SYNC_PAUSE = 'drive-upload'
+
 export const DIAGNOSTIC_AID_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 export type DriveUploadProgress = {
@@ -113,6 +115,12 @@ export async function uploadDiagnosticAidToGoogleDrive(
     emit('error', message)
     return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
   }
+
+  // Pausar sync clínico: enqueue + poll cada N s mataban Node (163MB JSON) durante el upload.
+  const { pauseClinicalSync, resumeClinicalSync, scheduleClinicalSync } = await import(
+    '@/services/clinicalSyncService'
+  )
+  pauseClinicalSync(DRIVE_UPLOAD_SYNC_PAUSE)
 
   emit('uploading', 'Subiendo a Google Drive…')
   const clinicId = resolveUploadClinicId(entry)
@@ -237,10 +245,6 @@ export async function uploadDiagnosticAidToGoogleDrive(
       webViewLink,
     })
 
-    // Sync metadatos solo tras confirmar Drive (evita ráfaga push+clinical).
-    const { scheduleClinicalSync } = await import('@/services/clinicalSyncService')
-    scheduleClinicalSync(1_200)
-
     emit('done', 'Guardado en Google Drive.')
     return updated
   } catch (error) {
@@ -249,5 +253,9 @@ export async function uploadDiagnosticAidToGoogleDrive(
     const failed = await markUploadError(aidId, message)
     emit('error', message)
     return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
+  } finally {
+    resumeClinicalSync(DRIVE_UPLOAD_SYNC_PAUSE)
+    // Metadatos mucho después del upload: no competir con Drive ni reinicios PM2.
+    scheduleClinicalSync(45_000)
   }
 }
