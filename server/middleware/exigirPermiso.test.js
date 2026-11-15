@@ -6,6 +6,7 @@ import {
   CUPOS_PLAN,
   cupoDisponible,
   identidadClinicaTitular,
+  planEfectivo,
   signColaboradorToken,
 } from '../routes/colaboradores.js'
 
@@ -16,6 +17,12 @@ test('superadmin omite el filtro de rol y de activo', () => {
   )
   assert.equal(decision.ok, true)
   assert.equal(decision.bypass, true)
+})
+
+test('la cuenta maestra prueba el equipo con cupo corporativo', () => {
+  assert.equal(planEfectivo({ email: 'doctormauriciosoto@gmail.com' }, 'exento'), 'CORPORATIVO')
+  assert.equal(planEfectivo({ email: 'doctormauriciosoto@gmail.com' }, 'smart'), 'SMART')
+  assert.equal(planEfectivo({ email: 'clinica@example.com' }, 'exento'), null)
 })
 
 test('el dueño con rol admin administra colaboradores', () => {

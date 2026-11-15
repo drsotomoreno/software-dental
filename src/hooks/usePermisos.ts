@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { getStoredApiAuth, type ApiSubscriptionUser } from '@/services/apiAuthService'
+import { getStoredApiAuth, isApiSuperAdmin, type ApiSubscriptionUser } from '@/services/apiAuthService'
 
 export type RolColaborador = 'TITULAR' | 'COLABORADOR_CLINICO' | 'COLABORADOR_ADMIN'
 
@@ -51,7 +51,8 @@ export function usePermisos() {
     const rol = rolDeSesion(actual)
     const rolCrudo = String(actual?.rol || '').trim().toLowerCase()
     const dueno = esDuenoClinica(actual)
-    const esTitular = rol === 'TITULAR' || dueno
+    // La cuenta maestra prueba el software completo: clínica, agenda y equipo.
+    const esTitular = isApiSuperAdmin(actual) || rol === 'TITULAR' || dueno
     const esClinico = rol === 'COLABORADOR_CLINICO'
     const esAdminColab = rol === 'COLABORADOR_ADMIN'
     const legado = rol === '' && Boolean(actual?.id)
@@ -73,6 +74,8 @@ export function usePermisos() {
     apiUser?.rethusNumber,
     apiUser?.isClinicOwner,
     apiUser?.clinicId,
+    apiUser?.email,
+    user?.email,
     user?.rethusNumber,
   ])
 }

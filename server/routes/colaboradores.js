@@ -178,13 +178,21 @@ function publico(row, { conInvitacion = false } = {}) {
   }
 }
 
+/** Plan de cupos. La cuenta maestra prueba con el tope corporativo. */
+export function planEfectivo(titular, planAlmacenado) {
+  const plan = planCanonico(planAlmacenado)
+  if (plan) return plan
+  if (normalizeEmail(titular?.email) === MASTER_EMAIL) return 'CORPORATIVO'
+  return null
+}
+
 async function planDelTitular(titular) {
   const users = await listAllSubscriptionUsers()
   const email = normalizeEmail(titular.email)
   const match = users.find(
     (user) => normalizeEmail(user.email) === email || String(user.id) === String(titular.id),
   )
-  return planCanonico(match?.plan)
+  return planEfectivo(titular, match?.plan)
 }
 
 async function contarActivos(client, titularId) {
