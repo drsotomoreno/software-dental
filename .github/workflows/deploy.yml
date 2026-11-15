@@ -122,6 +122,9 @@ jobs:
                 --exclude '.git/' \
                 --exclude 'dist/' \
                 "$CANONICAL/" "$APP_DIR/" || true
+              # PM2 usa APP_DIR. node_modules no viaja en el rsync, así que
+              # una dependencia nueva (p. ej. bcryptjs) debe instalarse aquí.
+              npm install --omit=dev --prefix "$APP_DIR" || npm install --prefix "$APP_DIR"
             fi
 
             # Extraer dist construido en GHA
