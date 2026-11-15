@@ -535,9 +535,17 @@ export async function pullPatientDraftOnDemand(patientSyncId: string): Promise<b
   if (!auth?.token) return false
   const { response, payload } = await syncFetch(
     `/api/sync/draft/${encodeURIComponent(syncId)}`,
-    { timeoutMs: 20_000 },
+    { timeoutMs: 45_000 },
   )
-  if (!response.ok || !payload?.draft) return false
+  if (!response.ok || !payload?.draft) {
+    console.warn('[Sync] pullPatientDraftOnDemand failed', {
+      syncId,
+      status: response.status,
+      error: payload?.error,
+      code: payload?.code,
+    })
+    return false
+  }
   await applyClinicSnapshot(
     {
       clinicId: String(payload.clinicId || auth.clinicId || ''),

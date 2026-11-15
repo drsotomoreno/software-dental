@@ -784,18 +784,92 @@ export async function pullClinicalRecords(clinicId, _since, aliasIds = []) {
 }
 
 /**
- * Un solo borrador por patientSyncId (p. ej. al abrir Pacientes Valorados).
- * Evita serializar los ~31 MB de drafts en el pull global.
+ * Extrae un objeto JSON balanceado desde `start` (posición del '{').
+ * Evita parsear el clinical-sync.json completo (~100MB+) al abrir un valorado.
  */
-export async function pullPatientDraft(clinicId, patientSyncId, aliasIds = []) {
+function extractBalancedJsonObject(raw, start) {
+  if (start < 0 || start >= raw.length || raw[start] !== '{') return null
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < raw.length; i += 1) {
+    const ch = raw[i]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (ch === '\\') {
+        escaped = true
+        continue
+      }
+      if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === '{') depth += 1
+    else if (ch === '}') {
+      depth -= 1
+      if (depth === 0) {
+        try {
+          return JSON.parse(raw.slice(start, i + 1))
+        } catch {
+          return null
+        }
+      }
+    }
+  }
+  return null
+}
+
+/** Lectura fría de un solo draft sin JSON.parse del archivo entero. */
+async function extractDraftRecordFromFile(patientSyncId) {
   const syncKey = String(patientSyncId || '').trim()
   if (!syncKey) return null
-  const ids = scopeIds(clinicId, aliasIds)
-  if (ids.length === 0) return null
-  const store = await loadStore()
-  const clinic = mergeClinicBuckets(store, ids)
   const draftKey = syncKey.startsWith('draft:') ? syncKey : `draft:${syncKey}`
-  const record =
+  const needles = [`"${draftKey}"`, `"${syncKey}"`]
+  let raw = ''
+  try {
+    raw = await readFile(STORE_FILE, 'utf8')
+  } catch {
+    return null
+  }
+  for (const needle of needles) {
+    let from = 0
+    while (from < raw.length) {
+      const at = raw.indexOf(needle, from)
+      if (at < 0) break
+      const colon = raw.indexOf(':', at + needle.length)
+      if (colon < 0) break
+      let brace = colon + 1
+      while (brace < raw.length && /\s/.test(raw[brace])) brace += 1
+      if (raw[brace] === '{') {
+        const parsed = extractBalancedJsonObject(raw, brace)
+        if (parsed && typeof parsed === 'object') {
+          const payload =
+            parsed.payload && typeof parsed.payload === 'object' ? parsed.payload : parsed
+          const ps = String(payload?.patientSyncId || payload?.patientId || parsed.syncId || '').trim()
+          if (
+            ps === syncKey ||
+            ps === draftKey ||
+            String(parsed.syncId || '') === draftKey ||
+            String(parsed.syncId || '') === syncKey
+          ) {
+            return parsed
+          }
+        }
+      }
+      from = at + needle.length
+    }
+  }
+  return null
+}
+
+function findDraftInClinicMaps(clinic, syncKey, draftKey) {
+  return (
     clinic.drafts?.[draftKey] ||
     clinic.drafts?.[syncKey] ||
     Object.values(clinic.drafts || {}).find((row) => {
@@ -804,6 +878,45 @@ export async function pullPatientDraft(clinicId, patientSyncId, aliasIds = []) {
       return ps === syncKey || `draft:${ps}` === draftKey
     }) ||
     null
+  )
+}
+
+/**
+ * Un solo borrador por patientSyncId (p. ej. al abrir Pacientes Valorados).
+ * Evita serializar los ~31 MB de drafts en el pull global.
+ * Preferir caché en memoria; si el JSON es demasiado grande para parse frío, extrae por clave.
+ */
+export async function pullPatientDraft(clinicId, patientSyncId, aliasIds = []) {
+  const syncKey = String(patientSyncId || '').trim()
+  if (!syncKey) return null
+  const ids = scopeIds(clinicId, aliasIds)
+  if (ids.length === 0) return null
+  const draftKey = syncKey.startsWith('draft:') ? syncKey : `draft:${syncKey}`
+
+  let record = null
+  if (storeCache.store) {
+    try {
+      const clinic = mergeClinicBuckets(storeCache.store, ids)
+      record = findDraftInClinicMaps(clinic, syncKey, draftKey)
+    } catch {
+      record = null
+    }
+  }
+
+  if (!record) {
+    try {
+      const store = await loadStore()
+      const clinic = mergeClinicBuckets(store, ids)
+      record = findDraftInClinicMaps(clinic, syncKey, draftKey)
+    } catch (error) {
+      if (error?.code !== 'CLINICAL_SYNC_TOO_LARGE') throw error
+      record = await extractDraftRecordFromFile(syncKey)
+    }
+  }
+
+  if (!record) {
+    record = await extractDraftRecordFromFile(syncKey)
+  }
   if (!record) return null
   return omitHeavyClinicalDraftForms(stripHeavyBinaryFields(record))
 }

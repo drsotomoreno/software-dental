@@ -865,50 +865,70 @@ export function PatientDetailPage() {
     }
   }, [id, patientForeignKey, professionalLicense, draftClinicalData])
 
-  // Si el paciente llega después del shell vacío, recuperar valuationDraft (local o servidor).
+  // Valorados: el pull global ya no trae drafts. Recuperar valuationDraft al abrir.
   useEffect(() => {
-    if (!id || !patientForeignKey || !patient?.syncId || draftClinicalData) return
-    if (!isValuationOnly || !clinicalData) return
-    if (clinicalFormHasContent(clinicalData)) return
-    if (valuationDraftRecoveryRef.current === id) return
-    valuationDraftRecoveryRef.current = id
+    if (!id || !patientForeignKey || draftClinicalData) return
+    if (!isValuationOnly) return
+    const syncId = patient?.syncId?.trim() || ''
+    if (!syncId) return
+    if (clinicalData && clinicalFormHasContent(clinicalData)) return
+    // Solo bloquear reintentos tras éxito; fallos permiten reintentar.
+    if (valuationDraftRecoveryRef.current === `ok:${id}`) return
 
-    let cancelled = false
+    const requestId = id
+    let alive = true
     void (async () => {
-      try {
-        let draft = await getPatientClinicalDraft(patientForeignKey)
-        let living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
-        if (!clinicalFormHasContent(living) && patient.syncId) {
-          const { pullPatientDraftOnDemand } = await import('@/services/clinicalSyncService')
-          const ok = await pullPatientDraftOnDemand(patient.syncId)
-          if (ok) {
-            draft = await getPatientClinicalDraft(patientForeignKey)
-            living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+      let lastError = ''
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (!alive || valuationDraftRecoveryRef.current === `ok:${requestId}`) return
+        try {
+          let draft = await getPatientClinicalDraft(patientForeignKey)
+          let living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+          if (!clinicalFormHasContent(living)) {
+            const { pullPatientDraftOnDemand } = await import('@/services/clinicalSyncService')
+            const ok = await pullPatientDraftOnDemand(syncId)
+            if (!ok) {
+              lastError = 'El servidor no devolvió el borrador de valoración.'
+            } else {
+              draft = await getPatientClinicalDraft(patientForeignKey)
+              living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+            }
           }
+          if (!alive) return
+          if (living && clinicalFormHasContent(living)) {
+            valuationDraftRecoveryRef.current = `ok:${requestId}`
+            setClinicalData((prev) => {
+              if (prev && clinicalFormHasContent(prev)) return prev
+              return {
+                ...living,
+                diagnosticChart: normalizeClinicalDiagnosticChart(living.diagnosticChart),
+                specializedAnnexes: normalizeSpecializedAnnexes(living.specializedAnnexes),
+                valuationConsent:
+                  living.valuationConsent ?? patientRef.current?.valuationConsent ?? null,
+              }
+            })
+            setMessage('Valoración cargada desde el servidor.')
+            return
+          }
+          lastError = lastError || 'No hay borrador de valoración guardado para este paciente.'
+        } catch {
+          lastError = 'No se pudo recuperar la valoración (red o memoria del servidor).'
         }
-        if (cancelled || !living || !clinicalFormHasContent(living)) return
-        setClinicalData((prev) => {
-          if (prev && clinicalFormHasContent(prev)) return prev
-          return {
-            ...living,
-            diagnosticChart: normalizeClinicalDiagnosticChart(living.diagnosticChart),
-            specializedAnnexes: normalizeSpecializedAnnexes(living.specializedAnnexes),
-            valuationConsent: living.valuationConsent ?? patient.valuationConsent ?? null,
-          }
-        })
-      } catch {
-        // Recuperación opcional.
+        await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1)))
+      }
+      if (!alive) return
+      if (lastError) {
+        setMessage(lastError)
       }
     })()
 
     return () => {
-      cancelled = true
+      alive = false
     }
   }, [
     id,
     patientForeignKey,
     patient?.syncId,
-    patient?.valuationConsent,
     isValuationOnly,
     draftClinicalData,
     Boolean(clinicalData && clinicalFormHasContent(clinicalData)),
