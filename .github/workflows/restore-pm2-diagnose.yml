@@ -142,7 +142,7 @@ jobs:
               echo "SYNC_JSON missing (readonly skip)"
             fi
 
-            echo "==== Restaurar PM2 online heap 4096 + env RDS ===="
+            echo "==== Restaurar PM2 (heap 70% RAM, nunca 4096 en t3.micro) ===="
             if pm2 describe software-dental >/dev/null 2>&1; then
               pm2 delete software-dental || true
             fi
@@ -154,18 +154,27 @@ jobs:
             # shellcheck disable=SC1091
             [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
             set +a
-            export NODE_OPTIONS="--max-old-space-size=4096"
+            HEAP_MB=700
+            if [[ -f "$APP_DIR/scripts/pm2-heap-from-ram.sh" ]]; then
+              HEAP_MB="$(bash "$APP_DIR/scripts/pm2-heap-from-ram.sh")"
+            fi
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
             export NODE_ENV="${NODE_ENV:-production}"
             if [[ -z "${DATABASE_URL:-}" ]]; then
               echo "ERROR: DATABASE_URL vacío tras cargar .env de $APP_DIR" >&2
               exit 1
             fi
+            echo "HEAP_MB=$HEAP_MB"
             echo "DATABASE_URL_PRESENT=yes host=$(node -e 'try{const u=new URL(process.env.DATABASE_URL);console.log(u.hostname)}catch{console.log("bad")}')"
-            pm2 start "$APP_DIR/server.js" \
-              --name software-dental \
-              --cwd "$APP_DIR" \
-              --update-env \
-              --node-args="--max-old-space-size=4096"
+            if [[ -f "$APP_DIR/ecosystem.config.cjs" ]]; then
+              pm2 start "$APP_DIR/ecosystem.config.cjs" --update-env
+            else
+              pm2 start "$APP_DIR/server.js" \
+                --name software-dental \
+                --cwd "$APP_DIR" \
+                --update-env \
+                --node-args="--max-old-space-size=${HEAP_MB}"
+            fi
             pm2 save || true
             sleep 15
             sudo systemctl reload nginx || true

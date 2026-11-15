@@ -136,11 +136,12 @@ jobs:
             fi
             sudo nginx -t && sudo systemctl reload nginx || true
 
-            HEAP_MB=450
+            # Heap = 70% RAM [512,1536]. ecosystem.config.cjs usa la misma fórmula.
+            # Nunca fijar 450 (OOM) ni 4096 (mata t3.micro).
+            HEAP_MB=700
             if [[ -f "$APP_DIR/scripts/pm2-heap-from-ram.sh" ]]; then
               HEAP_MB="$(bash "$APP_DIR/scripts/pm2-heap-from-ram.sh")"
             fi
-            # Preferir ecosystem (450) si existe
             set -a
             # shellcheck disable=SC1091
             [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
@@ -148,6 +149,7 @@ jobs:
             export NODE_ENV=production
             export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
             [[ -n "${DATABASE_URL:-}" ]] || { echo "DATABASE_URL_EMPTY"; exit 1; }
+            echo "HEAP_MB=$HEAP_MB"
 
             cd "$APP_DIR"
             pm2 delete software-dental 2>/dev/null || true

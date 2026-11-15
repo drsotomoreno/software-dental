@@ -22,83 +22,15 @@ export type DriveUploadProgress = {
   message: string
 }
 
-type DriveStatusPayload = {
-  connected?: boolean
-  status?: string
-  clinicId?: string | null
-  error?: string
-  code?: string
+function resolveUploadClinicId(entry: DiagnosticAid): string {
+  return String(entry.clinicId || resolveActiveDriveClinicId() || '').trim()
 }
 
-async function readDriveStatus(): Promise<{
-  connected: boolean
-  /** true = status degradado (502/timeout); conviene intentar upload igual. */
-  softFail: boolean
-  clinicId: string | null
-  message: string | null
-}> {
-  const auth = getStoredApiAuth()
-  const clinicId = resolveActiveDriveClinicId()
-  if (!auth?.token) {
-    return {
-      connected: false,
-      softFail: false,
-      clinicId: null,
-      message: 'Sesión inválida o expirada. Vuelva a iniciar sesión para subir a Google Drive.',
-    }
-  }
-  try {
-    const controller = new AbortController()
-    const timer = window.setTimeout(() => controller.abort(), 5_000)
-    let response: Response
-    try {
-      response = await fetch(`/api/integrations/google-drive/status${driveClinicQuery(clinicId)}`, {
-        headers: driveIdentityHeaders(clinicId),
-        signal: controller.signal,
-      })
-    } finally {
-      window.clearTimeout(timer)
-    }
-    const body = (await response.json().catch(() => ({}))) as DriveStatusPayload & {
-      degraded?: boolean
-      status?: string
-    }
-    if (response.status === 401) {
-      return {
-        connected: false,
-        softFail: false,
-        clinicId: null,
-        message: 'Sesión inválida o expirada. Vuelva a iniciar sesión.',
-      }
-    }
-    // 5xx / degradado: no bloquear la subida; el POST /upload decide.
-    if (!response.ok || body.degraded || body.status === 'unknown') {
-      return {
-        connected: true,
-        softFail: true,
-        clinicId: typeof body.clinicId === 'string' ? body.clinicId : clinicId || null,
-        message: null,
-      }
-    }
-    const connected = Boolean(body.connected) || body.status === 'connected'
-    return {
-      connected,
-      softFail: false,
-      clinicId:
-        (typeof body.clinicId === 'string' && body.clinicId.trim()) || clinicId || null,
-      message: connected
-        ? null
-        : 'Google Drive no está conectado. Conéctelo en Perfil → Google Drive.',
-    }
-  } catch {
-    // Red/502/timeout: intentar upload de todas formas.
-    return {
-      connected: true,
-      softFail: true,
-      clinicId: clinicId || null,
-      message: null,
-    }
-  }
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && /aborted|AbortError/i.test(error.message))
+  )
 }
 
 async function markUploadError(aidId: string, message: string): Promise<DiagnosticAid | undefined> {
@@ -108,6 +40,30 @@ async function markUploadError(aidId: string, message: string): Promise<Diagnost
     storageBackend: 'indexeddb',
   })
   return db.diagnosticAids.get(aidId)
+}
+
+/**
+ * POST /upload con un reintento ante 502/503/504 o fallo de red
+ * (PM2 reiniciando tras OOM / Nginx Bad Gateway).
+ */
+async function postDriveUploadWithRetry(
+  postOnce: () => Promise<Response>,
+  emit: (phase: DriveUploadProgress['phase'], message: string) => void,
+): Promise<Response> {
+  try {
+    const first = await postOnce()
+    if (first.status === 502 || first.status === 503 || first.status === 504) {
+      emit('uploading', 'Servidor ocupado; reintentando subida…')
+      await new Promise((r) => window.setTimeout(r, 2_500))
+      return postOnce()
+    }
+    return first
+  } catch (error) {
+    if (isAbortError(error)) throw error
+    emit('uploading', 'Red inestable; reintentando subida…')
+    await new Promise((r) => window.setTimeout(r, 2_500))
+    return postOnce()
+  }
 }
 
 /**
@@ -128,23 +84,18 @@ export async function uploadDiagnosticAidToGoogleDrive(
     return entry
   }
 
-  emit('checking', 'Verificando Google Drive…')
   await db.diagnosticAids.update(aidId, {
     driveUploadStatus: 'uploading',
     driveUploadError: null,
   })
 
-  const status = await readDriveStatus()
-  if (!status.connected && !status.softFail) {
+  const auth = getStoredApiAuth()
+  if (!auth?.token) {
     const message =
-      status.message ||
-      'Google Drive no está conectado. Conéctelo en Perfil → Google Drive.'
+      'Sesión inválida o expirada. Vuelva a iniciar sesión para subir a Google Drive.'
     const failed = await markUploadError(aidId, message)
     emit('error', message)
     return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
-  }
-  if (status.softFail) {
-    emit('uploading', 'Estado Drive no verificado (servidor ocupado); intentando subida…')
   }
 
   const blobRecord = await getDiagnosticAidBlobByAidId(aidId)
@@ -164,50 +115,52 @@ export async function uploadDiagnosticAidToGoogleDrive(
   }
 
   emit('uploading', 'Subiendo a Google Drive…')
-  const clinicId = String(
-    status.clinicId || entry.clinicId || resolveActiveDriveClinicId() || '',
-  ).trim()
+  const clinicId = resolveUploadClinicId(entry)
 
   try {
     const mimeType = blobRecord.mimeType || mimeTypeForDiagnosticFile(entry.fileName)
-    const form = new FormData()
-    form.append(
-      'file',
-      new Blob([blobRecord.data as BlobPart], { type: mimeType }),
-      entry.fileName || 'archivo.bin',
-    )
-    form.append('aidId', aidId)
-    form.append('fileName', entry.fileName)
-    form.append('mimeType', mimeType)
-    form.append('patientSyncId', entry.patientSyncId || entry.patientId || 'sin-paciente')
-    if (clinicId) form.append('clinicId', clinicId)
-    if (entry.driveFileId) form.append('driveFileId', entry.driveFileId)
-
-    const controller = new AbortController()
-    // 45s era insuficiente para STL grandes vía Nginx→EC2→Drive (abortaba a mitad).
     const bytes = blobRecord.data.byteLength || 0
     const timeoutMs = Math.min(
       180_000,
       Math.max(90_000, 45_000 + Math.ceil(bytes / (256 * 1024)) * 1_000),
     )
-    const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+
+    const postOnce = async (): Promise<Response> => {
+      const form = new FormData()
+      form.append(
+        'file',
+        new Blob([blobRecord.data as BlobPart], { type: mimeType }),
+        entry.fileName || 'archivo.bin',
+      )
+      form.append('aidId', aidId)
+      form.append('fileName', entry.fileName)
+      form.append('mimeType', mimeType)
+      form.append('patientSyncId', entry.patientSyncId || entry.patientId || 'sin-paciente')
+      if (clinicId) form.append('clinicId', clinicId)
+      if (entry.driveFileId) form.append('driveFileId', entry.driveFileId)
+
+      const controller = new AbortController()
+      const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+      try {
+        return await fetch(
+          `/api/integrations/google-drive/upload${driveClinicQuery(clinicId)}`,
+          {
+            method: 'POST',
+            headers: driveIdentityHeaders(clinicId),
+            body: form,
+            signal: controller.signal,
+          },
+        )
+      } finally {
+        window.clearTimeout(timer)
+      }
+    }
+
     let response: Response
     try {
-      response = await fetch(
-        `/api/integrations/google-drive/upload${driveClinicQuery(clinicId)}`,
-        {
-          method: 'POST',
-          headers: driveIdentityHeaders(clinicId),
-          body: form,
-          signal: controller.signal,
-        },
-      )
+      response = await postDriveUploadWithRetry(postOnce, emit)
     } catch (error) {
-      window.clearTimeout(timer)
-      const aborted =
-        (error instanceof DOMException && error.name === 'AbortError') ||
-        (error instanceof Error && /aborted|AbortError/i.test(error.message))
-      const message = aborted
+      const message = isAbortError(error)
         ? `La subida a Google Drive superó ${Math.round(timeoutMs / 1000)} s. Reintente con «Subir a Drive».`
         : error instanceof Error
           ? error.message
@@ -215,8 +168,6 @@ export async function uploadDiagnosticAidToGoogleDrive(
       const failed = await markUploadError(aidId, message)
       emit('error', message)
       return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
-    } finally {
-      window.clearTimeout(timer)
     }
     const body = await response.json().catch(() => ({}))
 
