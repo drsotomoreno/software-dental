@@ -168,8 +168,18 @@ function applyPayload<T extends Patient | Appointment>(
   delete payload.id
   delete payload.pendingSync
   delete payload.lastSyncedAt
+  // Flags de listado viven en record.payload; se copian explícitamente al row Dexie.
+  const clinicalFlags =
+    'valuationOnly' in payload || 'phase' in payload || 'treatmentCompleted' in payload
+      ? {
+          valuationOnly: payload.valuationOnly as Patient['valuationOnly'],
+          phase: payload.phase as Patient['phase'],
+          treatmentCompleted: payload.treatmentCompleted as Patient['treatmentCompleted'],
+        }
+      : {}
   return {
     ...(payload as unknown as T),
+    ...clinicalFlags,
     syncId: remote.syncId,
     clinicId: remote.clinicId,
     updatedAt: remote.updatedAt,

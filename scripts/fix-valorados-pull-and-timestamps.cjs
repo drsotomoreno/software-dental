@@ -310,6 +310,21 @@ async function main() {
   fs.writeFileSync(tmp, JSON.stringify(store))
   fs.renameSync(tmp, syncPath)
 
+  // Reemplazo completo en app_json_store (sin merge LWW con aliases stale).
+  try {
+    const durableUrl = pathToFileURL(
+      path.resolve(process.cwd(), 'server/services/durableStore.js'),
+    ).href
+    const { writeDurableJsonReplace } = await import(durableUrl)
+    await writeDurableJsonReplace(syncPath, store, 'clinical-sync')
+    console.log('DURABLE_REPLACE_OK')
+  } catch (error) {
+    console.log(
+      'DURABLE_REPLACE_ERROR',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+
   // Bak intactos
   if (fs.existsSync(bakPath) && fs.statSync(bakPath).size !== bakBytesBefore) {
     console.error('BAK_CHANGED')
@@ -337,13 +352,40 @@ async function main() {
 
   let pullAfter = null
   try {
-    // Invalidar caché del módulo si hay singleton — reimport fresco
     pullAfter = await countViaPullApi(CANONICAL)
     console.log('PULL_API_AFTER_JSON')
     console.log(JSON.stringify(pullAfter, null, 2))
   } catch (error) {
     console.log(
       'PULL_API_AFTER_ERROR',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+
+  let httpPull = null
+  try {
+    httpPull = await httpPullCountProof()
+    console.log('HTTP_PULL_PROOF_JSON')
+    console.log(JSON.stringify(httpPull, null, 2))
+  } catch (error) {
+    console.log(
+      'HTTP_PULL_PROOF_ERROR',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+
+  const backupDir = path.resolve(process.cwd(), 'backups')
+  const backupPath = path.join(backupDir, 'clinical-sync-clean-20261114.json')
+  try {
+    fs.mkdirSync(backupDir, { recursive: true })
+    fs.copyFileSync(syncPath, backupPath)
+    console.log(
+      'BACKUP_CLEAN_JSON',
+      JSON.stringify({ backupPath, bytes: fs.statSync(backupPath).size }),
+    )
+  } catch (error) {
+    console.log(
+      'BACKUP_CLEAN_ERROR',
       error instanceof Error ? error.message : String(error),
     )
   }
@@ -355,8 +397,10 @@ async function main() {
         pullBefore,
         pullAfter,
         diskAfter,
+        httpPull,
         valuationOnlyTrue_pull_before: pullBefore?.valuationOnlyTrue ?? null,
         valuationOnlyTrue_pull_after: pullAfter?.valuationOnlyTrue ?? null,
+        valuationOnlyTrue_http: httpPull?.counts?.valuationOnlyTrue ?? null,
       },
       null,
       2,
@@ -367,7 +411,58 @@ async function main() {
     console.error('VALORADOS_STILL_LOW')
     process.exit(1)
   }
+  if (
+    httpPull &&
+    (httpPull.counts?.valuationOnlyTrue < 39 ||
+      httpPull.counts?.activo < 43 ||
+      httpPull.counts?.terminado < 24)
+  ) {
+    console.error('HTTP_PULL_COUNTS_LOW')
+    process.exit(1)
+  }
   console.log('FIX_VALORADOS_OK')
+}
+
+async function httpPullCountProof() {
+  const authUrl = pathToFileURL(
+    path.resolve(process.cwd(), 'server/services/subscriptionAuthStore.js'),
+  ).href
+  const { MASTER_PASSWORD } = await import(authUrl)
+  const base =
+    process.env.PUBLIC_BASE_URL ||
+    process.env.APP_PUBLIC_URL ||
+    'http://127.0.0.1:3000'
+  const loginRes = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      email: 'doctormauriciosoto@gmail.com',
+      password: MASTER_PASSWORD,
+    }),
+  })
+  const loginJson = await loginRes.json().catch(() => ({}))
+  const token = loginJson.token || null
+  if (!loginRes.ok || !token) {
+    return {
+      ok: false,
+      loginStatus: loginRes.status,
+      loginKeys: Object.keys(loginJson || {}),
+      error: loginJson.error || 'login_failed',
+      base,
+    }
+  }
+  const pullRes = await fetch(`${base}/api/sync/pull?full=0`, {
+    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+  })
+  const pullJson = await pullRes.json().catch(() => ({}))
+  const patients = Array.isArray(pullJson.patients) ? pullJson.patients : []
+  return {
+    ok: pullRes.ok,
+    pullStatus: pullRes.status,
+    base,
+    clinicId: pullJson.clinicId || null,
+    counts: countPatients(patients),
+  }
 }
 
 main().catch((error) => {

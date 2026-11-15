@@ -23,9 +23,9 @@ const PULL_CACHE_DB = 'ClinicSyncPullCache'
 /**
  * Época de sincronización cliente. Al incrementar, el navegador limpia Dexie
  * + caché de pull y fuerza un pull fresco (sin F12 / Clear site data).
- * Bump: 2026-11-14-v2 — pull con flags preservadas vs espejo Postgres.
+ * Bump: 2026-11-14-v3 — HTTP pull verificado + flags en payload y Postgres.
  */
-export const SYNC_SCHEMA_VERSION = '2026-11-14-v2'
+export const SYNC_SCHEMA_VERSION = '2026-11-14-v3'
 /** @deprecated alias de lectura; la clave canónica es MHD_SYNC_EPOCH_KEY */
 const SYNC_SCHEMA_KEY = 'mihistoriadental.syncSchemaVersion'
 const MHD_SYNC_EPOCH_KEY = 'mhd_sync_epoch'

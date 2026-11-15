@@ -211,7 +211,7 @@ async function httpPullCount() {
     process.env.APP_PUBLIC_URL ||
     'http://127.0.0.1:3000'
 
-  const loginRes = await fetch(`${base}/api/auth/login`, {
+  const loginRes = await fetch(`${base}/api/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ email: MASTER_EMAIL, password: MASTER_PASSWORD }),

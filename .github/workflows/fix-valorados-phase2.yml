@@ -1,0 +1,128 @@
+# Fase 2 — alinear JSON+PG, prueba HTTP real, backup clean, restart PM2.
+name: Fix Valorados Phase2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fix:
+    name: Align + HTTP proof + PM2
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: SSH phase2 fix
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            CANONICAL="/var/www/mihistoriadental"
+            APP_DIR="/home/ubuntu/software-dental"
+            [[ -f "$APP_DIR/server.js" ]] || APP_DIR="$CANONICAL"
+
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL"
+              git fetch origin main
+              git reset --hard origin/main
+              rsync -a --exclude 'server/data/' --exclude '.env' --exclude 'node_modules/' --exclude 'dist/' \
+                --exclude 'backups/' \
+                "$CANONICAL/" "$APP_DIR/" || true
+            fi
+
+            SYNC="$APP_DIR/server/data/clinical-sync.json"
+            echo "SYNC_PATH=$SYNC bytes=$(stat -c%s "$SYNC")"
+
+            BAK12=$(stat -c%s "$SYNC.bak-20261112")
+            PRE=$(stat -c%s "$SYNC.bak-20261113-pre-merge")
+            DEDUP=$(stat -c%s "$SYNC.bak-20261113-dedup")
+            echo "BAK12=$BAK12 PRE=$PRE DEDUP=$DEDUP"
+
+            cd "$APP_DIR"
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
+            set +a
+            export PUBLIC_BASE_URL="http://127.0.0.1:${PORT:-3000}"
+
+            echo "==== Stop PM2 + apply fix ===="
+            pm2 stop software-dental || true
+            sleep 2
+            node --max-old-space-size=635 scripts/fix-valorados-pull-and-timestamps.cjs
+
+            [[ "$(stat -c%s "$SYNC.bak-20261112")" == "$BAK12" ]] || { echo "BAK12_CHANGED"; exit 1; }
+            [[ "$(stat -c%s "$SYNC.bak-20261113-pre-merge")" == "$PRE" ]] || { echo "PRE_CHANGED"; exit 1; }
+            [[ "$(stat -c%s "$SYNC.bak-20261113-dedup")" == "$DEDUP" ]] || { echo "DEDUP_CHANGED"; exit 1; }
+
+            echo "==== Restart PM2 ===="
+            HEAP_MB="$(bash scripts/pm2-heap-from-ram.sh 2>/dev/null || echo 450)"
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+            export NODE_ENV=production
+            pm2 delete software-dental 2>/dev/null || true
+            if [[ -f ecosystem.config.cjs ]]; then
+              pm2 start ecosystem.config.cjs --update-env
+            else
+              pm2 start server.js --name software-dental --cwd "$APP_DIR" --update-env \
+                --node-args="--max-old-space-size=${HEAP_MB}"
+            fi
+            pm2 save
+            sleep 18
+            STATUS=$(pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const a=JSON.parse(r||"[]").find(x=>x.name==="software-dental");console.log(a&&a.pm2_env?a.pm2_env.status:"missing")})')
+            echo "PM2_STATUS=$STATUS"
+            [[ "$STATUS" == "online" ]] || exit 1
+
+            echo "==== HTTP proof AFTER restart ===="
+            export PUBLIC_BASE_URL="http://127.0.0.1:${PORT:-3000}"
+            node --max-old-space-size=635 -e '
+              const { pathToFileURL } = require("node:url");
+              const path = require("node:path");
+              (async () => {
+                const authUrl = pathToFileURL(path.resolve("server/services/subscriptionAuthStore.js")).href;
+                const { MASTER_PASSWORD } = await import(authUrl);
+                const base = process.env.PUBLIC_BASE_URL || "http://127.0.0.1:3000";
+                const loginRes = await fetch(base + "/api/login", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Accept: "application/json" },
+                  body: JSON.stringify({ email: "doctormauriciosoto@gmail.com", password: MASTER_PASSWORD }),
+                });
+                const loginJson = await loginRes.json();
+                if (!loginRes.ok || !loginJson.token) {
+                  console.log(JSON.stringify({ ok: false, loginStatus: loginRes.status, keys: Object.keys(loginJson||{}) }));
+                  process.exit(1);
+                }
+                const pullRes = await fetch(base + "/api/sync/pull?full=0", {
+                  headers: { Accept: "application/json", Authorization: "Bearer " + loginJson.token },
+                });
+                const pull = await pullRes.json();
+                const patients = Array.isArray(pull.patients) ? pull.patients : [];
+                let voTrue = 0, activo = 0, valorado = 0, terminado = 0;
+                for (const rec of patients) {
+                  const p = rec && rec.payload && typeof rec.payload === "object" ? rec.payload : {};
+                  const tc = p.treatmentCompleted === true || p.treatmentCompleted === "true";
+                  const vo = p.valuationOnly === true || p.valuationOnly === "true";
+                  const voFalse = p.valuationOnly === false || p.valuationOnly === "false";
+                  if (vo) voTrue++;
+                  if (tc) terminado++;
+                  else if (vo || (!voFalse && p.phase === "VALORACION_RAPIDA")) valorado++;
+                  else activo++;
+                }
+                const out = { ok: pullRes.ok, n: patients.length, valuationOnlyTrue: voTrue, activo, valorado, terminado, clinicKeysHint: pull.clinicId || null };
+                console.log("HTTP_PULL_AFTER_RESTART_JSON");
+                console.log(JSON.stringify(out, null, 2));
+                if (voTrue < 39 || activo < 43 || terminado < 24) process.exit(1);
+              })().catch((e) => { console.error(e); process.exit(1); });
+            '
+
+            test -f "$APP_DIR/backups/clinical-sync-clean-20261114.json"
+            echo "BACKUP_BYTES=$(stat -c%s "$APP_DIR/backups/clinical-sync-clean-20261114.json")"
+            echo "SYNC_BYTES_FINAL=$(stat -c%s "$SYNC")"
+            echo "CLINIC_KEYS=$(node -e 'const j=require("./server/data/clinical-sync.json"); console.log(Object.keys(j.clinics||{}).join(","))')"
+            HEAD=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -Ik "https://www.mihistoriadental.com/pacientes-valorados" || echo 000)
+            echo "PUBLIC_HEAD=$HEAD"
+            [[ "$HEAD" == "200" ]] || exit 1
+            echo "FIX_VALORADOS_PHASE2_OK"

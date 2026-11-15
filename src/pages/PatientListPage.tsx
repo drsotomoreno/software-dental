@@ -10,29 +10,35 @@ import { SeedTestDataPanel } from '@/components/dev/SeedTestDataPanel'
 import { PatientListSearch } from '@/components/patients/PatientListSearch'
 import { forzarSincronizacionLocal } from '@/services/clinicalSyncService'
 import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
+import { resolveActiveClinicSyncId } from '@/services/clinicalSyncState'
 import { patientMatchesQuery } from '@/utils/patientListSearch'
 
 export function PatientListPage() {
-  const { can } = useAuth()
+  const { can, user } = useAuth()
   const { audit } = useAudit()
   const loggedRef = useRef(false)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
   const [query, setQuery] = useState('')
+  const clinicId = resolveActiveClinicSyncId(user)
 
   const patients = useLiveQuery(async () => {
+    if (!clinicId) return []
     const all = await db.patients.orderBy('lastName').reverse().toArray()
-    return all.filter((patient) => belongsToCurrentClinic(patient) && isActivePatient(patient))
-  })
+    return all.filter(
+      (patient) => belongsToCurrentClinic(patient, clinicId) && isActivePatient(patient),
+    )
+  }, [clinicId])
 
   const pendingSyncCount = useLiveQuery(async () => {
+    if (!clinicId) return 0
     const all = await db.patients.toArray()
     return all.filter(
       (patient) =>
-        belongsToCurrentClinic(patient) &&
+        belongsToCurrentClinic(patient, clinicId) &&
         (patient.pendingSync === true || !patient.lastSyncedAt),
     ).length
-  })
+  }, [clinicId])
 
   const filteredPatients = useMemo(
     () => (patients ?? []).filter((patient) => patientMatchesQuery(patient, query)),

@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import { PatientListSearch } from '@/components/patients/PatientListSearch'
 import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
+import { resolveActiveClinicSyncId } from '@/services/clinicalSyncState'
 import { isValuatedOnlyPatient } from '@/types/patient'
 import { patientMatchesQuery } from '@/utils/patientListSearch'
 import {
@@ -20,11 +21,15 @@ export function ValuatedPatientsPage() {
   const { audit } = useAudit()
   const loggedRef = useRef(false)
   const [query, setQuery] = useState('')
+  const clinicId = resolveActiveClinicSyncId(user)
 
   const patients = useLiveQuery(async () => {
+    if (!clinicId) return []
     const all = await db.patients.orderBy('lastName').reverse().toArray()
-    return all.filter((patient) => belongsToCurrentClinic(patient) && isValuatedOnlyPatient(patient))
-  })
+    return all.filter(
+      (patient) => belongsToCurrentClinic(patient, clinicId) && isValuatedOnlyPatient(patient),
+    )
+  }, [clinicId])
 
   const filteredPatients = useMemo(
     () =>

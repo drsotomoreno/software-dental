@@ -509,6 +509,33 @@ export async function deleteJsonDocument(storeKey) {
   }
 }
 
+/**
+ * Escritura atómica a disco + reemplazo completo en app_json_store (sin merge).
+ * Evita que un documento stale en Postgres reintroduzca aliases/clínicas borradas.
+ */
+export async function writeDurableJsonReplace(filePath, value, storeKey) {
+  await writeJsonFileAtomic(filePath, value)
+  if (postgresCoolingDown()) return
+  const db = getPool()
+  if (!db) return
+  try {
+    const client = await db.connect()
+    try {
+      await ensureTable(client)
+      await client.query(
+        `INSERT INTO app_json_store (key, value, updated_at)
+         VALUES ($1::text, $2::jsonb, now())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+        [storeKey, JSON.stringify(value)],
+      )
+    } finally {
+      client.release()
+    }
+  } catch (error) {
+    markPostgresUnavailable(error)
+  }
+}
+
 /** Lectura con fusionador propio (no usar mergeDurableStores de usuarios/sesiones). */
 export async function readDurableJsonWithMerge(filePath, fallback, storeKey, mergeFn) {
   const fileValue = await readJsonFile(filePath)

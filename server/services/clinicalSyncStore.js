@@ -7,7 +7,7 @@ import {
   readAttachmentBytes,
   writeAttachmentBytes,
 } from './clinicAttachmentStore.js'
-import { readDurableJsonWithMerge, writeDurableJsonWithMerge } from './durableStore.js'
+import { readDurableJsonWithMerge, writeDurableJsonReplace } from './durableStore.js'
 import {
   mergeAdministrativeClinicalFields,
   shouldReplaceClinicalDocument,
@@ -478,9 +478,11 @@ async function loadStore() {
 
 async function saveStore(store) {
   // Antes de disco/Postgres: purgar Base64/DataURL >50k, claves binarias y clinicalDraft pesados.
+  // Reemplazo completo en app_json_store: un merge LWW con un documento stale
+  // reintroducía aliases (UUID/email) y volvía a inflar clinical-sync.json.
   const base = store && typeof store === 'object' ? store : emptyStore()
   const sanitized = omitHeavyClinicalDraftForms(stripHeavyBinaryFields(base))
-  await writeDurableJsonWithMerge(STORE_FILE, sanitized, STORE_KEY, mergeClinicalStores)
+  await writeDurableJsonReplace(STORE_FILE, sanitized, STORE_KEY)
 }
 
 /**
