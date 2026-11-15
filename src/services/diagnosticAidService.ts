@@ -117,15 +117,36 @@ async function readFileInChunks(file: File): Promise<ArrayBuffer> {
   return merged.buffer
 }
 
+async function patientIdLookupKeys(patientId: string): Promise<string[]> {
+  const keys = new Set<string>()
+  const raw = String(patientId || '').trim()
+  if (raw) keys.add(raw)
+  try {
+    const { getPatientByRouteId } = await import('@/utils/patientId')
+    const patient = await getPatientByRouteId(raw)
+    if (patient?.id != null) keys.add(String(patient.id))
+    if (patient?.syncId) keys.add(String(patient.syncId))
+  } catch {
+    // ignore
+  }
+  return [...keys]
+}
+
 export async function listDiagnosticAids(
   patientId: string,
   encounterId?: string,
 ): Promise<DiagnosticAid[]> {
-  const items = encounterId
-    ? await db.diagnosticAids.where('[patientId+encounterId]').equals([patientId, encounterId]).toArray()
-    : await db.diagnosticAids.where('patientId').equals(patientId).toArray()
+  const keys = await patientIdLookupKeys(patientId)
+  const byId = new Map<string, DiagnosticAid>()
 
-  return items.sort((a, b) => {
+  for (const key of keys) {
+    const rows = encounterId
+      ? await db.diagnosticAids.where('[patientId+encounterId]').equals([key, encounterId]).toArray()
+      : await db.diagnosticAids.where('patientId').equals(key).toArray()
+    for (const row of rows) byId.set(row.id, row)
+  }
+
+  return [...byId.values()].sort((a, b) => {
     const dateA = new Date(a.receivedAt ?? a.createdAt).getTime()
     const dateB = new Date(b.receivedAt ?? b.createdAt).getTime()
     return dateB - dateA

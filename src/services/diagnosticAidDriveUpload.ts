@@ -238,7 +238,10 @@ export async function uploadDiagnosticAidToGoogleDrive(
     const webViewLink =
       String(body.webViewLink || '').trim() ||
       `https://drive.google.com/file/d/${driveFileId}/view`
-    const resolvedClinicId = String(body.clinicId || clinicId || '').trim()
+    // NO sobrescribir clinicId con el storageKey de Drive (p. ej. clinic:email):
+    // purgeForeignClinicRecords lo trataría como ajeno y borraría el adjunto de Dexie
+    // → lista vacía pese a "Guardado en Google Drive".
+    const sessionClinicId = String(entry.clinicId || clinicId || resolveActiveDriveClinicId() || '').trim()
 
     await db.diagnosticAids.update(aidId, {
       driveFileId,
@@ -246,7 +249,7 @@ export async function uploadDiagnosticAidToGoogleDrive(
       storageBackend: 'google_drive',
       driveUploadStatus: 'uploaded',
       driveUploadError: null,
-      clinicId: resolvedClinicId || entry.clinicId,
+      ...(sessionClinicId ? { clinicId: sessionClinicId } : {}),
       pendingSync: true,
     })
 
@@ -256,6 +259,7 @@ export async function uploadDiagnosticAidToGoogleDrive(
       webViewLink,
       storageBackend: 'google_drive' as const,
       driveUploadStatus: 'uploaded' as const,
+      clinicId: sessionClinicId || entry.clinicId,
     }
 
     await enqueueDiagnosticAidForSync(updated, {

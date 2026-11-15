@@ -399,6 +399,22 @@ function DiagnosticAidCard({
         <p className="text-xs text-slate-600">{item.comments}</p>
       )}
 
+      {(item.webViewLink || item.driveFileId) && (
+        <a
+          href={
+            item.webViewLink ||
+            `https://drive.google.com/file/d/${item.driveFileId}/view`
+          }
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-900 hover:underline"
+        >
+          <Cloud className="h-3.5 w-3.5" />
+          Abrir en Google Drive
+          <ExternalLink className="h-3 w-3" />
+        </a>
+      )}
+
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -416,7 +432,7 @@ function DiagnosticAidCard({
           ) : (
             <ExternalLink className="h-3.5 w-3.5" />
           )}
-          Abrir
+          Abrir / Visor
         </button>
 
         {isDesktopApp() && !useWebMenu && (

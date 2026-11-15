@@ -448,19 +448,64 @@ async function mergeDiagnosticAids(records: ClinicalSyncRecord[]): Promise<boole
       continue
     }
 
-    const patientId = (await resolveLocalPatientId(payload)) || String(payload.patientId || '')
+    const existing = await db.diagnosticAids.get(id)
+    const resolvedPatientId =
+      (await resolveLocalPatientId(payload)) ||
+      (existing?.patientId ? String(existing.patientId) : '') ||
+      String(payload.patientId || '')
+    if (!resolvedPatientId) continue
+
+    const driveFileId =
+      String(payload.driveFileId || existing?.driveFileId || '').trim() || null
+    const webViewLink =
+      String(
+        payload.webViewLink ||
+          payload.driveWebViewLink ||
+          existing?.webViewLink ||
+          '',
+      ).trim() ||
+      (driveFileId ? `https://drive.google.com/file/d/${driveFileId}/view` : null)
+
     const next: DiagnosticAid = {
+      ...(existing || ({} as DiagnosticAid)),
       ...(payload as unknown as DiagnosticAid),
       id,
-      patientId,
-      encounterId: String(payload.encounterId || payload.evolutionId || ''),
-      fileType: (payload.fileType as DiagnosticAid['fileType']) || 'OTHER',
-      fileName: String(payload.fileName || 'archivo'),
-      absolutePath: String(payload.absolutePath || `[navegador]/${payload.fileName || 'archivo'}`),
-      fileHash: String(payload.fileHash || ''),
-      createdAt: String(payload.createdAt || remote.updatedAt),
-      comments: String(payload.comments || ''),
-      clinicId: remote.clinicId,
+      patientId: resolvedPatientId,
+      encounterId: String(
+        payload.encounterId || payload.evolutionId || existing?.encounterId || '',
+      ),
+      fileType:
+        (payload.fileType as DiagnosticAid['fileType']) ||
+        existing?.fileType ||
+        'OTHER',
+      fileName: String(payload.fileName || existing?.fileName || 'archivo'),
+      absolutePath: String(
+        payload.absolutePath ||
+          existing?.absolutePath ||
+          `[navegador]/${payload.fileName || existing?.fileName || 'archivo'}`,
+      ),
+      fileHash: String(payload.fileHash || existing?.fileHash || ''),
+      createdAt: String(payload.createdAt || existing?.createdAt || remote.updatedAt),
+      receivedAt: String(payload.receivedAt || existing?.receivedAt || ''),
+      comments: String(payload.comments || existing?.comments || ''),
+      // Conservar blob local + metadatos Drive aunque el pull venga incompleto.
+      blobId: existing?.blobId ?? (payload.blobId as string | null | undefined) ?? null,
+      driveFileId,
+      webViewLink,
+      storageBackend:
+        driveFileId
+          ? 'google_drive'
+          : existing?.storageBackend ||
+            (payload.storageBackend as DiagnosticAid['storageBackend']) ||
+            'indexeddb',
+      driveUploadStatus: driveFileId
+        ? 'uploaded'
+        : existing?.driveUploadStatus ||
+          (payload.driveUploadStatus as DiagnosticAid['driveUploadStatus']) ||
+          null,
+      clinicId: existing?.clinicId || remote.clinicId || String(payload.clinicId || ''),
+      patientSyncId:
+        String(payload.patientSyncId || existing?.patientSyncId || '').trim() || undefined,
       pendingSync: false,
       lastSyncedAt: new Date().toISOString(),
     }

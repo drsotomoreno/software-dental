@@ -356,12 +356,22 @@ export async function purgeForeignClinicRecords(clinicId = getCurrentClinicId())
 
     for (const row of await db.diagnosticAids.toArray()) {
       if (row.id == null) continue
-      const patientOk = keptPatientIds.has(String(row.patientId ?? ''))
-      if (!rowBelongsToClinicScope(row.clinicId, clinicId) || !patientOk) {
+      const patientOk =
+        keptPatientIds.has(String(row.patientId ?? '')) ||
+        (row.patientSyncId ? keptPatientIds.has(String(row.patientSyncId)) : false)
+      // Sin clinicId aún: conservar si el paciente es de esta clínica (upload reciente).
+      const clinicOk =
+        !row.clinicId ||
+        rowBelongsToClinicScope(row.clinicId, clinicId) ||
+        clinicIdsMatch(row.clinicId, clinicId)
+      if (!clinicOk || !patientOk) {
         await db.diagnosticAids.delete(row.id)
         continue
       }
       if (canonical && row.clinicId && !clinicIdsMatch(row.clinicId, canonical)) {
+        // Reetiquetar al canónico de sesión (no borrar por alias de Drive).
+        await db.diagnosticAids.update(row.id, { clinicId: canonical })
+      } else if (canonical && !row.clinicId) {
         await db.diagnosticAids.update(row.id, { clinicId: canonical })
       }
     }
