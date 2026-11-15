@@ -10,6 +10,7 @@ import {
   isGoogleDriveRequiredResponse,
   notifyGoogleDriveRequired,
 } from '@/services/globalToast'
+import { getCurrentClinicId, withClinicalSyncSuppressed } from '@/services/clinicalSyncState'
 import { enqueueDiagnosticAidForSync } from '@/services/syncQueueService'
 import type { DiagnosticAid } from '@/types/diagnosticAid'
 import { mimeTypeForDiagnosticFile } from '@/utils/diagnosticAidWebClassification'
@@ -24,8 +25,13 @@ export type DriveUploadProgress = {
   message: string
 }
 
+/** clinicId de sesión para Dexie — nunca storageKey de Drive ni email suelto. */
+function resolveDexieClinicId(entry: DiagnosticAid): string {
+  return String(entry.clinicId || getCurrentClinicId() || '').trim()
+}
+
 function resolveUploadClinicId(entry: DiagnosticAid): string {
-  return String(entry.clinicId || resolveActiveDriveClinicId() || '').trim()
+  return String(entry.clinicId || resolveActiveDriveClinicId() || getCurrentClinicId() || '').trim()
 }
 
 function isAbortError(error: unknown): boolean {
@@ -214,12 +220,11 @@ export async function uploadDiagnosticAidToGoogleDrive(
     const webViewLink =
       String(body.webViewLink || '').trim() ||
       `https://drive.google.com/file/d/${driveFileId}/view`
-    // NO sobrescribir clinicId con el storageKey de Drive (p. ej. clinic:email):
-    // purgeForeignClinicRecords lo trataría como ajeno y borraría el adjunto de Dexie
-    // → lista vacía pese a "Guardado en Google Drive".
-    const sessionClinicId = String(entry.clinicId || clinicId || resolveActiveDriveClinicId() || '').trim()
+    // Solo clinicId canónico de sesión (getCurrentClinicId). Nunca storageKey Drive.
+    const sessionClinicId = resolveDexieClinicId(entry)
 
-    await db.diagnosticAids.update(aidId, {
+    const patched: DiagnosticAid = {
+      ...entry,
       driveFileId,
       webViewLink,
       storageBackend: 'google_drive',
@@ -227,15 +232,19 @@ export async function uploadDiagnosticAidToGoogleDrive(
       driveUploadError: null,
       ...(sessionClinicId ? { clinicId: sessionClinicId } : {}),
       pendingSync: true,
+    }
+
+    // put + suppress: evita dirty/purge a mitad de escritura y asegura campos Drive en Dexie.
+    await withClinicalSyncSuppressed(async () => {
+      await db.diagnosticAids.put(patched)
     })
 
-    const updated = (await db.diagnosticAids.get(aidId)) ?? {
-      ...entry,
-      driveFileId,
-      webViewLink,
-      storageBackend: 'google_drive' as const,
-      driveUploadStatus: 'uploaded' as const,
-      clinicId: sessionClinicId || entry.clinicId,
+    let updated = await db.diagnosticAids.get(aidId)
+    if (!updated?.driveFileId) {
+      await withClinicalSyncSuppressed(async () => {
+        await db.diagnosticAids.put(patched)
+      })
+      updated = (await db.diagnosticAids.get(aidId)) ?? patched
     }
 
     await enqueueDiagnosticAidForSync(updated, {

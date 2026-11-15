@@ -364,7 +364,16 @@ export async function purgeForeignClinicRecords(clinicId = getCurrentClinicId())
         !row.clinicId ||
         rowBelongsToClinicScope(row.clinicId, clinicId) ||
         clinicIdsMatch(row.clinicId, clinicId)
+      const hasDriveOrBlob = Boolean(row.driveFileId || row.blobId || row.webViewLink)
+      // NUNCA borrar escaneos ya en Drive / con blob: reetiquetar. Evita "Guardado en Drive"
+      // con lista vacía o sin «Abrir en Google Drive» / visor.
       if (!clinicOk || !patientOk) {
+        if (hasDriveOrBlob) {
+          if (canonical) {
+            await db.diagnosticAids.update(row.id, { clinicId: canonical })
+          }
+          continue
+        }
         await db.diagnosticAids.delete(row.id)
         continue
       }

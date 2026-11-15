@@ -146,6 +146,31 @@ export async function listDiagnosticAids(
     for (const row of rows) byId.set(row.id, row)
   }
 
+  // Huérfanos: patientId desfasado tras rehidratación, pero patientSyncId coincide.
+  try {
+    const { getPatientByRouteId } = await import('@/utils/patientId')
+    const patient = await getPatientByRouteId(String(patientId || '').trim())
+    const syncId = String(patient?.syncId || '').trim()
+    const localId = patient?.id != null ? String(patient.id) : ''
+    if (syncId) {
+      const orphans = await db.diagnosticAids
+        .filter((row) => String(row.patientSyncId || '') === syncId)
+        .toArray()
+      for (const row of orphans) {
+        if (byId.has(row.id)) continue
+        if (encounterId && String(row.encounterId || '') !== String(encounterId)) continue
+        if (localId && String(row.patientId) !== localId) {
+          void db.diagnosticAids.update(row.id, { patientId: localId })
+          byId.set(row.id, { ...row, patientId: localId })
+        } else {
+          byId.set(row.id, row)
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
   return [...byId.values()].sort((a, b) => {
     const dateA = new Date(a.receivedAt ?? a.createdAt).getTime()
     const dateB = new Date(b.receivedAt ?? b.createdAt).getTime()

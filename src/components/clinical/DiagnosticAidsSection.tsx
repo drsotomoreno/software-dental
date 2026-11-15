@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 
 import {
+  Box,
   ChevronDown,
   Cloud,
   CloudOff,
@@ -45,6 +46,7 @@ import {
   type DiagnosticAid,
   type DiagnosticAidFileType,
 } from "@/types/diagnosticAid";
+import { classifyDiagnosticAidForWeb } from "@/utils/diagnosticAidWebClassification";
 
 import { getDesktopBridge, isDesktopApp } from "@/types/desktopBridge";
 
@@ -265,6 +267,8 @@ function DiagnosticAidCard({
 
   onOpenWebMenu,
 
+  onOpenMesh3d,
+
   onOpenWithPicker,
 
   onRetryDrive,
@@ -287,6 +291,8 @@ function DiagnosticAidCard({
 
   onOpenWebMenu: (item: DiagnosticAid) => void;
 
+  onOpenMesh3d: (item: DiagnosticAid) => void;
+
   onOpenWithPicker: (id: string) => void;
 
   onRetryDrive: (item: DiagnosticAid) => void;
@@ -304,6 +310,8 @@ function DiagnosticAidCard({
   const useWebMenu = shouldOpenDiagnosticAidWithWebMenu(item);
 
   const storage = storageLabel(item);
+
+  const isMesh3d = classifyDiagnosticAidForWeb(item.fileName) === "mesh3d";
 
   return (
     <article className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -407,7 +415,7 @@ function DiagnosticAidCard({
           }
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-900 hover:underline"
+          className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
         >
           <Cloud className="h-3.5 w-3.5" />
           Abrir en Google Drive
@@ -421,18 +429,25 @@ function DiagnosticAidCard({
 
           disabled={disabled || isOpening}
 
-          onClick={() =>
-            useWebMenu ? onOpenWebMenu(item) : onOpenNative(item.id)
-          }
+          onClick={() => {
+            if (isMesh3d && useWebMenu) {
+              onOpenMesh3d(item);
+              return;
+            }
+            if (useWebMenu) onOpenWebMenu(item);
+            else onOpenNative(item.id);
+          }}
 
           className="inline-flex items-center gap-1.5 rounded-lg bg-dental-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-dental-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isOpening ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : isMesh3d ? (
+            <Box className="h-3.5 w-3.5" />
           ) : (
             <ExternalLink className="h-3.5 w-3.5" />
           )}
-          Abrir / Visor
+          {isMesh3d ? "Ver en visor 3D" : "Abrir / Visor"}
         </button>
 
         {isDesktopApp() && !useWebMenu && (
@@ -677,53 +692,49 @@ export function DiagnosticAidsSection({
     [user],
   );
 
-  const handleWebAction = useCallback(
-    async (action: DiagnosticAidWebAction) => {
-      if (!webMenuItem) return;
-
+  const openAidAction = useCallback(
+    async (item: DiagnosticAid, action: DiagnosticAidWebAction) => {
+      setOpeningId(item.id);
       setMenuBusy(true);
-
       setBanner(null);
-
       try {
-        const result = await executeDiagnosticAidWebAction(
-          webMenuItem,
-          action,
-          user,
-        );
-
+        const result = await executeDiagnosticAidWebAction(item, action, user);
         if (result.previewUrl && result.previewKind) {
           setPreview({
-            fileName: webMenuItem.fileName,
-
+            fileName: item.fileName,
             url: result.previewUrl,
-
             kind: result.previewKind,
-
             driveUrl:
-              webMenuItem.webViewLink ||
-              (webMenuItem.driveFileId
-                ? `https://drive.google.com/file/d/${webMenuItem.driveFileId}/view`
+              item.webViewLink ||
+              (item.driveFileId
+                ? `https://drive.google.com/file/d/${item.driveFileId}/view`
                 : null),
-
-            aidId: webMenuItem.id,
+            aidId: item.id,
           });
-
           setWebMenuItem(null);
+        } else if (
+          !result.ok &&
+          action === "view_in_app_3d" &&
+          (item.webViewLink || item.driveFileId)
+        ) {
+          // Fallback: si el proxy Drive falla, abrir el archivo en Drive.
+          const drive =
+            item.webViewLink ||
+            `https://drive.google.com/file/d/${item.driveFileId}/view`;
+          window.open(drive, "_blank", "noopener,noreferrer");
+          setBanner({
+            tone: "info",
+            message: `${result.message} Se abrió el enlace de Google Drive.`,
+          });
+          setWebMenuItem(null);
+          return;
         }
 
         setBanner({
           tone: result.ok ? "success" : "error",
-
           message: result.message,
         });
-
-        // Cerrar menú tras éxito (salvo que se abrió preview/visor). Si falla, cerrar igual para no dejar botones grises.
-        if (result.previewUrl) {
-          // preview ya cerró el menú
-        } else {
-          setWebMenuItem(null);
-        }
+        if (!result.previewUrl) setWebMenuItem(null);
       } catch (error) {
         setBanner({
           tone: "error",
@@ -737,8 +748,22 @@ export function DiagnosticAidsSection({
         setOpeningId(null);
       }
     },
+    [user],
+  );
 
-    [user, webMenuItem],
+  const handleWebAction = useCallback(
+    async (action: DiagnosticAidWebAction) => {
+      if (!webMenuItem) return;
+      await openAidAction(webMenuItem, action);
+    },
+    [webMenuItem, openAidAction],
+  );
+
+  const handleOpenMesh3d = useCallback(
+    async (item: DiagnosticAid) => {
+      await openAidAction(item, "view_in_app_3d");
+    },
+    [openAidAction],
   );
 
   const handleRetryDrive = useCallback(
@@ -970,6 +995,8 @@ export function DiagnosticAidsSection({
               onOpenNative={(id) => void handleOpenNative(id)}
 
               onOpenWebMenu={openWebMenu}
+
+              onOpenMesh3d={(aid) => void handleOpenMesh3d(aid)}
 
               onOpenWithPicker={(id) => void handleOpenNative(id, true)}
 
