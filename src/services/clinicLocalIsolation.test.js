@@ -27,7 +27,11 @@ function clinicIdsMatch(a, b) {
 test('adoptLocalRecords no debe reasignar clinicId ajeno', async () => {
   const src = await readFile(join(here, 'clinicalSyncService.ts'), 'utf8')
   assert.match(src, /NUNCA reasigna clinicId ajeno/)
-  assert.match(src, /if \(row\.clinicId && !clinicIdsMatch\(row\.clinicId, clinicId\)\) continue/)
+  assert.match(
+    src,
+    /if \(row\.clinicId && !rowBelongsToClinicScope\(row\.clinicId, clinicId\)\) continue/,
+  )
+  assert.match(src, /solo saltar clínicas ajenas/)
   assert.doesNotMatch(
     src,
     /if \(row\.clinicId !== clinicId\) patch\.clinicId = clinicId/,
@@ -86,17 +90,45 @@ test('pullCompleteClinicOnLogin aísla caché por clínica canónica', async () 
   )
 })
 
-test('SYNC_SCHEMA_VERSION / mhd_sync_epoch fuerza auto-wipe de caché cliente', async () => {
+test('SYNC_SCHEMA_VERSION / mhd_sync_epoch invalida caché SIN wipe clínico previo', async () => {
   const src = await readFile(join(here, 'clinicLocalIsolation.ts'), 'utf8')
-  assert.match(src, /export const SYNC_SCHEMA_VERSION = '2026-11-14-v2'/)
+  assert.match(src, /export const SYNC_SCHEMA_VERSION = '2026-11-14-v4'/)
   assert.match(src, /mhd_sync_epoch/)
   assert.match(src, /mihistoriadental\.syncSchemaVersion/)
   assert.match(src, /ensureSyncSchemaEpoch/)
+  assert.match(src, /commitSyncSchemaEpoch/)
+  assert.match(src, /clearPullCache/)
   assert.match(src, /wipeLocalClinicalData/)
   assert.match(src, /lastSyncAt/)
+  // Época nueva NO debe llamar wipeLocalClinicalData dentro de ensureSyncSchemaEpoch.
+  const ensureFn = src.slice(
+    src.indexOf('export async function ensureSyncSchemaEpoch'),
+    src.indexOf('export function commitSyncSchemaEpoch'),
+  )
+  assert.doesNotMatch(
+    ensureFn,
+    /wipeLocalClinicalData\(/,
+    'Médico-legal: no borrar Dexie antes de pull verificado',
+  )
+  assert.match(ensureFn, /clearPullCache/)
 })
 
-test('login + pull + reload: pacientes/odontogramas/drafts canónicos no se purgan', () => {
+test('belongsToCurrentClinic / purge usan aliases de sesión (UUID maestro)', async () => {
+  const src = await readFile(join(here, 'clinicLocalIsolation.ts'), 'utf8')
+  assert.match(src, /rowBelongsToClinicScope/)
+  assert.match(src, /clinicKeyInScope/)
+  assert.match(src, /clinicSyncAliasIds/)
+  assert.match(src, /Alias legacy/)
+})
+
+test('pullCompleteClinicOnLogin confirma época solo tras pull OK y conserva locales', async () => {
+  const src = await readFile(join(here, 'clinicalSyncService.ts'), 'utf8')
+  assert.match(src, /commitSyncSchemaEpoch/)
+  assert.match(src, /se conservan pacientes locales/)
+  assert.match(src, /CLINICAL_SYNC_LOGIN_FETCH_TIMEOUT_MS/)
+})
+
+test('login + pull + reload: pacientes/odontogramas/drafts canónicos no se purgan', async () => {
   const masterUuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
   const master = {
     id: masterUuid,
@@ -113,32 +145,42 @@ test('login + pull + reload: pacientes/odontogramas/drafts canónicos no se purg
   assert.equal(isOrphanUuidDentalEmrDb(orphanDb, masterUuid, canonicalDb), true)
 
   // Simula filas ya en el cubo canónico tras sync/pull (como en EC2).
+  // Incluye alias UUID del maestro: debe conservarse (clinicKeyInScope), no purgarse.
+  const scopeMod = await import('../../shared/clinicalSyncScope.js')
+  const { canonical: scopeCanonical, aliases } = scopeMod.clinicSyncAliasIds(master)
+  const inScope = (clinicId) => scopeMod.clinicKeyInScope(clinicId, scopeCanonical, aliases)
+
   const patients = [
     { id: 'p-activo-1', clinicId: canonical, status: 'activo' },
     { id: 'p-activo-2', clinicId: 'doctormauriciosoto@gmail.com', status: 'activo' },
+    { id: 'p-uuid', clinicId: `clinic:${masterUuid}`, status: 'activo' },
     { id: 'p-ajeno', clinicId: 'clinic:otra@clinica.test', status: 'activo' },
   ]
   const odontograms = [
     { id: 'o1', patientId: 'p-activo-1', clinicId: canonical },
     { id: 'o2', patientId: 'p-activo-2', clinicId: canonical },
+    { id: 'o-uuid', patientId: 'p-uuid', clinicId: `clinic:${masterUuid}` },
     { id: 'o-ajeno', patientId: 'p-ajeno', clinicId: 'clinic:otra@clinica.test' },
   ]
   const drafts = [
     { patientId: 'p-activo-1' },
     { patientId: 'p-activo-2' },
+    { patientId: 'p-uuid' },
     { patientId: 'p-ajeno' },
   ]
 
-  const keptPatients = patients.filter((row) => clinicIdsMatch(row.clinicId, canonical))
+  const keptPatients = patients.filter((row) => inScope(row.clinicId))
   const keptPatientIds = new Set(keptPatients.map((p) => p.id))
   const keptOdontograms = odontograms.filter(
-    (row) => clinicIdsMatch(row.clinicId, canonical) && keptPatientIds.has(row.patientId),
+    (row) => inScope(row.clinicId) && keptPatientIds.has(row.patientId),
   )
   const keptDrafts = drafts.filter((row) => keptPatientIds.has(row.patientId))
 
-  assert.equal(keptPatients.length, 2)
-  assert.equal(keptOdontograms.length, 2)
-  assert.equal(keptDrafts.length, 2)
+  assert.equal(keptPatients.length, 3)
+  assert.equal(keptOdontograms.length, 3)
+  assert.equal(keptDrafts.length, 3)
+  assert.equal(clinicIdsMatch(`clinic:${masterUuid}`, canonical), false)
+  assert.equal(inScope(`clinic:${masterUuid}`), true)
   // Recarga: misma resolución → mismos ids → purge no toca el cubo propio.
   assert.equal(resolveClinicSyncId(master), canonical)
   assert.equal(resolveDentalEmrDbNameFromUser(master), canonicalDb)

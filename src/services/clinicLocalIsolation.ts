@@ -14,18 +14,23 @@ import {
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import { getCurrentClinicId, withRemotePullLock } from '@/services/clinicalSyncState'
 import { citasStorageKey, CITAS_STORAGE_KEY_LEGACY } from '@/utils/agendaStorage'
-import { resolveClinicSyncId } from '../../shared/clinicalSyncScope.js'
+import {
+  clinicKeyInScope,
+  clinicSyncAliasIds,
+  resolveClinicSyncId,
+} from '../../shared/clinicalSyncScope.js'
 
 const LAST_CLINIC_KEY = 'doctorSEO_lastClinicSyncId'
 const LAST_DB_KEY = 'doctorSEO_lastDentalEmrDb'
 const PULL_CACHE_DB = 'ClinicSyncPullCache'
 
 /**
- * Época de sincronización cliente. Al incrementar, el navegador limpia Dexie
- * + caché de pull y fuerza un pull fresco (sin F12 / Clear site data).
- * Bump: 2026-11-14-v3 — HTTP pull verificado + flags en payload y Postgres.
+ * Época de sincronización cliente. Al incrementar, el navegador invalida la
+ * caché de pull y fuerza un pull fresco. NUNCA borra pacientes/historias de
+ * Dexie antes de un pull verificado (datos clínicos / legales).
+ * Bump: 2026-11-14-v4 — epoch seguro (sin wipe previo) + matching por alias.
  */
-export const SYNC_SCHEMA_VERSION = '2026-11-14-v3'
+export const SYNC_SCHEMA_VERSION = '2026-11-14-v4'
 /** @deprecated alias de lectura; la clave canónica es MHD_SYNC_EPOCH_KEY */
 const SYNC_SCHEMA_KEY = 'mihistoriadental.syncSchemaVersion'
 const MHD_SYNC_EPOCH_KEY = 'mhd_sync_epoch'
@@ -61,13 +66,46 @@ export function clinicIdsMatch(a?: string | null, b?: string | null): boolean {
   return Boolean(left && right && left === right)
 }
 
+/**
+ * Alcance de la sesión (canónico + aliases UUID/email/superadmin-session).
+ * Evita ocultar o purgar pacientes del maestro etiquetados con UUID legacy.
+ */
+export function getSessionClinicScope(clinicId = getCurrentClinicId()): {
+  canonical: string
+  aliases: string[]
+} {
+  try {
+    const auth = getStoredApiAuth()
+    if (auth?.user) {
+      const scope = clinicSyncAliasIds(auth.user)
+      if (scope.canonical) return scope
+    }
+  } catch {
+    /* ignore */
+  }
+  const canonical = normalizeClinicKey(clinicId)
+  return { canonical, aliases: canonical ? [canonical] : [] }
+}
+
+/** ¿El clinicId de la fila pertenece al cubo de la sesión (incl. aliases)? */
+export function rowBelongsToClinicScope(
+  rowClinicId?: string | null,
+  clinicId = getCurrentClinicId(),
+): boolean {
+  const raw = String(rowClinicId ?? '').trim()
+  if (!raw || !clinicId) return false
+  const { canonical, aliases } = getSessionClinicScope(clinicId)
+  if (!canonical) return clinicIdsMatch(raw, clinicId)
+  return clinicKeyInScope(raw, canonical, aliases)
+}
+
 /** ¿El registro pertenece a la clínica de la sesión actual? */
 export function belongsToCurrentClinic(
   row: { clinicId?: string | null } | null | undefined,
   clinicId = getCurrentClinicId(),
 ): boolean {
   if (!row || !clinicId) return false
-  return clinicIdsMatch(row.clinicId, clinicId)
+  return rowBelongsToClinicScope(row.clinicId, clinicId)
 }
 
 async function clearPullCache(): Promise<void> {
@@ -133,7 +171,10 @@ function clearTenantWebStorage(): void {
   }
 }
 
-/** Vacía TODAS las tablas Dexie de la instancia activa + storage asociado. */
+/**
+ * Vacía TODAS las tablas Dexie de la instancia activa + storage asociado.
+ * Solo para cambio de cuenta / recuperación explícita — NUNCA en bump de época.
+ */
 export async function wipeLocalClinicalData(): Promise<void> {
   await withRemotePullLock(async () => {
     const clears = db.tables.map((table) => table.clear())
@@ -143,30 +184,21 @@ export async function wipeLocalClinicalData(): Promise<void> {
   clearTenantWebStorage()
 }
 
-/**
- * Si `SYNC_SCHEMA_VERSION` cambió respecto a localStorage, limpia IndexedDB
- * y marca la nueva época. Idempotente cuando ya está al día.
- */
-export async function ensureSyncSchemaEpoch(): Promise<{ upgraded: boolean }> {
-  if (typeof window === 'undefined') return { upgraded: false }
-  let stored = ''
+function readStoredSyncEpoch(): string {
+  if (typeof window === 'undefined') return ''
   try {
-    stored = String(
+    return String(
       localStorage.getItem(MHD_SYNC_EPOCH_KEY) ||
         localStorage.getItem(SYNC_SCHEMA_KEY) ||
         '',
     ).trim()
   } catch {
-    stored = ''
+    return ''
   }
-  const current = String(SYNC_SCHEMA_VERSION)
-  if (stored === current) return { upgraded: false }
+}
 
-  console.warn('[Sync] Nueva mhd_sync_epoch — wipe Dexie + lastSyncAt + pull fresco.', {
-    stored: stored || '(none)',
-    current,
-  })
-  await wipeLocalClinicalData()
+function clearSyncMarkersForFreshPull(): void {
+  if (typeof window === 'undefined') return
   try {
     localStorage.removeItem('lastSyncAt')
     localStorage.removeItem('doctorSEO_lastSyncAt')
@@ -178,12 +210,45 @@ export async function ensureSyncSchemaEpoch(): Promise<{ upgraded: boolean }> {
       if (/lastSyncAt|LastSync|pullCache|clinicPull/i.test(key)) toRemove.push(key)
     }
     for (const key of toRemove) localStorage.removeItem(key)
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Si la época cambió: invalida caché de pull y marca “necesita pull fresco”.
+ * Conserva pacientes/historias/odontogramas en Dexie hasta commit tras pull OK.
+ */
+export async function ensureSyncSchemaEpoch(): Promise<{ upgraded: boolean }> {
+  if (typeof window === 'undefined') return { upgraded: false }
+  const stored = readStoredSyncEpoch()
+  const current = String(SYNC_SCHEMA_VERSION)
+  if (stored === current) return { upgraded: false }
+
+  console.warn(
+    '[Sync] Nueva mhd_sync_epoch — se conserva Dexie clínico; solo caché + pull fresco.',
+    { stored: stored || '(none)', current },
+  )
+  await clearPullCache()
+  clearSyncMarkersForFreshPull()
+  // Época NO se escribe aquí: commitSyncSchemaEpoch() tras pull verificado.
+  return { upgraded: true }
+}
+
+/** Confirma la época solo después de un pull/apply exitoso (datos legales intactos). */
+export function commitSyncSchemaEpoch(): void {
+  if (typeof window === 'undefined') return
+  const current = String(SYNC_SCHEMA_VERSION)
+  try {
     localStorage.setItem(MHD_SYNC_EPOCH_KEY, current)
     localStorage.setItem(SYNC_SCHEMA_KEY, current)
   } catch {
     /* ignore */
   }
-  return { upgraded: true }
+}
+
+export function isSyncSchemaEpochCurrent(): boolean {
+  return readStoredSyncEpoch() === String(SYNC_SCHEMA_VERSION)
 }
 
 /**
@@ -233,59 +298,71 @@ export async function ensureClinicLocalIsolation(clinicId = getCurrentClinicId()
   }
 }
 
-async function deleteIfForeign(
-  table: { delete: (key: string | number) => Promise<unknown> },
-  id: string | number | undefined | null,
-  rowClinicId: string | null | undefined,
-  clinicId: string,
-): Promise<void> {
-  if (id == null) return
-  if (!clinicIdsMatch(rowClinicId, clinicId)) {
-    await table.delete(id)
-  }
-}
-
-/** Borra de Dexie filas cuyo clinicId no coincide con la sesión. */
+/** Borra de Dexie filas ajenas al cubo de sesión; sana aliases → canónico. */
 export async function purgeForeignClinicRecords(clinicId = getCurrentClinicId()): Promise<void> {
   if (!clinicId) return
+  const canonical = normalizeClinicKey(clinicId)
   await withRemotePullLock(async () => {
     const patients = await db.patients.toArray()
     const keptPatientIds = new Set<string>()
     for (const row of patients) {
       if (row.id == null) continue
-      if (!clinicIdsMatch(row.clinicId, clinicId)) {
+      if (!rowBelongsToClinicScope(row.clinicId, clinicId)) {
         await db.patients.delete(row.id)
         continue
+      }
+      // Alias legacy (UUID / email sin clinic:) → sellar canónico, no borrar.
+      if (canonical && !clinicIdsMatch(row.clinicId, canonical)) {
+        await db.patients.update(row.id, { clinicId: canonical })
       }
       keptPatientIds.add(String(row.id))
       if (row.syncId) keptPatientIds.add(String(row.syncId))
     }
 
     for (const row of await db.appointments.toArray()) {
-      await deleteIfForeign(db.appointments, row.id, row.clinicId, clinicId)
+      if (row.id == null) continue
+      if (!rowBelongsToClinicScope(row.clinicId, clinicId)) {
+        await db.appointments.delete(row.id)
+        continue
+      }
+      if (canonical && row.clinicId && !clinicIdsMatch(row.clinicId, canonical)) {
+        await db.appointments.update(row.id, { clinicId: canonical })
+      }
     }
 
     for (const row of await db.clinicalRecords.toArray()) {
       if (row.id == null) continue
       const patientOk = keptPatientIds.has(String(row.patientId ?? ''))
-      if (!clinicIdsMatch(row.clinicId, clinicId) || !patientOk) {
+      if (!rowBelongsToClinicScope(row.clinicId, clinicId) || !patientOk) {
         await db.clinicalRecords.delete(row.id)
+        continue
+      }
+      if (canonical && row.clinicId && !clinicIdsMatch(row.clinicId, canonical)) {
+        await db.clinicalRecords.update(row.id, { clinicId: canonical })
       }
     }
 
     for (const row of await db.odontograms.toArray()) {
       if (row.id == null) continue
       const patientOk = keptPatientIds.has(String(row.patientId ?? ''))
-      if (!clinicIdsMatch(row.clinicId, clinicId) || !patientOk) {
+      if (!rowBelongsToClinicScope(row.clinicId, clinicId) || !patientOk) {
         await db.odontograms.delete(row.id)
+        continue
+      }
+      if (canonical && row.clinicId && !clinicIdsMatch(row.clinicId, canonical)) {
+        await db.odontograms.update(row.id, { clinicId: canonical })
       }
     }
 
     for (const row of await db.diagnosticAids.toArray()) {
       if (row.id == null) continue
       const patientOk = keptPatientIds.has(String(row.patientId ?? ''))
-      if (!clinicIdsMatch(row.clinicId, clinicId) || !patientOk) {
+      if (!rowBelongsToClinicScope(row.clinicId, clinicId) || !patientOk) {
         await db.diagnosticAids.delete(row.id)
+        continue
+      }
+      if (canonical && row.clinicId && !clinicIdsMatch(row.clinicId, canonical)) {
+        await db.diagnosticAids.update(row.id, { clinicId: canonical })
       }
     }
 
@@ -296,27 +373,27 @@ export async function purgeForeignClinicRecords(clinicId = getCurrentClinicId())
     }
 
     for (const row of await db.rips_submissions.toArray()) {
-      if (!clinicIdsMatch(row.clinicId, clinicId)) {
+      if (!rowBelongsToClinicScope(row.clinicId, clinicId)) {
         await db.rips_submissions.delete(row.id)
       }
     }
 
     for (const row of await db.ripsTemporales.toArray()) {
-      if (!clinicIdsMatch(row.clinicId, clinicId)) {
+      if (!rowBelongsToClinicScope(row.clinicId, clinicId)) {
         await db.ripsTemporales.delete(row.id)
       }
     }
 
     for (const row of await db.electronicInvoices.toArray()) {
       const invoiceClinic = (row as { clinicId?: string }).clinicId
-      if (invoiceClinic && !clinicIdsMatch(invoiceClinic, clinicId)) {
+      if (invoiceClinic && !rowBelongsToClinicScope(invoiceClinic, clinicId)) {
         await withBackupUnlockInvoiceDelete(row.id)
       }
     }
 
     for (const row of await db.rips_queue.toArray()) {
       const queueClinic = (row as { clinicId?: string }).clinicId
-      if (queueClinic && !clinicIdsMatch(queueClinic, clinicId)) {
+      if (queueClinic && !rowBelongsToClinicScope(queueClinic, clinicId)) {
         await db.rips_queue.delete(row.id!)
       }
     }

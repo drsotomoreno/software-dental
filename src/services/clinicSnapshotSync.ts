@@ -949,12 +949,17 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
   const auth = getStoredApiAuth()
   if (!auth?.token || !getCurrentClinicId()) return false
   try {
-    const { ensureSyncSchemaEpoch } = await import('@/services/clinicLocalIsolation')
+    const { ensureSyncSchemaEpoch, commitSyncSchemaEpoch } = await import(
+      '@/services/clinicLocalIsolation'
+    )
+    // Conserva Dexie clínico; solo invalida caché si la época cambió.
     const { upgraded } = await ensureSyncSchemaEpoch()
-    return await pullAndApplyClinicSnapshot({
+    const ok = await pullAndApplyClinicSnapshot({
       includeBlobs: true,
       useCache: !upgraded,
     })
+    if (ok) commitSyncSchemaEpoch()
+    return ok
   } catch {
     return false
   }

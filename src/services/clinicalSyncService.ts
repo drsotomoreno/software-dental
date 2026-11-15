@@ -34,7 +34,10 @@ const POLL_MS = 2_000
 const DIRTY_DEBOUNCE_MS = 800
 /** Cada fetch de sync: 12s. Evita inFlight colgado y UI congelada. */
 export const CLINICAL_SYNC_FETCH_TIMEOUT_MS = 12_000
+/** Login / rehidratación: payload completo (~100 pacientes) puede superar 12s. */
+const CLINICAL_SYNC_LOGIN_FETCH_TIMEOUT_MS = 60_000
 const CLINICAL_SYNC_CYCLE_TIMEOUT_MS = 36_000
+const CLINICAL_SYNC_LOGIN_CYCLE_TIMEOUT_MS = 90_000
 
 const LOCAL_ONLY_KEYS = new Set(['id', 'pendingSync', 'lastSyncedAt'])
 const HEAVY_BINARY_KEYS = new Set([
@@ -89,10 +92,17 @@ function identityHeaders() {
   }
 }
 
-async function syncFetch(url: string, init?: RequestInit) {
+async function syncFetch(
+  url: string,
+  init?: RequestInit & { timeoutMs?: number },
+) {
+  const { timeoutMs, ...fetchInit } = init ?? {}
   const controller = new AbortController()
-  const timer = globalThis.setTimeout(() => controller.abort(), CLINICAL_SYNC_FETCH_TIMEOUT_MS)
-  const parentSignal = init?.signal
+  const timer = globalThis.setTimeout(
+    () => controller.abort(),
+    typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : CLINICAL_SYNC_FETCH_TIMEOUT_MS,
+  )
+  const parentSignal = fetchInit.signal
   const onParentAbort = () => controller.abort()
   if (parentSignal) {
     if (parentSignal.aborted) controller.abort()
@@ -100,13 +110,13 @@ async function syncFetch(url: string, init?: RequestInit) {
   }
   try {
     const response = await fetch(url, {
-      ...init,
+      ...fetchInit,
       signal: controller.signal,
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
         ...identityHeaders(),
-        ...(init?.headers ?? {}),
+        ...(fetchInit.headers ?? {}),
       },
     })
     const payload = await response.json().catch(() => ({}))
@@ -177,11 +187,14 @@ function applyPayload<T extends Patient | Appointment>(
           treatmentCompleted: payload.treatmentCompleted as Patient['treatmentCompleted'],
         }
       : {}
+  const sessionClinicId = getCurrentClinicId()
+  // Sellar canónico de sesión al aplicar pull (evita purge por UUID/email legacy).
+  const clinicId = sessionClinicId || String(remote.clinicId || '').trim()
   return {
     ...(payload as unknown as T),
     ...clinicalFlags,
     syncId: remote.syncId,
-    clinicId: remote.clinicId,
+    clinicId,
     updatedAt: remote.updatedAt,
     pendingSync: false,
     lastSyncedAt: new Date().toISOString(),
@@ -190,12 +203,17 @@ function applyPayload<T extends Patient | Appointment>(
 }
 
 async function findLocalPatient(remote: ClinicalSyncRecord): Promise<Patient | undefined> {
-  const { clinicIdsMatch } = await import('@/services/clinicLocalIsolation')
-  const remoteClinicId = String(remote.clinicId || getCurrentClinicId() || '').trim()
+  const { rowBelongsToClinicScope } = await import('@/services/clinicLocalIsolation')
+  const sessionClinicId = getCurrentClinicId()
+  const remoteClinicId = String(remote.clinicId || sessionClinicId || '').trim()
 
   const bySync = await db.patients.where('syncId').equals(remote.syncId).first()
   if (bySync) {
-    if (!remoteClinicId || !bySync.clinicId || clinicIdsMatch(bySync.clinicId, remoteClinicId)) {
+    // Mismo syncId en el cubo de sesión (canónico o alias UUID/email).
+    if (
+      !bySync.clinicId ||
+      rowBelongsToClinicScope(bySync.clinicId, sessionClinicId || remoteClinicId)
+    ) {
       return bySync
     }
   }
@@ -203,10 +221,11 @@ async function findLocalPatient(remote: ClinicalSyncRecord): Promise<Patient | u
   const documentNumber = String(remote.payload.documentNumber ?? '').trim()
   if (!documentNumber) return undefined
 
-  // Merge solo si coincide la tupla (documentNumber, clinicaId).
+  // Merge solo si el documento pertenece al cubo de la sesión (aliases incluidos).
   const candidates = await db.patients.where('documentNumber').equals(documentNumber).toArray()
-  if (!remoteClinicId) return candidates[0]
-  return candidates.find((patient) => clinicIdsMatch(patient.clinicId, remoteClinicId))
+  const scopeId = sessionClinicId || remoteClinicId
+  if (!scopeId) return candidates[0]
+  return candidates.find((patient) => rowBelongsToClinicScope(patient.clinicId, scopeId))
 }
 
 async function findLocalAppointment(remote: ClinicalSyncRecord): Promise<Appointment | undefined> {
@@ -312,24 +331,32 @@ async function withPatientSyncId(row: Appointment): Promise<Appointment> {
  * NUNCA reasigna clinicId ajeno (fuga multi-tenant / Superadmin → clínica nueva).
  */
 async function adoptLocalRecords(clinicId: string): Promise<void> {
-  const { clinicIdsMatch } = await import('@/services/clinicLocalIsolation')
+  const { clinicIdsMatch, rowBelongsToClinicScope, normalizeClinicKey } = await import(
+    '@/services/clinicLocalIsolation'
+  )
+  const canonical = normalizeClinicKey(clinicId)
   await withRemotePullLock(async () => {
     const patients = await db.patients.toArray()
     for (const row of patients) {
       if (row.id == null) continue
-      if (row.clinicId && !clinicIdsMatch(row.clinicId, clinicId)) continue
+      // Conservar aliases del mismo cubo; solo saltar clínicas ajenas.
+      if (row.clinicId && !rowBelongsToClinicScope(row.clinicId, clinicId)) continue
       const patch: Partial<Patient> = {}
       if (!row.syncId) patch.syncId = generateId()
-      if (!row.clinicId) patch.clinicId = clinicId
+      if (!row.clinicId || (canonical && !clinicIdsMatch(row.clinicId, canonical))) {
+        patch.clinicId = canonical || clinicId
+      }
       if (Object.keys(patch).length > 0) await db.patients.update(row.id, patch)
     }
     const appointments = await db.appointments.toArray()
     for (const row of appointments) {
       if (row.id == null) continue
-      if (row.clinicId && !clinicIdsMatch(row.clinicId, clinicId)) continue
+      if (row.clinicId && !rowBelongsToClinicScope(row.clinicId, clinicId)) continue
       const patch: Partial<Appointment> = {}
       if (!row.syncId) patch.syncId = generateId()
-      if (!row.clinicId) patch.clinicId = clinicId
+      if (!row.clinicId || (canonical && !clinicIdsMatch(row.clinicId, canonical))) {
+        patch.clinicId = canonical || clinicId
+      }
       if (Object.keys(patch).length > 0) await db.appointments.update(row.id, patch)
     }
   })
@@ -340,7 +367,7 @@ async function pushAllLocal(clinicId: string): Promise<{
   acceptedPatients: number
   rejected: number
 }> {
-  const { clinicIdsMatch, ensureClinicLocalIsolation } = await import(
+  const { rowBelongsToClinicScope, ensureClinicLocalIsolation } = await import(
     '@/services/clinicLocalIsolation'
   )
   await ensureClinicLocalIsolation(clinicId)
@@ -350,10 +377,10 @@ async function pushAllLocal(clinicId: string): Promise<{
     db.appointments.toArray(),
   ])
   const patients = patientsRaw.filter(
-    (row) => !row.clinicId || clinicIdsMatch(row.clinicId, clinicId),
+    (row) => !row.clinicId || rowBelongsToClinicScope(row.clinicId, clinicId),
   )
   const appointments = appointmentsRaw.filter(
-    (row) => !row.clinicId || clinicIdsMatch(row.clinicId, clinicId),
+    (row) => !row.clinicId || rowBelongsToClinicScope(row.clinicId, clinicId),
   )
 
   const patientRecords = patients
@@ -453,8 +480,14 @@ export async function applyFullClinicPull(
   return extraChanged || patients.length > 0 || appointments.length > 0
 }
 
-async function pullAndMerge(includeBlobs = false): Promise<{ ok: boolean; patients: number }> {
-  const { response, payload } = await syncFetch(`/api/sync/pull?full=${includeBlobs ? '1' : '0'}`)
+async function pullAndMerge(
+  includeBlobs = false,
+  options?: { timeoutMs?: number },
+): Promise<{ ok: boolean; patients: number }> {
+  const { response, payload } = await syncFetch(
+    `/api/sync/pull?full=${includeBlobs ? '1' : '0'}`,
+    options?.timeoutMs ? { timeoutMs: options.timeoutMs } : undefined,
+  )
   if (!response.ok) return { ok: false, patients: 0 }
   await applyFullClinicPull(payload, { hydrateBlobs: includeBlobs })
   const patients = Array.isArray(payload.patients)
@@ -463,7 +496,11 @@ async function pullAndMerge(includeBlobs = false): Promise<{ ok: boolean; patien
   return { ok: true, patients }
 }
 
-/** Pull forzado al iniciar sesión: snapshot completo con archivos antes de renderizar. */
+/**
+ * Pull forzado al iniciar sesión.
+ * Médico-legal: NUNCA vacía Dexie antes del pull; si el pull falla, conserva
+ * los pacientes locales y no confirma la época de schema.
+ */
 export async function pullCompleteClinicOnLogin(): Promise<boolean> {
   const auth = getStoredApiAuth()
   if (!auth?.token) return false
@@ -474,10 +511,14 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
         const { ensureDentalDatabaseForAuth } = await import('@/db/database')
         // Misma resolución canónica que AuthContext / purge (nunca UUID crudo del maestro).
         await ensureDentalDatabaseForAuth(auth.user?.id, clinicId)
-        const { ensureClinicLocalIsolation, ensureSyncSchemaEpoch, clinicIdsMatch } = await import(
-          '@/services/clinicLocalIsolation'
-        )
-        // Bump SYNC_SCHEMA_VERSION → wipe Dexie + ignorar caché vieja → pull fresco EC2.
+        const {
+          ensureClinicLocalIsolation,
+          ensureSyncSchemaEpoch,
+          commitSyncSchemaEpoch,
+          clinicIdsMatch,
+          rowBelongsToClinicScope,
+        } = await import('@/services/clinicLocalIsolation')
+        // Bump SYNC_SCHEMA_VERSION → invalida caché (conserva Dexie) → pull fresco.
         const { upgraded } = await ensureSyncSchemaEpoch()
         if (clinicId) {
           await ensureClinicLocalIsolation(clinicId)
@@ -496,6 +537,7 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
               ) {
                 await applyFullClinicPull(cached)
               }
+              commitSyncSchemaEpoch()
               return true
             }
           }
@@ -505,15 +547,58 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
           }
         }
         if (!clinicId) return false
-        const merged = await pullAndMerge(true)
+
+        // Primero metadata (rápido); luego blobs si hay red.
+        let merged = await pullAndMerge(false, {
+          timeoutMs: CLINICAL_SYNC_LOGIN_FETCH_TIMEOUT_MS,
+        })
+        if (merged.ok && merged.patients > 0) {
+          commitSyncSchemaEpoch()
+          // Blobs en segundo plano: no retrasar la lista de pacientes.
+          void pullAndMerge(true, { timeoutMs: CLINICAL_SYNC_LOGIN_FETCH_TIMEOUT_MS }).catch(
+            () => undefined,
+          )
+        } else if (merged.ok) {
+          // Pull OK pero 0 pacientes: intentar full por si el compacto falló.
+          merged = await pullAndMerge(true, {
+            timeoutMs: CLINICAL_SYNC_LOGIN_FETCH_TIMEOUT_MS,
+          })
+          if (merged.ok) commitSyncSchemaEpoch()
+        }
+
         await syncCitasToLocalStorage()
         renderCitas()
-        return merged.ok
+
+        if (merged.ok) return true
+
+        // Pull falló: conservar datos locales si existen (offline / 502).
+        const localCount = await db.patients
+          .filter((row) => rowBelongsToClinicScope(row.clinicId, clinicId))
+          .count()
+        if (localCount > 0) {
+          console.warn(
+            '[Sync] Pull al login falló; se conservan pacientes locales (datos clínicos).',
+            { localCount, clinicId },
+          )
+          return true
+        }
+        return false
       })(),
-      CLINICAL_SYNC_CYCLE_TIMEOUT_MS,
+      CLINICAL_SYNC_LOGIN_CYCLE_TIMEOUT_MS,
       'Pull clínico al login',
     )
   } catch {
+    // Timeout/red: no destruir datos locales.
+    try {
+      const clinicId = getCurrentClinicId()
+      const { rowBelongsToClinicScope } = await import('@/services/clinicLocalIsolation')
+      const localCount = clinicId
+        ? await db.patients.filter((row) => rowBelongsToClinicScope(row.clinicId, clinicId)).count()
+        : await db.patients.count()
+      if (localCount > 0) return true
+    } catch {
+      /* ignore */
+    }
     return false
   }
 }
@@ -611,13 +696,13 @@ export async function forzarSincronizacionLocal(): Promise<ForzarSincronizacionR
     }
   }
 
-  const { clinicIdsMatch } = await import('@/services/clinicLocalIsolation')
+  const { rowBelongsToClinicScope } = await import('@/services/clinicLocalIsolation')
   const [patientRows, appointmentCount] = await Promise.all([
     db.patients.toArray(),
     db.appointments.count(),
   ])
   const ownPatients = patientRows.filter(
-    (row) => !row.clinicId || clinicIdsMatch(row.clinicId, clinicId),
+    (row) => !row.clinicId || rowBelongsToClinicScope(row.clinicId, clinicId),
   )
   const pending = ownPatients.filter((row) => row.pendingSync === true || !row.lastSyncedAt).length
 
@@ -641,7 +726,7 @@ export async function forzarSincronizacionLocal(): Promise<ForzarSincronizacionR
     renderCitas()
     const stillPending = (await db.patients.toArray()).filter(
       (row) =>
-        (!row.clinicId || clinicIdsMatch(row.clinicId, clinicId)) &&
+        (!row.clinicId || rowBelongsToClinicScope(row.clinicId, clinicId)) &&
         (row.pendingSync === true || !row.lastSyncedAt),
     ).length
     return {
