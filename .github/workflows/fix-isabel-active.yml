@@ -1,0 +1,63 @@
+# Corrige flags de Isabel De la Rosa → paciente ACTIVA.
+# NO toca .bak-20261112 ni .bak-20261113-pre-merge.
+name: Fix Isabel active flags
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fix:
+    name: Set Isabel treatmentCompleted=false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: SSH fix Isabel flags
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 12m
+          script: |
+            set -euo pipefail
+            CANONICAL="/var/www/mihistoriadental"
+            APP_DIR="/home/ubuntu/software-dental"
+            [[ -f "$APP_DIR/server.js" ]] || APP_DIR="$CANONICAL"
+
+            if [[ -d "$CANONICAL/.git" ]]; then
+              cd "$CANONICAL"
+              git fetch origin main
+              git checkout origin/main -- scripts/fix-isabel-active-flags.cjs || true
+              mkdir -p "$APP_DIR/scripts"
+              cp -f "$CANONICAL/scripts/fix-isabel-active-flags.cjs" \
+                "$APP_DIR/scripts/fix-isabel-active-flags.cjs"
+            fi
+
+            cd "$APP_DIR"
+            test -f server/data/clinical-sync.json
+            node --max-old-space-size=1536 scripts/fix-isabel-active-flags.cjs
+
+            # Reiniciar PM2 para limpiar caché en memoria del store/meta.
+            HEAP_MB=700
+            if [[ -f scripts/pm2-heap-from-ram.sh ]]; then
+              HEAP_MB="$(bash scripts/pm2-heap-from-ram.sh)"
+            fi
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+            set -a
+            # shellcheck disable=SC1091
+            [[ -f .env ]] && . ./.env
+            set +a
+            pm2 delete software-dental 2>/dev/null || true
+            if [[ -f ecosystem.config.cjs ]]; then
+              pm2 start ecosystem.config.cjs --update-env
+            else
+              pm2 start server.js --name software-dental --cwd "$APP_DIR" --update-env \
+                --node-args="--max-old-space-size=${HEAP_MB}"
+            fi
+            pm2 save
+            sleep 12
+            pm2 jlist | node -e 'let r="";process.stdin.on("data",d=>r+=d);process.stdin.on("end",()=>{const a=JSON.parse(r||"[]").find(x=>x.name==="software-dental");console.log("PM2_STATUS="+(a&&a.pm2_env?a.pm2_env.status:"missing"))})'
+            echo "Isabel flags fix done."
