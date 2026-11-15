@@ -18,6 +18,30 @@ test('superadmin omite el filtro de rol y de activo', () => {
   assert.equal(decision.bypass, true)
 })
 
+test('el dueño con rol admin administra colaboradores', () => {
+  const id = '11111111-1111-1111-1111-111111111111'
+  const decision = evaluarPermiso(
+    { id, rol: 'admin', activo: true, clinica_id: id, is_superadmin: false },
+    ['TITULAR'],
+  )
+  assert.equal(decision.ok, true)
+})
+
+test('un odontólogo de otra sede no administra el equipo', () => {
+  const decision = evaluarPermiso(
+    {
+      id: '22222222-2222-2222-2222-222222222222',
+      rol: 'odontologo',
+      activo: true,
+      clinica_id: '11111111-1111-1111-1111-111111111111',
+      is_superadmin: false,
+    },
+    ['TITULAR'],
+  )
+  assert.equal(decision.ok, false)
+  assert.equal(decision.status, 403)
+})
+
 test('rol superadmin sin God Mode no abre el bypass', () => {
   const decision = evaluarPermiso(
     { id: 'x', is_superadmin: false, rol: 'superadmin', activo: true, email: 'otro@clinica.com' },

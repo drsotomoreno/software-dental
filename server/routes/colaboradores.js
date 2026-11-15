@@ -16,6 +16,7 @@ import { verificarToken } from '../middleware/tenantAuth.middleware.js'
 import {
   asegurarEsquemaColaboradores,
   esSuperAdminSesion,
+  esTitularDeClinica,
   exigirPermiso,
 } from '../middleware/exigirPermiso.js'
 
@@ -139,6 +140,22 @@ async function queryUsuario(client, id) {
   return rows[0] || null
 }
 
+async function queryUsuarioDeSesion(client, req) {
+  const id = String(req.user?.id || '').trim()
+  const porId = id ? await queryUsuario(client, id) : null
+  if (porId) return porId
+  const email = normalizeEmail(req.user?.email)
+  if (!email) return null
+  const { rows } = await client.query(
+    `SELECT ${USUARIO_COLUMNS}
+       FROM usuarios
+      WHERE lower(email) = lower($1::text)
+      LIMIT 1`,
+    [email],
+  )
+  return rows[0] || null
+}
+
 function publico(row, { conInvitacion = false } = {}) {
   if (!row) return null
   const base = {
@@ -219,22 +236,35 @@ export function cupoDisponible(plan, conteo, rol, { incluirEste = true } = {}) {
 
 async function resolverTitular(client, req) {
   if (esSuperAdminSesion(req.user)) {
-    const requested = String(
-      req.body?.titular_id || req.query?.titular_id || req.user?.titular_id || '',
-    ).trim()
-    if (!requested) return { error: 'Indique titular_id de la clínica.', status: 400 }
-    const titular = await queryUsuario(client, requested)
-    if (!titular || titular.rol !== 'TITULAR' || titular.titular_id) {
+    const requested = String(req.body?.titular_id || req.query?.titular_id || '').trim()
+    const propio = String(req.user?.id || '').trim()
+    const id = requested || propio
+    if (!id) return { error: 'Indique titular_id de la clínica.', status: 400 }
+    let titular = id ? await queryUsuario(client, id) : null
+    if (!titular && !requested) titular = await queryUsuarioDeSesion(client, req)
+    if (!titular || titular.titular_id) {
+      return { error: 'El titular indicado no existe.', status: 404 }
+    }
+    const esPropio =
+      !requested ||
+      String(titular.id) === propio ||
+      normalizeEmail(titular.email) === normalizeEmail(req.user?.email)
+    if (!esPropio && !esTitularDeClinica(titular)) {
       return { error: 'El titular indicado no existe.', status: 404 }
     }
     return { titular }
   }
 
-  const propioId = String(req.user?.id || '').trim()
-  const fila = await queryUsuario(client, propioId)
+  const fila = await queryUsuarioDeSesion(client, req)
   if (!fila) return { error: 'La cuenta no está en usuarios.', status: 403 }
 
-  if (fila.rol === 'TITULAR' && !fila.titular_id) return { titular: fila }
+  const vista = {
+    ...fila,
+    clinica_id: req.user?.clinica_id || fila.clinica_id,
+    clinicId: req.user?.clinicId,
+    isClinicOwner: req.user?.isClinicOwner,
+  }
+  if (esTitularDeClinica(vista)) return { titular: fila }
 
   if (fila.titular_id && ROLES_INVITABLES.has(fila.rol)) {
     const titular = await queryUsuario(client, fila.titular_id)
@@ -283,7 +313,7 @@ router.get(
           [titular.id],
         )
         const plan = await planDelTitular(titular)
-        const verInvitacion = esSuperAdminSesion(req.user) || req.user?.rol === 'TITULAR'
+        const verInvitacion = esSuperAdminSesion(req.user) || esTitularDeClinica(req.user)
         const titularRow = rows.find((row) => row.id === titular.id) || titular
         const colaboradores = rows.filter((row) => row.titular_id === titular.id)
         const conteo = await contarActivos(client, titular.id)
@@ -345,9 +375,6 @@ router.post(
         const resolved = await resolverTitular(client, req)
         if (resolved.error) return resolved
         const { titular } = resolved
-        if (titular.rol !== 'TITULAR') {
-          return { error: 'Solo el titular puede invitar colaboradores.', status: 403 }
-        }
         await client.query('SELECT id FROM usuarios WHERE id = $1::uuid FOR UPDATE', [titular.id])
         const plan = await planDelTitular(titular)
         const conteo = await contarActivos(client, titular.id)
