@@ -44,6 +44,8 @@ function emitSnapshotPushed(clinicId, payload, accepted) {
 }
 
 const STORE_FILE = join(config.dataDir, 'clinical-sync.json')
+/** Índice liviano: solo patients + appointments (pull full=0 sin parsear ~83MB). */
+const META_FILE = join(config.dataDir, 'clinical-sync-meta.json')
 const STORE_KEY = 'clinical-sync'
 
 const ENTITY_MAPS = [
@@ -470,8 +472,94 @@ let storeCache = {
   store: null,
 }
 
+/** Caché del índice liviano (patients + appointments). */
+let metaCache = {
+  mtimeMs: 0,
+  size: 0,
+  meta: null,
+}
+
 function invalidateStoreCache() {
   storeCache = { mtimeMs: 0, size: 0, store: null }
+}
+
+function invalidateMetaCache() {
+  metaCache = { mtimeMs: 0, size: 0, meta: null }
+}
+
+function buildMetaFromStore(store, sourceStat = null) {
+  const clinicsIn = store?.clinics && typeof store.clinics === 'object' ? store.clinics : {}
+  const clinics = {}
+  for (const [clinicId, clinic] of Object.entries(clinicsIn)) {
+    if (!clinic || typeof clinic !== 'object') continue
+    clinics[clinicId] = {
+      patients:
+        clinic.patients && typeof clinic.patients === 'object' ? clinic.patients : {},
+      appointments:
+        clinic.appointments && typeof clinic.appointments === 'object'
+          ? clinic.appointments
+          : {},
+    }
+  }
+  return {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    sourceMtimeMs: sourceStat?.mtimeMs ?? 0,
+    sourceSize: sourceStat?.size ?? 0,
+    clinics,
+  }
+}
+
+async function writeMetaFile(meta) {
+  const { writeFile, rename } = await import('node:fs/promises')
+  const tmp = `${META_FILE}.tmp-${process.pid}`
+  await writeFile(tmp, JSON.stringify(meta), 'utf8')
+  await rename(tmp, META_FILE)
+}
+
+async function loadMetaStore() {
+  try {
+    const st = await stat(META_FILE)
+    if (
+      metaCache.meta &&
+      metaCache.mtimeMs === st.mtimeMs &&
+      metaCache.size === st.size
+    ) {
+      return metaCache.meta
+    }
+    const raw = await readFile(META_FILE, 'utf8')
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || !parsed.clinics) return null
+    metaCache = { mtimeMs: st.mtimeMs, size: st.size, meta: parsed }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+/** Fusiona solo patients/appointments desde el índice meta (sin drafts/historias). */
+function mergeMetaClinicBuckets(meta, ids) {
+  const clinic = emptyClinic()
+  const clinics = meta?.clinics && typeof meta.clinics === 'object' ? meta.clinics : {}
+  for (const id of ids) {
+    const bucket = clinics[id]
+    if (!bucket || typeof bucket !== 'object') continue
+    for (const [syncId, record] of Object.entries(bucket.patients || {})) {
+      if (!record) continue
+      const prev = clinic.patients[syncId]
+      clinic.patients[syncId] = prev ? (stamp(record) >= stamp(prev) ? record : prev) : record
+    }
+    for (const [syncId, record] of Object.entries(bucket.appointments || {})) {
+      if (!record) continue
+      const prev = clinic.appointments[syncId]
+      clinic.appointments[syncId] = prev
+        ? stamp(record) >= stamp(prev)
+          ? record
+          : prev
+        : record
+    }
+  }
+  return clinic
 }
 
 function enqueueWrite(fn) {
@@ -551,6 +639,7 @@ async function saveStore(store) {
   // Reemplazo completo en app_json_store: un merge LWW con un documento stale
   // reintroducía aliases (UUID/email) y volvía a inflar clinical-sync.json.
   invalidateStoreCache()
+  invalidateMetaCache()
   const base = store && typeof store === 'object' ? store : emptyStore()
   const sanitized = omitHeavyClinicalDraftForms(stripHeavyBinaryFields(base))
   await writeDurableJsonReplace(STORE_FILE, sanitized, STORE_KEY)
@@ -558,8 +647,15 @@ async function saveStore(store) {
   try {
     const st = await stat(STORE_FILE)
     storeCache = { mtimeMs: st.mtimeMs, size: st.size, store: sanitized }
-  } catch {
-    /* ignore */
+    const meta = buildMetaFromStore(sanitized, st)
+    await writeMetaFile(meta)
+    const metaStat = await stat(META_FILE)
+    metaCache = { mtimeMs: metaStat.mtimeMs, size: metaStat.size, meta }
+  } catch (error) {
+    console.error(
+      '[Sync] No se pudo escribir clinical-sync-meta.json:',
+      error instanceof Error ? error.message : error,
+    )
   }
 }
 
@@ -672,6 +768,43 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
   }
   if (ids.length === 0) return empty
 
+  // Metadata-only: lee índice liviano (~pacientes+citas). NUNCA parsea el JSON de 83MB.
+  if (slim) {
+    let clinic = null
+    const meta = await loadMetaStore()
+    if (meta) {
+      clinic = mergeMetaClinicBuckets(meta, ids)
+    } else {
+      // Fallback único: store completo (puede OOM). Preferible generar meta en deploy.
+      console.warn(
+        '[Sync] clinical-sync-meta.json ausente — fallback a clinical-sync.json (riesgo OOM)',
+      )
+      const store = await loadStore()
+      clinic = mergeClinicBuckets(store, ids)
+      try {
+        const st = await stat(STORE_FILE)
+        await writeMetaFile(buildMetaFromStore(store, st))
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      const { mergeMirroredPatients } = await import('./clinicPatientMirror.js')
+      clinic.patients = await mergeMirroredPatients(clinicId, clinic.patients)
+    } catch (error) {
+      console.error(
+        '[Sync] No se pudo leer el espejo Postgres de pacientes:',
+        error instanceof Error ? error.message : error,
+      )
+    }
+    return {
+      ...empty,
+      patients: Object.values(clinic.patients).filter(Boolean),
+      appointments: Object.values(clinic.appointments).filter(Boolean),
+      slim: true,
+    }
+  }
+
   const store = await loadStore()
   const clinic = mergeClinicBuckets(store, ids)
   try {
@@ -686,16 +819,6 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
 
   const patients = Object.values(clinic.patients).filter(Boolean)
   const appointments = Object.values(clinic.appointments).filter(Boolean)
-
-  // Metadata-only: restaura listados Activos/Valorados/Terminados sin matar el heap.
-  if (slim) {
-    return {
-      ...empty,
-      patients,
-      appointments,
-      slim: true,
-    }
-  }
 
   const attachments = []
   for (const record of Object.values(clinic.attachments).filter(Boolean)) {

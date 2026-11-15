@@ -152,6 +152,16 @@ jobs:
             echo "HEAP_MB=$HEAP_MB"
 
             cd "$APP_DIR"
+            # Índice liviano para GET /api/sync/pull?full=0 (evita OOM al parsear ~83MB).
+            # No modifica clinical-sync.json ni .bak-*.
+            if [[ -f "$APP_DIR/server/data/clinical-sync.json" && -f "$APP_DIR/scripts/build-clinical-sync-meta.cjs" ]]; then
+              echo "Building clinical-sync-meta.json (patients+appointments only)..."
+              node --max-old-space-size=1536 "$APP_DIR/scripts/build-clinical-sync-meta.cjs" || {
+                echo "WARN: meta build failed; slim pull may fallback to full JSON"
+              }
+              ls -lh "$APP_DIR/server/data/clinical-sync-meta.json" 2>/dev/null || true
+            fi
+
             pm2 delete software-dental 2>/dev/null || true
             if [[ -f "$APP_DIR/ecosystem.config.cjs" ]]; then
               pm2 start "$APP_DIR/ecosystem.config.cjs" --update-env
