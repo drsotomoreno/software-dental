@@ -289,7 +289,11 @@ function accessPolicyChanged(before, after) {
 
 async function loadStore() {
   const parsed = await readDurableJson(USERS_FILE, emptyStore())
-  const rawUsers = Array.isArray(parsed.users) ? parsed.users : []
+  const deletedAccounts = Array.isArray(parsed.deletedAccounts) ? parsed.deletedAccounts : []
+  const deletedIds = new Set(deletedAccounts.map((item) => String(item?.id || '')))
+  const rawUsers = (Array.isArray(parsed.users) ? parsed.users : []).filter(
+    (user) => !deletedIds.has(String(user?.id || '')),
+  )
   const users = rawUsers.map(migrateUser)
   if (rawUsers.some((user, index) => accessPolicyChanged(user, users[index]))) {
     await writeDurableJson(USERS_FILE, {
@@ -304,7 +308,13 @@ async function loadStore() {
   for (const session of Array.isArray(parsed.sessions) ? parsed.sessions : []) {
     if (session?.token) sessionsByToken.set(session.token, session)
   }
+  const deletedIdsForSessions = new Set(
+    (Array.isArray(parsed.deletedAccounts) ? parsed.deletedAccounts : []).map((item) =>
+      String(item?.id || ''),
+    ),
+  )
   for (const session of liveSessions.values()) {
+    if (deletedIdsForSessions.has(String(session?.userId || ''))) continue
     if (session?.token && !sessionsByToken.has(session.token)) {
       sessionsByToken.set(session.token, session)
     }
@@ -314,21 +324,26 @@ async function loadStore() {
     ? parsed.emailVerifications
     : []
   return {
-    users,
-    sessions: [...sessionsByToken.values()],
+    users: users.filter((user) => !deletedIds.has(String(user?.id || ''))),
+    sessions: [...sessionsByToken.values()].filter(
+      (session) => !deletedIds.has(String(session?.userId || '')),
+    ),
     passwordResets,
     emailVerifications,
+    deletedAccounts,
   }
 }
 
 async function saveStore(store) {
   try {
     await writeDurableJson(USERS_FILE, store)
+    return true
   } catch (error) {
     console.error(
       '[Auth] No se pudo guardar el almacén de usuarios; las sesiones en memoria se conservan:',
       error instanceof Error ? error.message : error,
     )
+    return false
   }
 }
 
@@ -2279,8 +2294,22 @@ export async function deleteSubscriptionUserByEmail(email) {
   store.emailVerifications = (store.emailVerifications || []).filter(
     (item) => item.email !== normalizedEmail,
   )
+  const deletedAt = new Date().toISOString()
+  store.deletedAccounts = [
+    ...(Array.isArray(store.deletedAccounts) ? store.deletedAccounts : []).filter(
+      (item) => String(item?.id || '') !== String(removed.id),
+    ),
+    { id: String(removed.id), email: normalizedEmail, deletedAt },
+  ]
   forgetLiveSessionsForUser(removed.id)
-  await saveStore(store)
+  const saved = await saveStore(store)
+  if (!saved) {
+    return {
+      ok: false,
+      status: 500,
+      error: 'No se pudo guardar la eliminación. El registro sigue activo.',
+    }
+  }
 
   const phone = normalizeColombiaPhoneNumber(removed.phone_number || removed.phone)
   try {

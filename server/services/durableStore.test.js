@@ -138,6 +138,65 @@ test('un save concurrente con lista vacía no borra OTP pendientes', () => {
   assert.equal(merged.emailVerifications[0].code, '020822')
 })
 
+test('una cuenta eliminada no revive al fusionar con la copia de Postgres', () => {
+  const deletedAt = '2026-11-15T20:00:00.000Z'
+  const merged = mergeDurableStores(
+    {
+      users: [{ id: 'keep', email: 'otra@clinica.co', createdAt: '2026-11-01T00:00:00.000Z' }],
+      sessions: [{ token: 'nueva', userId: 'keep' }],
+      deletedAccounts: [{ id: 'gone', email: 'baja@clinica.co', deletedAt }],
+    },
+    {
+      users: [
+        {
+          id: 'gone',
+          email: 'baja@clinica.co',
+          passwordHash: 'hash-viejo',
+          createdAt: '2026-10-01T00:00:00.000Z',
+        },
+        { id: 'keep', email: 'otra@clinica.co', createdAt: '2026-11-01T00:00:00.000Z' },
+      ],
+      sessions: [
+        { token: 'vieja', userId: 'gone' },
+        { token: 'nueva', userId: 'keep' },
+      ],
+    },
+    { primaryUserWins: true },
+  )
+  assert.deepEqual(merged.users.map((user) => user.id), ['keep'])
+  assert.deepEqual(merged.sessions.map((session) => session.userId), ['keep'])
+  assert.equal(merged.deletedAccounts[0].email, 'baja@clinica.co')
+})
+
+test('un registro nuevo con el mismo correo no queda bloqueado por la baja anterior', () => {
+  const merged = mergeDurableStores(
+    {
+      users: [
+        {
+          id: 'nuevo',
+          email: 'baja@clinica.co',
+          createdAt: '2026-11-15T21:00:00.000Z',
+        },
+      ],
+      deletedAccounts: [
+        { id: 'gone', email: 'baja@clinica.co', deletedAt: '2026-11-15T20:00:00.000Z' },
+      ],
+    },
+    {
+      users: [
+        {
+          id: 'gone',
+          email: 'baja@clinica.co',
+          passwordHash: 'hash-viejo',
+          createdAt: '2026-10-01T00:00:00.000Z',
+        },
+      ],
+    },
+    { primaryUserWins: true },
+  )
+  assert.deepEqual(merged.users.map((user) => user.id), ['nuevo'])
+})
+
 test('en lectura, el OTP más reciente del mismo correo gana', () => {
   const older = {
     email: 'delassostore@gmail.com',

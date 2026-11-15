@@ -354,6 +354,76 @@ function mergeSessions(secondary = [], primary = []) {
     .slice(0, MAX_SESSIONS)
 }
 
+function accountTombstones(...stores) {
+  const map = new Map()
+  for (const store of stores) {
+    const list = Array.isArray(store?.deletedAccounts) ? store.deletedAccounts : []
+    for (const item of list) {
+      const id = String(item?.id || '').trim()
+      if (!id) continue
+      const prev = map.get(id)
+      map.set(id, {
+        id,
+        email: String(item?.email || prev?.email || '').trim().toLowerCase(),
+        deletedAt: item?.deletedAt || prev?.deletedAt || null,
+      })
+    }
+  }
+  return [...map.values()]
+}
+
+function tombstoneBlocksUser(user, tombstones) {
+  const id = String(user?.id || '')
+  const email = String(user?.email || '').trim().toLowerCase()
+  const created = Date.parse(user?.createdAt || '') || 0
+  for (const tomb of tombstones) {
+    if (id && id === tomb.id) return true
+    if (!email || email !== tomb.email) continue
+    const deletedAt = Date.parse(tomb.deletedAt || '') || 0
+    if (created && deletedAt && created > deletedAt) continue
+    return true
+  }
+  return false
+}
+
+function tombstoneBlocksEmailRecord(record, tombstones) {
+  const email = String(record?.email || '').trim().toLowerCase()
+  const created = Date.parse(record?.createdAt || '') || 0
+  return tombstones.some((tomb) => {
+    if (!email || email !== tomb.email) return false
+    const deletedAt = Date.parse(tomb.deletedAt || '') || 0
+    if (created && deletedAt && created > deletedAt) return false
+    return true
+  })
+}
+
+/**
+ * Una cuenta eliminada no puede volver al fusionar el archivo con Postgres.
+ * Un registro posterior, con otro id y createdAt más nuevo, sí se conserva.
+ */
+function applyAccountTombstones(merged, tombstones) {
+  if (!tombstones.length) return merged
+  const ids = new Set(tombstones.map((item) => item.id))
+  if (Array.isArray(merged.users)) {
+    merged.users = merged.users.filter((user) => !tombstoneBlocksUser(user, tombstones))
+  }
+  if (Array.isArray(merged.sessions)) {
+    merged.sessions = merged.sessions.filter((session) => !ids.has(String(session?.userId || '')))
+  }
+  if (Array.isArray(merged.passwordResets)) {
+    merged.passwordResets = merged.passwordResets.filter(
+      (item) => !ids.has(String(item?.userId || '')),
+    )
+  }
+  if (Array.isArray(merged.emailVerifications)) {
+    merged.emailVerifications = merged.emailVerifications.filter(
+      (item) => !tombstoneBlocksEmailRecord(item, tombstones),
+    )
+  }
+  merged.deletedAccounts = tombstones
+  return merged
+}
+
 export function mergeDurableStores(primary, secondary, { primaryUserWins = false } = {}) {
   if (!primary || typeof primary !== 'object') return secondary && typeof secondary === 'object' ? secondary : primary
   if (!secondary || typeof secondary !== 'object') return primary
@@ -378,7 +448,7 @@ export function mergeDurableStores(primary, secondary, { primaryUserWins = false
       primaryUserWins,
     )
   }
-  return merged
+  return applyAccountTombstones(merged, accountTombstones(primary, secondary))
 }
 
 /**

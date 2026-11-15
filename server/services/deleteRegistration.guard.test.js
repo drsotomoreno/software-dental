@@ -18,6 +18,8 @@ test('eliminar un registro invalida la cuenta y no borra el cubo clínico', asyn
   const fn = sliceFunction(src, 'deleteSubscriptionUserByEmail')
   assert.match(fn, /La cuenta del superadministrador no puede eliminarse/)
   assert.match(fn, /forgetLiveSessionsForUser\(removed\.id\)/)
+  assert.match(fn, /deletedAccounts/)
+  assert.match(fn, /No se pudo guardar la eliminación/)
   assert.match(fn, /store\.sessions/)
   assert.match(fn, /store\.passwordResets/)
   assert.match(fn, /deleteEmailOtp\(normalizedEmail\)/)
