@@ -741,6 +741,31 @@ export async function pullClinicalRecords(clinicId, _since, aliasIds = []) {
 }
 
 /**
+ * Un solo borrador por patientSyncId (p. ej. al abrir Pacientes Valorados).
+ * Evita serializar los ~31 MB de drafts en el pull global.
+ */
+export async function pullPatientDraft(clinicId, patientSyncId, aliasIds = []) {
+  const syncKey = String(patientSyncId || '').trim()
+  if (!syncKey) return null
+  const ids = scopeIds(clinicId, aliasIds)
+  if (ids.length === 0) return null
+  const store = await loadStore()
+  const clinic = mergeClinicBuckets(store, ids)
+  const draftKey = syncKey.startsWith('draft:') ? syncKey : `draft:${syncKey}`
+  const record =
+    clinic.drafts?.[draftKey] ||
+    clinic.drafts?.[syncKey] ||
+    Object.values(clinic.drafts || {}).find((row) => {
+      const payload = row?.payload && typeof row.payload === 'object' ? row.payload : row
+      const ps = String(payload?.patientSyncId || payload?.patientId || '').trim()
+      return ps === syncKey || `draft:${ps}` === draftKey
+    }) ||
+    null
+  if (!record) return null
+  return omitHeavyClinicalDraftForms(stripHeavyBinaryFields(record))
+}
+
+/**
  * Snapshot del cubo canónico + aliases.
  *
  * options.slim / includeBlobs===false → solo pacientes+citas (~0.06MB).

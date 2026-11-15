@@ -96,8 +96,10 @@ import {
   clearPatientClinicalDraft,
   getPatientClinicalDraft,
   persistCorrectedEvolutionSessionClocks,
+  pickLivingDraftForm,
   savePatientValuationDraft,
 } from '@/utils/patientClinicalDraft'
+import { clinicalFormHasContent } from '../../shared/clinicalRecordGuard.js'
 import { isRemoteDraftNewer } from '@/utils/clinicalDraftMerge'
 import { preferGeneralBudgetSections } from '../../shared/clinicalBudgetMerge.js'
 import { mergeClinicalPaymentSections } from '../../shared/paymentControlMerge.js'
@@ -314,6 +316,7 @@ export function PatientDetailPage() {
 
   const viewedPatientRef = useRef<string | null>(null)
   const clinicalInitForPatientRef = useRef<string | null>(null)
+  const valuationDraftRecoveryRef = useRef<string | null>(null)
   const skipPatientIdentificationAutoSaveRef = useRef(true)
 
   const clinicalVoiceContext: ClinicalVoiceContext =
@@ -341,6 +344,7 @@ export function PatientDetailPage() {
     setMissingFieldErrors([])
     viewedPatientRef.current = null
     clinicalInitForPatientRef.current = null
+    valuationDraftRecoveryRef.current = null
     window.scrollTo({ top: 0, behavior: 'auto' })
   }, [id])
 
@@ -462,6 +466,7 @@ export function PatientDetailPage() {
     clinicalData,
     odontogram,
     enabled: Boolean(id) && Boolean(clinicalData) && !isArchiveView,
+    valuationOnly: isValuationOnly,
     onOdontogramPersisted: (persisted) => {
       setOdontogram((prev) => odontogramAfterPersist(prev, persisted))
     },
@@ -534,15 +539,7 @@ export function PatientDetailPage() {
     const pullPaymentsIntoForm = async () => {
       try {
         const draft = await getPatientClinicalDraft(patientForeignKey)
-        const livingRaw = draft?.clinicalDraft ?? draft?.valuationDraft
-        const living =
-          draft?.clinicalDraft && draft?.valuationDraft
-            ? {
-                ...draft.clinicalDraft,
-                ...mergeClinicalPaymentSections(draft.valuationDraft, draft.clinicalDraft),
-                ...preferGeneralBudgetSections(draft.valuationDraft, draft.clinicalDraft),
-              }
-            : livingRaw
+        const living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
         if (!living || cancelled) return
         setClinicalData((prev) => {
           if (!prev) return prev
@@ -603,13 +600,16 @@ export function PatientDetailPage() {
     })
   }, [patient?.id, id, audit])
 
+  const patientRef = useRef(patient)
+  patientRef.current = patient
+
   useEffect(() => {
     if (!id) return
-    // No esperar patient ni red: Dexie con patientForeignKey de la ruta.
-    if (clinicalInitForPatientRef.current === id) return
+    // No depender de patient?.id: al resolver useLiveQuery cancelaba la hidratación
+    // y el guard impedía reintentarla → historia de valoración en blanco.
 
     let cancelled = false
-    let loadCompleted = false
+    let applied = false
     const foreignKey = patientForeignKey || toPatientForeignKey(id)
     const emptyForm = createEmptyClinicalForm(professionalLicense, professionalLicense)
     const shellForm: ClinicalRecordFormData = {
@@ -624,7 +624,6 @@ export function PatientDetailPage() {
     // Offline-first: libera "Cargando historia clínica..." en el mismo tick.
     setClinicalData(shellForm)
     clinicalInitForPatientRef.current = id
-    loadCompleted = true
 
     const dexieTimeoutMs = 2_500
 
@@ -648,6 +647,7 @@ export function PatientDetailPage() {
     }
 
     async function hydrateFromDexie(options?: { quiet?: boolean }) {
+      const currentPatient = patientRef.current
       let base: ClinicalRecordFormData = { ...shellForm }
       let loadedWithWarning = false
       let signedRecord: ClinicalRecord | null = null
@@ -660,7 +660,7 @@ export function PatientDetailPage() {
             getLatestSignedClinicalRecord(foreignKey),
             'getLatestSignedClinicalRecord',
           )
-          if (!signedRecord && patient?.treatmentCompleted) {
+          if (!signedRecord && currentPatient?.treatmentCompleted) {
             signedRecord = await withDexieTimeout(
               getLatestClinicalRecord(foreignKey),
               'getLatestClinicalRecord',
@@ -683,25 +683,36 @@ export function PatientDetailPage() {
           }
         }
 
-        if (patient?.valuationConsent && !base.valuationConsent) {
-          base.valuationConsent = patient.valuationConsent
+        if (currentPatient?.valuationConsent && !base.valuationConsent) {
+          base.valuationConsent = currentPatient.valuationConsent
         }
 
         if (foreignKey) {
           try {
-            const draft = await withDexieTimeout(
+            let draft = await withDexieTimeout(
               getPatientClinicalDraft(foreignKey),
               'getPatientClinicalDraft',
             )
-            const livingRaw = draft?.clinicalDraft ?? draft?.valuationDraft
-            const living =
-              draft?.clinicalDraft && draft?.valuationDraft
-                ? {
-                    ...draft.clinicalDraft,
-                    ...mergeClinicalPaymentSections(draft.valuationDraft, draft.clinicalDraft),
-                    ...preferGeneralBudgetSections(draft.valuationDraft, draft.clinicalDraft),
-                  }
-                : livingRaw
+            let living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+
+            // Pull HTTP ya no trae drafts (OOM). Si Dexie está vacío, pedir solo este borrador.
+            if (
+              !draftClinicalData &&
+              !clinicalFormHasContent(living) &&
+              currentPatient?.syncId
+            ) {
+              try {
+                const { pullPatientDraftOnDemand } = await import('@/services/clinicalSyncService')
+                const remote = await pullPatientDraftOnDemand(currentPatient.syncId)
+                if (remote) {
+                  draft = (await getPatientClinicalDraft(foreignKey)) ?? draft
+                  living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+                }
+              } catch {
+                // Red opcional: se muestra lo local.
+              }
+            }
+
             if (draft && living && !draftClinicalData) {
               const newer = signedRecord
                 ? isRemoteDraftNewer(
@@ -759,23 +770,33 @@ export function PatientDetailPage() {
         setClinicalData((prev) => {
           // Tras sync en segundo plano: solo reemplaza si hay contenido más rico/nuevo.
           if (options?.quiet && prev) {
-            const prevStamp = String(
-              (prev as ClinicalRecordFormData & { updatedAt?: string }).updatedAt ||
-                prev.evolutionNotes?.[0]?.createdAt ||
-                '',
-            )
-            const nextStamp = String(
-              signedRecord?.updatedAt ||
-                signedRecord?.signedAt ||
-                signedRecord?.createdAt ||
-                '',
-            )
-            if (prevStamp && nextStamp && !isRemoteDraftNewer(prevStamp, nextStamp)) {
+            if (clinicalFormHasContent(prev) && !clinicalFormHasContent(base)) {
+              return prev
+            }
+            if (
+              clinicalFormHasContent(prev) &&
+              clinicalFormHasContent(base) &&
+              !isRemoteDraftNewer(
+                String(
+                  (prev as ClinicalRecordFormData & { updatedAt?: string }).updatedAt ||
+                    prev.evolutionNotes?.[0]?.createdAt ||
+                    '',
+                ),
+                String(
+                  signedRecord?.updatedAt ||
+                    signedRecord?.signedAt ||
+                    signedRecord?.createdAt ||
+                    (base as ClinicalRecordFormData & { updatedAt?: string }).updatedAt ||
+                    '',
+                ),
+              )
+            ) {
               return prev
             }
           }
           return base
         })
+        applied = true
 
         if (!options?.quiet) {
           if (!loadedWithWarning && signedRecord && !loadedDraft) {
@@ -783,7 +804,7 @@ export function PatientDetailPage() {
               'Historia clínica activa. Las evoluciones firmadas son inmutables (Res. 1995/1999); odontograma, demografía, plan y exámenes siguen editables.',
             )
           }
-          if (patient?.treatmentCompleted) {
+          if (currentPatient?.treatmentCompleted) {
             setActiveSection('all')
             if (loadedDraft) {
               setMessage('Historia clínica cargada desde borrador guardado.')
@@ -837,21 +858,61 @@ export function PatientDetailPage() {
       cancelled = true
       backgroundAbort.abort()
       window.clearTimeout(backgroundTimer)
-      if (!loadCompleted) {
+      // Si la hidratación no llegó a aplicarse, permitir reintento al remontar.
+      if (!applied && clinicalInitForPatientRef.current === id) {
         clinicalInitForPatientRef.current = null
       }
+    }
+  }, [id, patientForeignKey, professionalLicense, draftClinicalData])
+
+  // Si el paciente llega después del shell vacío, recuperar valuationDraft (local o servidor).
+  useEffect(() => {
+    if (!id || !patientForeignKey || !patient?.syncId || draftClinicalData) return
+    if (!isValuationOnly || !clinicalData) return
+    if (clinicalFormHasContent(clinicalData)) return
+    if (valuationDraftRecoveryRef.current === id) return
+    valuationDraftRecoveryRef.current = id
+
+    let cancelled = false
+    void (async () => {
+      try {
+        let draft = await getPatientClinicalDraft(patientForeignKey)
+        let living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+        if (!clinicalFormHasContent(living) && patient.syncId) {
+          const { pullPatientDraftOnDemand } = await import('@/services/clinicalSyncService')
+          const ok = await pullPatientDraftOnDemand(patient.syncId)
+          if (ok) {
+            draft = await getPatientClinicalDraft(patientForeignKey)
+            living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+          }
+        }
+        if (cancelled || !living || !clinicalFormHasContent(living)) return
+        setClinicalData((prev) => {
+          if (prev && clinicalFormHasContent(prev)) return prev
+          return {
+            ...living,
+            diagnosticChart: normalizeClinicalDiagnosticChart(living.diagnosticChart),
+            specializedAnnexes: normalizeSpecializedAnnexes(living.specializedAnnexes),
+            valuationConsent: living.valuationConsent ?? patient.valuationConsent ?? null,
+          }
+        })
+      } catch {
+        // Recuperación opcional.
+      }
+    })()
+
+    return () => {
+      cancelled = true
     }
   }, [
     id,
     patientForeignKey,
-    professionalLicense,
+    patient?.syncId,
+    patient?.valuationConsent,
+    isValuationOnly,
     draftClinicalData,
-    // Solo ids estables: valuationConsent/objeto patient re-disparaba el efecto en cada sync.
-    patient?.id,
-    patient?.treatmentCompleted,
+    Boolean(clinicalData && clinicalFormHasContent(clinicalData)),
   ])
-
-
 
   const handleSaveOdontogram = useCallback(async () => {
 
@@ -1754,7 +1815,7 @@ export function PatientDetailPage() {
           professionalLicense,
         )
         const draft = await getPatientClinicalDraft(patientForeignKey)
-        const living = draft?.clinicalDraft ?? draft?.valuationDraft
+        const living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
         if (draft && living) {
           form = mergeLivingChart(
             form,
@@ -2140,6 +2201,7 @@ export function PatientDetailPage() {
 
         {showRapidValuation && patientForm ? (
           <RapidValuationForm
+            key={`valuation-${patientForeignKey}`}
             patientData={patientForm}
             onPatientDataChange={(data) => {
               setPatientForm(data)

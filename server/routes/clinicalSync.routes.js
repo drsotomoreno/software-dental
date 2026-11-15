@@ -9,6 +9,7 @@ import {
   findClinicAttachment,
   isGoogleDriveRequiredError,
   pullClinicSnapshot,
+  pullPatientDraft,
   pushClinicSnapshot,
   pushClinicalRecords,
 } from '../services/clinicalSyncStore.js'
@@ -218,6 +219,51 @@ router.get('/pull', async (req, res) => {
       error: oom
         ? 'El servidor agotó memoria al preparar el sync. Reintente con full=0.'
         : 'No se pudo descargar el snapshot completo de la clínica.',
+      code: oom ? code || 'HEAP_PRESSURE' : undefined,
+    })
+  }
+})
+
+/** Un borrador clínico/valoración al abrir la ficha (el pull global ya no incluye drafts). */
+router.get('/draft/:patientSyncId', async (req, res) => {
+  try {
+    const auth = await requireClinicSession(req, res)
+    if (!auth) return
+    if (denyWithoutClinicalAccess(auth, res)) return
+    if (denyIfHeapPressure(res)) return
+
+    const patientSyncId = String(req.params?.patientSyncId || '').trim()
+    if (!patientSyncId) {
+      return sendJson(res, 400, { success: false, ok: false, error: 'Falta patientSyncId.' })
+    }
+    const draft = await pullPatientDraft(auth.canonical, patientSyncId, auth.aliases)
+    if (!draft) {
+      return sendJson(res, 404, {
+        success: false,
+        ok: false,
+        error: 'No hay borrador de valoración/historia para este paciente en el servidor.',
+      })
+    }
+    return sendJson(res, 200, {
+      success: true,
+      ok: true,
+      clinicId: auth.canonical,
+      draft,
+    })
+  } catch (error) {
+    console.error('[Sync] Error en GET /api/sync/draft/:patientSyncId:', error)
+    const message = error instanceof Error ? error.message : String(error)
+    const code = error?.code || ''
+    const oom =
+      code === 'CLINICAL_SYNC_TOO_LARGE' ||
+      code === 'HEAP_PRESSURE' ||
+      /heap|out of memory|ENOMEM/i.test(message)
+    return sendJson(res, oom ? 503 : 500, {
+      success: false,
+      ok: false,
+      error: oom
+        ? 'El servidor agotó memoria al leer el borrador. Reintente en unos segundos.'
+        : 'No se pudo leer el borrador del paciente.',
       code: oom ? code || 'HEAP_PRESSURE' : undefined,
     })
   }

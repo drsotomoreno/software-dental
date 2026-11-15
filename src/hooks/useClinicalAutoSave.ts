@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
 import type { OdontogramData } from '@/types/odontogram'
 import { registerClinicalDraftFlush } from '@/services/clinicalSyncState'
-import { savePatientClinicalDraft } from '@/utils/patientClinicalDraft'
+import {
+  savePatientClinicalDraft,
+  savePatientValuationDraft,
+} from '@/utils/patientClinicalDraft'
 import { upsertPatientOdontogram } from '@/utils/patientId'
 import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceService'
 
@@ -23,9 +26,18 @@ export function useClinicalAutoSave(options: {
   clinicalData: ClinicalRecordFormData | null
   odontogram: OdontogramData | null
   enabled: boolean
+  /** Pacientes Valorados: persiste valuationDraft (no un clinicalDraft fino que lo tapa). */
+  valuationOnly?: boolean
   onOdontogramPersisted?: (odontogram: OdontogramData) => void
 }): { lastSavedAt: string | null; saving: boolean } {
-  const { patientRouteId, clinicalData, odontogram, enabled, onOdontogramPersisted } = options
+  const {
+    patientRouteId,
+    clinicalData,
+    odontogram,
+    enabled,
+    valuationOnly = false,
+    onOdontogramPersisted,
+  } = options
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -35,11 +47,13 @@ export function useClinicalAutoSave(options: {
   const clinicalDataRef = useRef(clinicalData)
   const odontogramRef = useRef(odontogram)
   const enabledRef = useRef(enabled)
+  const valuationOnlyRef = useRef(valuationOnly)
   const patientRouteIdRef = useRef(patientRouteId)
   onOdontogramPersistedRef.current = onOdontogramPersisted
   clinicalDataRef.current = clinicalData
   odontogramRef.current = odontogram
   enabledRef.current = enabled
+  valuationOnlyRef.current = valuationOnly
   patientRouteIdRef.current = patientRouteId
 
   const flushAutoSave = useRef(async () => {
@@ -48,7 +62,11 @@ export function useClinicalAutoSave(options: {
     const clinicalData = normalizeClinicalRecordPayments(clinicalDataRef.current)
     const odontogramToSave = odontogramRef.current
     try {
-      await savePatientClinicalDraft(patientRouteId, clinicalData, odontogramToSave)
+      if (valuationOnlyRef.current) {
+        await savePatientValuationDraft(patientRouteId, clinicalData)
+      } else {
+        await savePatientClinicalDraft(patientRouteId, clinicalData, odontogramToSave)
+      }
     } catch {
       // El borrador clínico se intenta primero: un fallo del odontograma no lo borra.
     }

@@ -14,6 +14,8 @@ import { BudgetForm } from './BudgetForm'
 import { PresupuestoRapido } from './PresupuestoRapido'
 import type { OdontogramData } from '@/types/odontogram'
 import type { BudgetLineItem } from '@/types/clinicalRecord'
+import { clinicalFormHasContent } from '../../../shared/clinicalRecordGuard.js'
+import { normalizeAnamnesis } from '@/types/anamnesis'
 
 interface RapidValuationFormProps {
   patientData?: PatientFormData
@@ -47,12 +49,50 @@ export function RapidValuationForm({
   disabled = false,
   replaceBudgetWithQuick = false,
 }: RapidValuationFormProps) {
-  const [form, setForm] = useState<ClinicalRecordFormData>(() => ({
-    ...createEmptyClinicalForm(),
-    ...initialData,
-  }))
+  const buildForm = (data?: Partial<ClinicalRecordFormData>): ClinicalRecordFormData => {
+    const emptyForm = createEmptyClinicalForm()
+    return {
+      ...emptyForm,
+      ...data,
+      anamnesis: normalizeAnamnesis({ ...emptyForm.anamnesis, ...data?.anamnesis }),
+      treatmentPlan: data?.treatmentPlan ?? emptyForm.treatmentPlan,
+      budgetItems: data?.budgetItems ?? emptyForm.budgetItems,
+    }
+  }
+
+  const [form, setForm] = useState<ClinicalRecordFormData>(() => buildForm(initialData))
   const onChangeRef = useRef(onChange)
+  const formRef = useRef(form)
+  const loadedPatientKeyRef = useRef<string | null>(null)
+  formRef.current = form
   onChangeRef.current = onChange
+
+  // Id estable: no usar documento (en Nuevo Paciente cambia al tipear y borraría el formulario).
+  const patientKey =
+    patient?.id != null
+      ? String(patient.id)
+      : patient?.syncId
+        ? String(patient.syncId)
+        : 'local-draft'
+
+  // Offline-first: el padre hidrata el borrador de valoración después del primer render.
+  // Sin este sync, la UI se queda en el formulario vacío inicial.
+  useEffect(() => {
+    if (!initialData) return
+    const samePatient = loadedPatientKeyRef.current === patientKey
+    const recoverBlankForm =
+      samePatient &&
+      !clinicalFormHasContent(formRef.current) &&
+      clinicalFormHasContent(initialData)
+    if (samePatient && !recoverBlankForm) return
+
+    loadedPatientKeyRef.current = patientKey
+    const next = buildForm(initialData)
+    setForm(next)
+    if (clinicalFormHasContent(next)) {
+      onChangeRef.current(next)
+    }
+  }, [initialData, patientKey])
 
   const update = (patch: Partial<ClinicalRecordFormData>) => {
     setForm((prev) => {
@@ -67,10 +107,6 @@ export function RapidValuationForm({
       diagnoses: form.diagnoses.map((item) => (item.code === code ? { ...item, ...patch } : item)),
     })
   }
-
-  useEffect(() => {
-    onChangeRef.current(form)
-  }, [])
 
   const budgetLinkedPlanItemIds = useMemo(
     () =>

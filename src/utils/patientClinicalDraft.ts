@@ -21,6 +21,7 @@ import { normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChar
 import { keepStoredConsentSignatures } from '@/types/consent'
 import { normalizeSpecializedAnnexes } from '@/types/specializedAnnexes'
 import {
+  clinicalFormHasContent,
   preserveEvolutionWorkflowStatus,
   shouldPersistClinicalDraft,
 } from '../../shared/clinicalRecordGuard.js'
@@ -193,7 +194,66 @@ export async function getPatientClinicalDraft(
   patientRouteId: string,
 ): Promise<PatientClinicalDraft | undefined> {
   const patientId = toPatientForeignKey(patientRouteId)
-  return db.patientClinicalDrafts.get(patientId)
+  const direct = await db.patientClinicalDrafts.get(patientId)
+  if (direct) return direct
+
+  // Borradores sincronizados a veces quedan indexados por syncId del paciente.
+  const patient = await db.patients.get(
+    /^\d+$/.test(patientId) ? Number(patientId) : patientId,
+  )
+  const syncId = patient?.syncId?.trim()
+  if (syncId && syncId !== patientId) {
+    const bySync = await db.patientClinicalDrafts.get(syncId)
+    if (bySync) return bySync
+  }
+  return undefined
+}
+
+/**
+ * Elige el formulario vivo: un clinicalDraft vacío/fino no debe tapar valuationDraft
+ * (motivo, diagnósticos, presupuesto de valoración).
+ */
+export function pickLivingDraftForm(
+  clinicalDraft: ClinicalRecordFormData | null | undefined,
+  valuationDraft: ClinicalRecordFormData | null | undefined,
+): ClinicalRecordFormData | null {
+  const hasClinical = clinicalFormHasContent(clinicalDraft)
+  const hasValuation = clinicalFormHasContent(valuationDraft)
+  if (hasClinical && hasValuation && clinicalDraft && valuationDraft) {
+    return {
+      ...valuationDraft,
+      ...clinicalDraft,
+      anamnesis: hasAnamnesisPrefer(valuationDraft, clinicalDraft),
+      diagnoses:
+        Array.isArray(clinicalDraft.diagnoses) && clinicalDraft.diagnoses.length > 0
+          ? clinicalDraft.diagnoses
+          : valuationDraft.diagnoses,
+      treatmentPlan:
+        Array.isArray(clinicalDraft.treatmentPlan) && clinicalDraft.treatmentPlan.length > 0
+          ? clinicalDraft.treatmentPlan
+          : valuationDraft.treatmentPlan,
+      ...mergeClinicalPaymentSections(valuationDraft, clinicalDraft),
+      ...preferGeneralBudgetSections(valuationDraft, clinicalDraft),
+      ...preferSpecialtyBudgets(valuationDraft, clinicalDraft),
+    }
+  }
+  if (hasValuation && valuationDraft) return valuationDraft
+  if (hasClinical && clinicalDraft) return clinicalDraft
+  return clinicalDraft ?? valuationDraft ?? null
+}
+
+function hasAnamnesisPrefer(
+  valuationDraft: ClinicalRecordFormData,
+  clinicalDraft: ClinicalRecordFormData,
+) {
+  // Preferir anamnesis con contenido real (motivo de consulta de valoración).
+  const v = valuationDraft.anamnesis
+  const c = clinicalDraft.anamnesis
+  const vText = typeof v?.chiefComplaint === 'string' ? v.chiefComplaint.trim() : ''
+  const cText = typeof c?.chiefComplaint === 'string' ? c.chiefComplaint.trim() : ''
+  if (vText && !cText) return v
+  if (cText) return c
+  return c ?? v
 }
 
 export async function savePatientValuationDraft(

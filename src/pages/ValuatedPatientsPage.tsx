@@ -55,8 +55,8 @@ export function ValuatedPatientsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Pacientes Valorados</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Ordenados por fecha de apertura, del más nuevo al más antiguo, para las tareas de
-            mercadeo. Puede abrir la ficha o pasarlos a historia completa desde Nuevo Paciente.
+            Ordenados por fecha de apertura, del más nuevo al más antiguo. Pulse{' '}
+            <strong>Abrir valoración</strong> para ver la historia abreviada completa.
           </p>
         </div>
         {can('patients.write') && (
@@ -98,81 +98,83 @@ export function ValuatedPatientsPage() {
               </button>
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-amber-200 bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-amber-100 bg-amber-50">
-              <tr>
-                <th className="px-4 py-2.5 font-medium text-slate-600">Historia creada en</th>
-                <th className="px-4 py-2.5 font-medium text-slate-600">Documento</th>
-                <th className="px-4 py-2.5 font-medium text-slate-600">Nombre</th>
-                <th className="px-4 py-2.5 font-medium text-slate-600">Teléfono</th>
-                <th className="px-4 py-2.5 font-medium text-slate-600">EPS</th>
-                <th className="px-4 py-2.5 font-medium text-slate-600">Estado</th>
-                <th className="px-4 py-2.5 font-medium text-slate-600">WhatsApp</th>
-                <th className="px-4 py-2.5 font-medium text-slate-600">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
+            <ul className="space-y-3">
               {filteredPatients.map((patient) => {
                 const whatsappUrl = buildWhatsAppUrl(
                   patient.phone,
                   buildValuationFollowUpMessage(resolveAccountHolderTitle(user)),
                 )
+                const valuationPath = `/pacientes/${patient.id}`
+                const fullName = `${patient.firstName} ${patient.lastName}`.trim()
                 return (
-                  <tr key={patient.id} className="hover:bg-amber-50/40">
-                    <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-teal-950">
-                      {etiquetaAperturaPaciente(patient.createdAt) || '—'}
-                    </td>
-                    <td className="px-4 py-2.5 font-mono text-xs">
-                      {patient.documentType} {patient.documentNumber}
-                    </td>
-                    <td className="px-4 py-2.5 font-medium">
-                      {patient.firstName} {patient.lastName}
-                    </td>
-                    <td className="px-4 py-2.5">{patient.phone}</td>
-                    <td className="px-4 py-2.5">{patient.insurer ?? '—'}</td>
-                    <td className="px-4 py-2.5">
-                      <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900">
-                        Solo valoración
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {whatsappUrl ? (
-                        <a
-                          href={whatsappUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center whitespace-nowrap rounded-md bg-[#25D366] px-2.5 py-1 text-xs font-medium text-white shadow-sm transition hover:bg-[#1ebe57]"
-                          aria-label={`Enviar WhatsApp a ${patient.firstName} ${patient.lastName}`}
+                  <li
+                    key={patient.id}
+                    className="rounded-xl border border-amber-200 bg-white p-4 shadow-sm"
+                  >
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            to={valuationPath}
+                            state={{ resetHistoryView: true }}
+                            className="text-base font-semibold text-dental-800 hover:underline"
+                          >
+                            {fullName}
+                          </Link>
+                          <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900">
+                            Solo valoración
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-600">
+                          <span className="font-mono text-xs">
+                            {patient.documentType} {patient.documentNumber}
+                          </span>
+                          <span className="mx-2 text-slate-300">·</span>
+                          <span>{patient.phone || 'Sin teléfono'}</span>
+                          <span className="mx-2 text-slate-300">·</span>
+                          <span>{patient.insurer || 'Sin EPS'}</span>
+                        </p>
+                        <p className="text-xs font-medium text-teal-900">
+                          Historia creada:{' '}
+                          {etiquetaAperturaPaciente(patient.createdAt) || '—'}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+                        <Link
+                          to={valuationPath}
+                          state={{ resetHistoryView: true }}
+                          className="inline-flex items-center justify-center rounded-md bg-dental-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-dental-700"
+                          aria-label={`Abrir valoración de ${fullName}`}
                         >
-                          Enviar WhatsApp
-                        </a>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled
-                          title="Este paciente no tiene un celular válido para WhatsApp"
-                          className="inline-flex cursor-not-allowed items-center whitespace-nowrap rounded-md bg-slate-200 px-2.5 py-1 text-xs font-medium text-slate-500"
-                        >
-                          Enviar WhatsApp
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <Link
-                        to={`/pacientes/${patient.id}`}
-                        state={{ resetHistoryView: true }}
-                        className="text-dental-600 hover:underline"
-                      >
-                        Ver valoración
-                      </Link>
-                    </td>
-                  </tr>
+                          Abrir valoración
+                        </Link>
+                        {whatsappUrl ? (
+                          <a
+                            href={whatsappUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center rounded-md bg-[#25D366] px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[#1ebe57]"
+                            aria-label={`Enviar WhatsApp a ${fullName}`}
+                          >
+                            Enviar WhatsApp
+                          </a>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            title="Este paciente no tiene un celular válido para WhatsApp"
+                            className="inline-flex cursor-not-allowed items-center justify-center rounded-md bg-slate-200 px-3 py-2 text-sm font-medium text-slate-500"
+                          >
+                            Enviar WhatsApp
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </li>
                 )
               })}
-            </tbody>
-          </table>
-            </div>
+            </ul>
           )}
         </>
       )}

@@ -518,6 +518,30 @@ async function pullAndMerge(
 }
 
 /**
+ * El pull global ya no incluye drafts (OOM). Al abrir un paciente valorado
+ * pedimos solo su borrador y lo fusionamos en IndexedDB.
+ */
+export async function pullPatientDraftOnDemand(patientSyncId: string): Promise<boolean> {
+  const syncId = String(patientSyncId || '').trim()
+  if (!syncId) return false
+  const auth = getStoredApiAuth()
+  if (!auth?.token) return false
+  const { response, payload } = await syncFetch(
+    `/api/sync/draft/${encodeURIComponent(syncId)}`,
+    { timeoutMs: 20_000 },
+  )
+  if (!response.ok || !payload?.draft) return false
+  await applyClinicSnapshot(
+    {
+      clinicId: String(payload.clinicId || auth.clinicId || ''),
+      drafts: [payload.draft],
+    } as import('@/types/clinicalSync').ClinicalSyncPullResponse,
+    { hydrateBlobs: false },
+  )
+  return true
+}
+
+/**
  * Pull forzado al iniciar sesión.
  * Médico-legal: NUNCA vacía Dexie antes del pull; si el pull falla, conserva
  * los pacientes locales y no confirma la época de schema.

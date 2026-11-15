@@ -25,6 +25,14 @@ export async function getPatientByRouteId(routeId: string): Promise<Patient | nu
     patient = await db.patients.get(String(numericKey))
   }
 
+  // Rutas con syncId UUID (u otros ids no numéricos) tras sync multi-dispositivo.
+  if (!patient && typeof numericKey === 'string' && numericKey.trim()) {
+    patient =
+      (await db.patients.where('syncId').equals(numericKey).first()) ??
+      (await db.patients.filter((row) => String(row.id) === numericKey).first()) ??
+      undefined
+  }
+
   return patient ?? null
 }
 
