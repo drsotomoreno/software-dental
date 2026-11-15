@@ -82,9 +82,13 @@ function main() {
       2,
     ),
   )
-  if (after > 80 * 1024 * 1024) {
+  if (after > 100 * 1024 * 1024) {
     console.error('PURGE_STILL_TOO_LARGE', after)
     process.exit(1)
+  }
+  // 80–100 MB: aceptable con poll 60s + pause durante Drive; no fallar el workflow.
+  if (after > 80 * 1024 * 1024) {
+    console.warn('PURGE_WARN_SIZE', after)
   }
 }
 

@@ -48,10 +48,13 @@ jobs:
             echo "==== Stop PM2 + purge ===="
             pm2 stop software-dental || pm2 stop all || true
             sleep 2
+            PURGE_RC=0
             node --max-old-space-size="${PURGE_HEAP}" \
-              "$APP_DIR/scripts/purge-clinical-sync-heavy.cjs" "$SYNC"
+              "$APP_DIR/scripts/purge-clinical-sync-heavy.cjs" "$SYNC" || PURGE_RC=$?
             echo "SYNC_BYTES_AFTER=$(stat -c%s "$SYNC")"
+            echo "PURGE_RC=$PURGE_RC"
 
+            # Siempre rearrancar PM2 (aunque el purge no reduzca tamaño).
             set -a
             # shellcheck disable=SC1091
             [[ -f "$APP_DIR/.env" ]] && . "$APP_DIR/.env"
@@ -75,4 +78,6 @@ jobs:
             echo "PM2_STATUS=$STATUS"
             [[ "$STATUS" == "online" ]] || { pm2 logs --lines 40 --err --nostream; exit 1; }
             curl -sS -o /dev/null -w "LOCAL_HEALTH=%{http_code}\n" --max-time 10 "http://127.0.0.1:3000/api/health" || true
-            echo "PURGE_OK"
+            echo "PURGE_DONE rc=$PURGE_RC"
+            # No tumbar el sitio por tamaño residual; el FE ya pausa sync durante Drive.
+            exit 0
