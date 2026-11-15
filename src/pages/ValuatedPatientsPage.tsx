@@ -50,6 +50,20 @@ export function ValuatedPatientsPage() {
     })
   }, [audit])
 
+  // Rehidrata valuationDraft faltantes (pull slim no trae drafts).
+  useEffect(() => {
+    if (!clinicId || !patients?.length) return
+    let cancelled = false
+    void (async () => {
+      const { prefetchMissingValuationDrafts } = await import('@/services/clinicalSyncService')
+      if (cancelled) return
+      await prefetchMissingValuationDrafts({ limit: 40, concurrency: 2 }).catch(() => undefined)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [clinicId, patients?.length])
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

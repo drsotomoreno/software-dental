@@ -1,11 +1,16 @@
 /**
  * Evita que clinical-sync.json crezca por borradores locales pesados.
- * clinicalDraft / valuationDraft > 50 KB JSON viven solo en IndexedDB (Dexie).
+ *
+ * INVARIANTE Pacientes Valorados (Colombia / Res. 1995):
+ * - `valuationDraft` NUNCA se nullifica aquí. Es la única copia servidor de la
+ *   historia abreviada; sin ella el listado abre ficha vacía tras wipe Dexie.
+ * - Solo `clinicalDraft` (historia completa) puede omitirse si supera el umbral.
  */
 
 export const MAX_SYNC_DRAFT_JSON_CHARS = 50 * 1024
 
-const DRAFT_FORM_KEYS = ['clinicalDraft', 'valuationDraft']
+/** Solo clinicalDraft es omitible; valuationDraft se conserva siempre. */
+const OMITTABLE_HEAVY_DRAFT_KEYS = ['clinicalDraft']
 
 export function measureJsonChars(value) {
   if (value == null) return 0
@@ -21,7 +26,7 @@ export function isHeavySyncJson(value, maxChars = MAX_SYNC_DRAFT_JSON_CHARS) {
 }
 
 /**
- * Nullifica clinicalDraft / valuationDraft si superan el umbral.
+ * Nullifica clinicalDraft pesado. Nunca toca valuationDraft.
  * Recorre payloads de sync, mapas drafts y clinics del store.
  */
 export function omitHeavyClinicalDraftForms(value, maxChars = MAX_SYNC_DRAFT_JSON_CHARS) {
@@ -36,7 +41,7 @@ export function omitHeavyClinicalDraftForms(value, maxChars = MAX_SYNC_DRAFT_JSO
     out.payload = omitHeavyClinicalDraftForms(out.payload, maxChars)
   }
 
-  for (const key of DRAFT_FORM_KEYS) {
+  for (const key of OMITTABLE_HEAVY_DRAFT_KEYS) {
     if (key in out && isHeavySyncJson(out[key], maxChars)) {
       out[key] = null
     }

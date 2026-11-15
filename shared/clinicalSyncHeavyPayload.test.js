@@ -14,7 +14,7 @@ test('isHeavySyncJson detecta clinicalDraft > 50 KB', () => {
   assert.equal(isHeavySyncJson(heavy), true)
 })
 
-test('omitHeavyClinicalDraftForms nullifica solo formularios pesados en drafts', () => {
+test('omitHeavyClinicalDraftForms nullifica clinicalDraft pesado y conserva valuationDraft', () => {
   const payload = {
     patientId: '42',
     clinicalDraft: { blob: 'y'.repeat(MAX_SYNC_DRAFT_JSON_CHARS + 50) },
@@ -26,6 +26,23 @@ test('omitHeavyClinicalDraftForms nullifica solo formularios pesados en drafts',
   assert.equal(next.valuationDraft.anamnesis.chiefComplaint, 'Ok')
   assert.deepEqual(next.odontogramDraft, { teeth: [] })
   assert.equal(next.patientId, '42')
+})
+
+test('omitHeavy NUNCA nullifica valuationDraft aunque supere 50 KB (Pacientes Valorados)', () => {
+  const heavyValuation = {
+    anamnesis: { chiefComplaint: 'Dolor' },
+    blob: 'v'.repeat(MAX_SYNC_DRAFT_JSON_CHARS + 200),
+  }
+  const payload = {
+    patientId: '99',
+    valuationDraft: heavyValuation,
+    clinicalDraft: { note: 'light' },
+  }
+  const next = omitHeavyClinicalDraftForms(payload)
+  assert.ok(next.valuationDraft)
+  assert.equal(next.valuationDraft.anamnesis.chiefComplaint, 'Dolor')
+  assert.equal(next.valuationDraft.blob.length, MAX_SYNC_DRAFT_JSON_CHARS + 200)
+  assert.deepEqual(next.clinicalDraft, { note: 'light' })
 })
 
 test('omitHeavyClinicalDraftForms limpia store.clinics.*.drafts', () => {

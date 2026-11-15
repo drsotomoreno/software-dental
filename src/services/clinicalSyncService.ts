@@ -557,6 +557,59 @@ export async function pullPatientDraftOnDemand(patientSyncId: string): Promise<b
 }
 
 /**
+ * Tras login/pull slim: rehidrata valuationDraft de valorados que aún no lo tienen
+ * en Dexie. Evita ficha vacía la primera vez que se abre Pacientes Valorados.
+ */
+export async function prefetchMissingValuationDrafts(options?: {
+  limit?: number
+  concurrency?: number
+}): Promise<number> {
+  const limit = Math.max(1, options?.limit ?? 40)
+  const concurrency = Math.max(1, Math.min(options?.concurrency ?? 2, 3))
+  const auth = getStoredApiAuth()
+  if (!auth?.token) return 0
+
+  const { isValuatedOnlyPatient } = await import('@/types/patient')
+  const { getPatientClinicalDraft, pickLivingDraftForm } = await import(
+    '@/utils/patientClinicalDraft'
+  )
+  const { clinicalFormHasContent } = await import('../../shared/clinicalRecordGuard.js')
+  const { belongsToCurrentClinic } = await import('@/services/clinicLocalIsolation')
+  const clinicId = getCurrentClinicId()
+
+  const patients = await db.patients.toArray()
+  const missing: string[] = []
+  for (const patient of patients) {
+    if (missing.length >= limit) break
+    if (!isValuatedOnlyPatient(patient)) continue
+    if (clinicId && !belongsToCurrentClinic(patient, clinicId)) continue
+    const syncId = String(patient.syncId || '').trim()
+    if (!syncId || patient.id == null) continue
+    try {
+      const draft = await getPatientClinicalDraft(String(patient.id))
+      const living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+      if (clinicalFormHasContent(living)) continue
+      missing.push(syncId)
+    } catch {
+      missing.push(syncId)
+    }
+  }
+
+  let recovered = 0
+  for (let i = 0; i < missing.length; i += concurrency) {
+    const chunk = missing.slice(i, i + concurrency)
+    const results = await Promise.all(
+      chunk.map((syncId) => pullPatientDraftOnDemand(syncId).catch(() => false)),
+    )
+    recovered += results.filter(Boolean).length
+  }
+  if (recovered > 0) {
+    console.info('[Sync] Prefetch valuationDraft recuperó', recovered, 'valorados')
+  }
+  return recovered
+}
+
+/**
  * Pull forzado al iniciar sesión.
  * Médico-legal: NUNCA vacía Dexie antes del pull; si el pull falla, conserva
  * los pacientes locales y no confirma la época de schema.
@@ -639,6 +692,8 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
 
         if (merged.ok) {
           if (merged.patients === 0) recordPullSuccess(clinicId, 0)
+          // Segundo plano: drafts de valoración (el pull slim no los trae).
+          void prefetchMissingValuationDrafts().catch(() => undefined)
           return true
         }
 
@@ -652,6 +707,7 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
             '[Sync] Pull al login falló; se conservan pacientes locales (datos clínicos).',
             { localCount, clinicId },
           )
+          void prefetchMissingValuationDrafts().catch(() => undefined)
           return true
         }
         return false

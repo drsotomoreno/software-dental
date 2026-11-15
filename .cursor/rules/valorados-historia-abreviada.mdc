@@ -1,0 +1,43 @@
+---
+description: Invariantes Pacientes Valorados — historia abreviada siempre recuperable
+globs:
+  - src/pages/ValuatedPatientsPage.tsx
+  - src/pages/PatientDetailPage.tsx
+  - src/services/clinicalSyncService.ts
+  - server/services/clinicalSyncStore.js
+  - server/routes/clinicalSync.routes.js
+  - shared/clinicalSyncHeavyPayload.js
+  - scripts/configure-nginx-spa-static.sh
+alwaysApply: false
+---
+
+# Pacientes Valorados — historia abreviada
+
+## Problema que no debe repetirse
+
+El listado mostraba pacientes pero **no se podía ver** lo registrado en la
+valoración rápida (ficha vacía / sin botón de abrir).
+
+## Invariantes obligatorios
+
+1. **UI**: `ValuatedPatientsPage` debe exponer siempre una acción visible
+   «Abrir valoración» (no esconderla al final de una tabla ancha).
+2. **Almacenamiento**: el contenido clínico de un valorado vive en
+   `patientClinicalDrafts.valuationDraft` (no en `clinicalRecords` hasta aceptar
+   tratamiento).
+3. **Sync HTTP**: `pullClinicSnapshot` puede devolver `drafts: []` (anti-OOM),
+   pero **debe existir** `GET /api/sync/draft/:patientSyncId` y el cliente debe
+   llamarlo al abrir un valorado sin draft local.
+4. **omitHeavy**: **nunca** nullificar `valuationDraft` en
+   `omitHeavyClinicalDraftForms`. Solo `clinicalDraft` pesado es omitible.
+5. **Recuperación**: `PatientDetailPage` reintenta el pull del draft; no marcar
+   “ya recuperado” hasta éxito; mostrar mensaje si falla.
+6. **Caché**: `index.html` con `Cache-Control: no-store` en Nginx para no servir
+   UI vieja tras deploy.
+
+## Al editar
+
+- No eliminar el botón/enlace de abrir valoración.
+- No volver a incluir `valuationDraft` en la lista de formularios omitibles.
+- No quitar `pullPatientDraft` / `pullPatientDraftOnDemand` / prefetch post-login.
+- Mantener tests en `src/pages/valuatedPatientsHistory.guard.test.js`.

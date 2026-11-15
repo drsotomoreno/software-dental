@@ -72,6 +72,18 @@ válido un documento de este tipo si falta alguna de las dos firmas.
 
 ---
 
+## PACIENTES VALORADOS — HISTORIA ABREVIADA (NO ROMPER)
+
+- La UI debe mostrar siempre **«Abrir valoración»** (nunca solo WhatsApp).
+- El contenido clínico del valorado vive en `valuationDraft`. El pull HTTP
+  puede ir con `drafts: []` (anti-OOM), pero debe existir
+  `GET /api/sync/draft/:patientSyncId` + recuperación al abrir + prefetch.
+- `omitHeavyClinicalDraftForms` **NUNCA** nullifica `valuationDraft`.
+- Tests: `src/pages/valuatedPatientsHistory.guard.test.js`.
+- Regla detallada: `.cursor/rules/valorados-historia-abreviada.mdc`.
+
+---
+
 ## SECCIÓN 8 — PRESUPUESTO DE ORTODONCIA (NO ELIMINAR)
 
 - Debe existir el botón **«Añadir Presupuesto de Ortodoncia»** en la toolbar
