@@ -22,6 +22,7 @@ import {
   findClinicDriveCredentials,
   frontendRedirectAfterOAuth,
   getGoogleOAuthConfigStatus,
+  oauthReturnPathFromState,
   readGoogleDriveStatusForUser,
   resolveManagedClinicId,
 } from '../services/googleDriveOAuth.service.js'
@@ -202,8 +203,9 @@ router.get('/status', async (req, res) => {
 
 /**
  * Inicia OAuth: genera URL con access_type=offline, prompt=consent, scope drive.file.
+ * /auth-url es el mismo inicio (el frontend envía clinicId y returnPath).
  */
-router.get('/connect', async (req, res) => {
+async function handleConnect(req, res) {
   try {
     const user = await requireSessionUser(req, res)
     if (!user) return
@@ -211,6 +213,7 @@ router.get('/connect', async (req, res) => {
     const resolved = await findClinicDriveCredentials(req, user)
     const { url, clinicId } = buildGoogleDriveConnectUrl(user, {
       clinicId: earlyClinicIdFrom(req) || resolved.clinicId || '',
+      returnPath: String(req.query?.returnPath || req.query?.return || ''),
     })
     if (String(req.query?.redirect || '') === '1') {
       if (res.headersSent || res.writableEnded) return
@@ -233,20 +236,29 @@ router.get('/connect', async (req, res) => {
       code: mapped.code,
     })
   }
-})
+}
+
+router.get('/connect', handleConnect)
+router.get('/auth-url', handleConnect)
+
+function redirectAfterDriveOAuth(query, { ok, errorCode }) {
+  const state = String(query?.state || '').trim()
+  return frontendRedirectAfterOAuth({
+    ok,
+    errorCode,
+    returnPath: state ? oauthReturnPathFromState(state) : '/perfil',
+  })
+}
 
 router.get('/callback', async (req, res) => {
   try {
     const query = req.query && typeof req.query === 'object' ? req.query : {}
     if (query.error) {
       if (res.headersSent || res.writableEnded) return
-      return res.redirect(
-        302,
-        frontendRedirectAfterOAuth({
-          ok: false,
-          errorCode: String(query.error),
-        }),
-      )
+      return res.redirect(302, redirectAfterDriveOAuth(query, {
+        ok: false,
+        errorCode: String(query.error),
+      }))
     }
     const code = String(query.code || '').trim()
     const state = String(query.state || '').trim()
@@ -254,20 +266,20 @@ router.get('/callback', async (req, res) => {
       if (res.headersSent || res.writableEnded) return
       return res.redirect(
         302,
-        frontendRedirectAfterOAuth({ ok: false, errorCode: 'OAUTH_CALLBACK_INVALID' }),
+        redirectAfterDriveOAuth(query, { ok: false, errorCode: 'OAUTH_CALLBACK_INVALID' }),
       )
     }
 
     await completeGoogleDriveOAuthCallback({ code, state })
     if (res.headersSent || res.writableEnded) return
-    return res.redirect(302, frontendRedirectAfterOAuth({ ok: true }))
+    return res.redirect(302, redirectAfterDriveOAuth(query, { ok: true }))
   } catch (error) {
     console.error('[google-drive] GET /callback:', error)
     const mapped = mapOAuthError(error)
     if (res.headersSent || res.writableEnded) return
     return res.redirect(
       302,
-      frontendRedirectAfterOAuth({ ok: false, errorCode: mapped.code }),
+      redirectAfterDriveOAuth(query, { ok: false, errorCode: mapped.code }),
     )
   }
 })

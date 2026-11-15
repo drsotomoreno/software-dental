@@ -265,7 +265,7 @@ export function getGoogleOAuthConfigStatus() {
 function createOAuthClient() {
   if (!oauthConfigured()) {
     const err = new Error(
-      'Google OAuth no está configurado. Defina GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET y GOOGLE_OAUTH_REDIRECT_URI.',
+      'Google OAuth no está configurado. Defina GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET y GOOGLE_OAUTH_REDIRECT_URI (también se aceptan GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET y GOOGLE_REDIRECT_URI).',
     )
     err.code = 'GOOGLE_OAUTH_NOT_CONFIGURED'
     throw err
@@ -330,6 +330,21 @@ function verifyStateToken(state) {
  * @param {object} user
  * @param {{ clinicId?: string }} [options]
  */
+/** Solo rutas internas. Rechaza URLs absolutas y protocol-relative. */
+export function sanitizeOAuthReturnPath(raw) {
+  const value = String(raw || '').trim()
+  if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/perfil'
+  let parsed
+  try {
+    parsed = new URL(value, 'https://mihistoriadental.com')
+  } catch {
+    return '/perfil'
+  }
+  if (parsed.origin !== 'https://mihistoriadental.com') return '/perfil'
+  if (parsed.pathname.includes('..')) return '/perfil'
+  return `${parsed.pathname}${parsed.search}`
+}
+
 export function buildGoogleDriveConnectUrl(user, options = {}) {
   if (!canManageClinicGoogleDrive(user)) {
     const err = new Error(
@@ -352,6 +367,7 @@ export function buildGoogleDriveConnectUrl(user, options = {}) {
     clinicId,
     userId: String(user.id),
     clinicName: clinicDisplayName(user),
+    returnPath: sanitizeOAuthReturnPath(options.returnPath),
     exp: Date.now() + STATE_TTL_MS,
   })
 
@@ -626,7 +642,15 @@ export async function getAuthorizedDriveClient(canonicalClinicId, candidateIds =
  * No usa req.headers.host (puede llegar sin www) ni cae en apex
  * aunque APP_PUBLIC_URL esté mal configurada.
  */
-export function frontendRedirectAfterOAuth({ ok, errorCode }) {
+export function oauthReturnPathFromState(state) {
+  try {
+    return sanitizeOAuthReturnPath(verifyStateToken(state)?.returnPath)
+  } catch {
+    return '/perfil'
+  }
+}
+
+export function frontendRedirectAfterOAuth({ ok, errorCode, returnPath }) {
   const production = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true'
   let base = resolveAppPublicUrl(config.appPublicUrl) || ''
   try {
@@ -646,7 +670,7 @@ export function frontendRedirectAfterOAuth({ ok, errorCode }) {
   }
   if (!base) base = production ? CANONICAL_PRODUCTION_ORIGIN : 'http://localhost:5173'
 
-  const url = new URL(`${base.replace(/\/$/, '')}/perfil`)
+  const url = new URL(sanitizeOAuthReturnPath(returnPath), `${base.replace(/\/$/, '')}/`)
   if (ok) {
     url.searchParams.set('googleDrive', 'connected')
   } else {

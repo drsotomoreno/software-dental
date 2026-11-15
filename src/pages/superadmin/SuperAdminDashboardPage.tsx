@@ -4,6 +4,7 @@ import { Building2, CircleDollarSign, UserPlus, Users } from 'lucide-react'
 import { InfraStatusCards } from '@/components/superadmin/InfraStatusCards'
 import { MetricCard } from '@/components/superadmin/MetricCard'
 import { ServiceStatusCard } from '@/components/superadmin/ServiceStatusCard'
+import { GoogleDriveConnectionCard } from '@/components/settings/GoogleDriveConnectionCard'
 import { useSuperadminResource } from '@/hooks/useSuperadminResource'
 import {
   fetchDashboardMetrics,
@@ -193,9 +194,13 @@ export function SuperAdminDashboardPage() {
               Estado de los servicios API
             </h2>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              {metrics.data.services.map((service) => (
-                <ServiceStatusCard key={service.id} service={service} action={serviceAction(service)} />
-              ))}
+              {metrics.data.services.map((service) =>
+                service.id === 'googleDrive' ? (
+                  <GoogleDriveConnectionCard key={service.id} />
+                ) : (
+                  <ServiceStatusCard key={service.id} service={service} action={serviceAction(service)} />
+                ),
+              )}
             </div>
           </section>
         </>

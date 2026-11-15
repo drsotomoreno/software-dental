@@ -1,3 +1,4 @@
+import { GoogleDriveIntegration } from '@/components/settings/GoogleDriveIntegration'
 import { useSuperadminResource } from '@/hooks/useSuperadminResource'
 import { fetchSystemSettings } from '@/services/superadminApi'
 
@@ -37,6 +38,7 @@ export function SuperAdminSettingsPage() {
           <Row label="Cron RIPS mensual" value={data.ripsCron} />
         </dl>
       ) : null}
+      <GoogleDriveIntegration />
     </div>
   )
 }

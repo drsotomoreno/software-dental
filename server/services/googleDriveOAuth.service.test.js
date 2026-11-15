@@ -32,6 +32,15 @@ test('frontendRedirectAfterOAuth aterriza en /perfil con flag googleDrive', () =
   assert.equal(errUrl.pathname, '/perfil')
   assert.equal(errUrl.searchParams.get('googleDrive'), 'error')
   assert.equal(errUrl.searchParams.get('code'), 'access_denied')
+
+  const dash = new URL(frontendRedirectAfterOAuth({ ok: true, returnPath: '/superadmin' }))
+  assert.equal(dash.pathname, '/superadmin')
+  assert.equal(dash.searchParams.get('googleDrive'), 'connected')
+
+  const blocked = new URL(
+    frontendRedirectAfterOAuth({ ok: true, returnPath: 'https://evil.test/phish' }),
+  )
+  assert.equal(blocked.pathname, '/perfil')
 })
 
 test('callback OAuth con APP_PUBLIC_URL apex no redirige sin www', () => {

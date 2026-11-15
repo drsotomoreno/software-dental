@@ -355,7 +355,8 @@ function buildServices() {
   const muvReady = hasMinsaludCredentials()
   const dianReady = Boolean(config.dian.technicalKey)
   const driveReady = Boolean(
-    process.env.GOOGLE_DRIVE_CLIENT_EMAIL || process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
+    (process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.GOOGLE_CLIENT_ID) &&
+      (process.env.GOOGLE_OAUTH_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET),
   )
   return [
     {
@@ -381,7 +382,7 @@ function buildServices() {
       label: 'Google Drive API',
       status: driveReady ? 'operativo' : 'pendiente',
       detail: driveReady
-        ? 'Cuenta de servicio de Google Drive detectada.'
+        ? 'OAuth listo. Cada clínica conecta su propio Google Drive.'
         : 'La API de Google Drive todavía no está conectada.',
       simulated: !driveReady,
     },
@@ -623,7 +624,8 @@ export function getSystemSettings() {
     dianSoftwareId: config.dian.softwareId || '—',
     dianConfigured: Boolean(config.dian.technicalKey),
     googleDriveConfigured: Boolean(
-      process.env.GOOGLE_DRIVE_CLIENT_EMAIL || process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
+      (process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.GOOGLE_CLIENT_ID) &&
+        (process.env.GOOGLE_OAUTH_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET),
     ),
     ripsCron: '0 2 1 * * (America/Bogota)',
   }

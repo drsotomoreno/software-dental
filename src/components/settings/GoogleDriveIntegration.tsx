@@ -127,8 +127,15 @@ export function GoogleDriveIntegration() {
     setBusy(true)
     setError('')
     try {
-      const response = await fetch(`/api/integrations/google-drive/connect${clinicQuery()}`, {
-        headers: authHeaders(),
+      const clinicId = resolveActiveDriveClinicId()
+      const query = new URLSearchParams()
+      if (clinicId) query.set('clinicId', clinicId)
+      query.set(
+        'returnPath',
+        `${window.location.pathname}${window.location.search}`,
+      )
+      const response = await fetch(`/api/integrations/google-drive/auth-url?${query.toString()}`, {
+        headers: authHeaders(clinicId),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok || !payload?.url) {
