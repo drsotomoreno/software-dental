@@ -89,7 +89,9 @@ export function ActivarCuenta() {
             {APP_INITIALS}
           </div>
           <h1 className="text-2xl font-bold text-slate-900">{APP_NAME}</h1>
-          <p className="mt-1 text-sm text-slate-600">Activa tu acceso de colaborador</p>
+          <p className="mt-1 text-sm text-slate-600">
+            Elige una contraseña. Al activar confirmas tu correo y tu acceso queda verificado.
+          </p>
         </div>
 
         {!token ? (

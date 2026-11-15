@@ -4,6 +4,9 @@
  */
 import { createHmac, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { readFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Router } from 'express'
 import { config } from '../config.js'
 import { resolveClinicSyncId } from '../../shared/clinicalSyncScope.js'
@@ -21,6 +24,7 @@ import {
   perfilSuscripcionDeSesion,
 } from '../middleware/exigirPermiso.js'
 import { ensureMasterUsuarioRow } from '../services/tenantRbacStore.js'
+import { splitSqlStatements } from '../services/consultasRepository.js'
 
 const require = createRequire(import.meta.url)
 const bcrypt = require('bcryptjs')
@@ -137,6 +141,15 @@ export function signColaboradorToken(claims) {
   return `${data}.${sig}`
 }
 
+const TELEFONO_MIGRATION = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../db/migrations/add_colaboradores_telefono_verificacion.sql',
+)
+const CORREO_ESTRICTO = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+const ENLACE_ACTIVACION = 'https://mihistoriadental.com/activar?token='
+
+let telefonoEsquemaListo = null
+
 const USUARIO_COLUMNS = `id::text AS id,
        email,
        nombre_completo,
@@ -146,6 +159,8 @@ const USUARIO_COLUMNS = `id::text AS id,
        titular_id::text AS titular_id,
        clinica_id::text AS clinica_id,
        codigo_sede_reps,
+       telefono,
+       email_verificado,
        invite_token,
        invite_expires_at`
 
@@ -274,6 +289,8 @@ function publico(row, { conInvitacion = false } = {}) {
     titular_id: row.titular_id ?? null,
     clinica_id: row.clinica_id ?? null,
     codigo_sede_reps: row.codigo_sede_reps ?? null,
+    telefono: row.telefono ?? null,
+    email_verificado: row.email_verificado === true,
   }
   if (!conInvitacion) return base
   return {
@@ -396,8 +413,63 @@ async function resolverTitular(client, req) {
   return { error: 'Solo el titular puede administrar colaboradores.', status: 403 }
 }
 
+async function asegurarTelefonoVerificacion() {
+  if (!telefonoEsquemaListo) {
+    telefonoEsquemaListo = withPgClientInteractive(async (client) => {
+      const sql = await readFile(TELEFONO_MIGRATION, 'utf8')
+      for (const statement of splitSqlStatements(sql)) {
+        await client.query(statement)
+      }
+    }).catch((error) => {
+      telefonoEsquemaListo = null
+      throw error
+    })
+  }
+  return telefonoEsquemaListo
+}
+
+function enlaceActivacionPublico(token) {
+  return `${ENLACE_ACTIVACION}${encodeURIComponent(token)}`
+}
+
+async function enviarCorreoActivacion({ email, nombre, token }) {
+  const apiKey = String(config.mail?.resendApiKey || process.env.RESEND_API_KEY || '').trim()
+  if (!apiKey || !token) return { sent: false }
+  const enlace = enlaceActivacionPublico(token)
+  const saludo = nombre ? `Hola ${nombre}.` : 'Hola.'
+  const from = config.mail?.resendFrom || 'Doctor SEO Labs <notificaciones@mihistoriadental.com>'
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from,
+        to: [email],
+        subject: 'Activa tu acceso a MiHistoriaDental',
+        text: `${saludo} Activa tu acceso con este enlace: ${enlace}`,
+        html: `<p>${saludo}</p><p>Activa tu acceso a MiHistoriaDental con este enlace:</p><p><a href="${enlace}">${enlace}</a></p>`,
+      }),
+    })
+    if (!response.ok) {
+      console.error('[colaboradores] Resend no envió la invitación', response.status)
+      return { sent: false }
+    }
+    return { sent: true }
+  } catch (error) {
+    console.error(
+      '[colaboradores] Resend falló; la invitación queda disponible por WhatsApp',
+      error instanceof Error ? error.message : error,
+    )
+    return { sent: false }
+  }
+}
+
 async function withTx(fn) {
   await asegurarEsquemaColaboradores()
+  await asegurarTelefonoVerificacion()
   return withPgClientInteractive(async (client) => {
     await client.query('BEGIN')
     try {
@@ -481,8 +553,13 @@ router.post(
       if (!nombre || nombre.length > 255) {
         return fail(res, 400, 'Indique el nombre del colaborador.')
       }
-      if (!email.includes('@') || email.length > 255) {
-        return fail(res, 400, 'Indique un correo válido.')
+      if (!email || !CORREO_ESTRICTO.test(email) || email.length > 255) {
+        return fail(res, 400, 'El correo electrónico no tiene un formato válido.')
+      }
+      const telefono = String(body.telefono || '').trim()
+      const telefonoDigitos = telefono.replace(/\D/g, '')
+      if (!telefono || telefono.length > 30 || telefonoDigitos.length < 10 || telefonoDigitos.length > 15) {
+        return fail(res, 400, 'Indique un teléfono de WhatsApp válido, con indicativo.')
       }
       if (email === MASTER_EMAIL) {
         return fail(res, 403, 'Ese correo no se puede invitar como colaborador.')
@@ -521,6 +598,10 @@ router.post(
         const vence = expiresAt()
         const passwordHash = bcrypt.hashSync(randomUUID(), BCRYPT_ROUNDS)
         const rethusDb = rol === 'COLABORADOR_CLINICO' ? rethus : null
+        const duplicado = await queryUsuarioPorEmail(client, email)
+        if (duplicado) {
+          return { error: 'Ese correo ya está registrado en el sistema.', status: 409 }
+        }
 
         try {
           const { rows } = await client.query(
@@ -528,12 +609,14 @@ router.post(
                id, clinica_id, email, password_hash, nombre_completo,
                registro_rethus, is_superadmin, rol, estado,
                titular_id, codigo_sede_reps, rethus,
-               invite_token, invite_expires_at, activo
+               invite_token, invite_expires_at, activo,
+               telefono, email_verificado
              ) VALUES (
                $1::uuid, $2::uuid, $3::text, $4::text, $5::text,
                $6::text, FALSE, $7::text, 'activo',
                $8::uuid, $9::text, $10::text,
-               $11::text, $12::timestamp, TRUE
+               $11::text, $12::timestamp, TRUE,
+               $13::text, FALSE
              )
              RETURNING ${USUARIO_COLUMNS}`,
             [
@@ -549,11 +632,16 @@ router.post(
               rethusDb,
               inviteToken,
               vence.toISOString(),
+              telefono,
             ],
           )
-          return { usuario: rows[0], plan }
+          return { usuario: rows[0], plan, inviteToken }
         } catch (error) {
           if (error?.code === '23505') {
+            const detalle = `${error.constraint || ''} ${error.detail || ''}`
+            if (/email/i.test(detalle)) {
+              return { error: 'Ese correo ya está registrado en el sistema.', status: 409 }
+            }
             return { error: 'Ya existe una cuenta con ese correo o ese enlace.', status: 409 }
           }
           throw error
@@ -561,6 +649,11 @@ router.post(
       })
 
       if (creado.error) return fail(res, creado.status, creado.error)
+      await enviarCorreoActivacion({
+        email,
+        nombre,
+        token: creado.inviteToken || creado.usuario?.invite_token,
+      })
       return res.status(201).json({
         success: true,
         ok: true,
@@ -708,7 +801,9 @@ router.post('/auth/activar', async (req, res, next) => {
         `UPDATE usuarios
             SET password_hash = $2::text,
                 invite_token = NULL,
-                invite_expires_at = NULL
+                invite_expires_at = NULL,
+                email_verificado = TRUE,
+                activo = TRUE
           WHERE id = $1::uuid
             AND invite_token = $3::text
         RETURNING ${USUARIO_COLUMNS}`,
