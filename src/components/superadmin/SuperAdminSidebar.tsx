@@ -1,8 +1,9 @@
-import { NavLink } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
 import {
   Activity,
   Building2,
   CreditCard,
+  Home,
   LayoutDashboard,
   Settings,
   Stethoscope,
@@ -38,7 +39,7 @@ export function SuperAdminSidebar({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3 py-4" aria-label="Secciones del panel">
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4" aria-label="Secciones del panel">
         {ITEMS.map((item) => {
           const Icon = item.icon
           return (
@@ -61,13 +62,14 @@ export function SuperAdminSidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="border-t border-white/10 px-3 py-4">
-        <NavLink
+        <Link
           to="/app"
           onClick={onNavigate}
-          className="flex items-center rounded-xl px-3 py-2.5 text-sm text-white/70 hover:bg-white/5 hover:text-white"
+          className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/10"
         >
-          Volver al consultorio
-        </NavLink>
+          <Home className="h-4 w-4 shrink-0" aria-hidden />
+          Inicio
+        </Link>
       </div>
     </div>
   )
