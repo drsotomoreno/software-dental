@@ -15,6 +15,8 @@ export interface SuperadminTenant {
   patientCount: number
   mrrCop: number
   lastSyncAt: string | null
+  /** Cuenta maestra. No es un cobro y no se suspende desde este panel. */
+  platformOwner?: boolean
 }
 
 export interface ServiceStatus {

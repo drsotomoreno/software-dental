@@ -48,7 +48,12 @@ export function TenantsTable({
               const suspended = tenant.status === 'suspendida'
               return (
                 <tr key={tenant.id} className="align-top">
-                  <td className="px-4 py-3 font-medium text-slate-900">{tenant.clinicName}</td>
+                  <td className="px-4 py-3 font-medium text-slate-900">
+                {tenant.clinicName}
+                {tenant.platformOwner ? (
+                  <span className="mt-1 block text-xs font-normal text-violet-700">Cuenta maestra</span>
+                ) : null}
+              </td>
                   <td className="px-4 py-3 text-slate-700">{tenant.ownerName}</td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-700">
                     {tenant.repsCode || '—'}
@@ -74,14 +79,16 @@ export function TenantsTable({
                       >
                         Ver Detalles
                       </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => onSuspend(tenant)}
-                        className="rounded-lg border border-amber-200 px-2.5 py-1.5 text-left text-xs font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
-                      >
-                        {suspended ? 'Reactivar cuenta' : 'Suspender Cuenta'}
-                      </button>
+                      {tenant.platformOwner ? null : (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => onSuspend(tenant)}
+                          className="rounded-lg border border-amber-200 px-2.5 py-1.5 text-left text-xs font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+                        >
+                          {suspended ? 'Reactivar cuenta' : 'Suspender Cuenta'}
+                        </button>
+                      )}
                       <button
                         type="button"
                         disabled={busy}

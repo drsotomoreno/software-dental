@@ -1,68 +1,24 @@
 /**
  * Panel global del superadministrador.
- * Clínicas y pacientes salen de PostgreSQL cuando RDS responde.
- * MRR, servicios sin credencial e infraestructura EC2 quedan simulados
- * hasta conectar suscripciones SaaS y CloudWatch.
+ * Un inquilino es la cuenta maestra o una clínica con suscripción pagada.
+ * Quien solo se registró (pendiente o prueba) no aparece en Clínicas.
+ * MRR de demostración e infraestructura EC2 siguen simulados si no hay cuentas reales.
  */
+import { join } from 'node:path'
 import { config, DATABASE_URL, hasMinsaludCredentials } from '../config.js'
-import { withPgClient } from './durableStore.js'
+import { hasSubscriptionPaymentProof, isMasterAccessEmail } from '../../shared/clinicalAccess.js'
+import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
+import { PAID_PLAN_IDS, PAID_PLANS, planDisplayName } from '../../shared/subscriptionPlans.js'
+import { readDurableJson, withPgClient } from './durableStore.js'
+import { clinicaUuidFromCanonical } from './clinicPatientMirror.js'
 
-const SQL_TENANTS = `
-SELECT
-  c.id::text AS id,
-  c.nombre AS clinic_name,
-  COALESCE(titular.nombre_completo, 'Sin titular') AS owner_name,
-  COALESCE(c.codigo_reps, '') AS reps_code,
-  COALESCE(titular.registro_rethus, '') AS rethus,
-  COALESCE(titular.estado, 'activo') AS status,
-  COALESCE(pac.total, 0)::int AS patient_count
-FROM clinicas c
-LEFT JOIN LATERAL (
-  SELECT u.nombre_completo, u.registro_rethus, u.estado
-  FROM usuarios u
-  WHERE u.clinica_id = c.id
-    AND u.is_superadmin = FALSE
-  ORDER BY
-    CASE WHEN u.rol IN ('admin', 'admin_clinica', 'odontologo') THEN 0 ELSE 1 END,
-    u.created_at ASC
-  LIMIT 1
-) titular ON TRUE
-LEFT JOIN LATERAL (
-  SELECT COUNT(*)::int AS total
-  FROM pacientes p
-  WHERE p.clinica_id = c.id
-    AND p.deleted_at IS NULL
-) pac ON TRUE
-ORDER BY c.nombre ASC
-LIMIT 200
-`
+const USERS_FILE = join(config.dataDir, 'subscription-users.json')
 
-const SQL_TENANTS_SIMPLE = `
-SELECT
-  c.id::text AS id,
-  c.nombre AS clinic_name,
-  COALESCE(titular.nombre_completo, 'Sin titular') AS owner_name,
-  COALESCE(c.codigo_reps, '') AS reps_code,
-  COALESCE(titular.registro_rethus, '') AS rethus,
-  COALESCE(titular.estado, 'activo') AS status,
-  0::int AS patient_count
-FROM clinicas c
-LEFT JOIN LATERAL (
-  SELECT u.nombre_completo, u.registro_rethus, u.estado
-  FROM usuarios u
-  WHERE u.clinica_id = c.id
-    AND u.is_superadmin = FALSE
-  ORDER BY u.created_at ASC
-  LIMIT 1
-) titular ON TRUE
-ORDER BY c.nombre ASC
-LIMIT 200
-`
-
-const SQL_PATIENTS = `
-SELECT COUNT(*)::int AS total
+const SQL_PATIENT_COUNTS = `
+SELECT clinica_id::text AS id, COUNT(*)::int AS total
 FROM pacientes
 WHERE deleted_at IS NULL
+GROUP BY clinica_id
 `
 
 const SQL_LOGS = `
@@ -188,61 +144,152 @@ export function resetSuperadminOverrides() {
   overrides.clear()
 }
 
-function mapStatus(value) {
-  const normalized = String(value ?? '').trim().toLowerCase()
-  if (normalized === 'suspendida' || normalized === 'suspendido' || normalized === 'inactivo') {
-    return 'suspendida'
-  }
-  return 'activa'
-}
-
 function applyOverride(tenant) {
   const extra = overrides.get(tenant.id)
   return extra ? { ...tenant, ...extra } : tenant
 }
 
-function mapTenantRow(row) {
-  return applyOverride({
-    id: String(row.id),
-    clinicName: row.clinic_name || 'Clínica sin nombre',
-    ownerName: row.owner_name || 'Sin titular',
-    repsCode: row.reps_code || '',
-    rethus: row.rethus || '',
-    plan: 'Por conectar',
-    status: mapStatus(row.status),
-    patientCount: Number(row.patient_count) || 0,
-    mrrCop: 0,
-    lastSyncAt: null,
-  })
-}
-
 function fixtureTenants() {
-  return FIXTURE_TENANTS.map((tenant) => applyOverride({ ...tenant }))
+  return FIXTURE_TENANTS.map((tenant) => applyOverride({ ...tenant, platformOwner: false }))
 }
 
 function isMissingRelation(error) {
   return error?.code === '42P01' || error?.code === '42703'
 }
 
-async function readTenantRows(query) {
+function ownerNameOf(user) {
+  const fromParts = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim()
+  return String(user?.nombre || fromParts || '').trim() || 'Sin titular'
+}
+
+function clinicNameOf(user) {
+  return String(user?.clinicName || user?.legalName || '').trim() || ownerNameOf(user)
+}
+
+function planPriceCop(planId) {
+  const plan = PAID_PLANS.find((item) => item.id === planId)
+  const digits = String(plan?.priceLabel || '').replace(/\D/g, '')
+  return Number(digits) || 0
+}
+
+function isClinicOwnerAccount(user) {
+  if (isMasterAccessEmail(user?.email)) return true
+  const id = String(user?.id || '').trim()
+  if (!id) return false
+  return String(user?.clinicId || id).trim() === id
+}
+
+/** Compra real: plan de pago + sello subscriptionPaidAt. Prueba y pendiente no cuentan. */
+function purchasedSubscription(user) {
+  if (!user || isMasterAccessEmail(user.email)) return false
+  if (!hasSubscriptionPaymentProof(user)) return false
+  const plan = String(user.plan ?? '').trim().toLowerCase()
+  if (!PAID_PLAN_IDS.includes(plan)) return false
+  const estado = String(user.estado_pago ?? '').trim().toLowerCase()
+  return estado === 'activo' || estado === 'vencido'
+}
+
+function tenantStatusOf(user) {
+  if (isMasterAccessEmail(user?.email)) return 'activa'
+  const estado = String(user?.estado_pago ?? '').trim().toLowerCase()
+  if (estado === 'vencido' || user?.accessEnabled === false) return 'suspendida'
+  if (user?.fecha_vencimiento && new Date(user.fecha_vencimiento).getTime() <= Date.now()) {
+    return 'suspendida'
+  }
+  return 'activa'
+}
+
+function clinicaIdsFor(user) {
+  const scope = clinicSyncAliasIds(user)
+  const ids = new Set()
+  for (const key of [scope.canonical, ...(scope.aliases || [])]) {
+    const value = String(key || '').trim()
+    if (!value) continue
+    ids.add(clinicaUuidFromCanonical(value))
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+      ids.add(value)
+    }
+  }
+  return [...ids]
+}
+
+/**
+ * La cuenta maestra siempre entra, con su titular, REPS y ReTHUS.
+ * El resto solo si el titular compró un plan.
+ */
+export function tenantsFromAccounts(users) {
+  const rows = []
+  for (const user of Array.isArray(users) ? users : []) {
+    const master = isMasterAccessEmail(user?.email)
+    if (!master && !purchasedSubscription(user)) continue
+    if (!isClinicOwnerAccount(user)) continue
+    const planId = String(user.plan ?? '').trim().toLowerCase()
+    const status = tenantStatusOf(user)
+    rows.push({
+      id: String(user.id),
+      clinicName: clinicNameOf(user),
+      ownerName: ownerNameOf(user),
+      repsCode: String(user.repsCode ?? '').trim(),
+      rethus: String(user.rethusNumber ?? user.registro_rethus ?? '').trim(),
+      plan: master ? 'Exento' : planDisplayName(planId, user.estado_pago),
+      status,
+      patientCount: 0,
+      mrrCop: master || status !== 'activa' ? 0 : planPriceCop(planId),
+      lastSyncAt: null,
+      platformOwner: master,
+    })
+  }
+  rows.sort((left, right) => {
+    if (left.platformOwner !== right.platformOwner) return left.platformOwner ? -1 : 1
+    return left.clinicName.localeCompare(right.clinicName, 'es')
+  })
+  return rows
+}
+
+async function loadSubscriptionAccounts() {
   try {
-    const rows = await query(SQL_TENANTS, [])
-    return Array.isArray(rows) ? rows : []
+    const parsed = await readDurableJson(USERS_FILE, null)
+    return Array.isArray(parsed?.users) ? parsed.users : null
   } catch (error) {
-    if (!isMissingRelation(error)) throw error
-    const rows = await query(SQL_TENANTS_SIMPLE, [])
-    return Array.isArray(rows) ? rows : []
+    warnOnce('cuentas', error)
+    return null
+  }
+}
+
+async function resolveAccounts(deps) {
+  if (Object.prototype.hasOwnProperty.call(deps, 'accounts')) {
+    return Array.isArray(deps.accounts) ? deps.accounts : null
+  }
+  return loadSubscriptionAccounts()
+}
+
+async function attachPatientCounts(tenants, accounts, query) {
+  const byId = new Map((Array.isArray(accounts) ? accounts : []).map((user) => [String(user.id), user]))
+  const clinicaToTenant = new Map()
+  for (const tenant of tenants) {
+    const user = byId.get(tenant.id)
+    if (!user) continue
+    for (const clinicaId of clinicaIdsFor(user)) clinicaToTenant.set(clinicaId, tenant)
+  }
+  if (clinicaToTenant.size === 0) return
+  try {
+    const rows = await query(SQL_PATIENT_COUNTS, [])
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const tenant = clinicaToTenant.get(String(row.id))
+      if (!tenant) continue
+      tenant.patientCount += Number(row.total) || 0
+    }
+  } catch (error) {
+    if (!isMissingRelation(error)) warnOnce('pacientes-por-clinica', error)
   }
 }
 
 export async function listTenants(deps = {}) {
-  try {
-    const rows = await readTenantRows(queryOf(deps))
-    if (rows.length > 0) {
-      return { source: 'postgres', tenants: rows.map(mapTenantRow) }
-    }
-  } catch (error) {
-    warnOnce('clinicas', error)
+  const accounts = await resolveAccounts(deps)
+  if (accounts) {
+    const tenants = tenantsFromAccounts(accounts).map((tenant) => applyOverride(tenant))
+    await attachPatientCounts(tenants, accounts, queryOf(deps))
+    return { source: 'postgres', tenants }
   }
   return { source: 'fixture', tenants: fixtureTenants() }
 }
@@ -255,6 +302,7 @@ async function findTenant(id, deps) {
 export async function suspendTenant(id, status = 'suspendida', deps = {}) {
   const current = await findTenant(id, deps)
   if (!current) return null
+  if (current.platformOwner) return applyOverride(current)
   const nextStatus = status === 'activa' ? 'activa' : 'suspendida'
   overrides.set(id, { ...(overrides.get(id) || {}), status: nextStatus })
   try {
@@ -343,22 +391,17 @@ export async function getDashboardMetrics(deps = {}) {
     0,
   )
 
-  if (tenantsResult.source === 'postgres') {
-    try {
-      const rows = await queryOf(deps)(SQL_PATIENTS, [])
-      const total = Number(rows?.[0]?.total)
-      if (Number.isFinite(total)) registeredPatients = total
-    } catch (error) {
-      warnOnce('pacientes', error)
-    }
-  }
-
+  const simulated = tenantsResult.source !== 'postgres'
   return {
     source: tenantsResult.source,
     activeClinics,
     registeredPatients,
-    mrrCop: fixtureMrrCop(),
-    mrrSimulated: true,
+    mrrCop: simulated
+      ? fixtureMrrCop()
+      : tenantsResult.tenants
+          .filter((tenant) => tenant.status === 'activa')
+          .reduce((sum, tenant) => sum + (Number(tenant.mrrCop) || 0), 0),
+    mrrSimulated: simulated,
     services: buildServices(),
   }
 }

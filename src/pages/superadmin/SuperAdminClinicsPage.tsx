@@ -88,8 +88,9 @@ export function SuperAdminClinicsPage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <p className="max-w-2xl text-sm text-slate-600">
-          Sedes suscritas a la plataforma. Si PostgreSQL responde, la tabla sale de las clínicas y
-          del odontólogo titular. Si no, se muestran clínicas de demostración.
+          Clínicas que compraron una suscripción. La cuenta maestra aparece con su odontólogo
+          titular, código REPS y registro ReTHUS. Quien solo se registró, sin pago, no es inquilino
+          y no se lista.
         </p>
         <input
           value={query}
@@ -102,12 +103,14 @@ export function SuperAdminClinicsPage() {
 
       {data?.source === 'fixture' && (
         <p className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-          Datos de demostración. PostgreSQL no devolvió clínicas en este momento.
+          Datos de demostración. En este momento no hay cuentas de suscripción para listar.
         </p>
       )}
-      {data?.source === 'postgres' && (
+      {data?.source === 'postgres' &&
+        tenants.length > 0 &&
+        tenants.every((tenant) => tenant.platformOwner) && (
         <p className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-          El plan de suscripción queda en «Por conectar» hasta existir la tabla de planes SaaS.
+          Todavía no hay otras clínicas con suscripción pagada. La fila visible es la cuenta maestra.
         </p>
       )}
       {error && (
@@ -187,7 +190,9 @@ export function SuperAdminClinicsPage() {
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">Plan</dt>
-                <dd className="text-slate-900">{selected.plan}</dd>
+                <dd className="text-slate-900">
+                  {selected.platformOwner ? 'Exento (cuenta maestra)' : selected.plan}
+                </dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">Estado</dt>

@@ -158,8 +158,8 @@ export function SuperAdminDashboardPage() {
               value={integer.format(metrics.data.activeClinics)}
               hint={
                 metrics.data.source === 'postgres'
-                  ? 'Conteo en PostgreSQL (clínicas no suspendidas).'
-                  : 'Cifra de demostración: PostgreSQL no devolvió clínicas.'
+                  ? 'Cuenta maestra y clínicas con suscripción pagada, no suspendidas.'
+                  : 'Cifra de demostración: no hay cuentas de suscripción en este momento.'
               }
               icon={Building2}
               tone="sky"
@@ -169,8 +169,8 @@ export function SuperAdminDashboardPage() {
               value={integer.format(metrics.data.registeredPatients)}
               hint={
                 metrics.data.source === 'postgres'
-                  ? 'Historias con clinica_id en toda la plataforma.'
-                  : 'Suma de demostración mientras la base no responde.'
+                  ? 'Pacientes de la cuenta maestra y de las clínicas que pagaron.'
+                  : 'Suma de demostración mientras no hay cuentas reales.'
               }
               icon={Users}
               tone="teal"
@@ -178,7 +178,11 @@ export function SuperAdminDashboardPage() {
             <MetricCard
               label="Ingresos mensuales recurrentes"
               value={cop.format(metrics.data.mrrCop)}
-              hint="Suscripciones activas de demostración. Aún no se factura el SaaS desde RDS."
+              hint={
+                metrics.data.mrrSimulated
+                  ? 'Suscripciones activas de demostración. Aún no se factura el SaaS desde RDS.'
+                  : 'Suma de planes pagados vigentes. La cuenta maestra no genera cobro.'
+              }
               icon={CircleDollarSign}
               tone="indigo"
             />
