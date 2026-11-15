@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useLiveQuery } from "dexie-react-hooks";
 
@@ -532,6 +532,9 @@ export function DiagnosticAidsSection({
     new Date().toISOString().slice(0, 10),
   );
 
+  /** Ocultación optimista: la tarjeta sale de la caja al confirmar, sin esperar liveQuery/sync. */
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
+
   const items = useLiveQuery(
     () => listDiagnosticAidsForPatient(patientId),
 
@@ -540,14 +543,19 @@ export function DiagnosticAidsSection({
     [] as DiagnosticAid[],
   );
 
+  const visibleItems = useMemo(
+    () => items.filter((item) => !hiddenIds.has(String(item.id))),
+    [items, hiddenIds],
+  );
+
   useEffect(() => {
-    for (const item of items) {
+    for (const item of visibleItems) {
       // Solo precargar si hay caché local o Drive; evita spinners eternos en registros viejos.
       if (item.blobId || item.driveFileId) {
         void ensureLocalDiagnosticAidBlob(item);
       }
     }
-  }, [items]);
+  }, [visibleItems]);
 
   const handleUploadElectron = useCallback(async () => {
     const bridge = getDesktopBridge();
@@ -824,7 +832,8 @@ export function DiagnosticAidsSection({
 
   const handleDelete = useCallback(
     async (id: string) => {
-      const target = items.find((row) => row.id === id);
+      const aidId = String(id || "").trim();
+      const target = items.find((row) => String(row.id) === aidId);
       const label = target?.fileName || "este examen";
       if (
         typeof window !== "undefined" &&
@@ -832,17 +841,28 @@ export function DiagnosticAidsSection({
       ) {
         return;
       }
+      // Quitar de la caja de inmediato (antes del await / sync).
+      setHiddenIds((prev) => {
+        const next = new Set(prev);
+        next.add(aidId);
+        return next;
+      });
       setBanner({
         tone: "info",
         message: `Eliminando ${label}…`,
       });
       try {
-        await deleteDiagnosticAid(id, user);
+        await deleteDiagnosticAid(aidId, user);
         setBanner({
           tone: "success",
           message: `«${label}» eliminado del expediente.`,
         });
       } catch (error) {
+        setHiddenIds((prev) => {
+          const next = new Set(prev);
+          next.delete(aidId);
+          return next;
+        });
         setBanner({
           tone: "error",
           message:
@@ -973,7 +993,7 @@ export function DiagnosticAidsSection({
         />
       )}
 
-      {items.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center">
           <p className="text-sm text-slate-500">
             Sin archivos registrados en el expediente del paciente.
@@ -988,7 +1008,7 @@ export function DiagnosticAidsSection({
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <DiagnosticAidCard
               key={item.id}
 

@@ -143,11 +143,10 @@ export async function listDiagnosticAids(
     const rows = encounterId
       ? await db.diagnosticAids.where('[patientId+encounterId]').equals([key, encounterId]).toArray()
       : await db.diagnosticAids.where('patientId').equals(key).toArray()
-    for (const row of rows) byId.set(row.id, row)
+    for (const row of rows) byId.set(String(row.id), row)
   }
 
   // Huérfanos: patientId desfasado tras rehidratación, pero patientSyncId coincide.
-  // Nunca reintroducir ids con tumba local (Quitar).
   try {
     const { getPatientByRouteId } = await import('@/utils/patientId')
     const patient = await getPatientByRouteId(String(patientId || '').trim())
@@ -158,27 +157,34 @@ export async function listDiagnosticAids(
         .filter((row) => String(row.patientSyncId || '') === syncId)
         .toArray()
       for (const row of orphans) {
-        if (byId.has(row.id)) continue
+        const rid = String(row.id)
+        if (byId.has(rid)) continue
         if (encounterId && String(row.encounterId || '') !== String(encounterId)) continue
-        try {
-          const tomb = await db.deletedDiagnosticAids.get(row.id)
-          if (tomb) {
-            await db.diagnosticAids.delete(row.id)
-            continue
-          }
-        } catch {
-          // sin tabla de tumbas
-        }
         if (localId && String(row.patientId) !== localId) {
           void db.diagnosticAids.update(row.id, { patientId: localId })
-          byId.set(row.id, { ...row, patientId: localId })
+          byId.set(rid, { ...row, patientId: localId })
         } else {
-          byId.set(row.id, row)
+          byId.set(rid, row)
         }
       }
     }
   } catch {
     // ignore
+  }
+
+  // Tumbas locales (Quitar): excluir de la caja y limpiar filas zombies reinsertadas por sync.
+  try {
+    const tombs = await db.deletedDiagnosticAids.toArray()
+    for (const tomb of tombs) {
+      const tid = String(tomb.id || '').trim()
+      if (!tid) continue
+      if (byId.has(tid)) {
+        byId.delete(tid)
+        void db.diagnosticAids.delete(tid).catch(() => undefined)
+      }
+    }
+  } catch {
+    // sin tabla de tumbas
   }
 
   return [...byId.values()].sort((a, b) => {
