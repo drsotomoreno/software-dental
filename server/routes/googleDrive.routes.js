@@ -113,10 +113,26 @@ function earlyClinicIdFrom(req) {
 }
 
 function mapOAuthError(error) {
-  const status = Number(error?.status) || 500
-  const code = error?.code || 'GOOGLE_DRIVE_ERROR'
+  const gaxiosStatus = Number(error?.response?.status) || Number(error?.status) || 0
+  const gaxiosBody = error?.response?.data?.error
+  const gaxiosMessage =
+    (typeof gaxiosBody === 'object' && gaxiosBody?.message) ||
+    (typeof gaxiosBody === 'string' ? gaxiosBody : null) ||
+    error?.errors?.[0]?.message ||
+    null
+  const gaxiosReason =
+    (typeof gaxiosBody === 'object' && (gaxiosBody?.status || gaxiosBody?.errors?.[0]?.reason)) ||
+    error?.errors?.[0]?.reason ||
+    null
+  const status = gaxiosStatus || 500
+  const code =
+    error?.code && String(error.code) !== String(status)
+      ? error.code
+      : gaxiosReason || 'GOOGLE_DRIVE_ERROR'
   const message =
-    error instanceof Error ? error.message : 'Error en la integración de Google Drive.'
+    gaxiosMessage ||
+    (error instanceof Error ? error.message : null) ||
+    'Error en la integración de Google Drive.'
   return { status: status >= 400 && status < 600 ? status : 500, code, message }
 }
 

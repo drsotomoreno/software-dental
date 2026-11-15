@@ -167,7 +167,12 @@ export async function uploadDiagnosticAidToGoogleDrive(
     if (entry.driveFileId) form.append('driveFileId', entry.driveFileId)
 
     const controller = new AbortController()
-    const timeoutMs = 45_000
+    // 45s era insuficiente para STL grandes vía Nginx→EC2→Drive (abortaba a mitad).
+    const bytes = blobRecord.data.byteLength || 0
+    const timeoutMs = Math.min(
+      180_000,
+      Math.max(90_000, 45_000 + Math.ceil(bytes / (256 * 1024)) * 1_000),
+    )
     const timer = window.setTimeout(() => controller.abort(), timeoutMs)
     let response: Response
     try {

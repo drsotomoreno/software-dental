@@ -3,9 +3,14 @@
  * Ruta: {root}/pacientes/{patientSyncId}/ayudas/{fileName}
  * Caché en memoria de IDs de carpeta para no agotar cuota en lotes.
  * Preferir filePath + createReadStream (t3.micro) frente a Buffer en RAM.
+ *
+ * Nota: googleapis + fs.ReadStream directo puede subir 0 bytes o cortar el
+ * body si el access_token se refresca a mitad de la petición. Por eso:
+ * 1) refrescar token ANTES de abrir el stream
+ * 2) pipear por PassThrough
  */
 import { createReadStream } from 'node:fs'
-import { Readable } from 'node:stream'
+import { PassThrough, Readable } from 'node:stream'
 import { getAuthorizedDriveClient } from './googleDriveOAuth.service.js'
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
@@ -95,6 +100,8 @@ async function findChildFolder(drive, parentId, name) {
     spaces: 'drive',
     fields: 'files(id, name)',
     pageSize: 3,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
   })
   const files = Array.isArray(res.data?.files) ? res.data.files : []
   return files[0]?.id || null
@@ -114,6 +121,7 @@ async function getOrCreateChildFolder(drive, rootFolderId, parentId, name) {
         parents: [parentId],
       },
       fields: 'id, name',
+      supportsAllDrives: true,
     })
     id = created.data?.id || null
   }
@@ -146,7 +154,13 @@ export async function ensurePatientFolder(driveClient, rootFolderId, patientSync
 
 async function resolveClinicDrive(canonicalClinicId, candidateIds = []) {
   try {
-    return await getAuthorizedDriveClient(canonicalClinicId, candidateIds)
+    const client = await getAuthorizedDriveClient(canonicalClinicId, candidateIds)
+    // Fuerza refresh ANTES de abrir streams de archivo (evita reintento que
+    // consume el ReadStream y deja el archivo en Drive con 0 bytes).
+    if (client?.auth && typeof client.auth.getAccessToken === 'function') {
+      await client.auth.getAccessToken()
+    }
+    return client
   } catch (error) {
     if (isGoogleDriveRequiredError(error)) {
       throw new GoogleDriveRequiredError(
@@ -157,6 +171,25 @@ async function resolveClinicDrive(canonicalClinicId, candidateIds = []) {
     }
     throw error
   }
+}
+
+/** fs.ReadStream → PassThrough (googleapis no siempre consume bien el FD crudo). */
+function asUploadBody(source) {
+  if (!source) return source
+  if (Buffer.isBuffer(source)) return Readable.from(source)
+  if (typeof source.pipe === 'function') {
+    const pass = new PassThrough()
+    source.on('error', (err) => {
+      try {
+        pass.destroy(err)
+      } catch {
+        // ignore
+      }
+    })
+    source.pipe(pass)
+    return pass
+  }
+  return source
 }
 
 /**
@@ -200,16 +233,14 @@ export async function uploadClinicAttachmentToDrive({
     )
   }
 
-  const openFileStream = () =>
-    typeof createReadStreamFn === 'function' ? createReadStreamFn() : createReadStream(path)
+  const openFileStream = () => {
+    const raw =
+      typeof createReadStreamFn === 'function' ? createReadStreamFn() : createReadStream(path)
+    return asUploadBody(raw)
+  }
 
   const parentId = await ensurePatientFolder(drive, rootFolderId, patientSyncId)
   const name = safeFileName(fileName)
-  const mediaBody = hasPath ? openFileStream() : Readable.from(buffer)
-  const media = {
-    mimeType: String(mimeType || 'application/octet-stream'),
-    body: mediaBody,
-  }
 
   const props = {}
   for (const [key, value] of Object.entries(appProperties || {})) {
@@ -231,9 +262,21 @@ export async function uploadClinicAttachmentToDrive({
     }
   }
 
+  function buildMedia() {
+    const body = hasPath ? openFileStream() : asUploadBody(buffer)
+    return {
+      mimeType: String(mimeType || 'application/octet-stream'),
+      body,
+    }
+  }
+
+  /** @type {import('node:stream').Readable | null} */
+  let lastBody = null
   try {
     if (existingFileId) {
       try {
+        const media = buildMedia()
+        lastBody = media.body
         const updated = await drive.files.update({
           fileId: String(existingFileId),
           requestBody: {
@@ -242,6 +285,7 @@ export async function uploadClinicAttachmentToDrive({
           },
           media,
           fields: 'id, size, webViewLink',
+          supportsAllDrives: true,
         })
         const id = updated.data?.id || String(existingFileId)
         return resultPayload(id, updated.data?.webViewLink, updated.data?.size)
@@ -250,15 +294,17 @@ export async function uploadClinicAttachmentToDrive({
           '[google-drive] update falló; se crea archivo nuevo:',
           error instanceof Error ? error.message : error,
         )
-        // Reabrir stream si el update consumió el anterior.
-        if (hasPath) {
-          media.body = openFileStream()
-        } else {
-          media.body = Readable.from(buffer)
+        try {
+          lastBody?.destroy?.()
+        } catch {
+          // ignore
         }
+        lastBody = null
       }
     }
 
+    const media = buildMedia()
+    lastBody = media.body
     const created = await drive.files.create({
       requestBody: {
         name,
@@ -267,6 +313,7 @@ export async function uploadClinicAttachmentToDrive({
       },
       media,
       fields: 'id, name, size, webViewLink',
+      supportsAllDrives: true,
     })
     const driveFileId = created.data?.id
     if (!driveFileId) {
@@ -274,10 +321,18 @@ export async function uploadClinicAttachmentToDrive({
       err.code = 'DRIVE_UPLOAD_FAILED'
       throw err
     }
+    const uploadedSize = Number(created.data?.size) || 0
+    if (byteLength > 0 && uploadedSize === 0) {
+      const err = new Error(
+        'Google Drive creó el archivo vacío (0 bytes). Reintente la subida; si persiste, reconecte Drive en Perfil.',
+      )
+      err.code = 'DRIVE_UPLOAD_EMPTY'
+      throw err
+    }
     return resultPayload(driveFileId, created.data?.webViewLink, created.data?.size)
   } finally {
     try {
-      if (mediaBody && typeof mediaBody.destroy === 'function') mediaBody.destroy()
+      lastBody?.destroy?.()
     } catch {
       // ignore
     }
