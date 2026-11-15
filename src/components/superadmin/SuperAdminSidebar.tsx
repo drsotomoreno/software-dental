@@ -20,8 +20,8 @@ type Item = {
 const ITEMS: Item[] = [
   { label: 'Dashboard', to: '/superadmin', icon: LayoutDashboard, end: true },
   { label: 'Registros / Ventas', to: '/superadmin/registros', icon: UserPlus },
-  { label: 'Clínicas (Tenants)', to: '/superadmin/clinicas', icon: Building2 },
-  { label: 'Suscripciones', to: '/superadmin/suscripciones', icon: CreditCard },
+  { label: 'Suscripciones', to: '/superadmin/clinicas', icon: Building2 },
+  { label: 'Ingresos', to: '/superadmin/suscripciones', icon: CreditCard },
   { label: 'Monitoreo DIAN/RIPS', to: '/superadmin/monitoreo', icon: Activity },
   { label: 'Configuración', to: '/superadmin/configuracion', icon: Settings },
 ]

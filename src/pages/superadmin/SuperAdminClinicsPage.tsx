@@ -28,7 +28,7 @@ export function SuperAdminClinicsPage() {
     const needle = query.trim().toLowerCase()
     if (!needle) return tenants
     return tenants.filter((tenant) =>
-      [tenant.clinicName, tenant.ownerName, tenant.repsCode, tenant.rethus, tenant.plan]
+      [tenant.clinicName, tenant.ownerName, tenant.email, tenant.repsCode, tenant.rethus, tenant.plan]
         .join(' ')
         .toLowerCase()
         .includes(needle),
@@ -95,7 +95,7 @@ export function SuperAdminClinicsPage() {
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Buscar clínica, REPS o ReTHUS"
+          placeholder="Buscar clínica, correo, REPS o ReTHUS"
           className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-sky-600 focus:ring-2 sm:max-w-xs"
           aria-label="Buscar clínicas"
         />
@@ -179,6 +179,10 @@ export function SuperAdminClinicsPage() {
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">Odontólogo titular</dt>
                 <dd className="text-right text-slate-900">{selected.ownerName}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-slate-500">Correo electrónico</dt>
+                <dd className="text-right text-slate-900">{selected.email || '—'}</dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">Código REPS</dt>

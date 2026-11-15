@@ -3,8 +3,8 @@ import { SuperAdminSidebar } from './SuperAdminSidebar'
 
 const TITLES: Record<string, string> = {
   '/superadmin/registros': 'Registros / Ventas',
-  '/superadmin/clinicas': 'Clínicas (Tenants)',
-  '/superadmin/suscripciones': 'Suscripciones',
+  '/superadmin/clinicas': 'Suscripciones',
+  '/superadmin/suscripciones': 'Ingresos',
   '/superadmin/monitoreo': 'Monitoreo DIAN/RIPS',
   '/superadmin/configuracion': 'Configuración',
 }

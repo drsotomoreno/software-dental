@@ -30,11 +30,12 @@ export function TenantsTable({
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <table className="min-w-[960px] w-full text-left text-sm">
+        <table className="min-w-[1120px] w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-4 py-3 font-semibold">Nombre de la Clínica</th>
               <th className="px-4 py-3 font-semibold">Odontólogo Titular</th>
+              <th className="px-4 py-3 font-semibold">Correo electrónico</th>
               <th className="px-4 py-3 font-semibold">Código REPS</th>
               <th className="px-4 py-3 font-semibold">Registro ReTHUS</th>
               <th className="px-4 py-3 font-semibold">Plan de Suscripción</th>
@@ -49,12 +50,13 @@ export function TenantsTable({
               return (
                 <tr key={tenant.id} className="align-top">
                   <td className="px-4 py-3 font-medium text-slate-900">
-                {tenant.clinicName}
-                {tenant.platformOwner ? (
-                  <span className="mt-1 block text-xs font-normal text-violet-700">Cuenta maestra</span>
-                ) : null}
-              </td>
+                    {tenant.clinicName}
+                    {tenant.platformOwner ? (
+                      <span className="mt-1 block text-xs font-normal text-violet-700">Cuenta maestra</span>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-3 text-slate-700">{tenant.ownerName}</td>
+                  <td className="px-4 py-3 text-slate-700">{tenant.email || '—'}</td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-700">
                     {tenant.repsCode || '—'}
                   </td>

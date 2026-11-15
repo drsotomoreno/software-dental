@@ -8,6 +8,7 @@ export interface SuperadminTenant {
   id: string
   clinicName: string
   ownerName: string
+  email: string
   repsCode: string
   rethus: string
   plan: string

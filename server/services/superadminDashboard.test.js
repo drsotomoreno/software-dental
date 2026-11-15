@@ -127,12 +127,14 @@ test('solo la cuenta maestra y las clínicas con suscripción pagada son inquili
   const master = listed.tenants[0]
   assert.equal(master.platformOwner, true)
   assert.equal(master.ownerName, 'Elias Soto')
+  assert.equal(master.email, 'doctormauriciosoto@gmail.com')
   assert.equal(master.repsCode, '6800103898-01')
   assert.equal(master.rethus, '438265')
   assert.equal(master.plan, 'Exento')
   assert.equal(master.mrrCop, 0)
   const paid = listed.tenants[1]
   assert.equal(paid.ownerName, 'Dra. Pago Real')
+  assert.equal(paid.email, 'pago@clinica.co')
   assert.equal(paid.plan, 'Smart')
   assert.equal(paid.patientCount, 4)
   assert.equal(paid.mrrCop, 100000)
