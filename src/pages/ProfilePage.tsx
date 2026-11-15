@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
+import { usePermisos } from '@/hooks/usePermisos'
+import { GestionColaboradores } from '@/components/GestionColaboradores'
 import { useAudit } from '@/hooks/useAudit'
 import { changeUserPassword } from '@/services/authService'
 import { upsertProfessionalFromUser } from '@/services/dentalServiceCatalogService'
@@ -111,6 +113,7 @@ function identityDraftFromUser(
 
 export function ProfilePage() {
   const { user, can, applySessionUser } = useAuth()
+  const { puedeConfigurarSedeYEquipo } = usePermisos()
   const { audit } = useAudit()
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -636,6 +639,8 @@ export function ProfilePage() {
           .toLowerCase()
         return isMaster && role === 'superadmin' ? <MailSettingsPanel /> : null
       })()}
+
+      {puedeConfigurarSedeYEquipo ? <GestionColaboradores /> : null}
 
       {can('backups.manage') && (
         <div className="card space-y-3">

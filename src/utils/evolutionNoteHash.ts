@@ -21,6 +21,7 @@ export function buildEvolutionNoteHashPayload(note: EvolutionNote) {
     prescriptions: note.prescriptions,
     professionalName: note.professionalName,
     professionalLicense: note.professionalLicense,
+    ...(note.rethusFirma ? { rethusFirma: note.rethusFirma } : {}),
     authorUserId: note.authorUserId ?? null,
     authorEmail: note.authorEmail ?? null,
     createdAt: note.createdAt,

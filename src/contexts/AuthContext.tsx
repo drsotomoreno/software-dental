@@ -148,7 +148,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const passwordValue = password.trim()
     const masterLogin = isMasterCredentials(normalizedEmail, passwordValue)
 
-    const completeApiLogin = async (token: string, sessionUser: ApiSubscriptionUser) => {
+    const completeApiLogin = async (token: string, incoming: ApiSubscriptionUser) => {
+      const colaborador = incoming as ApiSubscriptionUser & {
+        titular_id?: string | null
+        rethus?: string | null
+        nombre?: string
+        clinicEmail?: string | null
+        clinicSyncId?: string | null
+      }
+      let sessionUser = colaborador
+      if (colaborador.titular_id) {
+        const clinicEmail = String(colaborador.clinicEmail || '').trim().toLowerCase()
+        const titularSync = String(colaborador.clinicSyncId || '').trim()
+        const clave = titularSync.startsWith('clinic:')
+          ? titularSync.slice('clinic:'.length)
+          : titularSync || clinicEmail
+        sessionUser = {
+          ...colaborador,
+          rol: colaborador.rol,
+          nombre: colaborador.nombre,
+          rethus: colaborador.rethus ?? null,
+          rethusNumber: colaborador.rethus || colaborador.rethusNumber,
+          clinicEmail: clinicEmail || undefined,
+          clinicSyncId: titularSync || (clave ? `clinic:${clave}` : undefined),
+          clinicId: clave || colaborador.clinicId,
+        }
+      }
       setStoredApiAuth(token, sessionUser)
       const { resolveClinicSyncId } = await import('../../shared/clinicalSyncScope.js')
       const { getCurrentClinicId } = await import('@/services/clinicalSyncState')

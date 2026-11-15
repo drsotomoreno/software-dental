@@ -40,6 +40,8 @@ interface EvolutionNotesFormProps {
   professionalLicense?: string
   authorUserId?: string
   authorEmail?: string
+  /** ReTHUS del profesional que firma (titular o colaborador clínico). */
+  rethusFirma?: string
   disabled?: boolean
   allowAddendums?: boolean
   /** Si es false, no se muestra el alta de notas (p. ej. solo lectura). Por defecto sí se permite. */
@@ -57,6 +59,7 @@ export function EvolutionNotesForm({
   professionalLicense = '',
   authorUserId = '',
   authorEmail = '',
+  rethusFirma = '',
   disabled = false,
   allowAddendums = true,
   allowNewNotes = true,
@@ -81,17 +84,24 @@ export function EvolutionNotesForm({
     window.setTimeout(() => setBlockedMessage(''), 8000)
   }
 
-  const canAddNote = allowNewNotes
+  const canAddNote = allowNewNotes && !disabled
 
   const addNote = () => {
     if (!canAddNote) return
+    const draft = createEmptyEvolutionNote(
+      professionalName,
+      professionalLicense,
+      authorUserId,
+      authorEmail,
+    )
     onChange([
       ...notes,
-      createEmptyEvolutionNote(professionalName, professionalLicense, authorUserId, authorEmail),
+      rethusFirma ? { ...draft, rethusFirma } : draft,
     ])
   }
 
   const updateNote = (id: string, patch: EvolutionNotePatch) => {
+    if (disabled) return
     try {
       onChange(updateEvolutionNoteInList(notes, id, patch))
     } catch (error) {
@@ -109,6 +119,7 @@ export function EvolutionNotesForm({
   }
 
   const removeNote = (id: string) => {
+    if (disabled) return
     try {
       onChange(removeEvolutionNoteFromList(notes, id))
     } catch (error) {
@@ -122,6 +133,7 @@ export function EvolutionNotesForm({
   }
 
   const signNote = async (id: string) => {
+    if (disabled) return
     const note = notes.find((item) => item.id === id)
     if (!note || isEvolutionNoteImmutable(note)) {
       showBlocked(EVOLUTION_NOTE_IMMUTABILITY_MESSAGE)
@@ -154,6 +166,7 @@ export function EvolutionNotesForm({
         authorEmail: note.authorEmail?.trim() || authorEmail || undefined,
         professionalName: note.professionalName?.trim() || professionalName,
         professionalLicense: note.professionalLicense?.trim() || professionalLicense,
+        rethusFirma: rethusFirma || note.rethusFirma || undefined,
       }
       const identityIssues = validateEvolutionNote(readyToSign)
       if (identityIssues.length > 0) {
@@ -177,6 +190,7 @@ export function EvolutionNotesForm({
   }
 
   const addAddendum = (parentId: string) => {
+    if (disabled) return
     const parent = notes.find((item) => item.id === parentId)
     if (!parent || !isEvolutionNoteImmutable(parent)) {
       showBlocked('Solo puede agregar aclaratorias a evoluciones ya firmadas.')
@@ -184,13 +198,16 @@ export function EvolutionNotesForm({
     }
     onChange([
       ...notes,
-      createAddendumDraftNote(
-        parent,
-        professionalName,
-        professionalLicense,
-        authorUserId,
-        authorEmail,
-      ),
+      {
+        ...createAddendumDraftNote(
+          parent,
+          professionalName,
+          professionalLicense,
+          authorUserId,
+          authorEmail,
+        ),
+        ...(rethusFirma ? { rethusFirma } : {}),
+      },
     ])
   }
 

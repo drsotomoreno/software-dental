@@ -116,6 +116,7 @@ import { TreatmentPlanAuthorizationForm } from './TreatmentPlanAuthorizationForm
 import { BudgetForm } from './BudgetForm'
 import { PaymentControlForm } from './PaymentControlForm'
 import { Odontogram } from '@/components/odontogram'
+import { usePermisos } from '@/hooks/usePermisos'
 import { DiagnosticOdontogramSection } from '@/components/clinical/diagnostics'
 import { DiagnosticAidsSection } from './DiagnosticAidsSection'
 
@@ -220,6 +221,8 @@ export function ClinicalHistoryForm({
 }: ClinicalHistoryFormProps) {
   const snapshotLocked = disabled
   const livingLocked = lockLivingChart
+  const { puedeEditarClinica, rethusFirma } = usePermisos()
+  const edicionClinicaBloqueada = !puedeEditarClinica
   const [form, setForm] = useState<ClinicalRecordFormData>(() => {
     const emptyForm = createEmptyClinicalForm(professionalLicense)
     const base = {
@@ -464,7 +467,7 @@ export function ClinicalHistoryForm({
           <Odontogram
             data={odontogram}
             onChange={onOdontogramChange}
-            disabled={livingLocked}
+            disabled={livingLocked || edicionClinicaBloqueada}
           />
         </div>
       )}
@@ -535,7 +538,7 @@ export function ClinicalHistoryForm({
             if (diagnoses === form.diagnoses && diagnosticChart === chart) return
             update({ diagnoses, diagnosticChart })
           }}
-          disabled={livingLocked}
+          disabled={livingLocked || edicionClinicaBloqueada}
         />
       )}
 
@@ -695,7 +698,7 @@ export function ClinicalHistoryForm({
             professionalDocument={professionalLicense}
             rethusNumber={clinicalUser?.rethusNumber}
             userEmail={authorEmail}
-            canSign={canSignMainHistory && !snapshotLocked}
+            canSign={canSignMainHistory && !snapshotLocked && puedeEditarClinica}
             disabled={snapshotLocked}
             savedSignature={savedSignature}
             onSaveProfileSignature={onSaveProfileSignature}
@@ -739,7 +742,8 @@ export function ClinicalHistoryForm({
         professionalLicense={professionalLicense}
         authorUserId={authorUserId}
         authorEmail={authorEmail}
-        disabled={livingLocked}
+        rethusFirma={rethusFirma}
+        disabled={livingLocked || edicionClinicaBloqueada}
         allowNewNotes
         allowAddendums
       />

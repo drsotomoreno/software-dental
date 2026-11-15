@@ -18,6 +18,7 @@ import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
 import googleDriveRoutes from './server/routes/googleDrive.routes.js'
 import kioskRoutes from './server/routes/kiosk.routes.js'
 import superadminRoutes from './server/routes/superadmin.routes.js'
+import colaboradoresRouter from './server/routes/colaboradores.js'
 import { attachKioskSocket } from './server/socket/kioskSocket.js'
 import { getLocalLanIPv4, isPrivateLanOrigin } from './server/utils/localLanAddress.js'
 import { mailTransportLabel } from './server/services/mailer.js'
@@ -113,6 +114,7 @@ app.use('/api/integrations/google-drive', googleDriveRoutes)
 app.use('/api/v1/kiosk', kioskRoutes)
 app.use('/api/superadmin', superadminRoutes)
 app.use('/api', authRoutes)
+app.use('/api', colaboradoresRouter)
 
 function mountStaticFrontend() {
   app.use(

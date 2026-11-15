@@ -44,6 +44,7 @@ import { seedDemoData } from '@/db/database'
 import { hydrateBillingSettingsFromIndexedDb } from '@/services/billingModalityService'
 import { installInvoiceImmutabilityFetchGuard } from '@/bootstrap/invoiceImmutabilityGuard'
 import { KioskSignatureBridge } from '@/components/kiosk/KioskSignatureBridge'
+import { ActivarCuenta } from '@/pages/ActivarCuenta'
 import './dictation-app'
 import './agenda-app'
 
@@ -75,6 +76,7 @@ export default function ClinicalApp() {
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+        <Route path="/activar" element={<ActivarCuenta />} />
         <Route element={<ProtectedRoute />}>
           <Route path="welcome-trial" element={<WelcomeTrialPage />} />
           <Route element={<RequireSuperAdmin />}>

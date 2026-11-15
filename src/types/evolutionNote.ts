@@ -89,6 +89,8 @@ export interface EvolutionNote {
   professionalName: string
   /** Snapshot del documento de identidad (cédula / ReTHUS) al firmar la nota. */
   professionalLicense: string
+  /** ReTHUS del titular o del colaborador clínico que guarda la evolución. */
+  rethusFirma?: string
   /** Usuario autenticado que creó la anotación */
   authorUserId?: string
   authorEmail?: string
