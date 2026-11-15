@@ -3,8 +3,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
 import { config } from '../config.js'
-import { claimRethusForUser } from './rethusRegistry.js'
-import { verifyAndClaimPrestador } from './prestadorRegistry.js'
+import { claimRethusForUser, releaseRethusClaimsForUser } from './rethusRegistry.js'
+import { releasePrestadorLinksForUser, verifyAndClaimPrestador } from './prestadorRegistry.js'
 import {
   PAID_PLAN_IDS,
   PAID_PLAN_DAYS,
@@ -91,6 +91,14 @@ const liveSessions = new Map()
 
 function rememberLiveSession(session) {
   if (session?.token) liveSessions.set(session.token, session)
+}
+
+function forgetLiveSessionsForUser(userId) {
+  const id = String(userId || '')
+  if (!id) return
+  for (const [key, session] of liveSessions.entries()) {
+    if (String(session?.userId || '') === id) liveSessions.delete(key)
+  }
 }
 
 
@@ -2263,64 +2271,85 @@ export async function deleteSubscriptionUserByEmail(email) {
       String(item.userId) !== String(removed.id) &&
       normalizeEmail(item.email) !== normalizedEmail,
   )
+  store.passwordResets = (store.passwordResets || []).filter(
+    (item) =>
+      String(item.userId) !== String(removed.id) &&
+      normalizeEmail(item.email) !== normalizedEmail,
+  )
   store.emailVerifications = (store.emailVerifications || []).filter(
     (item) => item.email !== normalizedEmail,
   )
+  forgetLiveSessionsForUser(removed.id)
   await saveStore(store)
 
-  // Limpieza secundaria en segundo plano: no debe tumbar el DELETE por timeout de nginx.
   const phone = normalizeColombiaPhoneNumber(removed.phone_number || removed.phone)
-  setImmediate(() => {
-    void (async () => {
-      try {
-        await deleteEmailOtp(normalizedEmail)
-      } catch (error) {
-        console.error(
-          '[Auth] OTP correo no limpiado al borrar registro:',
-          error instanceof Error ? error.message : error,
-        )
-      }
-      if (phone) {
-        try {
-          await deletePhoneOtp(phone)
-        } catch (error) {
-          console.error(
-            '[Auth] OTP WhatsApp no limpiado al borrar registro:',
-            error instanceof Error ? error.message : error,
-          )
-        }
-      }
-      try {
-        await withPgClient(async (client) => {
-          await client.query(`DELETE FROM usuarios WHERE lower(email) = lower($1::text)`, [
-            normalizedEmail,
-          ])
-        })
-      } catch (error) {
-        if (error?.code !== 'PG_UNAVAILABLE') {
-          console.error(
-            '[Auth] No se pudo borrar el usuario en Postgres:',
-            error instanceof Error ? error.message : error,
-          )
-        }
-      }
-      try {
-        const scope = clinicSyncAliasIds(removed)
-        await resetClinicClinicalBucket(scope.canonical, scope.aliases)
-      } catch (error) {
-        console.error(
-          '[Auth] No se pudo limpiar el cubo clínico al borrar el registro:',
-          error instanceof Error ? error.message : error,
-        )
-      }
-    })()
-  })
+  try {
+    await deleteEmailOtp(normalizedEmail)
+  } catch (error) {
+    console.error(
+      '[Auth] OTP correo no limpiado al borrar registro:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+  if (phone) {
+    try {
+      await deletePhoneOtp(phone)
+    } catch (error) {
+      console.error(
+        '[Auth] OTP WhatsApp no limpiado al borrar registro:',
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
+  try {
+    await releaseRethusClaimsForUser(removed.id)
+  } catch (error) {
+    console.error(
+      '[Auth] No se pudo liberar el ReTHUS al borrar el registro:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+  try {
+    await releasePrestadorLinksForUser(removed.id)
+  } catch (error) {
+    console.error(
+      '[Auth] No se pudo liberar el prestador al borrar el registro:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+  try {
+    await withPgClient(async (client) => {
+      await client.query(
+        `DELETE FROM usuarios
+         WHERE lower(email) = lower($1::text)
+           AND COALESCE(is_superadmin, FALSE) = FALSE`,
+        [normalizedEmail],
+      )
+    })
+  } catch (error) {
+    if (error?.code !== 'PG_UNAVAILABLE') {
+      console.error(
+        '[Auth] No se pudo borrar el usuario en Postgres:',
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
 
   return {
     ok: true,
     email: normalizedEmail,
     id: removed.id,
+    message:
+      'Registro eliminado. La contraseña y la sesión dejaron de servir; debe registrarse de nuevo.',
   }
+}
+
+/** La cuenta sigue en el almacén. Un JWT viejo no alcanza si el registro ya se eliminó. */
+export async function subscriptionAccountExists(userId) {
+  const id = String(userId ?? '').trim()
+  if (!id) return false
+  const store = await loadStore()
+  return store.users.some((user) => String(user.id) === id)
 }
 
 function clinicIdOf(user) {

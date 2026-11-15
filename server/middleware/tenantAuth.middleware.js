@@ -10,6 +10,7 @@ import {
   isSuperAdminUser,
   resolveSubscriptionSession,
   sessionHintFromRequest,
+  subscriptionAccountExists,
 } from '../services/subscriptionAuthStore.js'
 
 function bearerToken(req) {
@@ -63,6 +64,14 @@ export async function verificarToken(req, res, next) {
   try {
     if (isLikelyJwt(token)) {
       const decoded = verifySessionToken(token)
+      if (!decoded.is_superadmin && !(await subscriptionAccountExists(decoded.id))) {
+        return res.status(401).json({
+          success: false,
+          ok: false,
+          error: 'La cuenta fue eliminada. Debe registrarse de nuevo.',
+          code: 'ACCOUNT_REMOVED',
+        })
+      }
       req.user = decoded
       req.authToken = token
       return next()

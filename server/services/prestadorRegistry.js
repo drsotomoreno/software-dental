@@ -228,3 +228,45 @@ export async function verifyAndClaimPrestador({
 
   return { ok: true, record, identity }
 }
+
+/**
+ * Quita a un usuario eliminado de las sedes REPS que reclamó.
+ * Si era el único titular, la sede queda libre para un registro nuevo.
+ * Si hay otros vinculados, la titularidad pasa al siguiente.
+ */
+export async function releasePrestadorLinksForUser(userId) {
+  const id = String(userId || '').trim()
+  if (!id) return { released: 0 }
+  const registry = await loadRegistry()
+  let released = 0
+  const next = []
+  for (const record of registry.records) {
+    const linked = (record.linkedUserIds ?? []).map(String).filter((item) => item && item !== id)
+    const wasOwner = String(record.claimedByUserId || '') === id
+    const wasLinked =
+      wasOwner || (record.linkedUserIds ?? []).map(String).includes(id)
+    if (!wasLinked) {
+      next.push(record)
+      continue
+    }
+    released += 1
+    if (!wasOwner) {
+      next.push({
+        ...record,
+        linkedUserIds: linked,
+        updatedAt: new Date().toISOString(),
+      })
+      continue
+    }
+    const successor = linked[0] || ''
+    if (!successor) continue
+    next.push({
+      ...record,
+      claimedByUserId: successor,
+      linkedUserIds: linked,
+      updatedAt: new Date().toISOString(),
+    })
+  }
+  if (released > 0) await saveRegistry({ records: next })
+  return { released }
+}

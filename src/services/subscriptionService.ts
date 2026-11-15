@@ -351,6 +351,33 @@ export async function confirmRegisteredUserPayment(email: string, planId: string
   }
 }
 
+/**
+ * Borra el registro. La contraseña y la sesión dejan de servir;
+ * el mismo correo puede volver a registrarse desde cero.
+ */
+export async function deleteRegisteredUser(email: string) {
+  const normalized = String(email || '').trim().toLowerCase()
+  const { response, payload } = await authFetch(
+    `/api/admin/users/by-email/${encodeURIComponent(normalized)}`,
+    { method: 'DELETE' },
+  )
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      status: response.status,
+      error: String(payload.error || 'No se pudo eliminar el registro.'),
+    }
+  }
+  return {
+    ok: true as const,
+    email: String(payload.email || normalized),
+    message: String(
+      payload.message ||
+        'Registro eliminado. Esa persona debe registrarse de nuevo para volver a entrar.',
+    ),
+  }
+}
+
 export async function fetchClinicUsers() {
   const { response, payload } = await authFetch('/api/clinic/users')
   if (!response.ok) {

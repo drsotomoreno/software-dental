@@ -241,7 +241,9 @@ router.delete('/admin/users/by-email/:email', verificarToken, soloSuperAdmin, as
     return res.json({
       success: true,
       ok: true,
-      message: `Cuenta eliminada: ${result.email}`,
+      message:
+        result.message ||
+        `Registro eliminado: ${result.email}. Esa cuenta ya no puede entrar y debe registrarse de nuevo.`,
       email: result.email,
       id: result.id,
     })

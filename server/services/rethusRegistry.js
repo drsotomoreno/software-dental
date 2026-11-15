@@ -140,3 +140,20 @@ export async function claimRethusForUser({ documentNumber, rethusNumber, userId 
   await saveRegistry(registry)
   return { ok: true, document: result.document, rethus: result.rethus }
 }
+
+/** Libera el ReTHUS reclamado por una cuenta eliminada para que pueda registrarse de nuevo. */
+export async function releaseRethusClaimsForUser(userId) {
+  const id = String(userId || '').trim()
+  if (!id) return { released: 0 }
+  const registry = await loadRegistry()
+  let released = 0
+  registry.records = registry.records.map((item) => {
+    if (String(item.claimedByUserId || '') !== id) return item
+    released += 1
+    const next = { ...item, claimedByUserId: null }
+    delete next.claimedAt
+    return next
+  })
+  if (released > 0) await saveRegistry(registry)
+  return { released }
+}

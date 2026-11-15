@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import { Download, MessageCircle, Search, Users } from 'lucide-react'
+import { Download, MessageCircle, Search, Trash2, Users } from 'lucide-react'
 import { useSuperadminResource } from '@/hooks/useSuperadminResource'
 import {
   confirmRegisteredUserPayment,
+  deleteRegisteredUser,
   fetchRegisteredUsers,
   PAID_PLANS,
   type RegisteredSubscriptionUser,
@@ -123,6 +124,9 @@ export function SuperAdminRegistrationsPage() {
   const [confirmingPaymentId, setConfirmingPaymentId] = useState<string | null>(null)
   const [paymentError, setPaymentError] = useState('')
   const [paymentMessage, setPaymentMessage] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState('')
+  const [deleteMessage, setDeleteMessage] = useState('')
 
   const markWhatsAppVerified = async (user: RegisteredSubscriptionUser) => {
     setVerifyError('')
@@ -180,6 +184,46 @@ export function SuperAdminRegistrationsPage() {
       setPaymentError('No se pudo contactar al servidor.')
     } finally {
       setConfirmingPaymentId(null)
+    }
+  }
+
+  const deleteRegistration = async (user: RegisteredSubscriptionUser) => {
+    setDeleteError('')
+    setDeleteMessage('')
+    const email = String(user.email || '').trim().toLowerCase()
+    if (!email) {
+      setDeleteError('Este registro no tiene correo y no se puede eliminar.')
+      return
+    }
+    if (email === SUPERADMIN_EMAIL) {
+      setDeleteError('La cuenta del superadministrador no se puede eliminar.')
+      return
+    }
+    const planLabel = user.planName || user.plan || 'sin plan'
+    const accepted = window.confirm(
+      `Eliminar registro\n\n` +
+        `${user.nombre || 'Sin nombre'} (${email})\n` +
+        `Estado: ${STATUS_LABELS[String(user.estado_pago || 'pendiente')] || user.estado_pago || 'sin plan'} · ${planLabel}\n\n` +
+        `La contraseña actual y la sesión abierta dejarán de servir. ` +
+        `Para volver a entrar tendrá que registrarse de nuevo.\n\n` +
+        `Esta acción no borra historias clínicas ya guardadas.`,
+    )
+    if (!accepted) return
+
+    setDeletingId(String(user.id))
+    try {
+      const result = await deleteRegisteredUser(email)
+      if (!result.ok) {
+        setDeleteError(result.error)
+        return
+      }
+      setDeleteMessage(result.message)
+      setSelectedId(null)
+      await reload?.()
+    } catch {
+      setDeleteError('No se pudo contactar al servidor.')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -373,6 +417,14 @@ export function SuperAdminRegistrationsPage() {
       {loading && !data ? <p className="text-sm text-slate-500">Cargando registros…</p> : null}
       {error ? (
         <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
+      ) : null}
+      {deleteMessage ? (
+        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {deleteMessage}
+        </p>
+      ) : null}
+      {deleteError ? (
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{deleteError}</p>
       ) : null}
 
       {!loading && !error && filtered.length === 0 ? (
@@ -659,6 +711,28 @@ export function SuperAdminRegistrationsPage() {
                     </dd>
                   </div>
                 </dl>
+
+                <div className="rounded-xl border border-red-200 bg-red-50/70 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-red-800">
+                    Eliminar registro
+                  </p>
+                  <p className="mt-1 text-xs text-red-900">
+                    Quita la cuenta de {selected.email || 'este registro'}. La contraseña y la
+                    sesión abierta dejan de servir. Para volver a usar mihistoriadental tendrá
+                    que registrarse de nuevo.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={deletingId === String(selected.id) || !selected.email}
+                    onClick={() => {
+                      void deleteRegistration(selected)
+                    }}
+                    className="mt-3 inline-flex items-center gap-2 rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden />
+                    {deletingId === String(selected.id) ? 'Eliminando…' : 'Eliminar registro'}
+                  </button>
+                </div>
               </div>
             ) : (
               <p className="text-sm text-slate-500">Seleccione un registro para ver el detalle.</p>
