@@ -71,9 +71,15 @@ export function LoginPage() {
       : from
   const storedUser = apiAuth?.user
   const onRegisterPath = location.pathname === '/registro'
-  if (!isLoading && (user || (apiAuth?.token && apiAuth.user)) && !onRegisterPath) {
-    const dest =
-      storedUser && !isSuperAdmin ? postAuthDestination(storedUser, afterLogin) : afterLogin
+  const demoIntent =
+    searchParams.get('destino') === 'demo' ||
+    (location.state as { intent?: string } | null)?.intent === 'demo'
+  if (!isLoading && (user || (apiAuth?.token && apiAuth.user)) && (!onRegisterPath || demoIntent)) {
+    const dest = demoIntent
+      ? '/demo'
+      : storedUser && !isSuperAdmin
+        ? postAuthDestination(storedUser, afterLogin)
+        : afterLogin
     return <Navigate to={dest} replace />
   }
 

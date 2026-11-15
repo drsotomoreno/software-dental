@@ -51,12 +51,13 @@ export function LandingPage() {
             >
               Empieza como Pionero
             </Link>
-            <a
-              href="#planes"
+            <Link
+              to="/registro?destino=demo"
+              state={{ from: '/demo', intent: 'demo' }}
               className="rounded-xl border border-slate-300 bg-white px-8 py-4 font-semibold text-slate-800 transition-all hover:bg-slate-100"
             >
               Ver Demostración
-            </a>
+            </Link>
           </div>
 
           <img

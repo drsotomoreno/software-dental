@@ -83,6 +83,7 @@
       path === '/' ||
       path === '/login' ||
       path === '/registro' ||
+      path === '/demo' ||
       path === '/forgot-password' ||
       path === '/reset-password'
     )
