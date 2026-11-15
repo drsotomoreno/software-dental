@@ -1,0 +1,36 @@
+---
+description: Invariantes de sync clínico multi-tenant (evitar desaparición de pacientes)
+globs: "{src/services/clinic*.ts,src/services/clinicalSync*.ts,server/services/clinicalSync*.js,server/routes/clinicalSync.routes.js,scripts/*clinical-sync*,.github/workflows/deploy.yml}"
+alwaysApply: false
+---
+
+# Sync clínico multi-tenant — invariantes (datos legales)
+
+Incidentes Isabel / listados vacíos: wipe local + pull OOM 502 + bandera `treatmentCompleted` mal puesta.
+Estas reglas aplican a **todas** las clínicas y cuentas, no solo al Superadmin.
+
+## Nunca
+
+1. **Nunca** vaciar Dexie / IndexedDB clínico en un bump de `SYNC_SCHEMA_VERSION` / `mhd_sync_epoch` **antes** de un pull HTTP verificado. Solo invalidar caché; `commitSyncSchemaEpoch()` tras pull OK.
+2. **Nunca** hacer que `GET /api/sync/pull?full=0` parseé o serialice `clinicalRecords` / `odontograms` / `drafts` / blobs. Slim = pacientes + citas desde `clinical-sync-meta.json`.
+3. **Nunca** eliminar el paso de deploy que genera `clinical-sync-meta.json`, ni el smoke de pull post-PM2.
+4. **Nunca** borrar ni reescribir `clinical-sync.json.bak-*` protegidos ni “limpiar” pacientes para arreglar OOM.
+5. **Nunca** filtrar listados solo por `phase` ignorando `valuationOnly` / `treatmentCompleted`.
+6. **Nunca** mezclar `clinicId` entre tenants; Superadmin canónico = `clinic:doctormauriciosoto@gmail.com` + aliases, no `clinica_id NULL` en listados EMR.
+
+## Siempre
+
+1. Clasificación de listado (misma en cliente y utilidades compartidas):
+   - `treatmentCompleted === true` → **terminado**
+   - else `valuationOnly === true` (o phase valoración si valuationOnly ausente) → **valorado**
+   - else → **activo**
+2. Tras `saveStore` del sync: regenerar `clinical-sync-meta.json` para **todas** las clínicas del store.
+3. Pull slim sin meta: reconstruir meta (heap alto / script) o responder error explícito (`SYNC_META_MISSING`) — **no** fallback que parseé 80MB+ en el request del usuario.
+4. Aislamiento: `belongsToCurrentClinic` / `rowBelongsToClinicScope` con `clinicSyncAliasIds`; sanear aliases → canónico, no purgar el cubo propio.
+5. UI: si el listado de la clínica está vacío tras login, mostrar fallo de sync / CTA “Forzar sincronización”, no solo “No hay pacientes”.
+
+## Al editar sync / deploy
+
+- Preservar `build-clinical-sync-meta.cjs` + invocación en `deploy.yml`.
+- Preservar smoke: login + `GET /api/sync/pull?full=0` → HTTP 200 y `slim: true`.
+- Cambios de flags de paciente (`valuationOnly`, `treatmentCompleted`, `phase`) son datos clínicos: no “corregir” masivamente sin evidencia y backup puntual.

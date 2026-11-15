@@ -5,6 +5,7 @@ import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import { PatientListSearch } from '@/components/patients/PatientListSearch'
+import { ClinicalSyncHealthBanner } from '@/components/patients/ClinicalSyncHealthBanner'
 import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import { resolveActiveClinicSyncId } from '@/services/clinicalSyncState'
 import { isCompletedPatient } from '@/types/patient'
@@ -56,6 +57,8 @@ export function CompletedPatientsPage() {
           </Link>
         )}
       </div>
+
+      <ClinicalSyncHealthBanner listEmpty={Boolean(patients && patients.length === 0)} />
 
       {!patients ? (
         <p className="text-slate-500">Cargando...</p>

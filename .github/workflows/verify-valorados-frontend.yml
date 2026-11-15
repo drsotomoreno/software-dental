@@ -1,0 +1,56 @@
+# READ-ONLY: verifica qué frontend sirve producción vs dist en disco.
+name: Verify Valorados Frontend
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check live HTML + EC2 dist
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            echo "==== LIVE index.html (curl) ===="
+            curl -sS -D - --max-time 20 "https://www.mihistoriadental.com/" -o /tmp/live-index.html | head -40
+            echo "LIVE_INDEX_ASSETS=$(grep -oE 'assets/[A-Za-z0-9._-]+' /tmp/live-index.html | tr '\n' ' ')"
+            echo "LIVE_HAS_ABRIR=$(grep -c 'Abrir valoración' /tmp/live-index.html || true)"
+            echo "==== DISK /var/www/mihistoriadental/dist ===="
+            ls -la /var/www/mihistoriadental/dist/index.html
+            grep -oE 'assets/[A-Za-z0-9._-]+' /var/www/mihistoriadental/dist/index.html | head -20
+            echo "DISK_CLINICAL=$(ls /var/www/mihistoriadental/dist/assets/ClinicalApp-*.js 2>/dev/null | head -3)"
+            echo "DISK_HAS_ABRIR=$(grep -ao 'Abrir valoración' /var/www/mihistoriadental/dist/assets/ClinicalApp-*.js 2>/dev/null | wc -l)"
+            echo "DISK_HAS_OLD=$(grep -ao 'Puede abrir la ficha' /var/www/mihistoriadental/dist/assets/ClinicalApp-*.js 2>/dev/null | wc -l)"
+            echo "==== nginx root ===="
+            grep -n "root\|try_files\|X-MHD\|Cache-Control" /etc/nginx/sites-enabled/software-dental | head -40 || true
+            echo "==== headers for ClinicalApp ===="
+            JS=$(grep -oE 'assets/ClinicalApp-[A-Za-z0-9_-]+\.js' /var/www/mihistoriadental/dist/index.html | head -1 || true)
+            # ClinicalApp is lazy; find from disk
+            JS=$(ls /var/www/mihistoriadental/dist/assets/ClinicalApp-*.js | head -1 | xargs -n1 basename)
+            curl -sS -D - --max-time 20 "https://www.mihistoriadental.com/assets/$JS" -o /dev/null | head -30
+            echo "==== sample draft keys ===="
+            node --max-old-space-size=1024 -e "
+              const fs=require('fs');
+              const p='/home/ubuntu/software-dental/server/data/clinical-sync.json';
+              if(!fs.existsSync(p)){console.log('NO_SYNC');process.exit(0)}
+              const j=JSON.parse(fs.readFileSync(p,'utf8'));
+              const clinics=j.clinics||{};
+              let drafts=0, withVal=0, samples=[];
+              for (const c of Object.values(clinics)) {
+                const map=c.drafts||{};
+                for (const [k,v] of Object.entries(map)) {
+                  drafts++;
+                  const payload=(v&&v.payload)||v||{};
+                  const vd=payload.valuationDraft;
+                  const has=vd && typeof vd==='object' && (JSON.stringify(vd).length>50);
+                  if(has){ withVal++; if(samples.length<5) samples.push({k, patientSyncId:payload.patientSyncId, bytes:JSON.stringify(vd).length}); }
+                }
+              }
+              console.log(JSON.stringify({drafts, withVal, samples},null,2));
+            " || echo "DRAFT_SCAN_FAILED"

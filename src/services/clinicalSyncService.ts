@@ -504,12 +504,19 @@ export async function applyFullClinicPull(
 async function pullAndMerge(
   includeBlobs = false,
   options?: { timeoutMs?: number },
-): Promise<{ ok: boolean; patients: number }> {
+): Promise<{ ok: boolean; patients: number; error?: string; code?: string }> {
   const { response, payload } = await syncFetch(
     `/api/sync/pull?full=${includeBlobs ? '1' : '0'}`,
     options?.timeoutMs ? { timeoutMs: options.timeoutMs } : undefined,
   )
-  if (!response.ok) return { ok: false, patients: 0 }
+  if (!response.ok) {
+    return {
+      ok: false,
+      patients: 0,
+      error: String(payload?.error || `HTTP ${response.status}`),
+      code: payload?.code ? String(payload.code) : undefined,
+    }
+  }
   await applyFullClinicPull(payload, { hydrateBlobs: includeBlobs })
   const patients = Array.isArray(payload.patients)
     ? payload.patients.length
@@ -593,13 +600,18 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
         }
         if (!clinicId) return false
 
+        const { recordPullSuccess, recordPullFailure } = await import(
+          '@/services/clinicalSyncHealth'
+        )
+
         // Primero metadata (rápido); luego blobs si hay red.
         let merged = await pullAndMerge(false, {
           timeoutMs: CLINICAL_SYNC_LOGIN_FETCH_TIMEOUT_MS,
         })
         if (merged.ok && merged.patients > 0) {
           commitSyncSchemaEpoch()
-          // Blobs en segundo plano: no retrasar la lista de pacientes.
+          recordPullSuccess(clinicId, merged.patients)
+          // Historias/odontogramas en segundo plano (sin drafts pesados).
           void pullAndMerge(true, { timeoutMs: CLINICAL_SYNC_LOGIN_FETCH_TIMEOUT_MS }).catch(
             () => undefined,
           )
@@ -608,18 +620,25 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
           merged = await pullAndMerge(true, {
             timeoutMs: CLINICAL_SYNC_LOGIN_FETCH_TIMEOUT_MS,
           })
-          if (merged.ok) commitSyncSchemaEpoch()
+          if (merged.ok) {
+            commitSyncSchemaEpoch()
+            recordPullSuccess(clinicId, merged.patients)
+          }
         }
 
         await syncCitasToLocalStorage()
         renderCitas()
 
-        if (merged.ok) return true
+        if (merged.ok) {
+          if (merged.patients === 0) recordPullSuccess(clinicId, 0)
+          return true
+        }
 
         // Pull falló: conservar datos locales si existen (offline / 502).
         const localCount = await db.patients
           .filter((row) => rowBelongsToClinicScope(row.clinicId, clinicId))
           .count()
+        recordPullFailure(clinicId, merged.error, merged.code)
         if (localCount > 0) {
           console.warn(
             '[Sync] Pull al login falló; se conservan pacientes locales (datos clínicos).',
@@ -632,10 +651,15 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
       CLINICAL_SYNC_LOGIN_CYCLE_TIMEOUT_MS,
       'Pull clínico al login',
     )
-  } catch {
+  } catch (error) {
     // Timeout/red: no destruir datos locales.
     try {
       const clinicId = getCurrentClinicId()
+      const { recordPullFailure } = await import('@/services/clinicalSyncHealth')
+      recordPullFailure(
+        clinicId,
+        error instanceof Error ? error.message : 'Pull clínico falló',
+      )
       const { rowBelongsToClinicScope } = await import('@/services/clinicLocalIsolation')
       const localCount = clinicId
         ? await db.patients.filter((row) => rowBelongsToClinicScope(row.clinicId, clinicId)).count()
@@ -768,9 +792,21 @@ export async function forzarSincronizacionLocal(): Promise<ForzarSincronizacionR
       }
     }
     await pushClinicSnapshotLocal(clinicId).catch(() => false)
-    const pulled = await pullAndMerge(true)
+    // Preferir slim (full=0): evita OOM; luego blobs en segundo plano.
+    let pulled = await pullAndMerge(false)
+    if (pulled.ok && pulled.patients === 0) {
+      pulled = await pullAndMerge(true)
+    } else if (pulled.ok) {
+      void pullAndMerge(true).catch(() => undefined)
+    }
     await syncCitasToLocalStorage()
     renderCitas()
+    const { recordPullSuccess, recordPullFailure } = await import('@/services/clinicalSyncHealth')
+    if (pulled.ok) {
+      recordPullSuccess(clinicId, pulled.patients)
+    } else {
+      recordPullFailure(clinicId, pulled.error, pulled.code)
+    }
     const stillPending = (await db.patients.toArray()).filter(
       (row) =>
         (!row.clinicId || rowBelongsToClinicScope(row.clinicId, clinicId)) &&
@@ -787,6 +823,11 @@ export async function forzarSincronizacionLocal(): Promise<ForzarSincronizacionR
       error: pulled.ok ? undefined : 'La subida llegó, pero no se pudo volver a bajar el listado.',
     }
   } catch (error) {
+    const { recordPullFailure } = await import('@/services/clinicalSyncHealth')
+    recordPullFailure(
+      clinicId,
+      error instanceof Error ? error.message : 'No se pudo sincronizar.',
+    )
     return {
       ok: false,
       patients: 0,

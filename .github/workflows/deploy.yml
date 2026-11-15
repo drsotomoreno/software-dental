@@ -38,6 +38,15 @@ jobs:
           test -f dist/index.html
           grep -o 'assets/index-[^"]*' dist/index.html || true
 
+      - name: Multi-tenant sync guards
+        run: |
+          set -euo pipefail
+          node --test \
+            server/services/clinicalSyncStore.slimPull.test.js \
+            shared/clinicalListBucket.test.js \
+            src/services/clinicLocalIsolation.test.js \
+            src/services/clinicalSyncHealth.guard.test.js
+
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
@@ -153,13 +162,16 @@ jobs:
 
             cd "$APP_DIR"
             # Índice liviano para GET /api/sync/pull?full=0 (evita OOM al parsear ~83MB).
+            # Obligatorio: sin meta el pull slim responde SYNC_META_MISSING (no fallback OOM).
             # No modifica clinical-sync.json ni .bak-*.
             if [[ -f "$APP_DIR/server/data/clinical-sync.json" && -f "$APP_DIR/scripts/build-clinical-sync-meta.cjs" ]]; then
               echo "Building clinical-sync-meta.json (patients+appointments only)..."
-              node --max-old-space-size=1536 "$APP_DIR/scripts/build-clinical-sync-meta.cjs" || {
-                echo "WARN: meta build failed; slim pull may fallback to full JSON"
-              }
-              ls -lh "$APP_DIR/server/data/clinical-sync-meta.json" 2>/dev/null || true
+              node --max-old-space-size=1536 "$APP_DIR/scripts/build-clinical-sync-meta.cjs"
+              test -f "$APP_DIR/server/data/clinical-sync-meta.json"
+              ls -lh "$APP_DIR/server/data/clinical-sync-meta.json"
+            else
+              echo "FATAL: falta clinical-sync.json o build-clinical-sync-meta.cjs"
+              exit 1
             fi
 
             pm2 delete software-dental 2>/dev/null || true
@@ -190,6 +202,15 @@ jobs:
             PUB=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 12 "https://www.mihistoriadental.com/pacientes" || echo 000)
             echo "PUBLIC_/pacientes=$PUB"
             [[ "$PUB" == "200" ]] || exit 1
+
+            # Smoke multi-tenant: login + pull slim 200 (evita UI vacía con datos en disco).
+            PORT="${PORT:-3000}"
+            [[ -f "$APP_DIR/.env" ]] && PORT="$(grep -E '^PORT=' "$APP_DIR/.env" | head -1 | cut -d= -f2- | tr -d \"\' || echo "${PORT}")"
+            PORT="${PORT:-3000}"
+            test -f "$APP_DIR/scripts/smoke-clinical-sync-pull.cjs"
+            SMOKE_REQUIRE_PATIENTS=1 PUBLIC_BASE_URL="http://127.0.0.1:${PORT}" \
+              node "$APP_DIR/scripts/smoke-clinical-sync-pull.cjs"
+
             pm2 status
             free -m
             echo "Despliegue OK."

@@ -208,18 +208,22 @@ router.get('/pull', async (req, res) => {
     console.error('[Sync] Error en GET /api/sync/pull:', error)
     const message = error instanceof Error ? error.message : String(error)
     const code = error?.code || ''
-    // OOM / heap → 503 para que el cliente reintente slim; no fingir 500 genérico.
+    const metaMissing =
+      code === 'SYNC_META_MISSING' || /SYNC_META_MISSING|clinical-sync-meta/i.test(message)
+    // OOM / heap / meta → 503 explícito (cliente muestra banner; no lista vacía silenciosa).
     const oom =
       code === 'CLINICAL_SYNC_TOO_LARGE' ||
       code === 'HEAP_PRESSURE' ||
       /heap|out of memory|ENOMEM/i.test(message)
-    return sendJson(res, oom ? 503 : 500, {
+    return sendJson(res, metaMissing || oom ? 503 : 500, {
       success: false,
       ok: false,
-      error: oom
-        ? 'El servidor agotó memoria al preparar el sync. Reintente con full=0.'
-        : 'No se pudo descargar el snapshot completo de la clínica.',
-      code: oom ? code || 'HEAP_PRESSURE' : undefined,
+      error: metaMissing
+        ? 'Índice de pacientes no disponible. Reintente en unos segundos o contacte soporte.'
+        : oom
+          ? 'El servidor agotó memoria al preparar el sync. Reintente con full=0.'
+          : 'No se pudo descargar el snapshot completo de la clínica.',
+      code: metaMissing ? 'SYNC_META_MISSING' : oom ? code || 'HEAP_PRESSURE' : 'SYNC_PULL_FAILED',
     })
   }
 })

@@ -8,6 +8,7 @@ import { useAudit } from '@/hooks/useAudit'
 import { isActivePatient } from '@/types/patient'
 import { SeedTestDataPanel } from '@/components/dev/SeedTestDataPanel'
 import { PatientListSearch } from '@/components/patients/PatientListSearch'
+import { ClinicalSyncHealthBanner } from '@/components/patients/ClinicalSyncHealthBanner'
 import { forzarSincronizacionLocal } from '@/services/clinicalSyncService'
 import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import { resolveActiveClinicSyncId } from '@/services/clinicalSyncState'
@@ -99,13 +100,18 @@ export function PatientListPage() {
 
       {syncMessage ? <p className="mb-4 text-sm text-slate-600">{syncMessage}</p> : null}
 
+      <ClinicalSyncHealthBanner listEmpty={Boolean(patients && patients.length === 0)} />
+
       {can('patients.write') && <SeedTestDataPanel />}
 
       {!patients ? (
         <p className="text-slate-500">Cargando...</p>
       ) : patients.length === 0 ? (
         <div className="card text-center">
-          <p className="text-slate-500">No hay pacientes registrados.</p>
+          <p className="text-slate-500">
+            No hay pacientes activos en este equipo. Si espera ver historias, use «Forzar
+            Sincronización Local» o revise Valorados / Terminados.
+          </p>
           {can('patients.write') && (
             <Link to="/pacientes/nuevo" className="btn-primary mt-4 inline-flex">
               Registrar primer paciente

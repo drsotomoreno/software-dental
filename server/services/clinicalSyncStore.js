@@ -537,6 +537,49 @@ async function loadMetaStore() {
   }
 }
 
+/**
+ * Multi-tenant: si falta el índice, reconstruir en proceso hijo con heap alto.
+ * NUNCA parsear clinical-sync.json (~83MB) dentro del request HTTP (OOM → 502).
+ */
+async function ensureMetaStore() {
+  const existing = await loadMetaStore()
+  if (existing) return existing
+
+  try {
+    const { spawnSync } = await import('node:child_process')
+    const { fileURLToPath } = await import('node:url')
+    const { dirname, join: pathJoin } = await import('node:path')
+    const here = dirname(fileURLToPath(import.meta.url))
+    const script = pathJoin(here, '../../scripts/build-clinical-sync-meta.cjs')
+    console.warn('[Sync] clinical-sync-meta.json ausente — regenerando en proceso hijo…')
+    const result = spawnSync(process.execPath, ['--max-old-space-size=1536', script], {
+      cwd: pathJoin(here, '../..'),
+      env: { ...process.env, CLINICAL_SYNC_PATH: STORE_FILE },
+      encoding: 'utf8',
+      timeout: 120_000,
+    })
+    if (result.status !== 0) {
+      console.error('[Sync] build-clinical-sync-meta falló:', result.stderr || result.stdout)
+    }
+  } catch (error) {
+    console.error(
+      '[Sync] No se pudo regenerar clinical-sync-meta.json:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+
+  invalidateMetaCache()
+  return loadMetaStore()
+}
+
+export class SyncMetaMissingError extends Error {
+  constructor(message = 'clinical-sync-meta.json ausente; no se puede hacer pull slim sin riesgo de OOM') {
+    super(message)
+    this.name = 'SyncMetaMissingError'
+    this.code = 'SYNC_META_MISSING'
+  }
+}
+
 /** Fusiona solo patients/appointments desde el índice meta (sin drafts/historias). */
 function mergeMetaClinicBuckets(meta, ids) {
   const clinic = emptyClinic()
@@ -795,24 +838,11 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
 
   // Metadata-only: lee índice liviano (~pacientes+citas). NUNCA parsea el JSON de 83MB.
   if (slim) {
-    let clinic = null
-    const meta = await loadMetaStore()
-    if (meta) {
-      clinic = mergeMetaClinicBuckets(meta, ids)
-    } else {
-      // Fallback único: store completo (puede OOM). Preferible generar meta en deploy.
-      console.warn(
-        '[Sync] clinical-sync-meta.json ausente — fallback a clinical-sync.json (riesgo OOM)',
-      )
-      const store = await loadStore()
-      clinic = mergeClinicBuckets(store, ids)
-      try {
-        const st = await stat(STORE_FILE)
-        await writeMetaFile(buildMetaFromStore(store, st))
-      } catch {
-        /* ignore */
-      }
+    const meta = await ensureMetaStore()
+    if (!meta) {
+      throw new SyncMetaMissingError()
     }
+    const clinic = mergeMetaClinicBuckets(meta, ids)
     try {
       const { mergeMirroredPatients } = await import('./clinicPatientMirror.js')
       clinic.patients = await mergeMirroredPatients(clinicId, clinic.patients)
