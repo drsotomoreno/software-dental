@@ -11,6 +11,8 @@ import {
   LandingPage,
   DemoPage,
   LoginPage,
+  PrivacyPolicyPage,
+  TermsOfServicePage,
   ForgotPasswordPage,
   ResetPasswordPage,
   NewPatientPage,
@@ -71,6 +73,8 @@ export default function ClinicalApp() {
         <Route path="/demo" element={<DemoPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/registro" element={<LoginPage />} />
+        <Route path="/privacidad" element={<PrivacyPolicyPage />} />
+        <Route path="/terminos" element={<TermsOfServicePage />} />
         <Route path="/subscription-plans" element={<SubscriptionPlansPage />} />
         <Route path="/planes" element={<SubscriptionPlansPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />

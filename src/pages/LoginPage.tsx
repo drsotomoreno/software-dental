@@ -11,6 +11,7 @@ import {
 import { validateColombiaMobile } from '@/utils/phoneValidation'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PhoneCountryInput } from '@/components/ui/PhoneCountryInput'
+import { PublicLegalFooter } from '@/components/legal/PublicLegalFooter'
 
 type AuthMode = 'login' | 'register' | 'activate'
 
@@ -233,7 +234,8 @@ export function LoginPage() {
         : 'Acceso seguro — cédula y contraseña de su clínica'
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-dental-50 px-4">
+    <div className="flex min-h-screen flex-col bg-gradient-to-br from-slate-50 to-dental-50">
+      <div className="flex flex-1 items-center justify-center px-4 py-8">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-dental-600 text-lg font-bold text-white">
@@ -448,6 +450,7 @@ export function LoginPage() {
           </div>
         )}
       </div>
+      </div>
 
       {mode === 'activate' && whatsappUrl ? (
         <button
@@ -459,6 +462,7 @@ export function LoginPage() {
           Activar por WhatsApp
         </button>
       ) : null}
+      <PublicLegalFooter />
     </div>
   )
 }

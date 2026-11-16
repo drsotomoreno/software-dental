@@ -85,7 +85,9 @@
       path === '/registro' ||
       path === '/demo' ||
       path === '/forgot-password' ||
-      path === '/reset-password'
+      path === '/reset-password' ||
+      path === '/privacidad' ||
+      path === '/terminos'
     )
   }
 
