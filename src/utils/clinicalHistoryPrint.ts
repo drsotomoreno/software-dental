@@ -87,6 +87,7 @@ import { REGIME_TYPES } from '@/constants/dental'
 import { formatDate } from './crypto'
 import { etiquetaFechaHoraSesion } from './clinicDateTime'
 import { openPortabilityHtmlForPrint } from './portabilityHtml'
+import { inlineDriveSignatureRefs } from './signatureImageSrc'
 import { differenceInYears } from 'date-fns'
 
 export interface ClinicalHistoryPrintInput {
@@ -1053,11 +1054,12 @@ export function buildClinicalHistoryPrintHtml(input: ClinicalHistoryPrintInput):
 </html>`
 }
 
-export function printClinicalHistorySections(input: ClinicalHistoryPrintInput): void {
+export async function printClinicalHistorySections(input: ClinicalHistoryPrintInput): Promise<void> {
   if (input.sections.length === 0) {
     throw new Error('Seleccione al menos una sección para imprimir.')
   }
 
-  const html = buildClinicalHistoryPrintHtml(input)
+  const ready = await inlineDriveSignatureRefs(input)
+  const html = buildClinicalHistoryPrintHtml(ready)
   openPortabilityHtmlForPrint(html)
 }

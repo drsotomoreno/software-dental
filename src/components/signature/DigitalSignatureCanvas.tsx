@@ -1,6 +1,8 @@
 import { useCallback, useRef, useEffect, useState } from 'react'
 import type { SignatureCaptureResult } from '@/types/signature'
 import { MIN_SIGNATURE_STROKES } from '@/types/signature'
+import { SignatureImage } from '@/components/signature/SignatureImage'
+import { isSignatureDriveRef } from '../../../shared/signatureDriveRef.js'
 
 interface DigitalSignatureCanvasProps {
   onSignatureChange: (result: SignatureCaptureResult | null) => void
@@ -21,7 +23,10 @@ interface Point {
 }
 
 function isStoredSignature(value: string | null | undefined): value is string {
-  return typeof value === 'string' && value.startsWith('data:image/')
+  return (
+    typeof value === 'string' &&
+    (value.startsWith('data:image/') || isSignatureDriveRef(value))
+  )
 }
 
 export function DigitalSignatureCanvas({
@@ -227,10 +232,9 @@ export function DigitalSignatureCanvas({
             disabled ? 'border-slate-200 bg-slate-50' : 'border-slate-300 bg-white'
           }`}
         >
-          <img
+          <SignatureImage
             src={value}
             alt={ariaLabel}
-            draggable={false}
             className="block w-full bg-white object-contain"
             style={{ height }}
           />

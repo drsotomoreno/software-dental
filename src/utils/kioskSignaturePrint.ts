@@ -1,4 +1,5 @@
 /** Bloque de firma del paciente o acudiente en la impresión de historia clínica. */
+import { isSignatureDriveRef } from '../../shared/signatureDriveRef.js'
 
 export interface KioskSignaturePrintInput {
   heading: string
@@ -20,8 +21,8 @@ function escapeHtml(value: string): string {
 
 function safeImageSrc(value: string): string {
   const raw = value.trim()
-  if (!raw.startsWith('data:image/')) return ''
-  return raw.replace(/"/g, '')
+  if (raw.startsWith('data:image/') || isSignatureDriveRef(raw)) return raw.replace(/"/g, '')
+  return ''
 }
 
 export function renderKioskSignatureBlock(input: KioskSignaturePrintInput): string {

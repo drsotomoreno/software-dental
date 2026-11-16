@@ -1,4 +1,5 @@
 import type { ValuationConsentMetadata } from '@/types/valuationConsent'
+import type { SignatureDriveMeta } from '@/types/signature'
 
 /** Tipos de documento según normativa colombiana */
 export type DocumentType = 'CC' | 'TI' | 'CE' | 'PA' | 'RC' | 'NIT'
@@ -117,6 +118,7 @@ export interface Patient {
 /** Estampado legal de la firma de ingreso hecha en la tableta. */
 export interface KioskIntakeSignature {
   patientSignatureDataUrl: string
+  patientSignatureDrive?: SignatureDriveMeta
   signedAt: string
   signerName: string
   signerDocument: string

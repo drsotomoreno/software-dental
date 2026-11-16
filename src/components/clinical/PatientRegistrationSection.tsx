@@ -10,6 +10,7 @@ import {
 import { ExternalHistoryRdaPanel } from './ExternalHistoryRdaPanel'
 import { PatientWhatsAppButton } from './PatientWhatsAppButton'
 import { PhoneCountryInput } from '@/components/ui/PhoneCountryInput'
+import { SignatureImage } from '@/components/signature/SignatureImage'
 
 interface PatientRegistrationSectionProps {
   value: PatientFormData
@@ -64,7 +65,7 @@ export function PatientRegistrationSection({
       </div>
       {value.kioskIntakeSignature?.patientSignatureDataUrl ? (
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
-          <img
+          <SignatureImage
             src={value.kioskIntakeSignature.patientSignatureDataUrl}
             alt="Firma del paciente capturada en la tableta"
             className="h-14 w-28 rounded-md border border-emerald-100 bg-white object-contain"

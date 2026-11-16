@@ -14,6 +14,7 @@ import type { KioskIntakeSignature } from '@/types/patient'
 import type { DigitalSignature, SignatureCaptureMetadata } from '@/types/signature'
 import { normalizeTreatmentPlanAuthorization } from '@/types/treatmentPlanAuthorization'
 import { signatureMetaFromKioskForm } from '@/utils/kioskSignatureMeta'
+import { isSignatureDataUrl, isSignatureDriveRef } from '../../shared/signatureDriveRef.js'
 import { getLatestClinicalRecord, listPatientClinicalRecords } from '@/utils/clinicalRecordSnapshot'
 import { getPatientByRouteId, toPatientForeignKey } from '@/utils/patientId'
 import { getPatientClinicalDraft, savePatientClinicalDraft } from '@/utils/patientClinicalDraft'
@@ -107,7 +108,7 @@ export async function applyKioskSignature(
 ): Promise<KioskSignatureAppliedDetail | null> {
   if (!acceptsKioskPatientSignature(event.documentType)) return null
   const signature = text(event.signatureBase64)
-  if (!signature.startsWith('data:image/')) return null
+  if (!isSignatureDataUrl(signature) && !isSignatureDriveRef(signature)) return null
 
   const patientKey = text(event.patientId)
   if (!patientKey) return null

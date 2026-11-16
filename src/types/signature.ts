@@ -13,6 +13,18 @@ export interface SignatureCaptureResult {
   metadata: SignatureCaptureMetadata
 }
 
+/** Metadatos livianos cuando el PNG de la firma vive en Google Drive. */
+export interface SignatureDriveMeta {
+  driveFileId?: string | null
+  uploadedAt?: string | null
+  proxyUrl?: string | null
+  imageSha256?: string | null
+  storageBackend?: 'google_drive' | 'inline'
+  pendingRetry?: boolean
+  pendingReason?: string | null
+  markedAt?: string | null
+}
+
 /** Firma digital conforme Ley 527 de 1999 (Colombia) */
 export interface DigitalSignature {
   id?: string

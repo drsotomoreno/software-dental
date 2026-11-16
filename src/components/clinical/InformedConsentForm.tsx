@@ -121,8 +121,10 @@ export function InformedConsentForm({
         selectedConsentIds: ids,
         patientSignatureDataUrl: candidate.patientSignatureDataUrl,
         patientSignatureMeta: candidate.patientSignatureMeta,
+        patientSignatureDrive: candidate.patientSignatureDrive,
         professionalSignatureDataUrl: candidate.professionalSignatureDataUrl,
         professionalSignatureMeta: candidate.professionalSignatureMeta,
+        professionalSignatureDrive: candidate.professionalSignatureDrive,
         signedAt: candidate.signedAt ?? record.signedAt,
         textAccepted: candidate.textAccepted === true || record.informedConsent?.textAccepted === true,
       }

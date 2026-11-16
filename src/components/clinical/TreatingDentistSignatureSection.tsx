@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { DigitalSignatureCanvas } from '@/components/signature/DigitalSignatureCanvas'
+import { SignatureImage } from '@/components/signature/SignatureImage'
 import { SignConfirmationModal } from '@/components/signature/SignConfirmationModal'
 import { CLINICAL_SECTION_TITLE_CLASS } from '@/constants/clinicalHistorySections'
 import { validateSignatureCapture } from '@/services/signatureService'
@@ -90,7 +91,7 @@ export function TreatingDentistSignatureSection({
               <dd className="text-sm text-slate-900">{formatDate(signature.signedAt)}</dd>
             </div>
           </dl>
-          <img
+          <SignatureImage
             src={signature.signatureDataUrl}
             alt="Firma del odontólogo tratante"
             className="max-h-32 rounded-lg border border-slate-200 bg-white p-2"

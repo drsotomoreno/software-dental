@@ -1,4 +1,4 @@
-import type { SignatureCaptureMetadata } from './signature'
+import type { SignatureCaptureMetadata, SignatureDriveMeta } from './signature'
 
 /** Consentimiento informado — procedimientos odontológicos Colombia */
 import type { ConsentTemplateId } from '@/constants/consentTemplates'
@@ -8,8 +8,10 @@ export interface InformedConsent {
   textAccepted: boolean
   patientSignatureDataUrl?: string
   patientSignatureMeta?: SignatureCaptureMetadata
+  patientSignatureDrive?: SignatureDriveMeta
   professionalSignatureDataUrl?: string
   professionalSignatureMeta?: SignatureCaptureMetadata
+  professionalSignatureDrive?: SignatureDriveMeta
   professionalLicense: string
   /** Conservado por compatibilidad de historias firmadas; se iguala a la cédula. */
   professionalRegistry: string
@@ -160,6 +162,7 @@ export function keepStoredConsentSignatures<T>(previous: unknown, next: T): T {
       ? {
           patientSignatureDataUrl: stored.patientSignatureDataUrl,
           patientSignatureMeta: stored.patientSignatureMeta,
+          patientSignatureDrive: stored.patientSignatureDrive,
           kioskDeviceId: stored.kioskDeviceId,
           signatureIp: stored.signatureIp,
         }
@@ -168,6 +171,7 @@ export function keepStoredConsentSignatures<T>(previous: unknown, next: T): T {
       ? {
           professionalSignatureDataUrl: stored.professionalSignatureDataUrl,
           professionalSignatureMeta: stored.professionalSignatureMeta,
+          professionalSignatureDrive: stored.professionalSignatureDrive,
         }
       : {}),
     ...(keepSignedAt ? { signedAt: stored.signedAt } : {}),
@@ -180,8 +184,10 @@ export interface StoredConsentSignatures {
   selectedConsentIds?: readonly string[]
   patientSignatureDataUrl?: string
   patientSignatureMeta?: SignatureCaptureMetadata
+  patientSignatureDrive?: SignatureDriveMeta
   professionalSignatureDataUrl?: string
   professionalSignatureMeta?: SignatureCaptureMetadata
+  professionalSignatureDrive?: SignatureDriveMeta
   signedAt?: string
   textAccepted?: boolean
 }

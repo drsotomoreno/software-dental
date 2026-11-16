@@ -8,6 +8,7 @@ import { etiquetaFechaHoraSesion } from '@/utils/clinicDateTime'
 import { PenLine } from 'lucide-react'
 import { VoiceDictationButton } from '@/components/voice'
 import { DigitalSignatureCanvas } from '@/components/signature'
+import { SignatureImage } from '@/components/signature/SignatureImage'
 import { useAuth } from '@/contexts/AuthContext'
 import type { OrthodonticsPaymentRecord, PaymentRecord } from '@/types/clinicalRecord'
 import { cupsExplicitosDeTexto, resolverProcedimientoCups } from '@/utils/cupsCodeResolve'
@@ -56,7 +57,7 @@ function FirmaRegistrada({ titulo, src }: { titulo: string; src?: string }) {
     <div className="rounded-lg border border-slate-200 bg-white p-3">
       <p className="mb-2 text-xs font-medium text-slate-600">{titulo}</p>
       {src ? (
-        <img src={src} alt={titulo} className="max-h-28 max-w-full" />
+        <SignatureImage src={src} alt={titulo} className="max-h-28 max-w-full" />
       ) : (
         <div className="flex h-28 items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-400">
           Sin firma registrada

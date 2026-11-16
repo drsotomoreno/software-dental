@@ -31,6 +31,7 @@ export function ClinicalHistoryPrintDialog({
     [patient.id],
   )
   const [open, setOpen] = useState(false)
+  const [printing, setPrinting] = useState(false)
   const [error, setError] = useState('')
   const [selectedSections, setSelectedSections] = useState<ClinicalHistoryPrintSectionId[]>(
     CLINICAL_HISTORY_PRINT_SECTIONS.map((section) => section.id),
@@ -66,9 +67,11 @@ export function ClinicalHistoryPrintDialog({
     setError('')
   }
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
+    setPrinting(true)
+    setError('')
     try {
-      printClinicalHistorySections({
+      await printClinicalHistorySections({
         patient,
         professional,
         clinicalData,
@@ -85,6 +88,8 @@ export function ClinicalHistoryPrintDialog({
           ? printError.message
           : 'No se pudo abrir el diálogo de impresión.',
       )
+    } finally {
+      setPrinting(false)
     }
   }
 
@@ -182,12 +187,14 @@ export function ClinicalHistoryPrintDialog({
               </button>
               <button
                 type="button"
-                onClick={handlePrint}
-                disabled={selectedSections.length === 0}
+                onClick={() => {
+                  void handlePrint()
+                }}
+                disabled={selectedSections.length === 0 || printing}
                 className="btn-primary inline-flex items-center gap-2"
               >
                 <Printer className="h-4 w-4" aria-hidden="true" />
-                Imprimir selección
+                {printing ? 'Preparando firmas…' : 'Imprimir selección'}
               </button>
             </div>
           </div>

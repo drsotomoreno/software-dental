@@ -7,7 +7,7 @@ import type { TreatmentPlanAuthorization } from './treatmentPlanAuthorization'
 import type { ValuationConsentMetadata } from './valuationConsent'
 import type { OdontogramData } from './odontogram'
 import type { ClinicalDiagnosticChart } from './clinicalDiagnosticChart'
-import type { SignatureCaptureMetadata } from './signature'
+import type { SignatureCaptureMetadata, SignatureDriveMeta } from './signature'
 import type { ImplantFdiQuadrant } from '@/constants/implantPlanning'
 
 /** Tipo de certeza diagnóstica CIE-10 */
@@ -313,6 +313,7 @@ export interface TreatingDentistSignature {
   rethusNumber?: string
   signatureDataUrl: string
   signatureMeta: SignatureCaptureMetadata
+  signatureDrive?: SignatureDriveMeta
   signedAt: string
   signatureId?: string
   contentHash?: string

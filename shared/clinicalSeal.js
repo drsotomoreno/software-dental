@@ -5,6 +5,8 @@
  * en el contentHash que envía el cliente.
  */
 
+import { signatureSealToken } from './signatureDriveRef.js'
+
 const VOLATILE_NOTE_KEYS = new Set([
   'updatedAt',
   'workflowStatus',
@@ -97,7 +99,10 @@ export function buildEvolutionSealPayload(note) {
     requiereCupsRips: note.requiereCupsRips ?? null,
     clinicalNote: note.clinicalNote ?? null,
     cupsCode: note.cupsCode ?? null,
-    professionalSignatureDataUrl: note.professionalSignatureDataUrl ?? null,
+    professionalSignatureDataUrl: signatureSealToken(
+      note.professionalSignatureDataUrl,
+      note.professionalSignatureDrive,
+    ),
     professionalSignatureMeta: note.professionalSignatureMeta ?? null,
     cost: note.cost ?? null,
     isBillable: note.isBillable ?? null,
@@ -145,8 +150,14 @@ function sealInformedConsent(consent) {
     selectedConsentIds: Array.isArray(consent.selectedConsentIds)
       ? [...consent.selectedConsentIds].sort()
       : [],
-    patientSignatureDataUrl: consent.patientSignatureDataUrl ?? null,
-    professionalSignatureDataUrl: consent.professionalSignatureDataUrl ?? null,
+    patientSignatureDataUrl: signatureSealToken(
+      consent.patientSignatureDataUrl,
+      consent.patientSignatureDrive,
+    ),
+    professionalSignatureDataUrl: signatureSealToken(
+      consent.professionalSignatureDataUrl,
+      consent.professionalSignatureDrive,
+    ),
     signedAt: text(consent.signedAt) || null,
     guardianName: consent.guardianName ?? null,
     guardianDocument: consent.guardianDocument ?? null,
@@ -157,7 +168,7 @@ function sealTreatingSignature(signature) {
   if (!signature || typeof signature !== 'object') return null
   return {
     signedAt: text(signature.signedAt) || null,
-    signatureDataUrl: signature.signatureDataUrl ?? null,
+    signatureDataUrl: signatureSealToken(signature.signatureDataUrl, signature.signatureDrive),
     professionalName: signature.professionalName ?? null,
     professionalLicense: signature.professionalLicense ?? null,
     rethus: signature.rethus ?? signature.firmaRethus ?? null,

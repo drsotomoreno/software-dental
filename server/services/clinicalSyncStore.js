@@ -27,6 +27,8 @@ import {
   sanitizeClinicalRecordArrays,
 } from '../../shared/clinicalSyncCircuitBreaker.js'
 import { clinicalSyncEvents, SNAPSHOT_PUSHED } from './clinicalSyncEvents.js'
+import { offloadSignaturesInPayload } from './signatureDriveService.js'
+import { isSignatureImageFieldKey } from '../../shared/signatureDriveRef.js'
 
 /**
  * Emite el delta al indexador CQRS sin await.
@@ -439,7 +441,7 @@ function stripHeavyBinaryFields(value) {
   const out = {}
   for (const [key, entry] of Object.entries(value)) {
     if (HEAVY_BINARY_KEYS.includes(key)) continue
-    if (isHeavyBinaryString(entry)) continue
+    if (isHeavyBinaryString(entry) && !isSignatureImageFieldKey(key)) continue
     out[key] =
       entry && typeof entry === 'object' ? stripHeavyBinaryFields(entry) : entry
   }
@@ -457,7 +459,7 @@ function stripHeavyKeepingClinicalDrafts(value) {
       continue
     }
     if (HEAVY_BINARY_KEYS.includes(key)) continue
-    if (isHeavyBinaryString(entry)) continue
+    if (isHeavyBinaryString(entry) && !isSignatureImageFieldKey(key)) continue
     out[key] =
       entry && typeof entry === 'object' ? stripHeavyKeepingClinicalDrafts(entry) : entry
   }
@@ -1343,8 +1345,26 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
     return { accepted: emptyAccepted, serverTime: new Date().toISOString() }
   }
 
+  // Firmas PNG → Drive antes de persistir. Sin Drive o si la red falla, el base64 sigue.
+  const incoming = body && typeof body === 'object' ? body : {}
+  let withSignatures = incoming
+  try {
+    const offloaded = await offloadSignaturesInPayload(incoming, { clinicId: canonical })
+    withSignatures = offloaded.payload
+    if (offloaded.migrated || offloaded.pending) {
+      console.log(
+        `[signatures] clinic=${canonical} migrated=${offloaded.migrated} pending=${offloaded.pending} skipped=${offloaded.skipped} savedBytes=${offloaded.bytesSaved}`,
+      )
+    }
+  } catch (error) {
+    console.warn(
+      '[signatures] offload omitido; se conserva el JSON clínico:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+
   // Binarios fuera. El borrador de cada paciente se queda entero; las listas se deduplican abajo.
-  const safeBody = stripHeavyKeepingClinicalDrafts(body && typeof body === 'object' ? body : {})
+  const safeBody = stripHeavyKeepingClinicalDrafts(withSignatures)
 
   return enqueueWrite(async () => {
     const store = await loadStore()

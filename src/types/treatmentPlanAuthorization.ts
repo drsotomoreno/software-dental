@@ -1,4 +1,4 @@
-import type { SignatureCaptureMetadata } from '@/types/signature'
+import type { SignatureCaptureMetadata, SignatureDriveMeta } from '@/types/signature'
 
 /**
  * Autorización conjunta del Plan de Tratamiento / Presupuesto
@@ -8,8 +8,10 @@ export interface TreatmentPlanAuthorization {
   textAccepted: boolean
   patientSignatureDataUrl?: string
   patientSignatureMeta?: SignatureCaptureMetadata
+  patientSignatureDrive?: SignatureDriveMeta
   professionalSignatureDataUrl?: string
   professionalSignatureMeta?: SignatureCaptureMetadata
+  professionalSignatureDrive?: SignatureDriveMeta
   professionalLicense: string
   /** Nombre del acudiente / representante legal (obligatorio si menor de 18). */
   guardianName?: string

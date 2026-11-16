@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url'
 import { withPgClient } from './durableStore.js'
 import { splitSqlStatements } from './consultasRepository.js'
 import { saveKioskIntake } from './kiosk.service.js'
+import { offloadSignaturesInPayload } from './signatureDriveService.js'
+import { isSignatureDriveRef } from '../../shared/signatureDriveRef.js'
 
 const MIGRATION_FILE = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -126,23 +128,46 @@ export async function saveKioskSignature({
     throw error
   }
   assertKioskPatientSignatureAllowed({ documentType: type, formData })
-  if (!signature.startsWith('data:image/')) {
+  if (!signature.startsWith('data:image/') && !isSignatureDriveRef(signature)) {
     const error = new Error('signatureBase64 inválida.')
     error.status = 400
     throw error
   }
 
+  let storedSignature = signature
+  let storedForm = formData && typeof formData === 'object' && !Array.isArray(formData) ? formData : {}
+  if (signature.startsWith('data:image/')) {
+    try {
+      const offloaded = await offloadSignaturesInPayload(
+        { signatureBase64: signature, formData: storedForm },
+        { clinicId: canonicalClinicId, budgetMs: 5_000 },
+      )
+      storedSignature = String(offloaded.payload?.signatureBase64 || signature)
+      storedForm =
+        offloaded.payload?.formData && typeof offloaded.payload.formData === 'object'
+          ? offloaded.payload.formData
+          : storedForm
+      if (offloaded.payload?.signatureDrive) {
+        storedForm = { ...storedForm, signatureDrive: offloaded.payload.signatureDrive }
+      }
+    } catch (error) {
+      console.warn(
+        '[Kiosco] Drive no recibió la firma; se guarda el base64:',
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
+
   await ensureKioskSignaturesSchema()
 
-  const form = formData && typeof formData === 'object' && !Array.isArray(formData) ? formData : {}
   let intakeResult = null
 
-  if (type === 'INTAKE' && form.datosBasicos) {
+  if (type === 'INTAKE' && storedForm.datosBasicos) {
     intakeResult = await saveKioskIntake({
       clinicId: canonicalClinicId,
-      datosBasicos: form.datosBasicos,
-      anamnesis: form.anamnesis || {},
-      signatureBase64: signature,
+      datosBasicos: storedForm.datosBasicos,
+      anamnesis: storedForm.anamnesis || {},
+      signatureBase64: storedSignature,
     })
   }
 
@@ -156,8 +181,8 @@ export async function saveKioskSignature({
       patientId ? String(patientId) : intakeResult?.syncId || null,
       title ? String(title).slice(0, 500) : null,
       contentText ? String(contentText).slice(0, 200_000) : null,
-      signature,
-      JSON.stringify(form),
+      storedSignature,
+      JSON.stringify(storedForm),
     ])
     return rows[0]
   })
@@ -170,7 +195,7 @@ export async function saveKioskSignature({
     patientId: row.patient_id,
     createdAt: row.created_at,
     intake: intakeResult,
-    formData: form,
-    signatureBase64: signature,
+    formData: storedForm,
+    signatureBase64: storedSignature,
   }
 }

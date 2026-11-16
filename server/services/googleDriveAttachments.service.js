@@ -152,6 +152,16 @@ export async function ensurePatientFolder(driveClient, rootFolderId, patientSync
   return ayudasId
 }
 
+/** Carpeta dedicada bajo la raíz de la clínica (p. ej. Firmas_Clinicas). */
+async function ensureFolderPath(drive, rootFolderId, segments) {
+  let parent = rootFolderId
+  for (const segment of segments) {
+    const name = safeFileName(segment, 'carpeta')
+    parent = await getOrCreateChildFolder(drive, rootFolderId, parent, name)
+  }
+  return parent
+}
+
 async function resolveClinicDrive(canonicalClinicId, candidateIds = []) {
   try {
     const client = await getAuthorizedDriveClient(canonicalClinicId, candidateIds)
@@ -210,6 +220,8 @@ export async function uploadClinicAttachmentToDrive({
   byteLength: knownByteLength,
   driveFileId: existingFileId,
   appProperties = {},
+  /** Si viene, la subida no usa pacientes/{id}/ayudas. Ej. ['Firmas_Clinicas']. */
+  folderSegments = null,
 }) {
   const path = String(filePath || '').trim()
   const hasPath = Boolean(path)
@@ -239,7 +251,10 @@ export async function uploadClinicAttachmentToDrive({
     return asUploadBody(raw)
   }
 
-  const parentId = await ensurePatientFolder(drive, rootFolderId, patientSyncId)
+  const parentId =
+    Array.isArray(folderSegments) && folderSegments.length
+      ? await ensureFolderPath(drive, rootFolderId, folderSegments)
+      : await ensurePatientFolder(drive, rootFolderId, patientSyncId)
   const name = safeFileName(fileName)
 
   const props = {}

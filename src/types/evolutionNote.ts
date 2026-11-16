@@ -1,4 +1,4 @@
-import type { SignatureCaptureMetadata } from '@/types/signature'
+import type { SignatureCaptureMetadata, SignatureDriveMeta } from '@/types/signature'
 import type { CamposPagoAtencion } from '@/types/atencionPago'
 import type { DiagnosisAnatomicalScope } from '@/types/clinicalRecord'
 import {
@@ -108,6 +108,7 @@ export interface EvolutionNote {
   /** Firma digital/electrónica exclusiva del odontólogo tratante (Res. 1995/1999). */
   professionalSignatureDataUrl?: string
   professionalSignatureMeta?: SignatureCaptureMetadata
+  professionalSignatureDrive?: SignatureDriveMeta
   /**
    * Costo de la atención. Si es 0 y `isBillable` es false, genera RIPS (con CUPS) pero no FEV DIAN.
    */
