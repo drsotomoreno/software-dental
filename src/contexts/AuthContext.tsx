@@ -27,6 +27,7 @@ import type { Permission } from '@/utils/permissions'
 import { canManageClinicTeam, normalizeRole } from '@/utils/permissions'
 import type { UserRole } from '@/types/user'
 import { accessTier, userHasTrialLimits, userNeedsWelcome } from '@/utils/subscriptionAccess'
+import { clearExpressRegisterFlag } from '@/utils/expressRegister'
 import { useClinicalPullSync } from '@/hooks/useClinicalPullSync'
 import { recoverMissingProfessionalDocument } from '@/services/professionalDocumentMemory'
 
@@ -357,6 +358,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('[auth] No se pudo sincronizar antes del cierre de sesión:', error)
     }
     clearStoredApiAuth()
+    clearExpressRegisterFlag()
     try {
       const { lockLocalEncryption } = await import('@/db/localEncryptionKey')
       lockLocalEncryption()

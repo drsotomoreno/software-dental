@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Info, Sparkles } from 'lucide-react'
 import { DEMO_STEPS, getDemoStep } from '@/constants/demoSteps'
+import { useAuth } from '@/contexts/AuthContext'
 import { getStoredApiAuth } from '@/services/apiAuthService'
 import { userNeedsWelcome } from '@/utils/subscriptionAccess'
 import { PAID_PLANS } from '../../../shared/subscriptionPlans.js'
@@ -18,12 +19,25 @@ import { DemoStepTreatmentPlan } from './DemoStepTreatmentPlan'
 import { EMPTY_DEMO_FORM, type DemoFormData } from './demoTypes'
 
 export function DemoShell() {
+  const navigate = useNavigate()
+  const { logout } = useAuth()
   const [currentStep, setCurrentStep] = useState(1)
   const [formData, setFormData] = useState<DemoFormData>(EMPTY_DEMO_FORM)
+  const [loggingOut, setLoggingOut] = useState(false)
   const step = getDemoStep(currentStep) ?? DEMO_STEPS[0]
   const isFirst = currentStep <= 1
   const isLast = currentStep >= DEMO_STEPS.length
   const needsPlan = userNeedsWelcome(getStoredApiAuth()?.user)
+
+  const handleLogout = async () => {
+    setLoggingOut(true)
+    try {
+      await logout()
+      navigate('/login', { replace: true })
+    } finally {
+      setLoggingOut(false)
+    }
+  }
 
   const goToStep = (stepId: number) => {
     if (stepId < 1 || stepId > DEMO_STEPS.length) return
@@ -137,12 +151,22 @@ export function DemoShell() {
             </p>
           </div>
           {needsPlan ? (
-            <Link
-              to="/welcome-trial"
-              className="shrink-0 rounded-lg bg-amber-950 px-3 py-1.5 text-xs font-semibold text-amber-50 hover:bg-amber-900 sm:text-sm"
-            >
-              Activar prueba o plan
-            </Link>
+            <div className="flex shrink-0 flex-wrap items-center justify-center gap-2">
+              <Link
+                to="/welcome-trial"
+                className="shrink-0 rounded-lg bg-amber-950 px-3 py-1.5 text-xs font-semibold text-amber-50 hover:bg-amber-900 sm:text-sm"
+              >
+                Activar prueba o plan
+              </Link>
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                disabled={loggingOut}
+                className="shrink-0 rounded-lg border border-amber-950/40 bg-white/80 px-3 py-1.5 text-xs font-semibold text-amber-950 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm"
+              >
+                {loggingOut ? 'Cerrando sesión...' : 'Cerrar sesión'}
+              </button>
+            </div>
           ) : null}
         </div>
       </div>

@@ -463,9 +463,6 @@
     document.body.classList.remove('auth-locked')
     if (appRoot) appRoot.style.display = 'block'
     window.dispatchEvent(new CustomEvent('doctorseolabs-auth-ready'))
-    if (window.location.pathname === '/login') {
-      window.history.replaceState(null, '', '/app')
-    }
   }
 
   function lockApp() {

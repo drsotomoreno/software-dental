@@ -44,7 +44,7 @@ async function postJson(url: string, body: Record<string, string>) {
 }
 
 export function LoginPage() {
-  const { user, login, isLoading, adoptApiSession } = useAuth()
+  const { user, login, logout, isLoading, adoptApiSession } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams] = useSearchParams()
@@ -70,6 +70,7 @@ export function LoginPage() {
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [switchingAccount, setSwitchingAccount] = useState(false)
 
   const afterLogin =
     !from ||
@@ -313,13 +314,34 @@ export function LoginPage() {
     }
   }
 
-  if (!isLoading && (user || (apiAuth?.token && apiAuth.user)) && (!onRegisterPath || demoIntent)) {
-    const dest = demoIntent
-      ? '/demo'
-      : storedUser && !isSuperAdmin
-        ? postAuthDestination(storedUser, afterLogin)
-        : afterLogin
+  const hasActiveSession = !isLoading && Boolean(user || (apiAuth?.token && apiAuth.user))
+  const dest = demoIntent
+    ? '/demo'
+    : storedUser && !isSuperAdmin
+      ? postAuthDestination(storedUser, afterLogin)
+      : afterLogin
+  const offerAccountSwitch = hasActiveSession && !onRegisterPath && !demoIntent
+  const activeEmail = String(storedUser?.email || user?.email || '').trim()
+
+  if (hasActiveSession && !offerAccountSwitch && (!onRegisterPath || demoIntent)) {
     return <Navigate to={dest} replace />
+  }
+
+  const continueActiveSession = () => {
+    navigate(dest, { replace: true })
+  }
+
+  const switchAccount = async () => {
+    setSwitchingAccount(true)
+    setError('')
+    setInfo('')
+    try {
+      await logout()
+      setEmail('')
+      setPassword('')
+    } finally {
+      setSwitchingAccount(false)
+    }
   }
 
   const subtitle =
@@ -340,6 +362,32 @@ export function LoginPage() {
           <h1 className="text-2xl font-bold text-slate-900">{APP_NAME}</h1>
           <p className="mt-1 text-sm text-slate-600">{subtitle}</p>
         </div>
+
+        {offerAccountSwitch && mode === 'login' && (
+          <div className="card mb-4 space-y-4 border border-amber-200 bg-amber-50">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Hay una sesión activa</p>
+              <p className="mt-1 text-sm text-slate-700">
+                {activeEmail
+                  ? `Este navegador tiene abierta la cuenta ${activeEmail}.`
+                  : 'Este navegador tiene una sesión abierta.'}
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button type="button" onClick={continueActiveSession} className="btn-primary w-full">
+                {dest === '/demo' ? 'Continuar a la demo' : 'Continuar'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void switchAccount()}
+                disabled={switchingAccount}
+                className="btn-secondary w-full"
+              >
+                {switchingAccount ? 'Cerrando sesión...' : 'Cerrar sesión y usar otra cuenta'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {mode === 'login' && (
           <form onSubmit={handleLogin} className="card space-y-4">
