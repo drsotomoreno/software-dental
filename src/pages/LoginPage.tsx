@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Info } from 'lucide-react'
 import { APP_INITIALS, APP_NAME } from '@/constants/branding'
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
@@ -497,6 +498,14 @@ export function LoginPage() {
                 Colombia (+57) viene seleccionada. También puede elegir otro país: solo se aceptan
                 celulares, en formato internacional.
               </p>
+              <div className="mt-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950">
+                <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                <p>
+                  Importante si se registra desde un computador: para verificar su número deberá
+                  enviar un código desde su WhatsApp. Asegúrese de tener WhatsApp Web o de
+                  escritorio vinculado en este PC (o realice el registro desde su celular).
+                </p>
+              </div>
             </div>
             <div>
               <label className="label-field">Contraseña</label>
@@ -600,6 +609,10 @@ export function LoginPage() {
               >
                 Abrir WhatsApp y enviar código
               </button>
+              <p className="text-xs leading-relaxed text-emerald-900">
+                Al abrir WhatsApp, envíe el mensaje tal como aparece. Si está en un PC sin sesión
+                iniciada, vincule primero su WhatsApp Web o continúe desde su teléfono.
+              </p>
               {whatsappVerified ? (
                 <p className="rounded-lg bg-white px-3 py-2 text-sm font-semibold text-emerald-700">
                   WhatsApp verificado
