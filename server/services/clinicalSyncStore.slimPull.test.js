@@ -11,7 +11,7 @@ test('pullClinicSnapshot: full=0/slim no serializa clinicalRecords/drafts', asyn
   assert.match(src, /Metadata-only: lee índice liviano/)
   assert.match(src, /clinical-sync-meta\.json/)
   assert.match(src, /slim:\s*true/)
-  assert.match(src, /Drafts \(~31MB\) no van por HTTP/)
+  assert.match(src, /Historias y drafts siguen fuera del slim/)
   // Caché por mtime para no re-parsear 83MB
   assert.match(src, /storeCache/)
   assert.match(src, /metaCache/)
