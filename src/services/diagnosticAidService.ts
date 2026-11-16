@@ -576,6 +576,8 @@ export async function deleteDiagnosticAid(id: string, user?: UserProfile | null)
       clinicId,
       fileName,
       deletedAt,
+      explicitDelete: true,
+      deletedBy: String(user?.email || user?.id || ''),
     })
   } catch (error) {
     console.warn('[diagnosticAid] No se pudo guardar tumba local:', error)
@@ -601,6 +603,8 @@ export async function deleteDiagnosticAid(id: string, user?: UserProfile | null)
       driveFileId: entry?.driveFileId ?? null,
       webViewLink: entry?.webViewLink ?? null,
       binarySynced: true,
+      explicitDelete: true,
+      deletedBy: String(user?.email || user?.id || ''),
       createdAt: existing?.createdAt || deletedAt,
       updatedAt: deletedAt,
     }

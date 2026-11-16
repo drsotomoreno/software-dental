@@ -9,10 +9,12 @@ import {
   findClinicAttachment,
   isGoogleDriveRequiredError,
   pullClinicSnapshot,
+  pullPatientChart,
   pullPatientDraft,
   pushClinicSnapshot,
   pushClinicalRecords,
 } from '../services/clinicalSyncStore.js'
+import { isClinicalArrayCircuitError } from '../../shared/clinicalSyncCircuitBreaker.js'
 import { heapPressurePayload, isHeapNearLimit } from '../utils/heapPressure.js'
 
 function driveRequiredPayload(error) {
@@ -155,6 +157,17 @@ function snapshotResponse(auth, snapshot) {
   }
 }
 
+function sendCircuitError(res, error) {
+  if (!isClinicalArrayCircuitError(error)) return false
+  sendJson(res, 422, {
+    success: false,
+    ok: false,
+    error: error.message,
+    code: error.code || 'CLINICAL_ARRAY_CIRCUIT',
+  })
+  return true
+}
+
 function denyIfHeapPressure(res) {
   if (!isHeapNearLimit(0.68)) return false
   sendJson(res, 503, heapPressurePayload(25))
@@ -274,6 +287,43 @@ router.get('/draft/:patientSyncId', async (req, res) => {
   }
 })
 
+/** Paquete de una ficha: borrador íntegro + historia firmada + exámenes. Sin corte de 50 KB. */
+router.get('/patient/:patientSyncId', async (req, res) => {
+  try {
+    const auth = await requireClinicSession(req, res)
+    if (!auth) return
+    if (denyWithoutClinicalAccess(auth, res)) return
+    if (denyIfHeapPressure(res)) return
+
+    const patientSyncId = String(req.params?.patientSyncId || '').trim()
+    if (!patientSyncId) {
+      return sendJson(res, 400, { success: false, ok: false, error: 'Falta patientSyncId.' })
+    }
+    const chart = await pullPatientChart(auth.canonical, patientSyncId, auth.aliases)
+    return sendJson(res, 200, {
+      success: true,
+      ok: true,
+      clinicId: auth.canonical,
+      ...chart,
+    })
+  } catch (error) {
+    console.error('[Sync] Error en GET /api/sync/patient/:patientSyncId:', error)
+    const code = error?.code || ''
+    const oom =
+      code === 'CLINICAL_SYNC_TOO_LARGE' ||
+      code === 'HEAP_PRESSURE' ||
+      /heap|out of memory|ENOMEM/i.test(error instanceof Error ? error.message : String(error))
+    return sendJson(res, oom ? 503 : 500, {
+      success: false,
+      ok: false,
+      error: oom
+        ? 'El servidor agotó memoria al leer la ficha. Reintente en unos segundos.'
+        : 'No se pudo leer la ficha del paciente.',
+      code: oom ? code || 'HEAP_PRESSURE' : undefined,
+    })
+  }
+})
+
 router.post('/clinical', async (req, res) => {
   try {
     const auth = await requireClinicSession(req, res)
@@ -320,6 +370,7 @@ router.post('/clinical', async (req, res) => {
       serverTime: result.serverTime,
     })
   } catch (error) {
+    if (sendCircuitError(res, error)) return
     if (isGoogleDriveRequiredError(error)) {
       return sendJson(res, error.status || 428, driveRequiredPayload(error))
     }
@@ -353,6 +404,7 @@ router.post('/push', async (req, res) => {
       serverTime: result.serverTime,
     })
   } catch (error) {
+    if (sendCircuitError(res, error)) return
     if (isGoogleDriveRequiredError(error)) {
       return sendJson(res, error.status || 428, driveRequiredPayload(error))
     }

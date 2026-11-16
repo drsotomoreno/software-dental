@@ -53,12 +53,14 @@ export interface DiagnosticAidBlobRecord {
   createdAt: string
 }
 
-/** Tumba local: evita que el merge del sync reinserta un examen ya quitado (F5). */
+/** Tumba local: solo la escribe el botón Quitar (explicitDelete). Un Dexie vacío no crea tumbas. */
 export interface DeletedDiagnosticAidTombstone {
   id: string
   clinicId?: string
   fileName?: string
   deletedAt: string
+  explicitDelete?: boolean
+  deletedBy?: string
 }
 
 export const DIAGNOSTIC_AID_FILE_TYPE_LABELS: Record<DiagnosticAidFileType, string> = {

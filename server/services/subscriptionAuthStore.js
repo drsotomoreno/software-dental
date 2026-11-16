@@ -48,6 +48,7 @@ import { sanitizeRepsInput } from '../../shared/prestadorIdentity.js'
 import { isInstitutionProvider, normalizeProviderType } from '../../shared/providerType.js'
 import { keepStoredDocumentNumber, validateProfessionalDocumentNumber } from '../../shared/professionalDocument.js'
 import { dominantDocumentFromClinic } from './professionalDocumentBackfill.js'
+import { mobileDigitsMatch, normalizeMobileDigits } from '../../shared/mobilePhone.js'
 import {
   DEFAULT_PERFIL_FISCAL,
   isNoObligadoFev,
@@ -557,9 +558,15 @@ export async function registerSubscriptionUser({
   nombre,
   email,
   password,
+  passwordHash,
   phone_number,
   phone,
   activation_token,
+  is_verified,
+  email_verified,
+  whatsapp_verified,
+  whatsapp_status,
+  verifiedRegistration,
 }) {
   const store = await loadStore()
   const normalizedEmail = normalizeEmail(email)
@@ -570,6 +577,10 @@ export async function registerSubscriptionUser({
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, '')
     .slice(0, 6)
+  const providedHash = String(passwordHash || '').trim().toLowerCase()
+  const reuseHash = /^[a-f0-9]{64}$/.test(providedHash)
+  const markVerified = verifiedRegistration === true || whatsapp_verified === true || is_verified === true
+  const markEmail = email_verified === true || markVerified
 
   if (normalizedEmail === SUPERADMIN_EMAIL) {
     return { ok: false, status: 403, error: 'Este correo está reservado para el administrador del sistema.' }
@@ -584,15 +595,25 @@ export async function registerSubscriptionUser({
     return {
       ok: false,
       status: 400,
-      error: 'Indique un celular colombiano válido (+57), por ejemplo 3001234567.',
+      error: 'Indique un celular válido. Ejemplo: 3001234567.',
     }
   }
-  if (!password || String(password).length < 6) {
+  if (!reuseHash && (!password || String(password).length < 6)) {
     return { ok: false, status: 400, error: 'La contraseña debe tener al menos 6 caracteres.' }
   }
+  const finalHash = reuseHash ? providedHash : hashPasswordSha256(password)
 
   const existingIndex = store.users.findIndex((user) => user.email === normalizedEmail)
   const existing = existingIndex === -1 ? null : store.users[existingIndex]
+  if (existing && verifiedRegistration === true) {
+    return { ok: false, status: 409, error: 'Ya existe una cuenta con este correo.' }
+  }
+  if (
+    verifiedRegistration === true &&
+    store.users.some((user) => mobileDigitsMatch(user.phone_number || user.phone, phoneNumber))
+  ) {
+    return { ok: false, status: 409, error: 'Ya existe una cuenta con este número de WhatsApp.' }
+  }
   if (existing) {
     // Reanudar Click-to-Chat si la cuenta quedó a medias (intentos Meta OTP / sin verificar).
     const canResume =
@@ -604,7 +625,7 @@ export async function registerSubscriptionUser({
     const updated = {
       ...existing,
       nombre: name || existing.nombre,
-      passwordHash: hashPasswordSha256(password),
+      passwordHash: finalHash,
       phone: phoneNumber,
       phone_number: phoneNumber,
       whatsapp_verified: false,
@@ -631,13 +652,16 @@ export async function registerSubscriptionUser({
     id: randomUUID(),
     nombre: name,
     email: normalizedEmail,
-    passwordHash: hashPasswordSha256(password),
+    passwordHash: finalHash,
     phone: phoneNumber,
     phone_number: phoneNumber,
-    whatsapp_verified: false,
-    whatsapp_status: 'pending',
-    whatsapp_activation_token: activationToken || null,
-    is_verified: false,
+    whatsapp_verified: markVerified,
+    whatsapp_status: whatsapp_status || (markVerified ? 'verified' : 'pending'),
+    whatsapp_activation_token: markVerified ? null : activationToken || null,
+    whatsappVerifiedAt: markVerified ? createdAt : undefined,
+    is_verified: markVerified,
+    email_verified: markEmail,
+    emailVerifiedAt: markEmail ? createdAt : undefined,
     rol: 'admin',
     estado_pago: 'pendiente',
     fecha_vencimiento: null,
@@ -665,8 +689,34 @@ export async function registerSubscriptionUser({
   return {
     ok: true,
     resumed: false,
-    user: sanitizeUser(user),
+    user: userForClient(store, user),
     activation_token: user.whatsapp_activation_token,
+  }
+}
+
+/** JWT de sesión para una cuenta recién creada, con la misma forma que /api/login. */
+export async function issueSessionForStoredUser(userId) {
+  const store = await loadStore()
+  const index = store.users.findIndex((item) => String(item.id) === String(userId))
+  if (index === -1) return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+
+  let currentUser = refreshPaymentStatus(store.users[index])
+  if (!currentUser.clinicId) {
+    currentUser = { ...currentUser, clinicId: currentUser.id, updatedAt: new Date().toISOString() }
+  }
+  store.users[index] = currentUser
+  const { token, session } = createSessionForUser(currentUser)
+  store.sessions.push(session)
+  await saveStore(store)
+  const safe = userForClient(store, currentUser)
+  return {
+    ok: true,
+    token,
+    user: safe,
+    rol: safe.rol,
+    expiresAt: session.expiresAt,
+    unlimitedAccess: false,
+    requiresSubscription: true,
   }
 }
 
@@ -1314,13 +1364,58 @@ function normalizeOtp(code) {
   return String(code ?? '').replace(/\D/g, '').slice(0, 6)
 }
 
-/** Celular Colombia (+57): 10 dígitos locales o 12 con indicativo. */
+/**
+ * Celular internacional en dígitos E.164. Sin indicativo se asume Colombia.
+ * Rechaza fijos. El nombre se conserva para los llamadores existentes.
+ */
 export function normalizeColombiaPhoneNumber(raw) {
-  const digits = String(raw ?? '').replace(/\D/g, '')
-  if (!digits) return ''
-  if (digits.startsWith('57') && digits.length === 12 && digits[2] === '3') return digits
-  if (digits.length === 10 && digits[0] === '3') return `57${digits}`
-  return ''
+  return normalizeMobileDigits(raw)
+}
+
+/** Correo o celular ya presentes en el JSON de cuentas o en el espejo `usuarios`. */
+export async function findRegistrationConflicts({ email, phoneNumber }) {
+  const store = await loadStore()
+  const normalizedEmail = normalizeEmail(email)
+  const phone = normalizeColombiaPhoneNumber(phoneNumber)
+  let emailTaken = store.users.some((user) => user.email === normalizedEmail)
+  let phoneTaken = Boolean(phone) && store.users.some((user) => mobileDigitsMatch(user.phone_number || user.phone, phone))
+
+  if (normalizedEmail || phone) {
+    try {
+      await withPgClient(async (client) => {
+        const { rows } = await client.query(
+          `SELECT lower(email) AS email,
+                  regexp_replace(COALESCE(phone_number, ''), '[^0-9]', '', 'g') AS phone
+           FROM usuarios
+           WHERE lower(email) = lower($1::text)
+              OR (
+                $2::text <> ''
+                AND regexp_replace(COALESCE(phone_number, ''), '[^0-9]', '', 'g') = $2::text
+              )
+              OR (
+                char_length($2::text) IN (10, 12)
+                AND right($2::text, 10) ~ '^3[0-9]{9}$'
+                AND char_length(regexp_replace(COALESCE(phone_number, ''), '[^0-9]', '', 'g')) IN (10, 12)
+                AND right(regexp_replace(COALESCE(phone_number, ''), '[^0-9]', '', 'g'), 10) = right($2::text, 10)
+              )`,
+          [normalizedEmail, phone],
+        )
+        for (const row of rows) {
+          if (normalizedEmail && String(row.email || '') === normalizedEmail) emailTaken = true
+          if (phone && mobileDigitsMatch(row.phone, phone)) phoneTaken = true
+        }
+      })
+    } catch (error) {
+      if (error?.code !== 'PG_UNAVAILABLE') {
+        console.error(
+          '[Auth] No se pudo contrastar el registro con usuarios de Postgres:',
+          error instanceof Error ? error.message : error,
+        )
+      }
+    }
+  }
+
+  return { emailTaken, phoneTaken }
 }
 
 export async function createEmailVerification({ nombre, email, password, phone_number, phone }) {
@@ -1713,6 +1808,7 @@ function sanitizeUser(user) {
     phone_number: user.phone_number || user.phone || '',
     whatsapp_verified: user.whatsapp_verified === true,
     is_verified: user.whatsapp_verified === true || user.is_verified === true,
+    email_verified: user.email_verified === true || Boolean(user.emailVerifiedAt),
     whatsapp_status: user.whatsapp_status || 'pending',
     whatsapp_activation_pending: Boolean(
       user.whatsapp_activation_token && user.whatsapp_verified !== true,

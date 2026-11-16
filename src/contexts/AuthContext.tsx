@@ -39,6 +39,11 @@ interface AuthContextValue {
     identifier: string,
     password: string,
   ) => Promise<{ ok: true; requiresSubscription?: boolean } | { ok: false; error: string }>
+  adoptApiSession: (
+    token: string,
+    incoming: ApiSubscriptionUser,
+    password: string,
+  ) => Promise<{ ok: true; requiresSubscription?: boolean } | { ok: false; error: string }>
   logout: () => Promise<void>
   refreshSessionUser: () => Promise<void>
   applySessionUser: (apiUser: ApiSubscriptionUser) => void
@@ -140,15 +145,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('doctorseolabs-auth-ready', handleApiAuthReady)
   }, [loadSession])
 
-  const login = useCallback(async (identifier: string, password: string) => {
-    const raw = identifier.trim()
-    const isEmail = raw.includes('@')
-    const normalizedEmail = isEmail ? raw.toLowerCase() : ''
-    const documentNumber = isEmail ? '' : raw.replace(/\D/g, '')
-    const passwordValue = password.trim()
-    const masterLogin = isMasterCredentials(normalizedEmail, passwordValue)
-
-    const completeApiLogin = async (token: string, incoming: ApiSubscriptionUser) => {
+  const bootstrapApiSession = useCallback(
+    async (token: string, incoming: ApiSubscriptionUser, passwordValue: string) => {
       const colaborador = incoming as ApiSubscriptionUser & {
         titular_id?: string | null
         rethus?: string | null
@@ -212,7 +210,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user: authUser,
       })
       return { ok: true as const, requiresSubscription: userNeedsWelcome(sessionUser) }
-    }
+    },
+    [],
+  )
+
+  const adoptApiSession = useCallback(
+    async (token: string, incoming: ApiSubscriptionUser, password: string) => {
+      if (!token || !incoming?.id) {
+        return { ok: false as const, error: 'La sesión de la cuenta nueva no llegó completa.' }
+      }
+      if (isApiSuperAdmin(incoming) || incoming.rol === 'superadmin') {
+        return { ok: false as const, error: 'Respuesta de sesión inválida. Intente de nuevo.' }
+      }
+      return bootstrapApiSession(token, incoming, password.trim())
+    },
+    [bootstrapApiSession],
+  )
+
+  const login = useCallback(async (identifier: string, password: string) => {
+    const raw = identifier.trim()
+    const isEmail = raw.includes('@')
+    const normalizedEmail = isEmail ? raw.toLowerCase() : ''
+    const documentNumber = isEmail ? '' : raw.replace(/\D/g, '')
+    const passwordValue = password.trim()
+    const masterLogin = isMasterCredentials(normalizedEmail, passwordValue)
+
+    const completeApiLogin = (token: string, incoming: ApiSubscriptionUser) =>
+      bootstrapApiSession(token, incoming, passwordValue)
 
     try {
       const response = await fetch('/api/login', {
@@ -296,7 +320,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ? 'No se pudo autenticar al superadministrador.'
         : 'No se pudo verificar la suscripción. Sin un plan pagado solo está disponible la prueba gratuita.',
     }
-  }, [])
+  }, [bootstrapApiSession])
 
   const refreshSessionUser = useCallback(async () => {
     await loadSession()
@@ -366,6 +390,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       needsWelcome: userNeedsWelcome(getStoredApiAuth()?.user),
       isTrialLimited: userHasTrialLimits(getStoredApiAuth()?.user),
       login,
+      adoptApiSession,
       logout,
       refreshSessionUser,
       applySessionUser,
@@ -387,7 +412,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return effective ? normalizeRole(effective) === normalizeRole(role) : false
       },
     }),
-    [user, isLoading, login, logout, refreshSessionUser, applySessionUser],
+    [user, isLoading, login, adoptApiSession, logout, refreshSessionUser, applySessionUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

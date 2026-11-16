@@ -99,27 +99,35 @@ export function mergeSignedEvolutionNotes(baseNotes, incomingNotes) {
     return Array.isArray(cleanedBase) ? cleanedBase : cleanedIncoming
   }
   if (!Array.isArray(cleanedBase) || cleanedBase.length === 0) return cleanedIncoming
+  const noteKey = (note) => {
+    if (note?.id) return `id:${note.id}`
+    const date = String(note?.date || note?.createdAt || '')
+    const procedure = String(note?.procedure || '')
+    const body = String(note?.clinicalNote || note?.note || '').slice(0, 120)
+    return `fp:${date}|${procedure}|${body}`
+  }
   const merged = new Map(
-    cleanedBase.filter((note) => note && note.id).map((note) => [note.id, note]),
+    cleanedBase.filter((note) => note && noteKey(note) !== 'fp:||').map((note) => [noteKey(note), note]),
   )
   for (const note of cleanedIncoming) {
-    if (!note || !note.id) continue
-    const previous = merged.get(note.id)
+    if (!note || noteKey(note) === 'fp:||') continue
+    const key = noteKey(note)
+    const previous = merged.get(key)
     if (!previous) {
-      merged.set(note.id, note)
+      merged.set(key, note)
       continue
     }
     if (!evolutionNoteIsSigned(previous)) {
-      merged.set(note.id, note)
+      merged.set(key, note)
       continue
     }
     // Sello real: si el núcleo clínico cambió, se conserva la firma del servidor
     // y solo se admite sidecar administrativo (RIPS / pago / workflow).
     if (!evolutionSealsEqual(previous, note)) {
-      merged.set(note.id, mergeEvolutionAdminSidecar(previous, note))
+      merged.set(key, mergeEvolutionAdminSidecar(previous, note))
       continue
     }
-    merged.set(note.id, mergeEvolutionAdminSidecar(previous, note))
+    merged.set(key, mergeEvolutionAdminSidecar(previous, note))
   }
   return preserveEvolutionWorkflowStatus(cleanedBase, [...merged.values()])
 }

@@ -1,95 +1,168 @@
+import { timingSafeEqual } from 'node:crypto'
+import { config } from '../config.js'
 import {
   confirmWhatsAppActivationByToken,
+  findRegistrationConflicts,
+  hashPasswordSha256,
+  issueSessionForStoredUser,
   normalizeColombiaPhoneNumber,
   registerSubscriptionUser,
+  SUPERADMIN_EMAIL,
 } from '../services/subscriptionAuthStore.js'
 import {
-  buildWhatsAppActivationLink,
-  generateActivationToken,
+  buildRegistrationVerificationLink,
   getCorporateWhatsAppNumber,
 } from '../services/whatsappClickToChat.service.js'
+import { describeMailError, sendVerificationCodeEmail } from '../services/mailer.js'
+import {
+  beginPendingCompletion,
+  deletePendingRegistration,
+  readPendingStatus,
+  releasePendingCompletion,
+  restorePendingRecord,
+  rotatePendingEmailCode,
+  savePendingRegistration,
+  verifyPendingWhatsApp,
+} from '../services/pendingRegistrationStore.js'
+import {
+  collectInboundMessages,
+  extractWhatsAppCodes,
+  inboundMessageText,
+  senderDigitCandidates,
+} from '../services/evolutionInbound.service.js'
 import { voidSendWelcomeWhatsAppInBackground } from '../services/whatsapp.service.js'
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function conflictMessage(emailTaken, phoneTaken) {
+  if (emailTaken && phoneTaken) {
+    return 'Ya existe una cuenta con este correo y con este número de WhatsApp.'
+  }
+  if (emailTaken) return 'Ya existe una cuenta con este correo.'
+  if (phoneTaken) return 'Ya existe una cuenta con este número de WhatsApp.'
+  return ''
+}
+
+function webhookSecretOk(req) {
+  const expected = String(config.evolutionWebhookSecret || process.env.EVOLUTION_WEBHOOK_SECRET || '').trim()
+  if (!expected) return true
+  const presented = [
+    req.query?.secret,
+    req.get('apikey'),
+    req.get('x-webhook-secret'),
+  ].map((value) => String(value || ''))
+  const expectedBuf = Buffer.from(expected)
+  return presented.some((value) => {
+    const received = Buffer.from(value)
+    if (received.length !== expectedBuf.length) return false
+    return timingSafeEqual(expectedBuf, received)
+  })
+}
+
 /**
- * Registro express + Click-to-Chat.
- * Crea la cuenta con is_verified / whatsapp_verified = false y devuelve el enlace wa.me.
+ * Paso 1: no crea la cuenta. Deja un pendiente, manda el OTP por correo
+ * y devuelve el enlace wa.me para que el usuario escriba el código.
  */
 export async function requestRegisterCode(req, res) {
+  let pending = null
   try {
     const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const nombre = String(body.nombre ?? '').trim()
     const email = String(body.email ?? '').trim().toLowerCase()
+    const password = String(body.password ?? '').trim()
     const phone = normalizeColombiaPhoneNumber(body.phone_number ?? body.phone)
 
+    if (!nombre) {
+      return res.status(400).json({ success: false, ok: false, error: 'El nombre es obligatorio.' })
+    }
+    if (!email || !EMAIL_RE.test(email)) {
+      return res.status(400).json({ success: false, ok: false, error: 'Indique un correo electrónico válido.' })
+    }
+    if (email === SUPERADMIN_EMAIL) {
+      return res.status(403).json({
+        success: false,
+        ok: false,
+        error: 'Este correo está reservado para el administrador del sistema.',
+      })
+    }
     if (!phone) {
       return res.status(400).json({
         success: false,
         ok: false,
-        error: 'Indique un celular colombiano válido (+57), por ejemplo 3001234567.',
+        error: 'Indique un celular válido. Ejemplo: 3001234567.',
       })
     }
-
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error: 'La contraseña debe tener al menos 6 caracteres.',
+      })
+    }
     if (!getCorporateWhatsAppNumber()) {
       return res.status(503).json({
         success: false,
         ok: false,
-        error:
-          'Falta configurar WHATSAPP_BUSINESS_NUMBER (WhatsApp corporativo) en el servidor.',
+        error: 'Falta configurar WHATSAPP_BUSINESS_NUMBER (WhatsApp corporativo) en el servidor.',
       })
     }
 
-    const activationToken = generateActivationToken(6)
-    const link = buildWhatsAppActivationLink(activationToken)
-    if (!link.ok) {
-      return res.status(503).json({
+    const conflicts = await findRegistrationConflicts({ email, phoneNumber: phone })
+    const duplicate = conflictMessage(conflicts.emailTaken, conflicts.phoneTaken)
+    if (duplicate) {
+      return res.status(409).json({
         success: false,
         ok: false,
-        error: link.error,
+        error: duplicate,
+        emailTaken: conflicts.emailTaken,
+        phoneTaken: conflicts.phoneTaken,
       })
     }
 
-    const result = await registerSubscriptionUser({
-      nombre: body.nombre,
+    pending = await savePendingRegistration({
+      nombre,
       email,
-      password: body.password,
-      phone_number: phone,
-      activation_token: activationToken,
+      phoneNumber: phone,
+      passwordHash: hashPasswordSha256(password),
     })
 
-    if (!result.ok) {
-      return res.status(result.status).json({
-        success: false,
-        ok: false,
-        error: result.error,
-      })
+    const link = buildRegistrationVerificationLink(pending.whatsappCode)
+    if (!link.ok) {
+      await deletePendingRegistration(pending.pendingId)
+      return res.status(503).json({ success: false, ok: false, error: link.error })
     }
 
-    const user = result.user
-    const token = result.activation_token || activationToken
-    const finalLink = buildWhatsAppActivationLink(token)
-    if (!finalLink.ok) {
+    try {
+      await sendVerificationCodeEmail({ to: email, code: pending.emailCode })
+    } catch (error) {
+      await deletePendingRegistration(pending.pendingId)
+      console.error('[Auth] No se pudo enviar el código de registro:', error instanceof Error ? error.message : error)
       return res.status(503).json({
         success: false,
         ok: false,
-        error: finalLink.error,
+        error: describeMailError(error),
       })
     }
-    return res.status(result.resumed ? 200 : 201).json({
+
+    return res.status(201).json({
       success: true,
       ok: true,
-      email: user.email,
-      phone_number: phone,
-      activation_token: token,
-      whatsapp_url: finalLink.url,
-      whatsapp_message: finalLink.message,
-      is_verified: false,
-      whatsapp_verified: false,
-      resumed: Boolean(result.resumed),
-      user,
-      message: result.resumed
-        ? 'Su cuenta ya existía sin activar. Abra WhatsApp y envíe el mensaje para verificar el celular.'
-        : 'Cuenta creada. Abra WhatsApp y envíe el mensaje de activación para verificar su celular.',
+      pendingId: pending.pendingId,
+      email: pending.email,
+      phone_number: pending.phone_number,
+      whatsapp_code: pending.whatsappCode,
+      whatsapp_url: link.url,
+      whatsapp_message: link.message,
+      expiresInSeconds: 900,
     })
   } catch (error) {
+    if (pending?.pendingId) {
+      try {
+        await deletePendingRegistration(pending.pendingId)
+      } catch {
+        /* el pendiente no debe quedar si la respuesta falló */
+      }
+    }
     console.error('[Auth] Error en /auth/register/request-code:', error)
     return res.status(500).json({
       success: false,
@@ -99,9 +172,187 @@ export async function requestRegisterCode(req, res) {
   }
 }
 
+export async function registerStatus(req, res) {
+  try {
+    const status = await readPendingStatus(req.params.pendingId)
+    return res.json({
+      success: true,
+      ok: true,
+      emailVerified: status.emailVerified,
+      whatsappVerified: status.whatsappVerified,
+      expired: status.expired,
+    })
+  } catch (error) {
+    console.error('[Auth] Error en GET /auth/register/status:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo consultar el registro.',
+    })
+  }
+}
+
+export async function resendRegisterEmail(req, res) {
+  let rotated = null
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    rotated = await rotatePendingEmailCode(body.pendingId)
+    if (!rotated.ok) {
+      return res.status(rotated.status).json({
+        success: false,
+        ok: false,
+        error: rotated.error,
+        retryAfterSeconds: rotated.retryAfterSeconds,
+      })
+    }
+    try {
+      await sendVerificationCodeEmail({
+        to: rotated.record.email,
+        code: rotated.record.emailCode,
+      })
+    } catch (error) {
+      if (rotated.previous) await restorePendingRecord(rotated.previous)
+      console.error('[Auth] Reenvío de código falló:', error instanceof Error ? error.message : error)
+      return res.status(503).json({
+        success: false,
+        ok: false,
+        error: describeMailError(error),
+      })
+    }
+    return res.json({
+      success: true,
+      ok: true,
+      pendingId: rotated.record.pendingId,
+      message: 'Enviamos un código nuevo a su correo. Caduca con el registro, en un máximo de 15 minutos.',
+    })
+  } catch (error) {
+    console.error('[Auth] Error en /auth/register/resend-email:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo reenviar el código.',
+    })
+  }
+}
+
+export async function completeRegister(req, res) {
+  let pendingId = ''
+  let claimed = false
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    pendingId = String(body.pendingId || '').trim()
+    const started = await beginPendingCompletion({
+      pendingId,
+      emailCode: body.emailCode ?? body.code,
+    })
+    if (!started.ok) {
+      return res.status(started.status).json({
+        success: false,
+        ok: false,
+        error: started.error,
+      })
+    }
+    claimed = true
+    const pending = started.record
+
+    const conflicts = await findRegistrationConflicts({
+      email: pending.email,
+      phoneNumber: pending.phone_number,
+    })
+    const duplicate = conflictMessage(conflicts.emailTaken, conflicts.phoneTaken)
+    if (duplicate) {
+      await deletePendingRegistration(pending.pendingId)
+      claimed = false
+      return res.status(409).json({ success: false, ok: false, error: duplicate })
+    }
+
+    const created = await registerSubscriptionUser({
+      nombre: pending.nombre,
+      email: pending.email,
+      passwordHash: pending.passwordHash,
+      phone_number: pending.phone_number,
+      verifiedRegistration: true,
+      is_verified: true,
+      email_verified: true,
+      whatsapp_verified: true,
+      whatsapp_status: 'verified',
+    })
+    if (!created.ok) {
+      await releasePendingCompletion(pending.pendingId)
+      claimed = false
+      return res.status(created.status).json({
+        success: false,
+        ok: false,
+        error: created.error,
+      })
+    }
+
+    const session = await issueSessionForStoredUser(created.user.id)
+    await deletePendingRegistration(pending.pendingId)
+    claimed = false
+    if (!session.ok) {
+      return res.status(session.status || 500).json({
+        success: false,
+        ok: false,
+        error: session.error || 'La cuenta quedó creada, pero no se pudo abrir la sesión. Inicie sesión.',
+      })
+    }
+
+    return res.status(201).json({
+      success: true,
+      ok: true,
+      token: session.token,
+      user: session.user,
+      rol: session.rol,
+      expiresAt: session.expiresAt,
+      requiresSubscription: true,
+      unlimitedAccess: false,
+    })
+  } catch (error) {
+    if (claimed && pendingId) {
+      try {
+        await releasePendingCompletion(pendingId)
+      } catch {
+        /* ignore */
+      }
+    }
+    console.error('[Auth] Error en /auth/register/complete:', error)
+    return res.status(500).json({
+      success: false,
+      ok: false,
+      error: 'No se pudo crear la cuenta.',
+    })
+  }
+}
+
 /**
- * Confirmación manual/simulada: el operador marca el token como recibido.
- * Cuerpo: { token } o { token, email }.
+ * Webhook de mensajes entrantes. No responde al chat: solo marca el pendiente
+ * si el código y el celular coinciden.
+ */
+export async function evolutionWhatsAppWebhook(req, res) {
+  try {
+    if (!webhookSecretOk(req)) {
+      return res.status(401).json({ ok: false, error: 'Webhook no autorizado.' })
+    }
+    const messages = collectInboundMessages(req.body)
+    let verified = false
+    for (const item of messages) {
+      const codes = extractWhatsAppCodes(inboundMessageText(item.message))
+      const senderDigits = senderDigitCandidates(item.key, item)
+      if (!codes.length || !senderDigits.length) continue
+      const result = await verifyPendingWhatsApp({ codes, senderDigits })
+      if (result.verified) verified = true
+    }
+    return res.status(200).json({ ok: true, verified })
+  } catch (error) {
+    console.error('[Auth] Error en webhook Evolution:', error)
+    return res.status(500).json({ ok: false, error: 'No se pudo procesar el mensaje.' })
+  }
+}
+
+/**
+ * Confirmación manual del flujo anterior (cuentas ya creadas con token).
+ * El alta nuevo no usa esta ruta.
  */
 export async function confirmWhatsAppClickToChat(req, res) {
   try {
@@ -145,12 +396,12 @@ export async function confirmWhatsAppClickToChat(req, res) {
   }
 }
 
-/** @deprecated Preferir requestRegisterCode (Click-to-Chat). */
+/** @deprecated Preferir el alta con verificación dual. */
 export async function verifyRegisterCode(req, res) {
   return confirmWhatsAppClickToChat(req, res)
 }
 
-/** @deprecated Preferir confirmWhatsAppClickToChat. */
+/** @deprecated Preferir el webhook de Evolution. */
 export async function verifyWhatsAppRegistration(req, res) {
   return confirmWhatsAppClickToChat(req, res)
 }

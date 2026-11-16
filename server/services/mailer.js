@@ -296,20 +296,20 @@ export async function sendVerificationCodeEmail({ to, email, code }) {
   const digits = String(code ?? '').replace(/\D/g, '')
   return sendTransactionalEmail({
     to: recipient,
-    subject: 'Código de verificación — doctorSEOlabs',
+    subject: 'Código de verificación — MiHistoriaDental',
     text: [
-      'Use este código de 6 dígitos para verificar su correo y crear su cuenta:',
+      'Use este código de 6 dígitos para verificar su correo en MiHistoriaDental:',
       '',
       digits,
       '',
       'Escríbalo seguido, sin espacios. Si recibió varios correos, use solo el más reciente.',
-      'El código caduca en 15 minutos. Si usted no solicitó el registro, ignore este mensaje.',
+      'El código es válido durante 15 minutos. Si usted no solicitó el registro, ignore este mensaje.',
     ].join('\n'),
     html: `
-      <p>Use este código de 6 dígitos para verificar su correo y crear su cuenta en <strong>doctorSEOlabs</strong>:</p>
-      <p style="font-size:28px;font-weight:700;font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:0">${digits}</p>
+      <p>Use este código de 6 dígitos para verificar su correo y crear su cuenta en <strong>MiHistoriaDental</strong>:</p>
+      <p style="font-size:32px;font-weight:700;letter-spacing:0.35em;font-family:ui-monospace,Menlo,Consolas,monospace;margin:16px 0">${digits}</p>
       <p>Escríbalo seguido, sin espacios. Si recibió varios correos, use solo el más reciente.</p>
-      <p>Caduca en 15 minutos. Si usted no solicitó el registro, ignore este mensaje.</p>
+      <p><strong>Válido durante 15 minutos.</strong> Si usted no solicitó el registro, ignore este mensaje.</p>
     `,
   })
 }

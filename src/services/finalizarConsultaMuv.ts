@@ -2,6 +2,7 @@ import type { ClinicalRecord } from '@/types/clinicalRecord'
 import type { Patient } from '@/types/patient'
 import type { UserProfile } from '@/types/user'
 import { db } from '@/db/database'
+import { guardarHistorialRadicacionRips } from '@/db/ripsSubmissionsStore'
 import { routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
 import { isNoObligadoFev, normalizePerfilFiscal } from '@/utils/fiscalProfile'
 
@@ -118,6 +119,17 @@ export async function reportarAtencionCerradaAlMuv(input: {
     }
 
     if (result.estadoMuv === 'APROBADO' && result.cuv) {
+      guardarHistorialRadicacionRips({
+        cuv: result.cuv,
+        cantidad_historias: 1,
+        estado: 'radicado',
+        payload_json: {
+          origen: 'cierre_consulta',
+          clinicalRecordId: id,
+          estadoMuv: result.estadoMuv,
+        },
+        fecha_radicacion: input.signedAt || new Date().toISOString(),
+      })
       return `CUV ${result.cuv}.`
     }
     if (result.estadoMuv === 'RECHAZADO') {

@@ -392,8 +392,19 @@ export async function purgeForeignClinicRecords(clinicId = getCurrentClinicId())
     }
 
     for (const row of await db.rips_submissions.toArray()) {
+      // Sin clinicId: reetiquetar al canónico (no borrar historial de CUV).
+      if (!String(row.clinicId ?? '').trim()) {
+        if (canonical) {
+          await db.rips_submissions.update(row.id, { clinicId: canonical })
+        }
+        continue
+      }
       if (!rowBelongsToClinicScope(row.clinicId, clinicId)) {
         await db.rips_submissions.delete(row.id)
+        continue
+      }
+      if (canonical && !clinicIdsMatch(row.clinicId, canonical)) {
+        await db.rips_submissions.update(row.id, { clinicId: canonical })
       }
     }
 

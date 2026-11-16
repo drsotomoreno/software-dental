@@ -11,6 +11,20 @@ import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceServic
 
 const AUTO_SAVE_DELAY_MS = 1200
 
+function formStamp(data: ClinicalRecordFormData | null): string {
+  if (!data) return ''
+  const pack = (rows: Array<{ id?: string }> | undefined) =>
+    `${rows?.length ?? 0}:${(rows ?? []).map((row) => row?.id || '').join(',')}`
+  return [
+    pack(data.budgetItems),
+    pack(data.paymentControl),
+    pack(data.evolutionNotes),
+    pack(data.diagnoses),
+    pack(data.treatmentPlan),
+    String(data.findings?.length ?? 0),
+  ].join('|')
+}
+
 async function persistOdontogram(
   patientRouteId: string,
   odontogram: OdontogramData,
@@ -49,6 +63,7 @@ export function useClinicalAutoSave(options: {
   const enabledRef = useRef(enabled)
   const valuationOnlyRef = useRef(valuationOnly)
   const patientRouteIdRef = useRef(patientRouteId)
+  const lastSavedStampRef = useRef('')
   onOdontogramPersistedRef.current = onOdontogramPersisted
   clinicalDataRef.current = clinicalData
   odontogramRef.current = odontogram
@@ -92,8 +107,12 @@ export function useClinicalAutoSave(options: {
 
     if (skipNextSaveRef.current) {
       skipNextSaveRef.current = false
+      lastSavedStampRef.current = formStamp(clinicalData)
       return
     }
+
+    const stamp = formStamp(clinicalData)
+    if (stamp === lastSavedStampRef.current) return
 
     if (timerRef.current) clearTimeout(timerRef.current)
     pendingRef.current = true
@@ -102,9 +121,13 @@ export function useClinicalAutoSave(options: {
       timerRef.current = null
       pendingRef.current = false
       setSaving(true)
+      const savedStamp = formStamp(clinicalData)
       void flushAutoSave
         .current()
-        .then(() => setLastSavedAt(new Date().toISOString()))
+        .then(() => {
+          lastSavedStampRef.current = savedStamp
+          setLastSavedAt(new Date().toISOString())
+        })
         .catch(() => {})
         .finally(() => setSaving(false))
     }, AUTO_SAVE_DELAY_MS)

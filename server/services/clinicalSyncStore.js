@@ -21,6 +21,11 @@ import { conservarFechaApertura } from '../../shared/patientOpenedAt.js'
 import { clinicKeyInScope } from '../../shared/clinicalSyncScope.js'
 import { mergeSyncedRecordNonDestructive } from '../../shared/clinicalSyncMerge.js'
 import { omitHeavyClinicalDraftForms } from '../../shared/clinicalSyncHeavyPayload.js'
+import {
+  assertClinicalArrayLimits,
+  isClinicalArrayCircuitError,
+  sanitizeClinicalRecordArrays,
+} from '../../shared/clinicalSyncCircuitBreaker.js'
 import { clinicalSyncEvents, SNAPSHOT_PUSHED } from './clinicalSyncEvents.js'
 
 /**
@@ -112,7 +117,41 @@ function sellarAperturaPaciente(prev, record) {
   return record
 }
 
+function isExplicitDiagnosticDelete(record) {
+  if (!record || typeof record !== 'object') return false
+  const payload = record.payload && typeof record.payload === 'object' ? record.payload : {}
+  if (payload.explicitDelete !== true) return false
+  return Boolean(record.deletedAt || payload.deletedAt)
+}
+
+/** Un Dexie vacío no puede tumbar un STL. Solo explicitDelete (clic en Quitar) borra. */
+function mergeDiagnosticAidServerRecord(prev, next) {
+  if (isExplicitDiagnosticDelete(next)) {
+    const deletedAt = String(next.deletedAt || next.payload?.deletedAt || new Date().toISOString())
+    return {
+      ...next,
+      deletedAt,
+      payload: {
+        ...(next.payload || {}),
+        explicitDelete: true,
+        deletedAt,
+        deletedBy: next.payload?.deletedBy || null,
+      },
+    }
+  }
+  if (isExplicitDiagnosticDelete(prev)) return prev
+  const activeNext = { ...next, deletedAt: null }
+  const merged = prev
+    ? mergeSyncedRecordNonDestructive(prev, activeNext, { preferNextMeta: true })
+    : activeNext
+  const payload = { ...(merged.payload || {}) }
+  delete payload.explicitDelete
+  payload.deletedAt = null
+  return { ...merged, deletedAt: null, payload }
+}
+
 function mergeClinicalEntityRecord(prev, next, entityKey) {
+  if (entityKey === 'diagnosticAids') return mergeDiagnosticAidServerRecord(prev, next)
   const merged = mergeClinicalEntityBody(prev, next, entityKey)
   return entityKey === 'patients' ? sellarAperturaPaciente(prev, merged) : merged
 }
@@ -272,6 +311,8 @@ const DIAGNOSTIC_AID_LIGHT_KEYS = [
   'byteLength',
   'storageBackend',
   'driveUploadStatus',
+  'explicitDelete',
+  'deletedBy',
   'updatedAt',
 ]
 
@@ -405,6 +446,24 @@ function stripHeavyBinaryFields(value) {
   return out
 }
 
+/** Quita binarios sueltos y conserva clinicalDraft / valuationDraft enteros (ficha de un paciente). */
+function stripHeavyKeepingClinicalDrafts(value) {
+  if (!value || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map((row) => stripHeavyKeepingClinicalDrafts(row))
+  const out = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === 'clinicalDraft' || key === 'valuationDraft') {
+      out[key] = entry
+      continue
+    }
+    if (HEAVY_BINARY_KEYS.includes(key)) continue
+    if (isHeavyBinaryString(entry)) continue
+    out[key] =
+      entry && typeof entry === 'object' ? stripHeavyKeepingClinicalDrafts(entry) : entry
+  }
+  return out
+}
+
 function normalizeRecord(raw, clinicId) {
   if (!raw || typeof raw !== 'object') return null
   const payloadSource =
@@ -415,8 +474,8 @@ function normalizeRecord(raw, clinicId) {
     raw.payload && typeof raw.payload === 'object' && !Array.isArray(raw.payload)
       ? { ...raw.payload }
       : { ...raw }
-  // Borradores: sin clinicalDraft >50 KB ni Base64; Dexie local conserva el completo.
-  const lightPayload = omitHeavyClinicalDraftForms(stripHeavyBinaryFields(payloadRaw))
+  // La ficha de un paciente se persiste entera. El corte de 50 KB solo aplica al listado masivo.
+  const lightPayload = stripHeavyKeepingClinicalDrafts(payloadRaw)
   const payload = stripClinicalPayloadEvolutionPatientSignatures(lightPayload)
   const updatedAt = String(raw.updatedAt || payload.updatedAt || payload.createdAt || new Date().toISOString())
   const deletedAt = raw.deletedAt || payload.deletedAt || null
@@ -832,7 +891,7 @@ async function saveStore(store) {
   invalidateStoreCache()
   invalidateMetaCache()
   const base = store && typeof store === 'object' ? store : emptyStore()
-  const sanitized = omitHeavyClinicalDraftForms(stripHeavyBinaryFields(base))
+  const sanitized = stripHeavyKeepingClinicalDrafts(base)
   await writeDurableJsonReplace(STORE_FILE, sanitized, STORE_KEY)
   // Re-cache tras escritura para el próximo pull (mtime fresco).
   try {
@@ -900,6 +959,25 @@ function rawClinicId(raw) {
   if (!raw || typeof raw !== 'object') return ''
   const payload = raw.payload && typeof raw.payload === 'object' ? raw.payload : null
   return String(raw.clinicId || payload?.clinicId || '').trim()
+}
+
+function prepareIncomingClinicalRows(rows, target) {
+  if (!Array.isArray(rows)) return []
+  return rows.map((raw) => {
+    const sanitized = sanitizeClinicalRecordArrays(raw)
+    const payload = sanitized?.payload && typeof sanitized.payload === 'object' ? sanitized.payload : {}
+    const syncId = String(sanitized?.syncId || payload.syncId || payload.id || '')
+    const previous = syncId && target ? target[syncId] : null
+    try {
+      assertClinicalArrayLimits(previous, sanitized)
+    } catch (error) {
+      if (isClinicalArrayCircuitError(error)) {
+        console.error('[Sync] CIRCUIT OPEN', error.message, error.details || {})
+      }
+      throw error
+    }
+    return sanitized
+  })
 }
 
 function mergeIncomingMap(target, incoming, clinicId, acceptedKey, accepted, aliasIds = []) {
@@ -1066,7 +1144,72 @@ export async function pullPatientDraft(clinicId, patientSyncId, aliasIds = []) {
     record = await extractDraftRecordFromFile(syncKey)
   }
   if (!record) return null
-  return omitHeavyClinicalDraftForms(stripHeavyBinaryFields(record))
+  // Un solo paciente: clinicalDraft y valuationDraft salen íntegros (60 KB o 300 KB).
+  return deliverSinglePatientRecord(record)
+}
+
+function deliverSinglePatientRecord(record) {
+  if (!record || typeof record !== 'object') return record
+  const payload =
+    record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+      ? record.payload
+      : null
+  if (!payload) return record
+  const keptDraft = payload.clinicalDraft
+  const keptValuation = payload.valuationDraft
+  const stripped = stripHeavyBinaryFields({
+    ...payload,
+    clinicalDraft: undefined,
+    valuationDraft: undefined,
+  })
+  if ('clinicalDraft' in payload) stripped.clinicalDraft = keptDraft ?? null
+  if ('valuationDraft' in payload) stripped.valuationDraft = keptValuation ?? null
+  return { ...record, payload: stripped }
+}
+
+function recordBelongsToPatient(record, syncKey) {
+  const payload = record?.payload && typeof record.payload === 'object' ? record.payload : {}
+  const ids = [record?.syncId, payload.patientSyncId, payload.patientId, payload.syncId]
+  return ids.some((value) => {
+    const text = String(value || '').trim()
+    return text === syncKey || text === `draft:${syncKey}`
+  })
+}
+
+/**
+ * Paquete de una ficha: borrador íntegro + historias firmadas + odontograma + exámenes.
+ * No aplica el corte de 50 KB. Las historias firmadas se devuelven tal cual (append-only).
+ */
+export async function pullPatientChart(clinicId, patientSyncId, aliasIds = []) {
+  const syncKey = String(patientSyncId || '').trim()
+  const draft = await pullPatientDraft(clinicId, syncKey, aliasIds)
+  const ids = scopeIds(clinicId, aliasIds)
+  let clinic = null
+  if (storeCache.store && ids.length) {
+    try {
+      clinic = mergeClinicBuckets(storeCache.store, ids)
+    } catch {
+      clinic = null
+    }
+  }
+  if (!clinic && ids.length) {
+    try {
+      const store = await loadStore()
+      clinic = mergeClinicBuckets(store, ids)
+    } catch (error) {
+      if (error?.code !== 'CLINICAL_SYNC_TOO_LARGE') throw error
+    }
+  }
+  const pick = (bucket) =>
+    Object.values(clinic?.[bucket] || {}).filter(
+      (record) => record && recordBelongsToPatient(record, syncKey),
+    )
+  return {
+    draft: draft ? deliverSinglePatientRecord(draft) : null,
+    clinicalRecords: clinic ? pick('clinicalRecords').map((record) => deliverSinglePatientRecord(record)) : [],
+    odontograms: clinic ? pick('odontograms') : [],
+    diagnosticAids: clinic ? pick('diagnosticAids').map((record) => lightweightDiagnosticAidRecord(record)).filter(Boolean) : [],
+  }
 }
 
 /**
@@ -1148,9 +1291,8 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
     syncQueue.push(await hydrateAttachment(ids, record, includeBlobs))
   }
 
-  // Drafts (~31MB) no van por HTTP: el cliente conserva Dexie local (merge no borra).
-  // full=1 prioriza historias/odontogramas (~13MB) sin reventar PM2.
-  return {
+  // Listado masivo: el corte de 50 KB solo aquí. La ficha de un paciente no pasa por esta función.
+  return omitHeavyClinicalDraftForms({
     patients,
     appointments,
     clinicalRecords: Object.values(clinic.clinicalRecords).filter(Boolean),
@@ -1161,7 +1303,7 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
     sync_queue: syncQueue,
     serverTime,
     slim: false,
-  }
+  })
 }
 
 export async function pushClinicalRecords(clinicId, patients = [], appointments = [], aliasIds = []) {
@@ -1201,10 +1343,8 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
     return { accepted: emptyAccepted, serverTime: new Date().toISOString() }
   }
 
-  // Purga Base64/DataURL y clinicalDraft >50 KB antes de tocar memoria/disco (t3.micro).
-  const safeBody = omitHeavyClinicalDraftForms(
-    stripHeavyBinaryFields(body && typeof body === 'object' ? body : {}),
-  )
+  // Binarios fuera. El borrador de cada paciente se queda entero; las listas se deduplican abajo.
+  const safeBody = stripHeavyKeepingClinicalDrafts(body && typeof body === 'object' ? body : {})
 
   return enqueueWrite(async () => {
     const store = await loadStore()
@@ -1245,6 +1385,8 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
         }
       }
     }
+    body.clinicalRecords = prepareIncomingClinicalRows(body.clinicalRecords, clinic.clinicalRecords)
+    body.drafts = prepareIncomingClinicalRows(body.drafts, clinic.drafts)
     mergeIncomingMap(clinic.clinicalRecords, body.clinicalRecords, canonical, 'clinicalRecords', accepted, aliasIds)
     mergeIncomingMap(clinic.odontograms, body.odontograms, canonical, 'odontograms', accepted, aliasIds)
     mergeIncomingMap(clinic.diagnosticAids, body.diagnosticAids, canonical, 'diagnosticAids', accepted, aliasIds)

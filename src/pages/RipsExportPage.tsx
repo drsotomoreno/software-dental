@@ -8,6 +8,7 @@ import {
   contarAtencionesEnviadas,
   guardarHistorialRadicacionRips,
 } from '@/db/ripsSubmissionsStore'
+import { getCurrentClinicId } from '@/services/clinicalSyncState'
 import { belongsToCurrentClinic, ensureClinicLocalIsolation } from '@/services/clinicLocalIsolation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
@@ -254,22 +255,16 @@ export function RipsExportPage() {
         return
       }
 
-      try {
-        const contadas = contarAtencionesEnviadas(rips)
-        await db.rips_submissions.add({
-          id: crypto.randomUUID(),
-          fecha_radicacion: new Date().toISOString(),
-          cuv: response.cuv,
-          cantidad_historias: contadas > 0 ? contadas : 1,
-          estado: 'radicado',
-          payload_json: JSON.parse(JSON.stringify(rips)) as unknown,
-          clinicId: user.clinicId || user.id,
-        })
-      } catch (error) {
-        console.error('No se pudo guardar el CUV en el historial local de RIPS.', error)
-      }
+      const contadas = contarAtencionesEnviadas(rips)
+      guardarHistorialRadicacionRips({
+        cuv: response.cuv,
+        cantidad_historias: contadas > 0 ? contadas : 1,
+        estado: 'radicado',
+        payload_json: rips,
+        clinicId: getCurrentClinicId(),
+      })
       void saveTemporaryRips({
-        clinicId: user.clinicId || user.id,
+        clinicId: getCurrentClinicId() || user.clinicId || user.id,
         patientId: String(patient.id ?? ''),
         professionalId: user.id,
         clinicalRecordId: String(attention.record.id ?? ''),

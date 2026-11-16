@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Copy } from 'lucide-react'
 import { db } from '@/db/database'
+import { reconciliarHistorialRipsDesdeHistorias } from '@/db/ripsSubmissionsStore'
 import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import type { RipsSubmission } from '@/types/ripsSubmission'
 import { formatDate } from '@/utils'
@@ -82,6 +83,13 @@ function CeldaCuv({ cuv }: { cuv: string }) {
  * Tarjeta 3 de Exportación RIPS: historial local ordenado por fecha de radicación.
  */
 export function RipsSubmissionsHistory() {
+  // Recupera CUV ya guardados en notas/historias que nunca llegaron a rips_submissions.
+  useEffect(() => {
+    void reconciliarHistorialRipsDesdeHistorias().catch((error) => {
+      console.error('No se pudo reconciliar el historial de RIPS radicados.', error)
+    })
+  }, [])
+
   const submissions = useLiveQuery(async () => {
     const rows = await db.rips_submissions.orderBy('fecha_radicacion').reverse().toArray()
     return rows.filter((row) => belongsToCurrentClinic(row))

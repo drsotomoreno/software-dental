@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildActivationMessage,
+  buildRegistrationVerificationLink,
   buildWhatsAppActivationLink,
   generateActivationToken,
   normalizeBusinessWhatsAppNumber,
@@ -26,6 +27,16 @@ test('arma el enlace wa.me con el mensaje de activación', () => {
 test('rechaza un número corporativo vacío', () => {
   const link = buildWhatsAppActivationLink('A4F8K2', '')
   assert.equal(link.ok, false)
+})
+
+test('arma el enlace de verificación dual sin enviar un mensaje saliente', () => {
+  const link = buildRegistrationVerificationLink('A4F8K2', '573001234567')
+  assert.equal(link.ok, true)
+  assert.equal(link.message, 'Verificar mi cuenta MiHistoriaDental: A4F8K2')
+  assert.equal(
+    link.url,
+    `https://wa.me/573001234567?text=${encodeURIComponent(link.message)}`,
+  )
 })
 
 test('normaliza el celular corporativo de Colombia', () => {

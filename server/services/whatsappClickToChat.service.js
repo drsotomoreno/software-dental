@@ -43,6 +43,29 @@ export function buildActivationMessage(token) {
 /**
  * https://wa.me/57XXXXXXXXXX?text=Activar+mi+cuenta+para+el+usuario+[TOKEN]
  */
+/**
+ * Click-to-Chat del alta dual. El usuario envía el código; el servidor no escribe al chat.
+ * https://wa.me/57XXXXXXXXXX?text=Verificar+mi+cuenta+MiHistoriaDental:+CODIGO
+ */
+export function buildRegistrationVerificationLink(code, businessNumber = getCorporateWhatsAppNumber()) {
+  const phone = normalizeBusinessWhatsAppNumber(businessNumber)
+  const token = String(code || '')
+    .trim()
+    .toUpperCase()
+  if (!phone || phone.length < 8) {
+    return {
+      ok: false,
+      error: 'Falta el WhatsApp corporativo (WHATSAPP_BUSINESS_NUMBER) en el servidor.',
+    }
+  }
+  if (!/^[A-Z0-9]{6}$/.test(token)) {
+    return { ok: false, error: 'Código de WhatsApp inválido.' }
+  }
+  const message = `Verificar mi cuenta MiHistoriaDental: ${token}`
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
+  return { ok: true, url, phone, token, message }
+}
+
 export function buildWhatsAppActivationLink(token, businessNumber = getCorporateWhatsAppNumber()) {
   const phone = normalizeBusinessWhatsAppNumber(businessNumber)
   const code = String(token || '')

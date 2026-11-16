@@ -23,11 +23,11 @@ test('ValuatedPatientsPage expone Abrir valoración (acción siempre visible)', 
   assert.doesNotMatch(src, /Puede abrir la ficha o pasarlos a historia completa/)
 })
 
-test('PatientDetailPage recupera valuationDraft bajo demanda al abrir valorado', async () => {
+test('PatientDetailPage recupera la ficha completa bajo demanda al abrir', async () => {
   const src = await readSrc('src/pages/PatientDetailPage.tsx')
-  assert.match(src, /pullPatientDraftOnDemand/)
+  assert.match(src, /pullPatientChartOnDemand/)
   assert.match(src, /pickLivingDraftForm/)
-  assert.match(src, /Valorados: el pull global ya no trae drafts/)
+  assert.match(src, /getLatestSignedClinicalRecord/)
   assert.match(src, /ok:\$\{requestId\}/)
 })
 
@@ -37,11 +37,22 @@ test('API sync expone GET /draft/:patientSyncId', async () => {
   assert.match(src, /pullPatientDraft/)
 })
 
-test('pullClinicSnapshot documenta drafts vacíos en HTTP y pullPatientDraft existe', async () => {
+test('pullClinicSnapshot documenta drafts vacíos en HTTP y la ficha individual no corta a 50 KB', async () => {
   const src = await readSrc('server/services/clinicalSyncStore.js')
   assert.match(src, /drafts:\s*\[\]/)
   assert.match(src, /export async function pullPatientDraft/)
+  assert.match(src, /export async function pullPatientChart/)
   assert.match(src, /extractDraftRecordFromFile/)
+  const draftFn = src.slice(
+    src.indexOf('export async function pullPatientDraft'),
+    src.indexOf('function deliverSinglePatientRecord'),
+  )
+  assert.doesNotMatch(draftFn, /omitHeavyClinicalDraftForms/)
+  const chartFn = src.slice(
+    src.indexOf('export async function pullPatientChart'),
+    src.indexOf('export async function pullClinicSnapshot'),
+  )
+  assert.doesNotMatch(chartFn, /omitHeavyClinicalDraftForms/)
 })
 
 test('omitHeavy no puede anular valuationDraft (fuente)', async () => {

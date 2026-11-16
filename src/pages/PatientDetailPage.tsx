@@ -695,18 +695,31 @@ export function PatientDetailPage() {
             )
             let living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
 
-            // Pull HTTP ya no trae drafts (OOM). Si Dexie está vacío, pedir solo este borrador.
-            if (
+            // El pull de login no trae la historia. Si falta el borrador o la historia firmada, bajar este paciente.
+            const needsServerChart =
               !draftClinicalData &&
-              !clinicalFormHasContent(living) &&
-              currentPatient?.syncId
-            ) {
+              Boolean(currentPatient?.syncId) &&
+              (!signedRecord || !clinicalFormHasContent(living))
+            if (needsServerChart && currentPatient?.syncId) {
               try {
-                const { pullPatientDraftOnDemand } = await import('@/services/clinicalSyncService')
-                const remote = await pullPatientDraftOnDemand(currentPatient.syncId)
+                const { pullPatientChartOnDemand } = await import('@/services/clinicalSyncService')
+                const remote = await pullPatientChartOnDemand(currentPatient.syncId)
                 if (remote) {
                   draft = (await getPatientClinicalDraft(foreignKey)) ?? draft
                   living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+                  if (!signedRecord) {
+                    signedRecord = await getLatestSignedClinicalRecord(foreignKey)
+                    if (signedRecord) {
+                      try {
+                        base = clinicalRecordToFormData(
+                          normalizeClinicalRecordForExport(signedRecord),
+                          professionalLicense,
+                        )
+                      } catch {
+                        loadedWithWarning = true
+                      }
+                    }
+                  }
                 }
               } catch {
                 // Red opcional: se muestra lo local.
@@ -885,8 +898,8 @@ export function PatientDetailPage() {
           let draft = await getPatientClinicalDraft(patientForeignKey)
           let living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
           if (!clinicalFormHasContent(living)) {
-            const { pullPatientDraftOnDemand } = await import('@/services/clinicalSyncService')
-            const ok = await pullPatientDraftOnDemand(syncId)
+            const { pullPatientChartOnDemand } = await import('@/services/clinicalSyncService')
+            const ok = await pullPatientChartOnDemand(syncId)
             if (!ok) {
               lastError = 'El servidor no devolvió el borrador de valoración.'
             } else {

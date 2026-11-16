@@ -3,8 +3,12 @@ import { Router } from 'express'
 import { config } from '../config.js'
 import { forgotPassword, resetPassword } from '../controllers/authPassword.controller.js'
 import {
+  completeRegister,
   confirmWhatsAppClickToChat,
+  evolutionWhatsAppWebhook,
+  registerStatus,
   requestRegisterCode,
+  resendRegisterEmail,
   verifyRegisterCode,
   verifyWhatsAppRegistration,
 } from '../controllers/authRegister.controller.js'
@@ -208,6 +212,10 @@ router.post('/confirmar-pago', async (req, res) => {
 router.post('/auth/forgot-password', forgotPassword)
 router.post('/auth/reset-password', resetPassword)
 router.post('/auth/register/request-code', requestRegisterCode)
+router.get('/auth/register/status/:pendingId', registerStatus)
+router.post('/auth/register/resend-email', resendRegisterEmail)
+router.post('/auth/register/complete', completeRegister)
+router.post('/webhooks/evolution/whatsapp', evolutionWhatsAppWebhook)
 router.post('/auth/register/verify', verifyRegisterCode)
 router.post('/auth/register/whatsapp/verify', verifyWhatsAppRegistration)
 router.post('/auth/register/whatsapp/confirm', confirmWhatsAppClickToChat)

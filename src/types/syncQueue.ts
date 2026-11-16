@@ -30,5 +30,8 @@ export interface SyncQueueAttachment {
   lastSyncedAt?: string
   /** true cuando el binario viajó al servidor; si falta, se reencola. */
   binarySynced?: boolean
+  /** Solo el botón Quitar. Un navegador vacío no envía esta bandera. */
+  explicitDelete?: boolean
+  deletedBy?: string
   error?: string
 }

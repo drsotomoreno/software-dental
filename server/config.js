@@ -153,6 +153,8 @@ export const config = {
       'bienvenida_mihistoriadental',
     templateLanguage: process.env.EVOLUTION_TEMPLATE_LANGUAGE || 'es',
   },
+  /** Si está vacío, el webhook de mensajes entrantes no exige token. */
+  evolutionWebhookSecret: process.env.EVOLUTION_WEBHOOK_SECRET || '',
   /**
    * WhatsApp Cloud API (Meta) — legado OTP. Descartado por registro mercantil;
    * el registro usa Click-to-Chat (whatsappClickToChat).

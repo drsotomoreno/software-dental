@@ -7,6 +7,7 @@ import type {
 import type { ElectronicInvoice } from '@/types/invoice'
 import type { Patient } from '@/types/patient'
 import { DOCUMENT_TYPE_RIPS, REGIME_TO_TIPO_USUARIO } from '@/constants/rips'
+import { guardarHistorialRadicacionRips } from '@/db/ripsSubmissionsStore'
 import { validateRipsWithMinistry, routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
 import {
   buildDianProviderPayload,
@@ -316,6 +317,15 @@ export async function processClinicalSession(
     if (ministryResponse.success && ministryResponse.approved) {
       cuv = ministryResponse.cuv
     }
+  }
+
+  if (cuv) {
+    guardarHistorialRadicacionRips({
+      cuv,
+      cantidad_historias: 1,
+      estado: 'radicado',
+      payload_json: ripsPayload,
+    })
   }
 
   if (ministryResponse?.success && ministryResponse.approved && invoice) {

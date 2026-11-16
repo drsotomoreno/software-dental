@@ -4,6 +4,8 @@
  * si otra copia del mismo paciente ya lo tenía.
  */
 
+import { dedupeClinicalItems } from './clinicalListMerge.js'
+
 function asArray(value) {
   return Array.isArray(value) ? value : []
 }
@@ -42,28 +44,29 @@ export function generalBudgetHasContent(form) {
   return budgetSummaryTotal(form.budget) > 0
 }
 
-/** Une líneas de presupuesto por id; sin id, conserva huérfanas con procedimiento. */
+function budgetFingerprint(item) {
+  return [
+    text(item.procedure).toLowerCase(),
+    String(item.toothNumber ?? item.tooth ?? item.anatomicalZone ?? ''),
+    String(item.unitPrice ?? ''),
+    text(item.cupsCode),
+    String(item.quantity ?? ''),
+  ].join('|')
+}
+
+function preferBudgetLine(previous, incoming) {
+  if (!previous) return incoming
+  if (!incoming) return previous
+  if (lineRichness(incoming) >= lineRichness(previous)) return { ...previous, ...incoming }
+  return { ...incoming, ...previous }
+}
+
+/** Une líneas por id. Sin id, usa procedimiento + diente + precio. Un duplicado exacto no se repite. */
 export function mergeBudgetItems(left, right) {
-  const byId = new Map()
-  const orphans = []
-
-  for (const item of [...asArray(left), ...asArray(right)]) {
-    if (!item || typeof item !== 'object') continue
-    if (!text(item.procedure) && lineRichness(item) === 0) continue
-    const id = text(item.id)
-    if (!id) {
-      orphans.push(item)
-      continue
-    }
-    const previous = byId.get(id)
-    if (!previous || lineRichness(item) >= lineRichness(previous)) {
-      byId.set(id, previous ? { ...previous, ...item } : item)
-    } else {
-      byId.set(id, { ...item, ...previous })
-    }
-  }
-
-  return [...byId.values(), ...orphans]
+  return dedupeClinicalItems([...asArray(left), ...asArray(right)], {
+    fingerprint: budgetFingerprint,
+    prefer: preferBudgetLine,
+  }).filter((item) => text(item.procedure) || lineRichness(item) > 0)
 }
 
 export function preferBudgetSummary(existing, incoming) {

@@ -5,6 +5,7 @@
  */
 
 import { withMergedClinicalBudgets } from './clinicalBudgetMerge.js'
+import { dedupeClinicalItems } from './clinicalListMerge.js'
 
 function asArray(value) {
   return Array.isArray(value) ? value : []
@@ -66,22 +67,23 @@ export function preferRicherPayment(left, right) {
  * Une abonos por `id`. Un autoguardado incompleto no puede borrar recibos
  * que otra terminal ya registró.
  */
+function paymentFingerprint(payment) {
+  return [
+    text(payment.paymentDate),
+    String(payment.amount ?? ''),
+    text(payment.paymentControlLineId),
+    text(payment.notes),
+    text(payment.concept || payment.procedure || payment.description),
+  ]
+    .join('|')
+    .toLowerCase()
+}
+
 export function mergePaymentRecords(left, right) {
-  const byId = new Map()
-  const orphans = []
-
-  for (const payment of [...asArray(left), ...asArray(right)]) {
-    if (!payment || typeof payment !== 'object') continue
-    const id = text(payment.id)
-    if (!id) {
-      orphans.push(payment)
-      continue
-    }
-    const previous = byId.get(id)
-    byId.set(id, previous ? preferRicherPayment(previous, payment) : payment)
-  }
-
-  const merged = [...byId.values(), ...orphans]
+  const merged = dedupeClinicalItems([...asArray(left), ...asArray(right)], {
+    fingerprint: paymentFingerprint,
+    prefer: preferRicherPayment,
+  })
   merged.sort((a, b) => {
     const dateCmp = String(a?.paymentDate || '').localeCompare(String(b?.paymentDate || ''))
     if (dateCmp !== 0) return dateCmp

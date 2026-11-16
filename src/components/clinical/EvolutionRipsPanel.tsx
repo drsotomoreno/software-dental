@@ -5,6 +5,7 @@ import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/useToast'
 import { listPatientElectronicInvoices } from '@/services/invoiceService'
+import { guardarHistorialRadicacionRips } from '@/db/ripsSubmissionsStore'
 import { routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
 import { Toast } from '@/components/ui/Toast'
 import {
@@ -415,14 +416,22 @@ export function EvolutionRipsPanel({
       })
       const cuv = resultado.cuv?.trim()
       if (cuv) {
+        const fechaTx = new Date().toISOString()
         publicar({
           ripsMetadata: {
             ...lista,
             ripsEstado: 'enviado_ok',
             cuv,
-            ripsFechaTransmision: new Date().toISOString(),
+            ripsFechaTransmision: fechaTx,
             ripsErrorLog: null,
           },
+        })
+        guardarHistorialRadicacionRips({
+          cuv,
+          cantidad_historias: 1,
+          estado: 'radicado',
+          payload_json: rips,
+          fecha_radicacion: fechaTx,
         })
         setVerCuv(true)
         showToast(`RIPS transmitido. CUV: ${cuv}`)

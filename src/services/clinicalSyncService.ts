@@ -566,6 +566,42 @@ export async function pullPatientDraftOnDemand(patientSyncId: string): Promise<b
 }
 
 /**
+ * Al abrir una ficha: baja borrador íntegro, historias firmadas y exámenes de ese paciente.
+ * Una historia firmada se fusiona como registro inmutable (el merge no la pisa con un borrador vacío).
+ */
+export async function pullPatientChartOnDemand(patientSyncId: string): Promise<boolean> {
+  const syncId = String(patientSyncId || '').trim()
+  if (!syncId) return false
+  const auth = getStoredApiAuth()
+  if (!auth?.token) return false
+  const { response, payload } = await syncFetch(
+    `/api/sync/patient/${encodeURIComponent(syncId)}`,
+    { timeoutMs: 45_000 },
+  )
+  if (!response.ok) {
+    console.warn('[Sync] pullPatientChartOnDemand failed', {
+      syncId,
+      status: response.status,
+      error: payload?.error,
+      code: payload?.code,
+    })
+    return false
+  }
+  const draft = payload?.draft
+  await applyClinicSnapshot(
+    {
+      clinicId: String(payload.clinicId || auth.clinicId || ''),
+      clinicalRecords: Array.isArray(payload.clinicalRecords) ? payload.clinicalRecords : [],
+      odontograms: Array.isArray(payload.odontograms) ? payload.odontograms : [],
+      diagnosticAids: Array.isArray(payload.diagnosticAids) ? payload.diagnosticAids : [],
+      drafts: draft ? [draft] : [],
+    } as import('@/types/clinicalSync').ClinicalSyncPullResponse,
+    { hydrateBlobs: false },
+  )
+  return true
+}
+
+/**
  * Tras login/pull slim: rehidrata valuationDraft de valorados que aún no lo tienen
  * en Dexie. Evita ficha vacía la primera vez que se abre Pacientes Valorados.
  */

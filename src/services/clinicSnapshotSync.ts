@@ -31,7 +31,6 @@ import {
   isSignedClinicalDocument,
   shouldReplaceClinicalDocument,
 } from '../../shared/clinicalRecordGuard.js'
-import { omitHeavyClinicalDraftForms } from '../../shared/clinicalSyncHeavyPayload.js'
 import { withMergedClinicalPayments } from '../../shared/paymentControlMerge.js'
 
 function paymentFingerprint(form: {
@@ -428,7 +427,7 @@ async function mergeDiagnosticAids(records: ClinicalSyncRecord[]): Promise<boole
     const id = String(payload.id || remote.syncId || '').trim()
     if (!id) continue
 
-    let tombstone: { id: string } | undefined
+    let tombstone: { id: string; explicitDelete?: boolean } | undefined
     try {
       tombstone = await db.deletedDiagnosticAids.get(id)
     } catch {
@@ -436,8 +435,10 @@ async function mergeDiagnosticAids(records: ClinicalSyncRecord[]): Promise<boole
     }
     const remoteDeletedAt = String(remote.deletedAt || payload.deletedAt || '').trim()
     const remoteAction = String(payload.action || '').toUpperCase()
-    // Tumba local o DELETE remoto: nunca reinsertar (Quitar debe prevalecer sobre pull).
-    if (tombstone || remoteDeletedAt || remoteAction === 'DELETE') {
+    const explicitRemoteDelete = payload.explicitDelete === true && (Boolean(remoteDeletedAt) || remoteAction === 'DELETE')
+    const explicitLocalDelete = tombstone?.explicitDelete === true
+    // Solo un Quitar explícito borra. Un Dexie vacío o un deletedAt sin bandera no es tumba.
+    if (explicitRemoteDelete || explicitLocalDelete) {
       const existing = await db.diagnosticAids.get(id)
       if (existing) {
         await db.diagnosticAids.delete(id)
@@ -450,6 +451,8 @@ async function mergeDiagnosticAids(records: ClinicalSyncRecord[]): Promise<boole
             clinicId: remote.clinicId || String(payload.clinicId || ''),
             fileName: String(payload.fileName || ''),
             deletedAt: remoteDeletedAt || new Date().toISOString(),
+            explicitDelete: true,
+            deletedBy: String(payload.deletedBy || ''),
           })
           changed = true
         } catch {
@@ -457,6 +460,14 @@ async function mergeDiagnosticAids(records: ClinicalSyncRecord[]): Promise<boole
         }
       }
       continue
+    }
+
+    if (tombstone && tombstone.explicitDelete !== true) {
+      try {
+        await db.deletedDiagnosticAids.delete(id)
+      } catch {
+        // La fila activa del servidor vuelve a Dexie.
+      }
     }
 
     const existing = await db.diagnosticAids.get(id)
@@ -882,7 +893,7 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
     }),
   )
 
-  const tombstones = await db.deletedDiagnosticAids.toArray()
+  const tombstones = (await db.deletedDiagnosticAids.toArray()).filter((row) => row.explicitDelete === true)
   const diagnosticAidsPayload = await Promise.all([
     ...diagnosticAids.map(async (row) => {
       const withPatient = await withPatientSyncId({ ...row, clinicId })
@@ -909,23 +920,24 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
           fileName: row.fileName || '',
           deletedAt,
           clinicId: row.clinicId || clinicId,
+          explicitDelete: true,
+          deletedBy: row.deletedBy || '',
         },
       }
     }),
   ])
 
-  // clinicalDraft pesado (>50 KB) solo en IndexedDB local; no inflar clinical-sync.json.
+  // El borrador viaja entero. El corte de 50 KB quedó solo en el listado masivo del servidor.
   const draftsPayload = await Promise.all(
     drafts.map(async (row) => {
       const withPatient = await withPatientSyncId({ ...row })
       const patientSyncId = await resolvePatientSyncId(String(withPatient.patientId))
       const syncId = `draft:${patientSyncId || withPatient.patientId}`
-      const record = toEntityRecord(
+      return toEntityRecord(
         { ...withPatient, patientSyncId } as unknown as Record<string, unknown>,
         clinicId,
         syncId,
       )
-      return omitHeavyClinicalDraftForms(record) as ClinicalSyncRecord
     }),
   )
 
@@ -949,6 +961,8 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
           ...meta,
           action: 'DELETE',
           deletedAt: updatedAt,
+          explicitDelete: true,
+          deletedBy: String((item as { deletedBy?: string }).deletedBy || ''),
           hasBinary: false,
         },
       }
