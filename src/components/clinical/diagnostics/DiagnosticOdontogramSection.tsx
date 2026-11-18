@@ -1,10 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Download, Stethoscope } from 'lucide-react'
-import type {
-  Cie10Diagnosis,
-  DiagnosisAnatomicalScope,
-  DiagnosisCertainty,
-} from '@/types/clinicalRecord'
+import { Download, Plus, Stethoscope } from 'lucide-react'
+import type { Cie10Diagnosis, DiagnosisCertainty } from '@/types/clinicalRecord'
+import type { ManualDiagnosisStatus } from '@/utils/importedCieEdit'
 import type { ClinicalDiagnosticChart, ClinicalDiagnosticToothEntry } from '@/types/clinicalDiagnosticChart'
 import {
   getDiagnosisChartColor,
@@ -54,14 +51,20 @@ interface DiagnosticOdontogramSectionProps {
   odontogramCieDiagnoses?: Cie10Diagnosis[]
   onImportOdontogramDiagnoses?: () => { added: number; updated: number }
   onChange: (value: ClinicalDiagnosticChart) => void
-  onEnsureDiagnosis?: (payload: { code: string; description: string; toothId: string }) => void
-  onAddAdditionalDiagnosis?: (
-    code: string,
-    description: string,
-    anatomicalScope: DiagnosisAnatomicalScope,
-  ) => void
+  onAssignToTooth?: (payload: {
+    code: string
+    description: string
+    toothId: string
+  }) => { status: ManualDiagnosisStatus; message: string }
+  onAddManualDiagnosis?: (payload: {
+    code: string
+    description: string
+    associationValue: string
+    type: Cie10Diagnosis['type']
+    certainty: DiagnosisCertainty
+  }) => { status: ManualDiagnosisStatus; message: string }
   onUpdateDiagnosis?: (code: string, patch: Partial<Cie10Diagnosis>) => void
-  onRemoveAdditionalDiagnosis?: (code: string) => void
+  onRemoveAdditionalDiagnosis?: (code: string, replacementPrincipalCode?: string) => boolean
   onDetachTeeth?: (toothIds: string[]) => void
   onReassignImportedCie?: (payload: {
     fromCode: string
@@ -144,8 +147,8 @@ export function DiagnosticOdontogramSection({
   odontogramCieDiagnoses = [],
   onImportOdontogramDiagnoses,
   onChange,
-  onEnsureDiagnosis,
-  onAddAdditionalDiagnosis,
+  onAssignToTooth,
+  onAddManualDiagnosis,
   onUpdateDiagnosis,
   onRemoveAdditionalDiagnosis,
   onDetachTeeth,
@@ -159,14 +162,29 @@ export function DiagnosticOdontogramSection({
   const [editQuery, setEditQuery] = useState('')
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const [actionNotice, setActionNotice] = useState<string | null>(null)
-  const [associationValue, setAssociationValue] = useState('')
-  const [pendingCie, setPendingCie] = useState<{ code: string; description: string } | null>(null)
+  const [listNotice, setListNotice] = useState<string | null>(null)
+  const [addQuery, setAddQuery] = useState('')
+  const [pendingAdd, setPendingAdd] = useState<{ code: string; description: string } | null>(null)
+  const [addAssociation, setAddAssociation] = useState('')
+  const [associationTouched, setAssociationTouched] = useState(false)
+  const [addType, setAddType] = useState<Cie10Diagnosis['type'] | null>(null)
+  const [addCertainty, setAddCertainty] = useState<DiagnosisCertainty>('impresion')
+  const [addNotice, setAddNotice] = useState<string | null>(null)
+  const [addNoticeTone, setAddNoticeTone] = useState<'ok' | 'warn'>('ok')
+  const [pendingRemoval, setPendingRemoval] = useState<{ code: string; replacement: string } | null>(
+    null,
+  )
 
   const cie10Results = useCatalogSearch('cie10', cieSearch, 30)
+  const addResults = useCatalogSearch('cie10', addQuery, 30)
   const editResults = useCatalogSearch('cie10', editingCode ? editQuery : '', 30)
   const cie10Meta = useCatalogMeta('cie10')
   const filteredCie10 = cie10Results ?? []
+  const filteredAddCie10 = addResults ?? []
   const filteredEditCie10 = editResults ?? []
+  const hasPrincipal = diagnoses.some((diagnosis) => diagnosis.type === 'principal')
+  const effectiveAddType = addType ?? (hasPrincipal ? 'relacionado' : 'principal')
+  const canSubmitManual = Boolean(pendingAdd && parseDiagnosisAssociation(addAssociation))
   const canImportOdontogramCie = odontogramCieDiagnoses.length > 0
 
   const visualPlan = useMemo(() => toVisualPlan(chart.entries), [chart.entries])
@@ -228,29 +246,18 @@ export function DiagnosticOdontogramSection({
 
   const handleSelectTooth = (dienteId: string) => {
     if (disabled) return
-    setSelectedToothId((current) => (current === dienteId ? null : dienteId))
+    const next = selectedToothId === dienteId ? null : dienteId
+    setSelectedToothId(next)
+    if (!associationTouched) setAddAssociation(next ? `tooth:${next}` : '')
     setCieSearch('')
     setActionNotice(null)
   }
 
   const paintDiagnosisOnTooth = (toothId: string, code: string, description: string) => {
     if (disabled) return
-    const withoutCurrent = chart.entries.filter((entry) => entry.dienteId !== toothId)
-    onEnsureDiagnosis?.({ code, description, toothId })
-    updateChart({
-      entries: [
-        ...withoutCurrent,
-        {
-          dienteId: toothId,
-          diagnosisCode: code,
-          diagnosisDescription: description,
-          color: diagnosisColorMap.get(code) ?? getDiagnosisChartColor(diagnosisColorMap.size),
-        },
-      ],
-    })
+    const result = onAssignToTooth?.({ code, description, toothId })
     setCieSearch('')
-    setPendingCie(null)
-    setActionNotice(null)
+    setActionNotice(result?.message ?? null)
   }
 
   const assignDiagnosisCode = (code: string, description: string) => {
@@ -258,54 +265,35 @@ export function DiagnosticOdontogramSection({
     paintDiagnosisOnTooth(selectedToothId, code, description)
   }
 
-  const addScopedDiagnosis = (code: string, description: string, scope: DiagnosisAnatomicalScope) => {
-    if (disabled) return
-    const existing = diagnoses.find((diagnosis) => diagnosis.code === code)
-    if (existing) {
-      const hasTeeth =
-        (existing.affectedTeeth?.length ?? 0) > 0 ||
-        chart.entries.some((entry) => entry.diagnosisCode === code)
-      if (!hasTeeth && !existing.anatomicalScope) {
-        onUpdateDiagnosis?.(code, { anatomicalScope: scope, affectedTeeth: undefined })
-        setCieSearch('')
-        setPendingCie(null)
-        setActionNotice(null)
-        return
-      }
-      setActionNotice(`${code} ya está en la lista. Seleccione una pieza del esquema para asignarlo.`)
-      setCieSearch('')
-      setPendingCie(null)
-      return
-    }
-    onAddAdditionalDiagnosis?.(code, description, scope)
-    setCieSearch('')
-    setPendingCie(null)
-    setActionNotice(null)
-  }
-
-  const commitAdditionalDiagnosis = (code: string, description: string, value: string) => {
-    const association = parseDiagnosisAssociation(value)
-    if (!association) {
-      setPendingCie({ code, description })
-      setActionNotice(
-        `Asocie ${code} a un diente, a un maxilar o a toda la dentición.`,
-      )
-      setCieSearch('')
-      return
-    }
-    if (association.kind === 'tooth') {
-      paintDiagnosisOnTooth(String(association.toothNumber), code, description)
-      return
-    }
-    addScopedDiagnosis(code, description, association.scope)
-  }
-
   const applySearchResult = (code: string, description: string) => {
-    if (selectedToothId) {
-      assignDiagnosisCode(code, description)
+    if (!selectedToothId) return
+    assignDiagnosisCode(code, description)
+  }
+
+  const submitManualDiagnosis = () => {
+    if (disabled) return
+    if (!pendingAdd || !parseDiagnosisAssociation(addAssociation)) {
+      setAddNotice(
+        'Elija un código del catálogo y asocie el diagnóstico a un diente, a un maxilar o a toda la dentición.',
+      )
+      setAddNoticeTone('warn')
       return
     }
-    commitAdditionalDiagnosis(code, description, associationValue)
+    const result = onAddManualDiagnosis?.({
+      code: pendingAdd.code,
+      description: pendingAdd.description,
+      associationValue: addAssociation,
+      type: effectiveAddType,
+      certainty: addCertainty,
+    })
+    setAddNotice(result?.message ?? null)
+    setAddNoticeTone(result?.status === 'added' || result?.status === 'attached' ? 'ok' : 'warn')
+    if (result?.status === 'added' || result?.status === 'attached') {
+      setPendingAdd(null)
+      setAddQuery('')
+      setAddType(null)
+      setAddCertainty('impresion')
+    }
   }
 
   const clearSelectedTooth = () => {
@@ -325,6 +313,7 @@ export function DiagnosticOdontogramSection({
     if (disabled || chart.entries.length === 0) return
     updateChart({ entries: [] })
     setSelectedToothId(null)
+    if (!associationTouched) setAddAssociation('')
   }
 
   const importOdontogramCie = () => {
@@ -362,8 +351,8 @@ export function DiagnosticOdontogramSection({
             {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.diagnosticos, 'Diagnósticos')}
           </h3>
           <p className="mt-1 text-sm text-slate-500">
-            Elija una pieza en el esquema y asígnele el CIE-10. Un diagnóstico adicional se asocia
-            a un diente, a un maxilar o a toda la dentición.
+            Importe los diagnósticos del odontograma o añada un CIE-10 del catálogo. Cada
+            diagnóstico queda asociado a un diente, a un maxilar o a toda la dentición.
           </p>
         </div>
         {!disabled && onImportOdontogramDiagnoses && (
@@ -489,18 +478,16 @@ export function DiagnosticOdontogramSection({
                 </p>
               ) : (
                 <p className="text-sm text-slate-500">
-                  Seleccione una pieza para asignarle un CIE-10, o agregue un diagnóstico adicional
-                  asociado a un diente, a un maxilar o a toda la dentición.
+                  Seleccione una pieza para marcarla en el esquema, o añada un diagnóstico con el
+                  formulario de abajo.
                 </p>
               )}
 
-              {!disabled && (
+              {!disabled && selectedToothId && (
                 <div className="mt-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <label className="text-xs font-medium text-slate-600" htmlFor="diagnostic-chart-cie-search">
-                      {selectedToothId
-                        ? `Asignar CIE-10 a la pieza ${selectedToothId}`
-                        : 'Agregar diagnóstico adicional'}
+                      {`Asignar CIE-10 a la pieza ${selectedToothId}`}
                       {catalogHint && (
                         <span className="ml-1 font-normal text-slate-400">{catalogHint}</span>
                       )}
@@ -511,32 +498,6 @@ export function DiagnosticOdontogramSection({
                       onValueChange={setCieSearch}
                     />
                   </div>
-                  {!selectedToothId && (
-                    <div>
-                      <label
-                        className="mb-1 block text-xs font-medium text-slate-600"
-                        htmlFor="diagnostic-additional-association"
-                      >
-                        Asociar a
-                      </label>
-                      <select
-                        id="diagnostic-additional-association"
-                        value={associationValue}
-                        onChange={(event) => {
-                          const nextValue = event.target.value
-                          setAssociationValue(nextValue)
-                          setActionNotice(null)
-                          if (pendingCie && parseDiagnosisAssociation(nextValue)) {
-                            const pending = pendingCie
-                            commitAdditionalDiagnosis(pending.code, pending.description, nextValue)
-                          }
-                        }}
-                        className={`input-field text-sm ${pendingCie ? 'border-amber-400' : ''}`}
-                      >
-                        <DiagnosisAssociationOptions />
-                      </select>
-                    </div>
-                  )}
                   <input
                     id="diagnostic-chart-cie-search"
                     type="search"
@@ -545,7 +506,6 @@ export function DiagnosticOdontogramSection({
                     onChange={(event) => {
                       setCieSearch(event.target.value)
                       setActionNotice(null)
-                      setPendingCie(null)
                     }}
                     className="input-field text-sm"
                   />
@@ -555,10 +515,7 @@ export function DiagnosticOdontogramSection({
                     onSelect={applySearchResult}
                   />
                   {actionNotice && (
-                    <p
-                      className={`text-xs font-medium ${pendingCie ? 'text-amber-700' : 'text-dental-700'}`}
-                      role="status"
-                    >
+                    <p className="text-xs font-medium text-dental-700" role="status">
                       {actionNotice}
                     </p>
                   )}
@@ -589,11 +546,160 @@ export function DiagnosticOdontogramSection({
             )}
           </div>
 
+          {!disabled && (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+              <div>
+                <h4 className="text-sm font-semibold text-slate-800">Añadir diagnóstico</h4>
+                <p className="mt-1 text-xs text-slate-500">
+                  El código y la descripción salen del catálogo CIE-10. No se escribe un diagnóstico
+                  a mano.
+                </p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <label className="text-xs font-medium text-slate-600" htmlFor="diagnostic-add-cie-search">
+                      Código CIE-10
+                      {catalogHint && (
+                        <span className="ml-1 font-normal text-slate-400">{catalogHint}</span>
+                      )}
+                    </label>
+                    <VoiceDictationButton
+                      targetInputId="diagnostic-add-cie-search"
+                      getValue={() => addQuery}
+                      onValueChange={setAddQuery}
+                    />
+                  </div>
+                  {pendingAdd ? (
+                    <div className="flex items-start justify-between gap-2 rounded-lg border border-dental-200 bg-dental-50 px-3 py-2 text-sm">
+                      <p>
+                        <span className="font-mono font-medium text-dental-700">{pendingAdd.code}</span>
+                        {' — '}
+                        {pendingAdd.description}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPendingAdd(null)
+                          setAddNotice(null)
+                        }}
+                        className="shrink-0 text-xs text-slate-500 hover:text-slate-700"
+                      >
+                        Cambiar
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        id="diagnostic-add-cie-search"
+                        type="search"
+                        placeholder="Buscar código o descripción CIE-10..."
+                        value={addQuery}
+                        onChange={(event) => {
+                          setAddQuery(event.target.value)
+                          setAddNotice(null)
+                        }}
+                        className="input-field text-sm"
+                      />
+                      <CieSearchResults
+                        query={addQuery}
+                        results={filteredAddCie10}
+                        onSelect={(code, description) => {
+                          setPendingAdd({ code, description })
+                          setAddQuery('')
+                          setAddNotice(null)
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="diagnostic-add-association">
+                    Asociar a
+                  </label>
+                  <select
+                    id="diagnostic-add-association"
+                    value={addAssociation}
+                    onChange={(event) => {
+                      setAssociationTouched(true)
+                      setAddAssociation(event.target.value)
+                      setAddNotice(null)
+                    }}
+                    className={`input-field text-sm ${pendingAdd && !addAssociation ? 'border-amber-400' : ''}`}
+                  >
+                    <DiagnosisAssociationOptions />
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="diagnostic-add-type">
+                    Tipo
+                  </label>
+                  <select
+                    id="diagnostic-add-type"
+                    value={effectiveAddType}
+                    onChange={(event) => {
+                      setAddType(event.target.value as Cie10Diagnosis['type'])
+                      setAddNotice(null)
+                    }}
+                    className="input-field text-sm"
+                  >
+                    <option value="principal">Principal</option>
+                    <option value="relacionado">Relacionado</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="diagnostic-add-certainty">
+                    Certeza
+                  </label>
+                  <select
+                    id="diagnostic-add-certainty"
+                    value={addCertainty}
+                    onChange={(event) => {
+                      setAddCertainty(event.target.value as DiagnosisCertainty)
+                      setAddNotice(null)
+                    }}
+                    className="input-field text-sm"
+                  >
+                    {Object.entries(DIAGNOSIS_CERTAINTY_LABELS).map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={submitManualDiagnosis}
+                  disabled={!canSubmitManual}
+                  className="inline-flex items-center rounded-lg bg-dental-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-dental-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  Añadir diagnóstico
+                </button>
+                {addNotice && (
+                  <p
+                    className={`text-xs font-medium ${addNoticeTone === 'warn' ? 'text-amber-700' : 'text-dental-700'}`}
+                    role="status"
+                  >
+                    {addNotice}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           <div>
             <h4 className="text-sm font-semibold text-slate-800">Diagnósticos registrados</h4>
+            {listNotice && (
+              <p className="mt-1 text-xs font-medium text-amber-700" role="status">
+                {listNotice}
+              </p>
+            )}
             {rows.length === 0 ? (
               <p className="mt-2 text-sm text-slate-500">
-                Todavía no hay diagnósticos. Use la búsqueda o importe los del odontograma.
+                Todavía no hay diagnósticos. Añada uno del catálogo o importe los del odontograma.
               </p>
             ) : (
               <ul className="mt-2 space-y-2">
@@ -657,11 +763,20 @@ export function DiagnosticOdontogramSection({
                           <>
                             <select
                               value={row.diagnosis.type}
-                              onChange={(event) =>
-                                onUpdateDiagnosis?.(row.code, {
-                                  type: event.target.value as Cie10Diagnosis['type'],
-                                })
-                              }
+                              onChange={(event) => {
+                                const nextType = event.target.value as Cie10Diagnosis['type']
+                                const solePrincipal =
+                                  row.diagnosis?.type === 'principal' &&
+                                  diagnoses.filter((item) => item.type === 'principal').length === 1
+                                if (nextType === 'relacionado' && solePrincipal) {
+                                  setListNotice(
+                                    'Para cambiar el principal, marque Principal en otro diagnóstico.',
+                                  )
+                                  return
+                                }
+                                setListNotice(null)
+                                onUpdateDiagnosis?.(row.code, { type: nextType })
+                              }}
                               className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs"
                               aria-label={`Tipo de ${row.code}`}
                             >
@@ -733,7 +848,18 @@ export function DiagnosticOdontogramSection({
                         {!disabled && (
                           <button
                             type="button"
-                            onClick={() => onRemoveAdditionalDiagnosis?.(row.code)}
+                            onClick={() => {
+                              const others = diagnoses.filter((item) => item.code !== row.code)
+                              if (row.diagnosis?.type === 'principal' && others.length > 0) {
+                                setPendingRemoval({ code: row.code, replacement: others[0].code })
+                                setListNotice(null)
+                                return
+                              }
+                              setPendingRemoval((current) =>
+                                current?.code === row.code ? null : current,
+                              )
+                              onRemoveAdditionalDiagnosis?.(row.code)
+                            }}
                             className="ml-auto text-red-500 hover:text-red-700"
                             aria-label={`Quitar ${row.code}`}
                           >
@@ -741,6 +867,53 @@ export function DiagnosticOdontogramSection({
                           </button>
                         )}
                       </div>
+
+                      {pendingRemoval?.code === row.code && !disabled && (
+                        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2">
+                          <label
+                            className="text-xs text-amber-800"
+                            htmlFor={`diagnosis-replacement-${row.code}`}
+                          >
+                            Este diagnóstico es el principal. Elija el que queda como principal.
+                          </label>
+                          <select
+                            id={`diagnosis-replacement-${row.code}`}
+                            value={pendingRemoval.replacement}
+                            onChange={(event) =>
+                              setPendingRemoval({ code: row.code, replacement: event.target.value })
+                            }
+                            className="rounded border border-amber-300 bg-white px-1.5 py-0.5 text-xs"
+                          >
+                            {diagnoses
+                              .filter((item) => item.code !== row.code)
+                              .map((item) => (
+                                <option key={item.code} value={item.code}>
+                                  {item.code} — {item.description}
+                                </option>
+                              ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const removed = onRemoveAdditionalDiagnosis?.(
+                                row.code,
+                                pendingRemoval.replacement,
+                              )
+                              if (removed) setPendingRemoval(null)
+                            }}
+                            className="rounded border border-red-200 bg-white px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                          >
+                            Quitar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPendingRemoval(null)}
+                            className="text-xs text-slate-500 hover:text-slate-700"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      )}
 
                       {row.pieces.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5">

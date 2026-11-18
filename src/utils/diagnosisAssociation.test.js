@@ -132,3 +132,32 @@ test('exige asociación al cerrar la atención si el diagnóstico adicional no t
     false,
   )
 })
+
+test('rechaza más de un diagnóstico principal', () => {
+  const issues = validateClinicalRecordDraft({
+    anamnesis: { chiefComplaint: 'Dolor' },
+    diagnosticChart: { entries: [], notes: '' },
+    treatmentPlan: [{ procedure: 'Control' }],
+    budgetItems: [{ procedure: 'Control' }],
+    diagnoses: [
+      {
+        code: 'K02.1',
+        description: 'Caries de la dentina',
+        type: 'principal',
+        certainty: 'impresion',
+        affectedTeeth: [16],
+      },
+      {
+        code: 'K05.1',
+        description: 'Gingivitis crónica',
+        type: 'principal',
+        certainty: 'impresion',
+        anatomicalScope: 'maxilar_superior',
+      },
+    ],
+  })
+  assert.equal(
+    issues.some((issue) => issue.includes('más de un diagnóstico principal')),
+    true,
+  )
+})

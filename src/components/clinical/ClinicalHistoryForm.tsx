@@ -7,12 +7,15 @@ import {
   syncClinicalDataFromOdontogram,
   syncClinicalDataFromOrthodonticsAnnex,
   syncClinicalDataFromEndodonticsAnnex,
-  assignCieToTooth,
+  addManualDiagnosis,
   collectOdontogramCieDiagnoses,
   detachTeethFromDiagnoses,
+  diagnosisRecordUsage,
   importOdontogramCieDiagnoses,
   reassignDiagnosticChartCie,
   reassignImportedDiagnosisCie,
+  removeDiagnosisFromRecord,
+  setDiagnosisType,
   createEmptyOrthodonticsBudget,
   createEmptyDentalImplantsBudget,
 } from '@/utils'
@@ -378,9 +381,39 @@ export function ClinicalHistoryForm({
   }
 
   const updateDiagnosis = (code: string, patch: Partial<Cie10Diagnosis>) => {
+    const { type, ...rest } = patch
+    let diagnoses = type ? setDiagnosisType(form.diagnoses, code, type) : form.diagnoses
+    if (Object.keys(rest).length > 0) {
+      diagnoses = diagnoses.map((diagnosis) =>
+        diagnosis.code === code ? { ...diagnosis, ...rest } : diagnosis,
+      )
+    }
+    const chart = normalizeClinicalDiagnosticChart(form.diagnosticChart)
+    const diagnosticChart = rest.anatomicalScope
+      ? {
+          ...chart,
+          entries: chart.entries.filter((entry) => entry.diagnosisCode !== code),
+        }
+      : undefined
+    if (diagnoses === form.diagnoses && !diagnosticChart) return
     update({
-      diagnoses: form.diagnoses.map((d) => (d.code === code ? { ...d, ...patch } : d)),
+      diagnoses,
+      ...(diagnosticChart ? { diagnosticChart } : {}),
     })
+  }
+
+  const usageConfirmation = (code: string): boolean => {
+    const usage = diagnosisRecordUsage(form, code)
+    if (usage.length === 0) return true
+    const where =
+      usage.length === 1
+        ? usage[0]
+        : usage.length === 2
+          ? `${usage[0]} y ${usage[1]}`
+          : `${usage.slice(0, -1).join(', ')} y ${usage[usage.length - 1]}`
+    return window.confirm(
+      `${code} también figura en ${where}. Esas filas conservan el código registrado. ¿Quitar el diagnóstico de esta sección?`,
+    )
   }
 
   const affectedTeeth = useMemo(
@@ -479,13 +512,29 @@ export function ClinicalHistoryForm({
           odontogramCieDiagnoses={odontogramCieDiagnoses}
           onImportOdontogramDiagnoses={importOdontogramDiagnoses}
           onChange={(diagnosticChart) => update({ diagnosticChart })}
-          onEnsureDiagnosis={({ code, description, toothId }) => {
-            const diagnoses = assignCieToTooth(form.diagnoses, {
+          onAssignToTooth={({ code, description, toothId }) => {
+            const result = addManualDiagnosis(form.diagnoses, form.diagnosticChart, {
               code,
               description,
-              toothNumber: Number(toothId),
+              associationValue: `tooth:${toothId}`,
             })
-            if (diagnoses !== form.diagnoses) update({ diagnoses })
+            if (result.status === 'added' || result.status === 'attached') {
+              update({ diagnoses: result.diagnoses, diagnosticChart: result.chart })
+            }
+            return { status: result.status, message: result.message }
+          }}
+          onAddManualDiagnosis={({ code, description, associationValue, type, certainty }) => {
+            const result = addManualDiagnosis(form.diagnoses, form.diagnosticChart, {
+              code,
+              description,
+              associationValue,
+              type,
+              certainty,
+            })
+            if (result.status === 'added' || result.status === 'attached') {
+              update({ diagnoses: result.diagnoses, diagnosticChart: result.chart })
+            }
+            return { status: result.status, message: result.message }
           }}
           onDetachTeeth={(toothIds) => {
             const diagnoses = detachTeethFromDiagnoses(
@@ -494,32 +543,18 @@ export function ClinicalHistoryForm({
             )
             if (diagnoses !== form.diagnoses) update({ diagnoses })
           }}
-          onAddAdditionalDiagnosis={(code, description, anatomicalScope) => {
-            if (form.diagnoses.some((diagnosis) => diagnosis.code === code)) return
-            update({
-              diagnoses: [
-                ...form.diagnoses,
-                {
-                  code,
-                  description,
-                  type: form.diagnoses.length === 0 ? 'principal' : 'relacionado',
-                  certainty: 'impresion',
-                  source: 'manual',
-                  anatomicalScope,
-                },
-              ],
-            })
-          }}
           onUpdateDiagnosis={updateDiagnosis}
-          onRemoveAdditionalDiagnosis={(code) => {
-            const diagnosticChart = normalizeClinicalDiagnosticChart(form.diagnosticChart)
-            update({
-              diagnoses: form.diagnoses.filter((diagnosis) => diagnosis.code !== code),
-              diagnosticChart: {
-                ...diagnosticChart,
-                entries: diagnosticChart.entries.filter((entry) => entry.diagnosisCode !== code),
-              },
-            })
+          onRemoveAdditionalDiagnosis={(code, replacementPrincipalCode) => {
+            if (!usageConfirmation(code)) return false
+            const result = removeDiagnosisFromRecord(
+              form.diagnoses,
+              form.diagnosticChart,
+              code,
+              replacementPrincipalCode,
+            )
+            if (result.status !== 'removed') return false
+            update({ diagnoses: result.diagnoses, diagnosticChart: result.chart })
+            return true
           }}
           onReassignImportedCie={({ fromCode, toCode, toDescription, toothNumber }) => {
             const chart = normalizeClinicalDiagnosticChart(form.diagnosticChart)

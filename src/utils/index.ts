@@ -25,10 +25,14 @@ export {
   mergeFindingsWithOdontogram,
 } from './odontogramDiagnosis'
 export {
+  addManualDiagnosis,
   assignCieToTooth,
   detachTeethFromDiagnoses,
+  diagnosisRecordUsage,
   reassignDiagnosticChartCie,
   reassignImportedDiagnosisCie,
+  removeDiagnosisFromRecord,
+  setDiagnosisType,
 } from './importedCieEdit'
 export {
   suggestTreatmentFromOdontogram,

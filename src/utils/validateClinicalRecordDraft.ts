@@ -53,6 +53,14 @@ export function validateClinicalRecordDraft(
     )
   }
 
+  const principals = diagnoses.filter((diagnosis) => diagnosis.type === 'principal')
+  if (principals.length > 1) {
+    const codes = principals.map((diagnosis) => diagnosis.code).join(', ')
+    issues.push(
+      `Hay más de un diagnóstico principal (${codes}). Deje solo uno antes de cerrar la atención.`,
+    )
+  }
+
   const treatmentPlan = draft?.treatmentPlan
   const hasProcedure =
     Array.isArray(treatmentPlan) && treatmentPlan.some((item) => hasText(item?.procedure))

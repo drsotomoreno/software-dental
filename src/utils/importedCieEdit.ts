@@ -1,5 +1,62 @@
+import { DIAGNOSIS_ANATOMICAL_SCOPE_LABELS } from '../constants/dental.ts'
 import type { ClinicalDiagnosticChart } from '../types/clinicalDiagnosticChart.ts'
-import type { Cie10Diagnosis } from '../types/clinicalRecord.ts'
+import type { Cie10Diagnosis, DiagnosisCertainty } from '../types/clinicalRecord.ts'
+import { parseDiagnosisAssociation } from './diagnosisAssociation.ts'
+
+/** Mismas 32 piezas permanentes del esquema. Los temporales se guardan solo en la lista. */
+const PERMANENT_CHART_TEETH = new Set([
+  '18', '17', '16', '15', '14', '13', '12', '11',
+  '21', '22', '23', '24', '25', '26', '27', '28',
+  '31', '32', '33', '34', '35', '36', '37', '38',
+  '41', '42', '43', '44', '45', '46', '47', '48',
+])
+
+const CHART_COLORS = [
+  '#3B82F6',
+  '#EF4444',
+  '#8B5CF6',
+  '#F97316',
+  '#0D9488',
+  '#EC4899',
+  '#CA8A04',
+  '#64748B',
+] as const
+
+function isPermanentChartTooth(toothId: string | number): boolean {
+  return PERMANENT_CHART_TEETH.has(String(toothId))
+}
+
+function chartColorAt(index: number): string {
+  return CHART_COLORS[index % CHART_COLORS.length]
+}
+
+function normalizeChart(
+  data?: Partial<ClinicalDiagnosticChart> | null,
+): ClinicalDiagnosticChart {
+  const entries = Array.isArray(data?.entries)
+    ? data.entries
+        .filter((entry) => {
+          if (!entry || typeof entry !== 'object') return false
+          const dienteId = String(entry.dienteId ?? '')
+          return (
+            PERMANENT_CHART_TEETH.has(dienteId) &&
+            typeof entry.diagnosisCode === 'string' &&
+            entry.diagnosisCode.trim() !== '' &&
+            typeof entry.diagnosisDescription === 'string'
+          )
+        })
+        .map((entry) => ({
+          dienteId: String(entry.dienteId),
+          diagnosisCode: entry.diagnosisCode.trim(),
+          diagnosisDescription: entry.diagnosisDescription.trim(),
+          color: typeof entry.color === 'string' && entry.color ? entry.color : CHART_COLORS[0],
+        }))
+    : []
+  return {
+    entries,
+    notes: typeof data?.notes === 'string' ? data.notes : '',
+  }
+}
 
 export interface ReassignImportedCieParams {
   fromCode: string
@@ -315,4 +372,369 @@ export function reassignDiagnosticChartCie(
 
   if (!changed) return chart
   return { ...chart, entries }
+}
+
+export type ManualDiagnosisStatus = 'added' | 'attached' | 'duplicate' | 'invalid'
+
+export interface ManualDiagnosisResult {
+  diagnoses: Cie10Diagnosis[]
+  chart: ClinicalDiagnosticChart
+  status: ManualDiagnosisStatus
+  message: string
+}
+
+export interface AddManualDiagnosisParams {
+  code: string
+  description: string
+  /** `tooth:NN`, `maxilar_superior`, `maxilar_inferior` o `denticion`. */
+  associationValue: string
+  type?: Cie10Diagnosis['type']
+  certainty?: DiagnosisCertainty
+}
+
+function resultOf(
+  diagnoses: Cie10Diagnosis[],
+  chart: ClinicalDiagnosticChart,
+  status: ManualDiagnosisStatus,
+  message: string,
+): ManualDiagnosisResult {
+  return { diagnoses, chart, status, message }
+}
+
+function chartColorFor(chart: ClinicalDiagnosticChart, code: string): string {
+  const existing = chart.entries.find((entry) => entry.diagnosisCode === code)?.color
+  if (existing) return existing
+  const used = new Set(chart.entries.map((entry) => entry.diagnosisCode))
+  return chartColorAt(used.size)
+}
+
+function paintChartTooth(
+  chart: ClinicalDiagnosticChart,
+  toothNumber: number,
+  code: string,
+  description: string,
+): ClinicalDiagnosticChart {
+  const dienteId = String(toothNumber)
+  if (!isPermanentChartTooth(dienteId)) return chart
+  return {
+    ...chart,
+    entries: [
+      ...chart.entries.filter((entry) => entry.dienteId !== dienteId),
+      {
+        dienteId,
+        diagnosisCode: code,
+        diagnosisDescription: description,
+        color: chartColorFor(chart, code),
+      },
+    ],
+  }
+}
+
+function releaseTooth(
+  diagnoses: Cie10Diagnosis[],
+  toothNumber: number,
+  keepCode: string,
+): Cie10Diagnosis[] {
+  return diagnoses.map((diagnosis) => {
+    if (diagnosis.code === keepCode) return diagnosis
+    const teeth = diagnosis.affectedTeeth ?? []
+    if (!teeth.includes(toothNumber)) return diagnosis
+    const remaining = teeth.filter((tooth) => tooth !== toothNumber)
+    return {
+      ...copyDiagnosis(diagnosis),
+      affectedTeeth: remaining.length > 0 ? remaining : undefined,
+    }
+  })
+}
+
+function withRequestedPrincipal(
+  diagnoses: Cie10Diagnosis[],
+  code: string,
+  requested: Cie10Diagnosis['type'],
+): Cie10Diagnosis[] {
+  const hasOtherPrincipal = diagnoses.some(
+    (diagnosis) => diagnosis.code !== code && diagnosis.type === 'principal',
+  )
+  const makePrincipal = requested === 'principal' || !hasOtherPrincipal
+  return diagnoses.map((diagnosis) => {
+    if (diagnosis.code === code) {
+      return { ...copyDiagnosis(diagnosis), type: makePrincipal ? 'principal' : 'relacionado' }
+    }
+    if (makePrincipal && diagnosis.type === 'principal') {
+      return { ...copyDiagnosis(diagnosis), type: 'relacionado' }
+    }
+    return diagnosis
+  })
+}
+
+function scopeLabel(scope: NonNullable<Cie10Diagnosis['anatomicalScope']>): string {
+  return DIAGNOSIS_ANATOMICAL_SCOPE_LABELS[scope]
+}
+
+/**
+ * Alta o asociación de un CIE elegido en el catálogo.
+ * El llamador entrega código y descripción del catálogo: aquí no hay texto libre.
+ * Una pieza queda en un solo diagnóstico. Si el código anterior se queda sin piezas, la fila se conserva.
+ */
+export function addManualDiagnosis(
+  diagnoses: Cie10Diagnosis[],
+  chartInput: ClinicalDiagnosticChart | Partial<ClinicalDiagnosticChart> | undefined,
+  params: AddManualDiagnosisParams,
+): ManualDiagnosisResult {
+  const chart = normalizeChart(chartInput)
+  const code = params.code.trim()
+  const description = params.description.trim()
+  const association = parseDiagnosisAssociation(params.associationValue ?? '')
+  if (!code || !description || !association) {
+    return resultOf(
+      diagnoses,
+      chart,
+      'invalid',
+      'Elija un código del catálogo y asocie el diagnóstico a un diente, a un maxilar o a toda la dentición.',
+    )
+  }
+
+  const requestedType = params.type === 'principal' ? 'principal' : 'relacionado'
+  const certainty = params.certainty ?? 'impresion'
+  const existing = diagnoses.find((diagnosis) => diagnosis.code === code)
+
+  if (association.kind === 'scope') {
+    const scope = association.scope
+    const hasTeeth =
+      (existing?.affectedTeeth?.length ?? 0) > 0 ||
+      chart.entries.some((entry) => entry.diagnosisCode === code)
+    if (existing && (hasTeeth || existing.anatomicalScope)) {
+      const where = existing.anatomicalScope
+        ? scopeLabel(existing.anatomicalScope)
+        : 'piezas del esquema'
+      return resultOf(
+        diagnoses,
+        chart,
+        'duplicate',
+        hasTeeth
+          ? `${code} ya está asociado a piezas. Para pasarlo a un maxilar o a toda la dentición, quite primero esas piezas.`
+          : `${code} ya está asociado a ${where}. Cambie la asociación en la lista.`,
+      )
+    }
+
+    const nextChart = {
+      ...chart,
+      entries: chart.entries.filter((entry) => entry.diagnosisCode !== code),
+    }
+    if (existing) {
+      const next = diagnoses.map((diagnosis) =>
+        diagnosis.code === code
+          ? { ...copyDiagnosis(diagnosis), anatomicalScope: scope, affectedTeeth: undefined }
+          : diagnosis,
+      )
+      return resultOf(next, nextChart, 'attached', `Se asoció ${code} a ${scopeLabel(scope)}.`)
+    }
+
+    const created: Cie10Diagnosis = {
+      code,
+      description,
+      type: 'relacionado',
+      certainty,
+      source: 'manual',
+      anatomicalScope: scope,
+    }
+    const next = withRequestedPrincipal([...diagnoses, created], code, requestedType)
+    const storedPrincipal = next.find((diagnosis) => diagnosis.code === code)?.type === 'principal'
+    const promoted =
+      storedPrincipal && requestedType === 'relacionado'
+        ? ' Quedó como principal porque la sección no tenía otro.'
+        : ''
+    return resultOf(
+      next,
+      nextChart,
+      'added',
+      `Se añadió ${code} — ${description} (${scopeLabel(scope)}).${promoted}`,
+    )
+  }
+
+  const toothNumber = association.toothNumber
+  const paintedHere = chart.entries.some(
+    (entry) => entry.dienteId === String(toothNumber) && entry.diagnosisCode === code,
+  )
+  const alreadyListed = (existing?.affectedTeeth ?? []).includes(toothNumber)
+  if (existing && alreadyListed && (paintedHere || !isPermanentChartTooth(toothNumber))) {
+    return resultOf(
+      diagnoses,
+      chart,
+      'duplicate',
+      `${code} ya está asociado a la pieza ${toothNumber}.`,
+    )
+  }
+
+  const previousTeeth = new Map(
+    diagnoses.map((diagnosis) => [diagnosis.code, new Set(diagnosis.affectedTeeth ?? [])]),
+  )
+  let next = releaseTooth(diagnoses, toothNumber, code)
+  const current = next.find((diagnosis) => diagnosis.code === code)
+  const chartBase = current?.anatomicalScope
+    ? { ...chart, entries: chart.entries.filter((entry) => entry.diagnosisCode !== code) }
+    : chart
+  const chartDescription = current?.description || description
+
+  if (!current) {
+    const created: Cie10Diagnosis = {
+      code,
+      description,
+      type: 'relacionado',
+      certainty,
+      source: 'manual',
+      affectedTeeth: [toothNumber],
+    }
+    next = withRequestedPrincipal([...next, created], code, requestedType)
+  } else {
+    const affectedTeeth = sortedUnique([...(current.affectedTeeth ?? []), toothNumber])
+    next = next.map((diagnosis) =>
+      diagnosis.code === code
+        ? { ...copyDiagnosis(diagnosis), affectedTeeth, anatomicalScope: undefined }
+        : diagnosis,
+    )
+  }
+
+  const nextChart = paintChartTooth(chartBase, toothNumber, code, chartDescription)
+  const stranded = next.filter((diagnosis) => {
+    if (diagnosis.code === code) return false
+    if (!previousTeeth.get(diagnosis.code)?.has(toothNumber)) return false
+    const teethLeft = diagnosis.affectedTeeth ?? []
+    const stillPainted = nextChart.entries.some((entry) => entry.diagnosisCode === diagnosis.code)
+    return teethLeft.length === 0 && !stillPainted
+  })
+  const strandedNote =
+    stranded.length === 0
+      ? ''
+      : stranded.length === 1
+        ? ` ${stranded[0].code} quedó sin piezas: asócielo de nuevo o quítelo de la lista.`
+        : ` ${stranded.map((diagnosis) => diagnosis.code).join(', ')} quedaron sin piezas: asócielos de nuevo o quítelos de la lista.`
+  const scopeNote = existing?.anatomicalScope
+    ? ` La asociación de ${scopeLabel(existing.anatomicalScope)} quedó reemplazada por esa pieza.`
+    : ''
+  const storedPrincipal = next.find((diagnosis) => diagnosis.code === code)?.type === 'principal'
+  const promoted =
+    !existing && storedPrincipal && requestedType === 'relacionado'
+      ? ' Quedó como principal porque la sección no tenía otro.'
+      : ''
+
+  return resultOf(
+    next,
+    nextChart,
+    existing ? 'attached' : 'added',
+    existing
+      ? `Se asignó la pieza ${toothNumber} a ${code}.${scopeNote}${strandedNote}`
+      : `Se añadió ${code} — ${description} en la pieza ${toothNumber}.${promoted}${strandedNote}`,
+  )
+}
+
+/**
+ * Un solo principal. Marcar otro degrada al anterior.
+ * No deja la lista sin principal: el único principal no pasa a relacionado.
+ */
+export function setDiagnosisType(
+  diagnoses: Cie10Diagnosis[],
+  code: string,
+  type: Cie10Diagnosis['type'],
+): Cie10Diagnosis[] {
+  const target = diagnoses.find((diagnosis) => diagnosis.code === code)
+  if (!target) return diagnoses
+
+  if (type === 'principal') {
+    const sole =
+      target.type === 'principal' &&
+      diagnoses.filter((diagnosis) => diagnosis.type === 'principal').length === 1
+    if (sole) return diagnoses
+    return diagnoses.map((diagnosis) => ({
+      ...copyDiagnosis(diagnosis),
+      type: diagnosis.code === code
+        ? 'principal'
+        : diagnosis.type === 'principal'
+          ? 'relacionado'
+          : diagnosis.type,
+    }))
+  }
+
+  const principalCount = diagnoses.filter((diagnosis) => diagnosis.type === 'principal').length
+  if (target.type !== 'principal' || principalCount <= 1) return diagnoses
+  return diagnoses.map((diagnosis) =>
+    diagnosis.code === code ? { ...copyDiagnosis(diagnosis), type: 'relacionado' } : diagnosis,
+  )
+}
+
+export type DiagnosisRemovalStatus = 'removed' | 'missing' | 'needs_principal'
+
+export interface DiagnosisRemovalResult {
+  diagnoses: Cie10Diagnosis[]
+  chart: ClinicalDiagnosticChart
+  status: DiagnosisRemovalStatus
+}
+
+/** Quita el CIE y sus marcas del esquema. Si era el único principal, exige el reemplazo. */
+export function removeDiagnosisFromRecord(
+  diagnoses: Cie10Diagnosis[],
+  chartInput: ClinicalDiagnosticChart | Partial<ClinicalDiagnosticChart> | undefined,
+  code: string,
+  replacementPrincipalCode?: string,
+): DiagnosisRemovalResult {
+  const chart = normalizeChart(chartInput)
+  const target = diagnoses.find((diagnosis) => diagnosis.code === code)
+  const nextChart = {
+    ...chart,
+    entries: chart.entries.filter((entry) => entry.diagnosisCode !== code),
+  }
+
+  if (!target) {
+    const changed = nextChart.entries.length !== chart.entries.length
+    return {
+      diagnoses,
+      chart: changed ? nextChart : chart,
+      status: changed ? 'removed' : 'missing',
+    }
+  }
+
+  const remaining = diagnoses.filter((diagnosis) => diagnosis.code !== code)
+  if (target.type === 'principal' && remaining.length > 0) {
+    const replacement = remaining.find((diagnosis) => diagnosis.code === replacementPrincipalCode)
+    if (!replacement) {
+      return { diagnoses, chart, status: 'needs_principal' }
+    }
+    return {
+      status: 'removed',
+      chart: nextChart,
+      diagnoses: remaining.map((diagnosis) => ({
+        ...copyDiagnosis(diagnosis),
+        type: diagnosis.code === replacement.code
+          ? 'principal'
+          : diagnosis.type === 'principal'
+            ? 'relacionado'
+            : diagnosis.type,
+      })),
+    }
+  }
+
+  return {
+    status: 'removed',
+    chart: nextChart,
+    diagnoses: remaining.map((diagnosis) => copyDiagnosis(diagnosis)),
+  }
+}
+
+/** Dónde más está citado el código. Esas filas no se reescriben al quitar el diagnóstico. */
+export function diagnosisRecordUsage(
+  record: {
+    treatmentPlan?: Array<{ diagnosisCode?: string | null }>
+    budgetItems?: Array<{ diagnosisCode?: string | null }>
+    paymentControlLines?: Array<{ diagnosisCode?: string | null }>
+  },
+  code: string,
+): string[] {
+  const normalized = code.trim()
+  const labels: string[] = []
+  const matches = (items?: Array<{ diagnosisCode?: string | null }>) =>
+    (items ?? []).some((item) => item.diagnosisCode?.trim() === normalized)
+  if (matches(record.treatmentPlan)) labels.push('el plan de tratamiento')
+  if (matches(record.budgetItems)) labels.push('el presupuesto')
+  if (matches(record.paymentControlLines)) labels.push('el control de pagos')
+  return labels
 }
