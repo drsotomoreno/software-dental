@@ -34,6 +34,49 @@ import { voidSendWelcomeWhatsAppInBackground } from '../services/whatsapp.servic
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+function digitsOnlyPhone(value) {
+  return String(value ?? '').replace(/\D/g, '')
+}
+
+/**
+ * Bienvenida saliente. No se espera: un fallo de Evolution no altera el alta.
+ */
+function dispatchRegistrationWelcome({ phoneNumber, nombre }) {
+  const number = digitsOnlyPhone(phoneNumber)
+  const wa = config.evolutionWhatsapp || {}
+  const baseUrl = String(wa.baseUrl || '').replace(/\/$/, '')
+  const instance = String(wa.instance || '').trim()
+  const apiKey = String(wa.apiKey || '').trim()
+  const doctor = String(nombre || '').trim() || 'Doctor(a)'
+  if (!number || !baseUrl || !instance || !apiKey) {
+    console.error('[WhatsApp] Bienvenida no enviada: faltan número o datos de Evolution API.')
+    return
+  }
+  const url = `${baseUrl}/message/sendText/${encodeURIComponent(instance)}`
+  const text = `Hola ${doctor}, bienvenido a Mi Historia Dental. Su prueba gratuita ya está lista. Entre aquí: https://www.mihistoriadental.com`
+  void (async () => {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: apiKey,
+        },
+        body: JSON.stringify({ number, text }),
+      })
+      if (!response.ok) {
+        const body = await response.text().catch(() => '')
+        console.error('[WhatsApp] Evolution API rechazó la bienvenida:', response.status, body)
+      }
+    } catch (error) {
+      console.error(
+        '[WhatsApp] No se pudo enviar la bienvenida:',
+        error instanceof Error ? error.message : error,
+      )
+    }
+  })()
+}
+
 function conflictMessage(emailTaken, phoneTaken) {
   if (emailTaken && phoneTaken) {
     return 'Ya existe una cuenta con este correo y con este número de WhatsApp.'
@@ -254,10 +297,11 @@ export async function completeRegister(req, res) {
     }
     claimed = true
     const pending = started.record
+    const phoneDigits = digitsOnlyPhone(pending.phone_number)
 
     const conflicts = await findRegistrationConflicts({
       email: pending.email,
-      phoneNumber: pending.phone_number,
+      phoneNumber: phoneDigits,
     })
     const duplicate = conflictMessage(conflicts.emailTaken, conflicts.phoneTaken)
     if (duplicate) {
@@ -270,7 +314,7 @@ export async function completeRegister(req, res) {
       nombre: pending.nombre,
       email: pending.email,
       passwordHash: pending.passwordHash,
-      phone_number: pending.phone_number,
+      phone_number: phoneDigits,
       verifiedRegistration: true,
       is_verified: true,
       email_verified: true,
@@ -298,7 +342,12 @@ export async function completeRegister(req, res) {
       })
     }
 
-    return res.status(201).json({
+    dispatchRegistrationWelcome({
+      phoneNumber: phoneDigits,
+      nombre: pending.nombre,
+    })
+
+    return res.status(200).json({
       success: true,
       ok: true,
       token: session.token,

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Info } from 'lucide-react'
 import { APP_INITIALS, APP_NAME } from '@/constants/branding'
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
@@ -62,12 +61,8 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [pendingId, setPendingId] = useState('')
-  const [whatsappUrl, setWhatsappUrl] = useState('')
-  const [whatsappCode, setWhatsappCode] = useState('')
   const [emailCode, setEmailCode] = useState('')
-  const [whatsappVerified, setWhatsappVerified] = useState(false)
   const [resendLeft, setResendLeft] = useState(0)
-  const [checkingWhatsApp, setCheckingWhatsApp] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -96,46 +91,13 @@ export function LoginPage() {
     return () => window.clearInterval(timer)
   }, [mode])
 
-  useEffect(() => {
-    if (mode !== 'verify' || !pendingId) return undefined
-    let stop = false
-    const tick = async () => {
-      try {
-        const response = await fetch(`/api/auth/register/status/${encodeURIComponent(pendingId)}`, {
-          headers: { Accept: 'application/json' },
-        })
-        const payload = await response.json().catch(() => ({}))
-        if (stop) return
-        if (payload.expired) {
-          setError('El tiempo de verificación expiró (15 minutos). Vuelva a crear la cuenta.')
-          setWhatsappVerified(false)
-          return
-        }
-        if (payload.whatsappVerified) setWhatsappVerified(true)
-      } catch {
-        /* el siguiente ciclo reintenta */
-      }
-    }
-    void tick()
-    const timer = window.setInterval(() => {
-      void tick()
-    }, 3000)
-    return () => {
-      stop = true
-      window.clearInterval(timer)
-    }
-  }, [mode, pendingId])
-
   const switchMode = (next: AuthMode) => {
     setMode(next)
     setError('')
     setInfo('')
     if (next !== 'verify') {
-      setWhatsappUrl('')
-      setWhatsappCode('')
       setPendingId('')
       setEmailCode('')
-      setWhatsappVerified(false)
       setResendLeft(0)
     }
   }
@@ -189,56 +151,20 @@ export function LoginPage() {
         setError(apiError || 'No se pudo iniciar la verificación.')
         return
       }
-      if (!payload.pendingId || !payload.whatsapp_url || !payload.whatsapp_code) {
+      if (!payload.pendingId) {
         setError('El servidor no entregó los datos de verificación. Intente de nuevo.')
         return
       }
       setPhoneNumber(phoneCheck.digits)
       setPendingId(String(payload.pendingId))
-      setWhatsappUrl(String(payload.whatsapp_url))
-      setWhatsappCode(String(payload.whatsapp_code))
       setEmailCode('')
-      setWhatsappVerified(false)
       setResendLeft(60)
-      setInfo('Le enviamos un código de 6 dígitos al correo. También debe enviar el mensaje de WhatsApp.')
+      setInfo('Le enviamos un código de 6 dígitos al correo.')
       setMode('verify')
     } catch {
       setError('No se pudo conectar con el servidor. Intente de nuevo.')
     } finally {
       setSubmitting(false)
-    }
-  }
-
-  const openWhatsAppActivation = () => {
-    if (!whatsappUrl) {
-      setError('No hay un enlace de WhatsApp disponible. Vuelva a registrarse.')
-      return
-    }
-    window.open(whatsappUrl, '_blank', 'noopener,noreferrer')
-  }
-
-  const refreshWhatsAppStatus = async () => {
-    if (!pendingId) return
-    setCheckingWhatsApp(true)
-    setError('')
-    try {
-      const response = await fetch(`/api/auth/register/status/${encodeURIComponent(pendingId)}`, {
-        headers: { Accept: 'application/json' },
-      })
-      const payload = await response.json().catch(() => ({}))
-      if (payload.expired) {
-        setWhatsappVerified(false)
-        setError('El tiempo de verificación expiró (15 minutos). Vuelva a crear la cuenta.')
-        return
-      }
-      setWhatsappVerified(Boolean(payload.whatsappVerified))
-      if (!payload.whatsappVerified) {
-        setInfo('Aún no llega el mensaje. Envíelo desde el mismo celular del formulario y vuelva a comprobar.')
-      }
-    } catch {
-      setError('No se pudo comprobar WhatsApp. Intente de nuevo.')
-    } finally {
-      setCheckingWhatsApp(false)
     }
   }
 
@@ -272,10 +198,6 @@ export function LoginPage() {
       setError('Escriba el código de 6 dígitos que llegó al correo.')
       return
     }
-    if (!whatsappVerified) {
-      setError('Falta la verificación de WhatsApp. Envíe el mensaje y espere la confirmación.')
-      return
-    }
     setSubmitting(true)
     try {
       const { response, payload } = await postJson('/api/auth/register/complete', {
@@ -284,7 +206,6 @@ export function LoginPage() {
       })
       if (!response.ok || !payload.token || !payload.user) {
         setError(String(payload.error || 'No se pudo crear la cuenta.'))
-        if (payload.expired) setWhatsappVerified(false)
         return
       }
       clearStoredApiAuth()
@@ -347,9 +268,9 @@ export function LoginPage() {
 
   const subtitle =
     mode === 'register'
-      ? 'Registro con verificación de correo y WhatsApp'
+      ? 'Registro de prueba gratuita'
       : mode === 'verify'
-        ? 'Verificación en 2 pasos — los dos canales son obligatorios'
+        ? 'Confirme el código enviado a su correo'
         : 'Acceso seguro — cédula y contraseña de su clínica'
 
   return (
@@ -472,8 +393,11 @@ export function LoginPage() {
               />
             </div>
             <div>
-              <label className="label-field">Correo electrónico</label>
+              <label className="label-field" htmlFor="register-email">
+                Correo electrónico
+              </label>
               <input
+                id="register-email"
                 type="email"
                 autoComplete="email"
                 required
@@ -481,6 +405,34 @@ export function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 className="input-field"
                 placeholder="usuario@clinica.co"
+              />
+            </div>
+            <div>
+              <label className="label-field" htmlFor="register-password">
+                Contraseña
+              </label>
+              <PasswordInput
+                id="register-password"
+                autoComplete="new-password"
+                required
+                minLength={6}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+              />
+            </div>
+            <div>
+              <label className="label-field" htmlFor="register-confirm-password">
+                Confirmar contraseña
+              </label>
+              <PasswordInput
+                id="register-confirm-password"
+                autoComplete="new-password"
+                required
+                minLength={6}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="••••••••"
               />
             </div>
             <div>
@@ -498,42 +450,12 @@ export function LoginPage() {
                 Colombia (+57) viene seleccionada. También puede elegir otro país: solo se aceptan
                 celulares, en formato internacional.
               </p>
-              <div className="mt-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950">
-                <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                <p>
-                  Importante si se registra desde un computador: para verificar su número deberá
-                  enviar un código desde su WhatsApp. Asegúrese de tener WhatsApp Web o de
-                  escritorio vinculado en este PC (o realice el registro desde su celular).
-                </p>
-              </div>
-            </div>
-            <div>
-              <label className="label-field">Contraseña</label>
-              <PasswordInput
-                autoComplete="new-password"
-                required
-                minLength={6}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-              />
-            </div>
-            <div>
-              <label className="label-field">Confirmar contraseña</label>
-              <PasswordInput
-                autoComplete="new-password"
-                required
-                minLength={6}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="••••••••"
-              />
             </div>
             {error && (
               <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
             )}
             <button type="submit" disabled={submitting} className="btn-primary w-full">
-              {submitting ? 'Enviando códigos...' : 'Continuar a la verificación'}
+              {submitting ? 'Enviando código...' : 'Continuar a la verificación'}
             </button>
             <p className="text-center text-sm text-slate-500">
               ¿Ya tiene cuenta?{' '}
@@ -554,12 +476,11 @@ export function LoginPage() {
               <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{info}</p>
             )}
             <p className="text-sm text-slate-600">
-              La cuenta no se crea hasta que el correo y el WhatsApp queden verificados. Tiene 15
-              minutos.
+              Escriba el código de 6 dígitos del correo para crear la cuenta. Tiene 15 minutos.
             </p>
 
             <section className="space-y-3 rounded-xl border border-slate-200 p-4">
-              <h2 className="text-sm font-semibold text-slate-900">Paso 1 — Correo electrónico</h2>
+              <h2 className="text-sm font-semibold text-slate-900">Código del correo</h2>
               <p className="text-xs text-slate-500">
                 Código de 6 dígitos enviado a <span className="font-medium text-slate-700">{email}</span>.
               </p>
@@ -588,53 +509,9 @@ export function LoginPage() {
               </button>
             </section>
 
-            <section className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
-              <h2 className="text-sm font-semibold text-emerald-950">
-                Paso 2 — WhatsApp (verificación instantánea)
-              </h2>
-              <p className="text-xs text-emerald-900">
-                Se abre WhatsApp con el mensaje listo. Envíelo desde el celular que registró. No
-                hace falta que el sistema le responda.
-              </p>
-              {whatsappCode ? (
-                <p className="text-center font-mono text-lg tracking-[0.2em] text-slate-900">
-                  {whatsappCode}
-                </p>
-              ) : null}
-              <button
-                type="button"
-                onClick={openWhatsAppActivation}
-                disabled={!whatsappUrl}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-              >
-                Abrir WhatsApp y enviar código
-              </button>
-              <p className="text-xs leading-relaxed text-emerald-900">
-                Al abrir WhatsApp, envíe el mensaje tal como aparece. Si está en un PC sin sesión
-                iniciada, vincule primero su WhatsApp Web o continúe desde su teléfono.
-              </p>
-              {whatsappVerified ? (
-                <p className="rounded-lg bg-white px-3 py-2 text-sm font-semibold text-emerald-700">
-                  WhatsApp verificado
-                </p>
-              ) : (
-                <p className="text-xs text-emerald-900">Esperando el mensaje de su celular…</p>
-              )}
-              <button
-                type="button"
-                disabled={checkingWhatsApp}
-                onClick={() => {
-                  void refreshWhatsAppStatus()
-                }}
-                className="w-full rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
-              >
-                {checkingWhatsApp ? 'Comprobando...' : 'Ya envié el mensaje — comprobar ahora'}
-              </button>
-            </section>
-
             <button
               type="button"
-              disabled={submitting || !whatsappVerified || emailCode.length !== 6}
+              disabled={submitting || emailCode.length !== 6}
               onClick={() => {
                 void completeRegistration()
               }}

@@ -303,13 +303,6 @@ export async function beginPendingCompletion({ pendingId, emailCode }) {
         emailAttempts: nextAttempts,
       }
     }
-    if (record.whatsappVerified !== true) {
-      return {
-        ok: false,
-        status: 400,
-        error: 'Falta la verificación de WhatsApp. Envíe el mensaje desde el celular registrado.',
-      }
-    }
     const updated = {
       ...record,
       emailVerified: true,
