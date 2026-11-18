@@ -14,6 +14,10 @@ import { getCurrentClinicId, withClinicalSyncSuppressed } from '@/services/clini
 import { enqueueDiagnosticAidForSync } from '@/services/syncQueueService'
 import type { DiagnosticAid } from '@/types/diagnosticAid'
 import { mimeTypeForDiagnosticFile } from '@/utils/diagnosticAidWebClassification'
+import {
+  DIAGNOSTIC_AID_DRIVE_RETRY_MS,
+  diagnosticAidDriveFailureMessage,
+} from '../../shared/diagnosticAidDriveError.js'
 
 const DRIVE_UPLOAD_SYNC_PAUSE = 'drive-upload'
 
@@ -51,8 +55,8 @@ async function markUploadError(aidId: string, message: string): Promise<Diagnost
 }
 
 /**
- * POST /upload con un reintento ante 502/503/504 o fallo de red
- * (PM2 reiniciando tras OOM / Nginx Bad Gateway).
+ * POST /upload con un reintento ante 502/503/504 o fallo de red.
+ * 8 s: un reinicio de PM2 no alcanza a escuchar de nuevo en 2,5 s.
  */
 async function postDriveUploadWithRetry(
   postOnce: () => Promise<Response>,
@@ -62,14 +66,14 @@ async function postDriveUploadWithRetry(
     const first = await postOnce()
     if (first.status === 502 || first.status === 503 || first.status === 504) {
       emit('uploading', 'Servidor ocupado; reintentando subida…')
-      await new Promise((r) => window.setTimeout(r, 2_500))
+      await new Promise((r) => window.setTimeout(r, DIAGNOSTIC_AID_DRIVE_RETRY_MS))
       return postOnce()
     }
     return first
   } catch (error) {
     if (isAbortError(error)) throw error
     emit('uploading', 'Red inestable; reintentando subida…')
-    await new Promise((r) => window.setTimeout(r, 2_500))
+    await new Promise((r) => window.setTimeout(r, DIAGNOSTIC_AID_DRIVE_RETRY_MS))
     return postOnce()
   }
 }
@@ -214,10 +218,7 @@ export async function uploadDiagnosticAidToGoogleDrive(
     }
 
     if (!response.ok || !body?.driveFileId) {
-      const message =
-        typeof body?.error === 'string'
-          ? body.error
-          : `Error al subir a Google Drive (HTTP ${response.status}).`
+      const message = diagnosticAidDriveFailureMessage(response.status, body)
       const failed = await markUploadError(aidId, message)
       emit('error', message)
       return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }

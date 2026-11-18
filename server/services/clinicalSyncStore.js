@@ -29,6 +29,12 @@ import {
 import { clinicalSyncEvents, SNAPSHOT_PUSHED } from './clinicalSyncEvents.js'
 import { offloadSignaturesInPayload } from './signatureDriveService.js'
 import { isSignatureImageFieldKey } from '../../shared/signatureDriveRef.js'
+import {
+  overlayClinicDiagnosticAids,
+  overlayIndexOntoMeta,
+  readDiagnosticAidIndex,
+  upsertDiagnosticAidIndexEntry,
+} from './diagnosticAidIndex.js'
 
 /**
  * Emite el delta al indexador CQRS sin await.
@@ -362,10 +368,11 @@ export function lightweightDiagnosticAidRecord(record) {
 }
 
 /**
- * Upsert atómico de UNA ayuda diagnóstica tras subir el binario a Drive.
- * No escribe base64. Corre en la misma cola que el resto de clinical-sync.
+ * Metadato de un examen tras subir el binario a Drive.
+ * Escribe diagnostic-aid-index.json. No abre clinical-sync.json (OOM → 502).
+ * aliasIds los resuelve el pull por scope; el índice guarda solo el canónico.
  */
-export async function upsertDiagnosticAidMetadata(clinicId, aliasIds = [], meta = {}) {
+export async function upsertDiagnosticAidMetadata(clinicId, _aliasIds = [], meta = {}) {
   const canonical = String(clinicId || '').trim()
   const aidId = String(meta.id || meta.aidId || '').trim()
   if (!canonical) {
@@ -379,38 +386,13 @@ export async function upsertDiagnosticAidMetadata(clinicId, aliasIds = [], meta 
     throw err
   }
 
-  return enqueueWrite(async () => {
-    const store = await loadStore()
-    const clinic = foldAliasesIntoCanonical(store, canonical, aliasIds)
-    const now = new Date().toISOString()
-    const prev = clinic.diagnosticAids[aidId]
-    const incomingAt = String(meta.updatedAt || now)
-    if (prev?.deletedAt && stamp(prev) > (Date.parse(incomingAt) || 0)) {
-      return { ok: true, aidId, skipped: 'deleted' }
-    }
-    const prevPayload =
-      prev?.payload && typeof prev.payload === 'object' ? prev.payload : {}
-    const payload = lightweightDiagnosticAidPayload(
-      {
-        ...prevPayload,
-        ...meta,
-        id: aidId,
-        updatedAt: incomingAt,
-        storageBackend: 'google_drive',
-        driveUploadStatus: 'uploaded',
-      },
-      canonical,
-    )
-    clinic.diagnosticAids[aidId] = {
-      syncId: aidId,
-      clinicId: canonical,
-      updatedAt: incomingAt,
-      deletedAt: null,
-      payload,
-    }
-    replicateAliases(store, canonical, clinic, aliasIds)
-    await saveStore(store)
-    return { ok: true, aidId, metadataPersisted: true }
+  return upsertDiagnosticAidIndexEntry(canonical, {
+    ...meta,
+    id: aidId,
+    clinicId: canonical,
+    storageBackend: 'google_drive',
+    driveUploadStatus: meta.driveUploadStatus || 'uploaded',
+    updatedAt: meta.updatedAt || new Date().toISOString(),
   })
 }
 
@@ -900,6 +882,15 @@ async function saveStore(store) {
     const st = await stat(STORE_FILE)
     storeCache = { mtimeMs: st.mtimeMs, size: st.size, store: sanitized }
     const meta = buildMetaFromStore(sanitized, st)
+    try {
+      const aidIndex = await readDiagnosticAidIndex()
+      overlayIndexOntoMeta(meta, aidIndex)
+    } catch (error) {
+      console.error(
+        '[Sync] No se pudo superponer el índice de exámenes al meta:',
+        error instanceof Error ? error.message : error,
+      )
+    }
     await writeMetaFile(meta)
     const metaStat = await stat(META_FILE)
     metaCache = { mtimeMs: metaStat.mtimeMs, size: metaStat.size, meta }
@@ -909,24 +900,6 @@ async function saveStore(store) {
       error instanceof Error ? error.message : error,
     )
   }
-}
-
-/**
- * Una sola fuente de verdad: el cubo canónico.
- * Los alias (email sin prefijo, UUID, superadmin-session) NO se duplican en disco;
- * se fusionan una vez hacia canónico y se eliminan para no multiplicar ~72MB.
- */
-function foldAliasesIntoCanonical(store, canonical, aliasIds = []) {
-  if (!store.clinics || typeof store.clinics !== 'object') store.clinics = {}
-  const ids = scopeIds(canonical, aliasIds)
-  const folded = mergeClinicBuckets(store, ids)
-  store.clinics[canonical] = folded
-  for (const key of Object.keys(store.clinics)) {
-    if (key === canonical) continue
-    if (!ids.includes(key)) continue
-    delete store.clinics[key]
-  }
-  return folded
 }
 
 function replicateAliases(store, canonical, clinic, aliasIds = []) {
@@ -1251,6 +1224,15 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
       throw new SyncMetaMissingError()
     }
     const clinic = mergeMetaClinicBuckets(meta, ids)
+    try {
+      const aidIndex = await readDiagnosticAidIndex()
+      overlayClinicDiagnosticAids(clinic, aidIndex, ids)
+    } catch (error) {
+      console.error(
+        '[Sync] No se pudo superponer el índice de exámenes:',
+        error instanceof Error ? error.message : error,
+      )
+    }
     try {
       const { mergeMirroredPatients } = await import('./clinicPatientMirror.js')
       clinic.patients = await mergeMirroredPatients(clinicId, clinic.patients)

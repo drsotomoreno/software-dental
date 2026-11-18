@@ -74,6 +74,41 @@ function escapeDriveQueryValue(value) {
   return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 }
 
+/**
+ * Si el aidId ya está en Drive, la segunda subida no llama a files.create.
+ * Un archivo de 0 bytes se actualiza; uno con bytes se reutiliza.
+ */
+export function selectExistingAidUpload(files) {
+  const list = (Array.isArray(files) ? files : []).filter((file) => file && file.id)
+  const ready = list
+    .filter((file) => Number(file.size) > 0)
+    .sort((a, b) => Number(b.size) - Number(a.size))
+  if (ready[0]) return { action: 'reuse', file: ready[0] }
+  if (list[0]) return { action: 'update', file: list[0] }
+  return { action: 'create', file: null }
+}
+
+export async function findFileByAidId(drive, aidId) {
+  const id = String(aidId || '').trim()
+  if (!id || typeof drive?.files?.list !== 'function') {
+    return { action: 'create', file: null }
+  }
+  const q = [
+    `appProperties has { key='aidId' and value='${escapeDriveQueryValue(id)}' }`,
+    'trashed = false',
+  ].join(' and ')
+  const res = await drive.files.list({
+    q,
+    spaces: 'drive',
+    fields: 'files(id, name, size, webViewLink)',
+    pageSize: 10,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  })
+  const files = Array.isArray(res.data?.files) ? res.data.files : []
+  return selectExistingAidUpload(files)
+}
+
 function safeFileName(value, fallback = 'archivo') {
   const cleaned = String(value || '')
     .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '_')
@@ -251,10 +286,6 @@ export async function uploadClinicAttachmentToDrive({
     return asUploadBody(raw)
   }
 
-  const parentId =
-    Array.isArray(folderSegments) && folderSegments.length
-      ? await ensureFolderPath(drive, rootFolderId, folderSegments)
-      : await ensurePatientFolder(drive, rootFolderId, patientSyncId)
   const name = safeFileName(fileName)
 
   const props = {}
@@ -262,6 +293,41 @@ export async function uploadClinicAttachmentToDrive({
     const k = String(key || '').trim().slice(0, 64)
     const v = String(value ?? '').trim().slice(0, 120)
     if (k && v) props[k] = v
+  }
+
+  let fileIdToUpdate = String(existingFileId || '').trim()
+  if (!fileIdToUpdate && props.aidId) {
+    try {
+      const decision = await findFileByAidId(drive, props.aidId)
+      if (decision.action === 'reuse' && decision.file?.id) {
+        return {
+          driveFileId: String(decision.file.id),
+          webViewLink:
+            String(decision.file.webViewLink || '').trim() ||
+            `https://drive.google.com/file/d/${decision.file.id}/view`,
+          byteLength: Number(decision.file.size) > 0 ? Number(decision.file.size) : byteLength,
+          storageBackend: 'google_drive',
+        }
+      }
+      if (decision.action === 'update' && decision.file?.id) {
+        fileIdToUpdate = String(decision.file.id)
+      }
+    } catch (error) {
+      console.warn(
+        '[google-drive] búsqueda por aidId omitida:',
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
+
+  let parentId = ''
+  const resolveParentId = async () => {
+    if (parentId) return parentId
+    parentId =
+      Array.isArray(folderSegments) && folderSegments.length
+        ? await ensureFolderPath(drive, rootFolderId, folderSegments)
+        : await ensurePatientFolder(drive, rootFolderId, patientSyncId)
+    return parentId
   }
 
   function resultPayload(id, webViewLink, sizeHint) {
@@ -288,12 +354,12 @@ export async function uploadClinicAttachmentToDrive({
   /** @type {import('node:stream').Readable | null} */
   let lastBody = null
   try {
-    if (existingFileId) {
+    if (fileIdToUpdate) {
       try {
         const media = buildMedia()
         lastBody = media.body
         const updated = await drive.files.update({
-          fileId: String(existingFileId),
+          fileId: fileIdToUpdate,
           requestBody: {
             name,
             appProperties: Object.keys(props).length ? props : undefined,
@@ -302,7 +368,7 @@ export async function uploadClinicAttachmentToDrive({
           fields: 'id, size, webViewLink',
           supportsAllDrives: true,
         })
-        const id = updated.data?.id || String(existingFileId)
+        const id = updated.data?.id || fileIdToUpdate
         return resultPayload(id, updated.data?.webViewLink, updated.data?.size)
       } catch (error) {
         console.warn(
@@ -323,7 +389,7 @@ export async function uploadClinicAttachmentToDrive({
     const created = await drive.files.create({
       requestBody: {
         name,
-        parents: [parentId],
+        parents: [await resolveParentId()],
         appProperties: Object.keys(props).length ? props : undefined,
       },
       media,

@@ -27,9 +27,9 @@ import {
   resolveManagedClinicId,
 } from '../services/googleDriveOAuth.service.js'
 import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
-import { upsertDiagnosticAidMetadata } from '../services/clinicalSyncStore.js'
+import { upsertDiagnosticAidIndexEntry } from '../services/diagnosticAidIndex.js'
 
-// El binario no entra a clinical-sync. Tras Drive solo se hace upsert de metadatos livianos.
+// El binario no entra a clinical-sync.json. Tras Drive se escribe diagnostic-aid-index.json.
 
 const router = Router()
 
@@ -499,8 +499,7 @@ router.post('/upload', (req, res, next) => {
       })
     }
 
-    // Stream desde disco: createReadStream → drive.files.create (sin Buffer del archivo).
-    // El JSON de clinical-sync solo recibe metadatos después, nunca este binario.
+    // Stream desde disco. Este request no abre clinical-sync.json.
     const uploaded = await uploadClinicAttachmentToDrive({
       clinicId,
       clinicIdCandidates: resolved.candidates,
@@ -524,7 +523,7 @@ router.post('/upload', (req, res, next) => {
         resolveManagedClinicId(user, String(body.clinicId || clinicId || '').trim()) ||
         scope.canonical
       if (canonical && aidId) {
-        await upsertDiagnosticAidMetadata(canonical, scope.aliases, {
+        await upsertDiagnosticAidIndexEntry(canonical, {
           id: aidId,
           aidId,
           patientId: patientId || patientSyncId,
@@ -548,7 +547,7 @@ router.post('/upload', (req, res, next) => {
       }
     } catch (metaError) {
       console.error(
-        '[google-drive] El archivo quedó en Drive; el metadato de clinical-sync no se guardó:',
+        '[google-drive] El archivo quedó en Drive; el índice de exámenes no se guardó:',
         metaError instanceof Error ? metaError.message : metaError,
       )
     }
