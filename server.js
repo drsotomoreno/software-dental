@@ -16,11 +16,13 @@ import invoicesRoutes from './server/routes/invoices.routes.js'
 import authRoutes from './server/routes/auth.routes.js'
 import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
 import patientChartRoutes from './server/routes/patientChart.routes.js'
+import emrV2Routes from './server/routes/emrV2.routes.js'
 import googleDriveRoutes from './server/routes/googleDrive.routes.js'
 import kioskRoutes from './server/routes/kiosk.routes.js'
 import superadminRoutes from './server/routes/superadmin.routes.js'
 import colaboradoresRouter from './server/routes/colaboradores.js'
 import { attachKioskSocket } from './server/socket/kioskSocket.js'
+import { ensureEmrV2Schema } from './server/services/emrV2Store.js'
 import { getLocalLanIPv4, isPrivateLanOrigin } from './server/utils/localLanAddress.js'
 import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
@@ -112,6 +114,7 @@ app.use('/api/rips', ripsRoutes)
 app.use('/api/invoices', invoicesRoutes)
 app.use('/api/sync', clinicalSyncRoutes)
 app.use('/api/patients', patientChartRoutes)
+app.use('/api/v2', emrV2Routes)
 app.use('/api/integrations/google-drive', googleDriveRoutes)
 app.use('/api/drive', googleDriveRoutes)
 app.use('/api/v1/kiosk', kioskRoutes)
@@ -199,6 +202,16 @@ async function bootAfterListen() {
       error instanceof Error ? error.message : error,
     )
   }
+  void ensureEmrV2Schema()
+    .then(() => {
+      console.log('[EMR v2] Esquema ACID + assets verificado en PostgreSQL')
+    })
+    .catch((error) => {
+      console.warn(
+        '[EMR v2] Schema aún no aplicado (RDS puede estar offline):',
+        error instanceof Error ? error.message : error,
+      )
+    })
   void mailTransportLabel()
     .then((label) => {
       console.log(`[Auth] Correo transaccional: ${label} (${config.appPublicUrl})`)

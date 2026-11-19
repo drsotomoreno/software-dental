@@ -22,6 +22,13 @@ export function clinicKioskRoom(clinicId) {
   return `clinic_${bare}`
 }
 
+/** Sala EMR v2 / tiempo real clínico: clave canónica `clinic:…`. */
+export function clinicEmrV2Room(clinicId) {
+  const raw = String(clinicId || '').trim()
+  if (!raw) return ''
+  return raw.startsWith('clinic:') ? raw : `clinic:${raw}`
+}
+
 function corsOriginAllowed(origin) {
   if (!origin) return true
   return (
@@ -206,10 +213,17 @@ export function attachKioskSocket(httpServer) {
     const { identity, room } = socket.data
     const transport = socket.conn?.transport?.name || '?'
     void socket.join(room)
+    const emrRoom = clinicEmrV2Room(identity.clinicId)
+    if (emrRoom && emrRoom !== room) {
+      void socket.join(emrRoom)
+      socket.data.emrRoom = emrRoom
+    } else if (emrRoom) {
+      socket.data.emrRoom = emrRoom
+    }
 
     logKiosk(
       'info',
-      `CONECTADO id=${socket.id} role=${identity.role} room=${room} transport=${transport} ip=${clientIpAddress(socket)}`,
+      `CONECTADO id=${socket.id} role=${identity.role} room=${room} emrRoom=${emrRoom || '-'} transport=${transport} ip=${clientIpAddress(socket)}`,
     )
 
     socket.emit('kiosk:ready', {
@@ -217,6 +231,7 @@ export function attachKioskSocket(httpServer) {
       clinicId: identity.clinicId,
       clinicName: identity.clinicName || null,
       room,
+      emrRoom: emrRoom || room,
     })
 
     socket.conn?.on?.('upgrade', (upgraded) => {

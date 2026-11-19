@@ -108,6 +108,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Liberar UI antes del pull: OAuth (?googleDrive=connected) no debe
           // quedar atrapado en "Verificando sesión..." si el sync tarda.
           const authUser = await sessionUserFromApi(validation.user, apiAuth.token)
+          try {
+            const { resolveClinicSyncId } = await import('../../shared/clinicalSyncScope.js')
+            const { ensureDentalDatabaseForAuth } = await import('@/db/database')
+            const { unifyLegacyDexieDatabases } = await import('@/db/unifyLegacyDexieDatabases')
+            const clinicSyncId = resolveClinicSyncId(validation.user)
+            await ensureDentalDatabaseForAuth(validation.user.id, clinicSyncId)
+            await unifyLegacyDexieDatabases({
+              user: validation.user,
+              userId: validation.user.id,
+              clinicaId: clinicSyncId,
+            })
+          } catch (error) {
+            console.warn('[auth] Unificación IndexedDB en restore diferida:', error)
+          }
           setUser(authUser)
           setIsLoading(false)
           if (accessTier(validation.user) !== 'none') {
@@ -180,6 +194,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ensureDentalDatabaseForAuth,
         retireOrphanUuidDentalEmrDatabase,
       } = await import('@/db/database')
+      const { unifyLegacyDexieDatabases } = await import('@/db/unifyLegacyDexieDatabases')
       const { unlockLocalEncryption } = await import('@/db/localEncryptionKey')
       // Cubo canónico (clinic:email del maestro / clinicId del titular). Nunca UUID crudo.
       const clinicSyncId = resolveClinicSyncId(sessionUser) || getCurrentClinicId()
@@ -190,6 +205,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       await ensureDentalDatabaseForAuth(sessionUser.id, clinicSyncId)
       await retireOrphanUuidDentalEmrDatabase(sessionUser.id, clinicSyncId)
+      try {
+        await unifyLegacyDexieDatabases({
+          user: sessionUser,
+          userId: sessionUser.id,
+          clinicaId: clinicSyncId,
+        })
+      } catch (error) {
+        console.warn('[auth] Unificación IndexedDB legacy diferida:', error)
+      }
       if (accessTier(sessionUser) !== 'none') {
         // Offline-first: no bloquear login ni la ficha clínica esperando sync.
         void pullCompleteClinicOnLogin().catch((error) => {

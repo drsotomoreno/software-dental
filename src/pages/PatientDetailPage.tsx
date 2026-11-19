@@ -145,6 +145,7 @@ import { useAudit } from '@/hooks/useAudit'
 import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceService'
 import { useClinicalVoiceRegistry } from '@/hooks/useClinicalVoiceRegistry'
 import { useClinicalAutoSave } from '@/hooks/useClinicalAutoSave'
+import { fetchPatientChartV2, subscribeEmrV2PatientUpdated } from '@/services/emrV2Client'
 import { VoiceClinicalAssistant, type ClinicalVoiceContext } from '@/components/voice'
 import { confirmUserPassword } from '@/services/authService'
 import { createDigitalSignature, validateSignatureCapture } from '@/services/signatureService'
@@ -484,9 +485,10 @@ export function PatientDetailPage() {
     saving: clinicalAutoSaving,
     saveStatus: clinicalSaveStatus,
     saveError: clinicalSaveError,
+    serverVersion: clinicalServerVersion,
     markHydratedHash,
   } = useClinicalAutoSave({
-    patientRouteId: id,
+    patientRouteId: patient?.syncId || id,
     clinicalData,
     odontogram,
     enabled: Boolean(id) && Boolean(clinicalData) && !isArchiveView,
@@ -504,13 +506,72 @@ export function PatientDetailPage() {
     clinicalSaveStatus === 'error'
       ? `Error al guardar${clinicalSaveError ? `: ${clinicalSaveError}` : ''}`
       : clinicalAutoSaving
-        ? 'Guardando…'
-        : clinicalAutoSavedAt
-          ? `Guardado automáticamente ${new Date(clinicalAutoSavedAt).toLocaleTimeString('es-CO', {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}`
-          : null
+        ? 'Guardando en servidor…'
+        : clinicalServerVersion
+          ? `Guardado en servidor · v${clinicalServerVersion}`
+          : clinicalAutoSavedAt
+            ? `Guardado automáticamente ${new Date(clinicalAutoSavedAt).toLocaleTimeString('es-CO', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}`
+            : null
+
+  // /pacientes/1407 → normaliza a patient.syncId (UUID canónico).
+  useEffect(() => {
+    if (!id || !patient?.syncId) return
+    const syncId = String(patient.syncId).trim()
+    if (!syncId || syncId === id) return
+    const isLegacyLocal =
+      /^\d+$/.test(id) ||
+      id === String(patient.id) ||
+      id === String(patient.documentNumber || '')
+    if (!isLegacyLocal) return
+    void reconcilePatientDraftKeys({
+      id: patient.id,
+      syncId,
+      documentNumber: patient.documentNumber,
+    })
+    navigate(`/pacientes/${encodeURIComponent(syncId)}`, {
+      replace: true,
+      state: location.state,
+    })
+  }, [id, patient?.syncId, patient?.id, patient?.documentNumber, navigate, location.state])
+
+  // Tiempo real: otro usuario/pestaña actualizó este paciente en /api/v2/.
+  useEffect(() => {
+    const syncId = String(patient?.syncId || '').trim()
+    if (!syncId) return
+    return subscribeEmrV2PatientUpdated((event) => {
+      if (event.patientSyncId !== syncId) return
+      void fetchPatientChartV2(syncId).then(async (result) => {
+        if (!result.ok) return
+        setMessage('Actualizado en tiempo real')
+        try {
+          const draft = await getPatientClinicalDraft(syncId)
+          const living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+          if (living) {
+            setClinicalData((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    ...living,
+                    diagnosticChart: normalizeClinicalDiagnosticChart(living.diagnosticChart),
+                    specializedAnnexes: normalizeSpecializedAnnexes(
+                      living.specializedAnnexes ?? prev.specializedAnnexes,
+                    ),
+                  }
+                : living,
+            )
+            const hash = computeClinicalFormHash(living)
+            setHydrationHash(hash)
+            markHydratedHash(hash)
+          }
+        } catch {
+          /* keep current form */
+        }
+      })
+    })
+  }, [patient?.syncId, markHydratedHash])
 
 
 
@@ -782,25 +843,35 @@ export function PatientDetailPage() {
               (!signedRecord || !clinicalFormHasContent(living))
             if (needsServerChart && currentPatient?.syncId) {
               try {
-                const { pullPatientChartOnDemand } = await import('@/services/clinicalSyncService')
-                const remote = await pullPatientChartOnDemand(currentPatient.syncId || String(currentPatient.id ?? foreignKey), {
-                  localId: currentPatient.id ?? foreignKey,
-                  documentNumber: currentPatient.documentNumber,
-                })
-                if (remote) {
-                  draft = (await getPatientClinicalDraft(foreignKey)) ?? draft
+                // Preferir EMR v2 (lazy migration RDS); fallback legacy chart pull.
+                const v2 = await fetchPatientChartV2(currentPatient.syncId)
+                if (v2.ok) {
+                  draft = (await getPatientClinicalDraft(currentPatient.syncId || foreignKey)) ?? draft
                   living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
-                  if (!signedRecord) {
-                    signedRecord = await getLatestSignedClinicalRecord(foreignKey)
-                    if (signedRecord) {
-                      try {
-                        base = clinicalRecordToFormData(
-                          normalizeClinicalRecordForExport(signedRecord),
-                          professionalLicense,
-                        )
-                      } catch {
-                        loadedWithWarning = true
-                      }
+                } else {
+                  const { pullPatientChartOnDemand } = await import('@/services/clinicalSyncService')
+                  const remote = await pullPatientChartOnDemand(
+                    currentPatient.syncId || String(currentPatient.id ?? foreignKey),
+                    {
+                      localId: currentPatient.id ?? foreignKey,
+                      documentNumber: currentPatient.documentNumber,
+                    },
+                  )
+                  if (remote) {
+                    draft = (await getPatientClinicalDraft(foreignKey)) ?? draft
+                    living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+                  }
+                }
+                if (!signedRecord) {
+                  signedRecord = await getLatestSignedClinicalRecord(foreignKey)
+                  if (signedRecord) {
+                    try {
+                      base = clinicalRecordToFormData(
+                        normalizeClinicalRecordForExport(signedRecord),
+                        professionalLicense,
+                      )
+                    } catch {
+                      loadedWithWarning = true
                     }
                   }
                 }

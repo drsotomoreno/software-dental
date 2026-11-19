@@ -11,8 +11,14 @@ import { writeEmergencyClinicalDraft } from '@/utils/clinicalEmergencyDraft'
 import { upsertPatientOdontogram } from '@/utils/patientId'
 import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceService'
 import { computeClinicalFormHash } from '../../shared/clinicalFormHash.js'
-
-const AUTO_SAVE_DELAY_MS = 1200
+import {
+  dirtyEmrV2Sections,
+  pickSectionPayload,
+  patchClinicalSectionV2,
+  type EmrV2Section,
+} from '@/services/emrV2Client'
+/** Debounce corto hacia /api/v2/ (Server-First). */
+const AUTO_SAVE_DELAY_MS = 800
 
 export type ClinicalAutoSaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -42,6 +48,7 @@ export function useClinicalAutoSave(options: {
   saving: boolean
   saveStatus: ClinicalAutoSaveStatus
   saveError: string | null
+  serverVersion: number | null
   markHydratedHash: (hash: string) => void
   flushNowAndWait: () => Promise<boolean>
 } {
@@ -59,6 +66,7 @@ export function useClinicalAutoSave(options: {
   const [saving, setSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<ClinicalAutoSaveStatus>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [serverVersion, setServerVersion] = useState<number | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingRef = useRef(false)
   const onOdontogramPersistedRef = useRef(onOdontogramPersisted)
@@ -70,6 +78,9 @@ export function useClinicalAutoSave(options: {
   const patientRouteIdRef = useRef(patientRouteId)
   const lastPersistedHashRef = useRef('')
   const clinicalRevisionRef = useRef(0)
+  const previousFormRef = useRef<ClinicalRecordFormData | null>(null)
+  const previousOdontogramRef = useRef<OdontogramData | null>(null)
+  const serverVersionRef = useRef(0)
   onOdontogramPersistedRef.current = onOdontogramPersisted
   onSaveErrorRef.current = onSaveError
   clinicalDataRef.current = clinicalData
@@ -152,6 +163,41 @@ export function useClinicalAutoSave(options: {
           // El borrador clínico ya está seguro en Dexie.
         }
       }
+
+      // Server-First: mutaciones granulares /api/v2/ solo de secciones dirty.
+      try {
+        const { patientSyncId } = await resolveCanonicalDraftPatientId(patientRouteId)
+        const dirty = dirtyEmrV2Sections(clinicalData, previousFormRef.current, {
+          odontogram: odontogramToSave,
+          previousOdontogram: previousOdontogramRef.current,
+        })
+        let latestVersion = Math.max(1, serverVersionRef.current || 1)
+        for (const section of dirty as EmrV2Section[]) {
+          const payload = pickSectionPayload(clinicalData, section, odontogramToSave)
+          const remote = await patchClinicalSectionV2(
+            patientSyncId,
+            section,
+            payload,
+            latestVersion,
+          )
+          if (remote.ok && remote.version != null) {
+            latestVersion = Number(remote.version) || latestVersion + 1
+            serverVersionRef.current = latestVersion
+            setServerVersion(latestVersion)
+          } else if (remote.queued) {
+            setSaveStatus('saved')
+          } else if (remote.status === 409 && remote.version != null) {
+            latestVersion = Number(remote.version) || latestVersion
+            serverVersionRef.current = latestVersion
+            setServerVersion(latestVersion)
+          }
+        }
+        previousFormRef.current = clinicalData
+        previousOdontogramRef.current = odontogramToSave
+      } catch {
+        // Dexie ya guardó; el outbox reintentará al reconectar.
+      }
+
       return true
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Error de autoguardado'
@@ -223,6 +269,10 @@ export function useClinicalAutoSave(options: {
     setLastSavedAt(null)
     setSaveStatus('idle')
     setSaveError(null)
+    setServerVersion(null)
+    previousFormRef.current = null
+    previousOdontogramRef.current = null
+    serverVersionRef.current = 0
   }, [patientRouteId])
 
   useEffect(() => {
@@ -287,6 +337,7 @@ export function useClinicalAutoSave(options: {
     saving,
     saveStatus,
     saveError,
+    serverVersion,
     markHydratedHash,
     flushNowAndWait,
   }

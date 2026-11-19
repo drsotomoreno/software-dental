@@ -106,6 +106,11 @@ export interface Patient {
   ownerUserId?: string
   /** Identidad estable entre dispositivos (no es el id Dexie). */
   syncId?: string
+  /**
+   * Ids numéricos locales legacy (p. ej. "57", "1407") conservados tras
+   * unificar IndexedDB hacia patient.syncId.
+   */
+  legacyNumericIds?: string[]
   /** Clínica dueña del registro para el pull multi-dispositivo. */
   clinicId?: string
   /** true = hay cambios locales aún no confirmados por el servidor. */

@@ -140,7 +140,7 @@ test('login + pull + reload: pacientes/odontogramas/drafts canónicos no se purg
   const orphanDb = orphanUuidDentalEmrDbName(masterUuid)
 
   assert.equal(canonical, 'clinic:doctormauriciosoto@gmail.com')
-  assert.equal(canonicalDb, `DentalEMR_${masterUuid}_doctormauriciosoto@gmail.com`)
+  assert.equal(canonicalDb, `DentalEMR_canonical_doctormauriciosoto@gmail.com`)
   assert.notEqual(orphanDb, canonicalDb)
   assert.equal(isOrphanUuidDentalEmrDb(orphanDb, masterUuid, canonicalDb), true)
 

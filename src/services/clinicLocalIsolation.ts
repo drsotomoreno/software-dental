@@ -1,7 +1,7 @@
 /**
  * Aislamiento multi-tenant en IndexedDB.
  *
- * Cada sesión usa `DentalEMR_${userId}_${clinicaId}`. Al cambiar de cuenta/clínica
+ * Cada sesión usa `DentalEMR_canonical_${clinicaId}`. Al cambiar de cuenta/clínica
  * se vacían todas las tablas y se invalidan claves de storage globales/scoped.
  */
 import {

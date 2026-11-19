@@ -23,6 +23,7 @@ import type { ClinicalRecordAddendum } from '@/types/addendum'
 import type { EvolutionNoteAddendum } from '@/types/evolutionNoteAddendum'
 import type { SyncOutboxEntry } from '@/types/syncOutbox'
 import type { SyncQueueAttachment } from '@/types/syncQueue'
+import type { EmrV2OutboxEntry } from '@/types/emrV2Outbox'
 import type {
   OfflineClinica,
   OfflineHistoriaClinica,
@@ -90,7 +91,7 @@ import {
 
 export { sanitizeDentalDbSegment }
 
-/** Nombre IndexedDB particionado: DentalEMR_${userId}_${clinicaCanonica} */
+/** Nombre IndexedDB canónico: DentalEMR_canonical_${clinicaCanonica} */
 export function resolveDentalEmrDbName(
   userId?: string | null,
   clinicaId?: string | null,
@@ -153,6 +154,8 @@ export class DentalDatabase extends Dexie {
   clinicas!: EntityTable<OfflineClinica, 'id'>
   /** Cola genérica de mutaciones offline hacia Postgres. Distinta de syncQueue (adjuntos). */
   sync_queue!: EntityTable<OfflineSyncQueueItem, 'id'>
+  /** Outbox FIFO de mutaciones granulares /api/v2/ (EMR Server-First). */
+  emrV2Outbox!: EntityTable<EmrV2OutboxEntry, 'id'>
 
   constructor(dbName = resolveDentalEmrDbName()) {
     super(dbName)
@@ -940,6 +943,12 @@ export class DentalDatabase extends Dexie {
     this.version(38).stores({
       clinicalAuditLogs: 'id, patientSyncId, clinicaId, createdAt, clinicalRevision',
       patientClinicalDrafts: 'patientId, updatedAt, patientSyncId, syncStatus, clinicalRevision',
+    })
+
+    // v39 — outbox granular EMR v2 (/api/v2/).
+    this.version(39).stores({
+      emrV2Outbox:
+        '++id, idempotencyKey, patientSyncId, kind, status, createdAt, updatedAt, [status+createdAt]',
     })
   }
 }

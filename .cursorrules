@@ -96,3 +96,51 @@ válido un documento de este tipo si falta alguna de las dos firmas.
   clínico sincronizado; el bloque del anexo es el editor de plan/calculadora.
 - Si ambos están visibles, ocultar la caja verde mientras el bloque del anexo
   esté abierto; no borrar el botón del producto.
+
+---
+
+## CONSTITUCIÓN SERVER-FIRST ACID (EMR v2)
+
+Gobernanza arquitectónica inviolable para cualquier IA o desarrollador. Complementa
+(no sustituye) las reglas de firmas, valorados y ortodoncia anteriores.
+
+### 1. Fuente Única de Verdad (Server-First ACID)
+- PostgreSQL (AWS RDS) es la **única fuente de verdad** clínica y financiera.
+- IndexedDB (Dexie.js) actúa exclusivamente como **caché local** y cola FIFO
+  (`outbox`) de operaciones atómicas cuando no hay red.
+- Prohibido tratar el espejo local como autoridad sobre el servidor en conflictos
+  de registro clínico firmado.
+
+### 2. Cero Snapshots Gigantes y Cero Base64 en BD
+- Prohibido serializar snapshots completos de toda la clínica con
+  `JSON.stringify` en memoria para persistencia o sync masivo.
+- Prohibido almacenar imágenes, firmas o PDFs en `data:image/...` base64
+  dentro de PostgreSQL o archivos JSON clínicos.
+- Todo binario debe ir a almacenamiento externo (S3 / almacenamiento de
+  archivos) guardando únicamente su URL/clave y hash **SHA-256**.
+
+### 3. Una Sola Base Dexie Canónica por Clínica
+- Prohibido crear bases de datos IndexedDB dinámicas usando
+  `superadmin-session` o UUIDs efímeros de sesión como nombre de BD.
+- La clave de paciente es siempre `patient.syncId` (UUID) reconciliado por
+  `(clinica_id, numero_documento)`.
+
+### 4. Inmutabilidad Médico-Legal (Res. 1995/1999)
+- Una evolución clínica cerrada/firmada (`is_locked = true`) o un
+  consentimiento firmado **jamás** pueden ser editados ni eliminados
+  (`UPDATE`/`DELETE` prohibidos a nivel de SQL trigger y API).
+- Toda corrección posterior debe realizarse únicamente mediante una
+  `nota_aclaratoria` vinculada (`parent_evolution_id`).
+- La firma de evoluciones sigue siendo **solo del profesional** (ReTHUS +
+  timestamp); nunca firma de paciente en evoluciones.
+
+### 5. Mutaciones Granulares (`/api/v2/`)
+- Toda **nueva** funcionalidad clínica debe usar endpoints REST granulares
+  validados con Zod y transacciones SQL (`BEGIN ... COMMIT`).
+- Prohibido sobrescribir el estado clínico completo en un solo payload para
+  código nuevo. El stack legacy `/api/sync` permanece hasta cutover explícito.
+
+### 6. Regla de Calidad
+- Todo cambio debe compilar sin errores (`tsc --noEmit` / `tsc -b` y
+  `npm run build`) y mantener en verde los tests críticos de integridad
+  clínica (incluidos `emrV2Store` y guards de firmas/valorados).

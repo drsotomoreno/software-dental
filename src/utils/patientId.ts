@@ -33,6 +33,19 @@ export async function getPatientByRouteId(routeId: string): Promise<Patient | nu
       undefined
   }
 
+  // Fallback: documento / legacyNumericIds (p. ej. ruta /pacientes/1407).
+  if (!patient && routeId.trim()) {
+    const needle = routeId.trim()
+    patient =
+      (await db.patients
+        .filter((row) => {
+          if (String(row.documentNumber || '').trim() === needle) return true
+          const legacy = Array.isArray(row.legacyNumericIds) ? row.legacyNumericIds : []
+          return legacy.map(String).includes(needle)
+        })
+        .first()) ?? undefined
+  }
+
   return patient ?? null
 }
 

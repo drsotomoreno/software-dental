@@ -4,6 +4,7 @@ import { resolveClinicSyncId } from './clinicalSyncScope.js'
 import {
   isOrphanUuidDentalEmrDb,
   orphanUuidDentalEmrDbName,
+  resolveCanonicalClinicDbKey,
   resolveDentalEmrDbNameFromUser,
   sanitizeDentalDbSegment,
 } from './dentalEmrDbName.js'
@@ -11,7 +12,7 @@ import {
 const MASTER_EMAIL = 'doctormauriciosoto@gmail.com'
 const MASTER_UUID = '11111111-2222-3333-4444-555555555555'
 
-test('Superadmin: Dexie usa correo canónico, no UUID crudo', () => {
+test('Superadmin: Dexie canónica por correo, nunca UUID ni superadmin-session', () => {
   const master = {
     id: MASTER_UUID,
     clinicId: MASTER_UUID,
@@ -19,8 +20,9 @@ test('Superadmin: Dexie usa correo canónico, no UUID crudo', () => {
   }
   assert.equal(resolveClinicSyncId(master), `clinic:${MASTER_EMAIL}`)
   const dbName = resolveDentalEmrDbNameFromUser(master)
-  assert.equal(dbName, `DentalEMR_${MASTER_UUID}_${MASTER_EMAIL}`)
+  assert.equal(dbName, `DentalEMR_canonical_${MASTER_EMAIL}`)
   assert.notEqual(dbName, orphanUuidDentalEmrDbName(MASTER_UUID))
+  assert.ok(!dbName.includes('superadmin-session'))
   assert.equal(
     isOrphanUuidDentalEmrDb(orphanUuidDentalEmrDbName(MASTER_UUID), MASTER_UUID, dbName),
     true,
@@ -37,11 +39,22 @@ test('Superadmin: override clinicId UUID no abre DentalEMR_{uid}_{uid}', () => {
     userId: MASTER_UUID,
     clinicaId: MASTER_UUID,
   })
-  assert.equal(dbName, `DentalEMR_${MASTER_UUID}_${MASTER_EMAIL}`)
+  assert.equal(dbName, `DentalEMR_canonical_${MASTER_EMAIL}`)
   assert.equal(sanitizeDentalDbSegment(`clinic:${MASTER_EMAIL}`), MASTER_EMAIL)
 })
 
-test('clínica multi-tenant conserva aislamiento (no cae en bucket del maestro)', () => {
+test('superadmin-session como id no contamina el nombre de BD', () => {
+  const user = {
+    id: 'superadmin-session',
+    clinicId: 'superadmin-session',
+    email: MASTER_EMAIL,
+  }
+  const dbName = resolveDentalEmrDbNameFromUser(user)
+  assert.equal(dbName, `DentalEMR_canonical_${MASTER_EMAIL}`)
+  assert.equal(resolveCanonicalClinicDbKey(user), MASTER_EMAIL)
+})
+
+test('clínica multi-tenant conserva aislamiento (una BD canónica por clínica)', () => {
   const dentist = {
     id: 'user-b',
     clinicId: 'clinic-b',
@@ -59,18 +72,18 @@ test('clínica multi-tenant conserva aislamiento (no cae en bucket del maestro)'
   })
   const dentistDb = resolveDentalEmrDbNameFromUser(dentist)
   const otherDb = resolveDentalEmrDbNameFromUser(other)
-  assert.equal(dentistDb, 'DentalEMR_user-b_clinic-b')
-  assert.equal(otherDb, 'DentalEMR_user-a_clinic-a')
+  assert.equal(dentistDb, 'DentalEMR_canonical_clinic-b')
+  assert.equal(otherDb, 'DentalEMR_canonical_clinic-a')
   assert.notEqual(dentistDb, otherDb)
   assert.notEqual(dentistDb, masterDb)
   assert.equal(isOrphanUuidDentalEmrDb(dentistDb, dentist.id, dentistDb), false)
 })
 
-test('dueño con clinicId === userId no trata su base como huérfana', () => {
+test('dueño con clinicId === userId usa DentalEMR_canonical_${ownerId}', () => {
   const ownerId = 'owner-uuid-999'
   const owner = { id: ownerId, clinicId: ownerId, email: 'dueno@clinica.test' }
   const dbName = resolveDentalEmrDbNameFromUser(owner)
-  assert.equal(dbName, `DentalEMR_${ownerId}_${ownerId}`)
+  assert.equal(dbName, `DentalEMR_canonical_${ownerId}`)
   assert.equal(isOrphanUuidDentalEmrDb(dbName, ownerId, dbName), false)
 })
 
