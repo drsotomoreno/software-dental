@@ -97,6 +97,7 @@ import {
   getPatientClinicalDraft,
   persistCorrectedEvolutionSessionClocks,
   pickLivingDraftForm,
+  reconcilePatientDraftKeys,
   resolveCanonicalDraftPatientId,
   savePatientClinicalDraft,
   savePatientValuationDraft,
@@ -426,6 +427,15 @@ export function PatientDetailPage() {
 
   const patientForeignKey = id ? toPatientForeignKey(id) : ''
 
+  useEffect(() => {
+    if (!patient) return
+    void reconcilePatientDraftKeys({
+      id: patient.id,
+      syncId: patient.syncId,
+      documentNumber: patient.documentNumber,
+    }).catch(() => undefined)
+  }, [patient?.id, patient?.syncId, patient?.documentNumber])
+
   const clinicalEncounterId = viewingRecord?.id
     ? String(viewingRecord.id)
     : `draft-${patientForeignKey}`
@@ -673,6 +683,17 @@ export function PatientDetailPage() {
 
     async function hydrateFromDexie(options?: { quiet?: boolean }) {
       const currentPatient = patientRef.current
+      if (currentPatient) {
+        try {
+          await reconcilePatientDraftKeys({
+            id: currentPatient.id,
+            syncId: currentPatient.syncId,
+            documentNumber: currentPatient.documentNumber,
+          })
+        } catch {
+          /* la ficha se lee igual con los alias que queden */
+        }
+      }
       let base: ClinicalRecordFormData = { ...shellForm }
       let loadedWithWarning = false
       let signedRecord: ClinicalRecord | null = null
@@ -762,7 +783,10 @@ export function PatientDetailPage() {
             if (needsServerChart && currentPatient?.syncId) {
               try {
                 const { pullPatientChartOnDemand } = await import('@/services/clinicalSyncService')
-                const remote = await pullPatientChartOnDemand(currentPatient.syncId)
+                const remote = await pullPatientChartOnDemand(currentPatient.syncId || String(currentPatient.id ?? foreignKey), {
+                  localId: currentPatient.id ?? foreignKey,
+                  documentNumber: currentPatient.documentNumber,
+                })
                 if (remote) {
                   draft = (await getPatientClinicalDraft(foreignKey)) ?? draft
                   living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
@@ -927,7 +951,9 @@ export function PatientDetailPage() {
     if (!id || !patientForeignKey || draftClinicalData) return
     if (!isValuationOnly) return
     const syncId = patient?.syncId?.trim() || ''
-    if (!syncId) return
+    const localId = patient?.id != null ? String(patient.id) : patientForeignKey
+    const documentNumber = String(patient?.documentNumber || '').trim()
+    if (!syncId && !localId) return
     if (clinicalData && clinicalFormHasContent(clinicalData)) return
     // Solo bloquear reintentos tras éxito; fallos permiten reintentar.
     if (valuationDraftRecoveryRef.current === `ok:${id}`) return
@@ -943,7 +969,10 @@ export function PatientDetailPage() {
           let living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
           if (!clinicalFormHasContent(living)) {
             const { pullPatientChartOnDemand } = await import('@/services/clinicalSyncService')
-            const ok = await pullPatientChartOnDemand(syncId)
+            const ok = await pullPatientChartOnDemand(syncId || localId, {
+              localId,
+              documentNumber,
+            })
             if (!ok) {
               lastError = 'El servidor no devolvió el borrador de valoración.'
             } else {
@@ -986,6 +1015,7 @@ export function PatientDetailPage() {
     id,
     patientForeignKey,
     patient?.syncId,
+    patient?.documentNumber,
     isValuationOnly,
     draftClinicalData,
     Boolean(clinicalData && clinicalFormHasContent(clinicalData)),

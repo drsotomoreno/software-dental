@@ -217,9 +217,88 @@ export async function resolveCanonicalDraftPatientId(patientRouteId: string): Pr
       : /^\d+$/.test(routeKey)
         ? routeKey
         : ''
+  const documentNumber = String(patient?.documentNumber || '').trim()
   const canonicalId = syncId || numericId || routeKey
-  const aliases = [...new Set([routeKey, syncId, numericId].filter(Boolean))]
-  return { canonicalId, patientSyncId: syncId || canonicalId, aliases }
+  const aliases = [routeKey, syncId, numericId, documentNumber]
+  if (documentNumber) {
+    const twins = await db.patients
+      .filter((row) => String(row.documentNumber || '').trim() === documentNumber)
+      .toArray()
+    for (const twin of twins) {
+      if (twin.id != null) aliases.push(String(twin.id))
+      const twinSync = String(twin.syncId || '').trim()
+      if (twinSync) aliases.push(twinSync)
+    }
+  }
+  return {
+    canonicalId,
+    patientSyncId: syncId || canonicalId,
+    aliases: [...new Set(aliases.filter(Boolean))],
+  }
+}
+
+function formRichness(value: unknown): number {
+  if (value == null) return 0
+  if (typeof value === 'string') return value.trim() ? Math.min(value.trim().length, 400) : 0
+  if (typeof value === 'number') return Number.isFinite(value) && value !== 0 ? 1 : 0
+  if (typeof value === 'boolean') return value ? 1 : 0
+  if (Array.isArray(value)) return value.reduce((sum, item) => sum + formRichness(item), 0)
+  if (typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).reduce(
+      (sum, item) => sum + formRichness(item),
+      0,
+    )
+  }
+  return 0
+}
+
+/** Une dos formularios sin perder evoluciones, abonos, presupuesto ni la anamnesis más llena. */
+function mergeClinicalForms(
+  left: ClinicalRecordFormData | null | undefined,
+  right: ClinicalRecordFormData | null | undefined,
+): ClinicalRecordFormData | null {
+  if (!left && !right) return null
+  if (!left) return right ?? null
+  if (!right) return left
+  const anamnesis =
+    formRichness(left.anamnesis) >= formRichness(right.anamnesis) ? left.anamnesis : right.anamnesis
+  return {
+    ...left,
+    ...right,
+    anamnesis,
+    ...preferGeneralBudgetSections(left, right),
+    ...mergeClinicalPaymentSections(left, right),
+    ...preferSpecialtyBudgets(left, right),
+    evolutionNotes: mergeDraftEvolutionNotes(
+      right.evolutionNotes ?? [],
+      left.evolutionNotes,
+      [...(left.evolutionNotes ?? []), ...(right.evolutionNotes ?? [])],
+    ),
+    informedConsent: keepStoredConsentSignatures(left.informedConsent, right.informedConsent),
+  }
+}
+
+function mergeDraftPair(left: PatientClinicalDraft, right: PatientClinicalDraft): PatientClinicalDraft {
+  const leftStamp = String(left.clinicalUpdatedAt || left.updatedAt || '')
+  const rightStamp = String(right.clinicalUpdatedAt || right.updatedAt || '')
+  const newer = rightStamp >= leftStamp ? right : left
+  const older = newer === right ? left : right
+  return {
+    ...older,
+    ...newer,
+    evolutionNotes: mergeDraftEvolutionNotes(
+      newer.evolutionNotes ?? [],
+      older.evolutionNotes,
+      [...(older.evolutionNotes ?? []), ...(newer.evolutionNotes ?? [])],
+    ),
+    clinicalDraft: mergeClinicalForms(older.clinicalDraft, newer.clinicalDraft),
+    valuationDraft: mergeClinicalForms(older.valuationDraft, newer.valuationDraft),
+    odontogramDraft: newer.odontogramDraft ?? older.odontogramDraft ?? null,
+    clinicalRevision: Math.max(Number(left.clinicalRevision) || 0, Number(right.clinicalRevision) || 0),
+    contentHash: newer.contentHash || older.contentHash,
+    patientSyncId: newer.patientSyncId || older.patientSyncId,
+    updatedAt: newer.updatedAt || older.updatedAt || new Date().toISOString(),
+  }
 }
 
 async function mergeDuplicateDraftRows(
@@ -241,10 +320,12 @@ async function mergeDuplicateDraftRows(
       String(a.clinicalUpdatedAt || a.updatedAt || ''),
     )
   })
-  const winner = {
-    ...rows[0],
+  let merged = rows[0]
+  for (const row of rows.slice(1)) merged = mergeDraftPair(merged, row)
+  const winner: PatientClinicalDraft = {
+    ...merged,
     patientId: canonicalId,
-    patientSyncId: patientSyncId || rows[0].patientSyncId,
+    patientSyncId: patientSyncId || merged.patientSyncId,
   }
 
   if (winner.patientId !== rows[0].patientId || rows.length > 1) {
@@ -264,6 +345,40 @@ export async function getPatientClinicalDraft(
   const { canonicalId, patientSyncId, aliases } =
     await resolveCanonicalDraftPatientId(patientRouteId)
   return mergeDuplicateDraftRows(canonicalId, patientSyncId, aliases)
+}
+
+/**
+ * 1407, UUID y la misma cédula dejan de ser tres historias.
+ * Conserva evoluciones, presupuestos, abonos y la anamnesis más completa
+ * bajo `patient.syncId`.
+ */
+export async function reconcilePatientDraftKeys(patient: {
+  id?: string | number | null
+  syncId?: string | null
+  documentNumber?: string | null
+} | null | undefined): Promise<string> {
+  if (!patient) return ''
+  const routeKey = String(patient.syncId || patient.id || '').trim()
+  if (!routeKey) return ''
+  const { canonicalId, patientSyncId, aliases } = await resolveCanonicalDraftPatientId(routeKey)
+  await mergeDuplicateDraftRows(canonicalId, patientSyncId, aliases)
+  const aliasSet = new Set(aliases)
+
+  const records = await db.clinicalRecords.toArray()
+  for (const record of records) {
+    const key = String(record.patientId ?? '')
+    if (!aliasSet.has(key) || key === canonicalId || record.id == null) continue
+    await db.clinicalRecords.update(record.id, { patientId: canonicalId })
+  }
+
+  const logs = await db.clinicalAuditLogs.toArray()
+  for (const log of logs) {
+    const key = String(log.patientSyncId || '')
+    if (!aliasSet.has(key) || key === canonicalId) continue
+    await db.clinicalAuditLogs.update(log.id, { patientSyncId: canonicalId })
+  }
+
+  return canonicalId
 }
 
 /**

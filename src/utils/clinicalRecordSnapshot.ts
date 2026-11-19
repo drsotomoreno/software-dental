@@ -17,7 +17,7 @@ import {
 import { normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import { migrateLegacyBudget, generateId } from '@/utils'
 import { sortEvolutionNotesChronologically } from '@/utils/recordIntegrity'
-import { toDexiePrimaryKey, toPatientForeignKey } from '@/utils/patientId'
+import { toDexiePrimaryKey, toPatientForeignKey, getPatientByRouteId } from '@/utils/patientId'
 import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceService'
 import {
   clinicalDocumentRichness,
@@ -150,6 +150,8 @@ export async function listPatientClinicalRecords(
 ): Promise<ClinicalRecord[]> {
   const patientId = toPatientForeignKey(patientRouteId)
   const numericKey = toDexiePrimaryKey(patientRouteId)
+  const patient = await getPatientByRouteId(patientRouteId)
+  const syncId = String(patient?.syncId || '').trim()
 
   const byString = await db.clinicalRecords.where('patientId').equals(patientId).toArray()
 
@@ -158,7 +160,12 @@ export async function listPatientClinicalRecords(
     byNumeric = await db.clinicalRecords.where('patientId').equals(numericKey).toArray()
   }
 
-  return [...new Map([...byString, ...byNumeric].map((record) => [record.id, record])).values()]
+  let bySync: ClinicalRecord[] = []
+  if (syncId && syncId !== patientId) {
+    bySync = await db.clinicalRecords.where('patientId').equals(syncId).toArray()
+  }
+
+  return [...new Map([...byString, ...byNumeric, ...bySync].map((record) => [record.id, record])).values()]
 }
 
 function latestClinicalRecord(records: ClinicalRecord[]): ClinicalRecord | null {

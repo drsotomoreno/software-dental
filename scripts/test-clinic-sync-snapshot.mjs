@@ -69,10 +69,16 @@ if (!pushed.accepted.sync_queue) {
 const snapshot = await pullClinicSnapshot(clinicId, [], { includeBlobs: true })
 if (snapshot.patients.length !== 1) throw new Error('pull no devolvió pacientes')
 if (snapshot.attachments.length < 1) throw new Error('pull no devolvió adjuntos')
-if (!snapshot.attachments[0]?.payload?.dataBase64) throw new Error('pull no incluyó el blob')
+if (snapshot.attachments[0]?.payload?.dataBase64) {
+  throw new Error('el listado full=1 no debe embeber dataBase64 (OOM JsonStringify)')
+}
+if (snapshot.attachments[0]?.payload?.fileHash !== fileHash) {
+  throw new Error('el listado perdió el hash del adjunto')
+}
 
 const byHash = await findClinicAttachment(clinicId, { fileHash, patientId: 'patient-1', encounterId: 'evo-9' })
-if (!byHash?.payload?.dataBase64) throw new Error('no se encontró el adjunto por paciente/evolución/hash')
+if (!byHash?.payload?.fileHash) throw new Error('no se encontró el adjunto por paciente/evolución/hash')
+if (byHash.payload.dataBase64) throw new Error('el binario no vive en el JSON de la clínica')
 
 const aliasId = 'legacy-clinic-key'
 const aliasAid = 'aid-stl-alias'
@@ -100,13 +106,14 @@ const aliasBlob = aliased.attachments.concat(aliased.sync_queue).find((row) => {
   const payload = row?.payload || {}
   return payload.aidId === aliasAid || row.syncId === aliasAid
 })
-if (!aliasBlob?.payload?.dataBase64) {
-  throw new Error('el pull no hidrató el blob almacenado en un alias de clínica')
+if (aliasBlob?.payload?.dataBase64) {
+  throw new Error('el pull de alias no debe hidratar base64 en el listado')
 }
+if (!aliasBlob) throw new Error('el pull no encontró el adjunto guardado en un alias de clínica')
 
 const byAliasHash = await findClinicAttachment(clinicId, { fileHash: 'alias-hash' }, [aliasId])
-if (!byAliasHash?.payload?.dataBase64) {
-  throw new Error('findClinicAttachment no resolvió el binario del alias')
+if (!byAliasHash?.payload?.fileName) {
+  throw new Error('findClinicAttachment no resolvió el metadato del alias')
 }
 
 const light = await pullClinicSnapshot(clinicId, [], { includeBlobs: false })

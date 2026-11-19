@@ -80,7 +80,7 @@ import {
   odontogramHasMarks,
   pickOdontogramFromCandidates,
 } from '@/utils/odontogramPersistence'
-import { listOdontogramsForPatient } from '@/utils/patientId'
+import { listOdontogramsForPatient, getPatientByRouteId } from '@/utils/patientId'
 import { generateId } from '@/utils/crypto'
 import {
   hasLocalDiskPath,
@@ -253,6 +253,17 @@ async function resolveLocalPatientId(payload: Record<string, unknown>): Promise<
   return fallback == null || fallback === '' ? undefined : String(fallback)
 }
 
+/** Clave de historia, borrador y bitácora: UUID del paciente, no el id numérico de Dexie. */
+async function resolveCanonicalChartKey(payload: Record<string, unknown>): Promise<string | undefined> {
+  const explicit = String(payload.patientSyncId ?? '').trim()
+  if (explicit && !/^\d+$/.test(explicit)) return explicit
+  const localId = explicit || (await resolveLocalPatientId(payload))
+  if (!localId) return undefined
+  const patient = await getPatientByRouteId(localId)
+  const syncId = String(patient?.syncId || '').trim()
+  return syncId || localId
+}
+
 async function withPatientSyncId<T extends { patientId?: string; patientSyncId?: string }>(
   row: T,
 ): Promise<T> {
@@ -285,8 +296,9 @@ async function mergeClinicalRecords(records: ClinicalSyncRecord[]): Promise<bool
   for (const remote of records) {
     const payload = payloadOf(remote)
     const local = bySync.get(remote.syncId)
-    const resolvedPatientId = await resolveLocalPatientId(payload)
-    const patientId = local?.patientId != null ? String(local.patientId) : resolvedPatientId
+    const canonicalPatientId = await resolveCanonicalChartKey(payload)
+    const patientId =
+      canonicalPatientId || (local?.patientId != null ? String(local.patientId) : undefined)
     if (!patientId) continue
 
     const next: ClinicalRecord = {
@@ -542,17 +554,19 @@ async function mergeDrafts(records: ClinicalSyncRecord[]): Promise<boolean> {
   const { localDraftBlocksRemoteOverwrite } = await import('../../shared/clinicalRevision.js')
   for (const remote of records) {
     const payload = payloadOf(remote)
-    const patientId = await resolveLocalPatientId(payload)
-    if (!patientId) continue
-    const remoteUpdatedAt = remote.updatedAt || String(payload.updatedAt || '')
+    const localNumericId = await resolveLocalPatientId(payload)
     const syncId = String(payload.patientSyncId || '').trim()
+    const canonicalId = (await resolveCanonicalChartKey(payload)) || syncId || localNumericId
+    if (!canonicalId) continue
+    const remoteUpdatedAt = remote.updatedAt || String(payload.updatedAt || '')
     const local =
-      (await db.patientClinicalDrafts.get(patientId)) ||
+      (await db.patientClinicalDrafts.get(canonicalId)) ||
+      (localNumericId ? await db.patientClinicalDrafts.get(localNumericId) : undefined) ||
       (syncId ? await db.patientClinicalDrafts.get(syncId) : undefined)
     const next: PatientClinicalDraft = {
       ...(payload as unknown as PatientClinicalDraft),
-      patientId: local?.patientId || patientId,
-      patientSyncId: syncId || local?.patientSyncId,
+      patientId: canonicalId,
+      patientSyncId: syncId || local?.patientSyncId || canonicalId,
       updatedAt: remoteUpdatedAt || new Date().toISOString(),
     }
     const remoteRecord = { ...remote, payload: next, updatedAt: next.updatedAt }
@@ -572,11 +586,23 @@ async function mergeDrafts(records: ClinicalSyncRecord[]): Promise<boolean> {
       if (paymentFingerprint(paymentsMerged) !== paymentFingerprint(local)) {
         await db.patientClinicalDrafts.put({
           ...paymentsMerged,
+          patientId: canonicalId,
+          patientSyncId: syncId || paymentsMerged.patientSyncId || canonicalId,
           updatedAt: new Date().toISOString(),
         })
+        if (local.patientId !== canonicalId) await db.patientClinicalDrafts.delete(local.patientId)
         changed = true
       } else if (localHasHistory && remoteIsEmptyShell) {
-        await db.patientClinicalDrafts.update(patientId, { updatedAt: new Date().toISOString() })
+        if (local.patientId !== canonicalId) {
+          await db.patientClinicalDrafts.put({
+            ...local,
+            patientId: canonicalId,
+            patientSyncId: syncId || local.patientSyncId || canonicalId,
+          })
+          await db.patientClinicalDrafts.delete(local.patientId)
+        } else {
+          await db.patientClinicalDrafts.update(canonicalId, { updatedAt: new Date().toISOString() })
+        }
         changed = true
       }
       continue
@@ -585,6 +611,8 @@ async function mergeDrafts(records: ClinicalSyncRecord[]): Promise<boolean> {
     const kept: PatientClinicalDraft = local
       ? {
           ...winner,
+          patientId: canonicalId,
+          patientSyncId: syncId || winner.patientSyncId || canonicalId,
           clinicalDraft: winner.clinicalDraft
             ? {
                 ...winner.clinicalDraft,
@@ -605,7 +633,18 @@ async function mergeDrafts(records: ClinicalSyncRecord[]): Promise<boolean> {
             : winner.valuationDraft,
         }
       : winner
-    await db.patientClinicalDrafts.put(kept)
+    await db.patientClinicalDrafts.put({
+      ...kept,
+      patientId: canonicalId,
+      patientSyncId: syncId || kept.patientSyncId || canonicalId,
+    })
+    if (local?.patientId && local.patientId !== canonicalId) {
+      await db.patientClinicalDrafts.delete(local.patientId)
+    }
+    if (localNumericId && localNumericId !== canonicalId) {
+      const stale = await db.patientClinicalDrafts.get(localNumericId)
+      if (stale) await db.patientClinicalDrafts.delete(localNumericId)
+    }
     changed = true
   }
   return changed

@@ -567,20 +567,32 @@ export async function pullPatientDraftOnDemand(patientSyncId: string): Promise<b
 
 /**
  * Al abrir una ficha: baja borrador íntegro, historias firmadas y exámenes de ese paciente.
- * Una historia firmada se fusiona como registro inmutable (el merge no la pisa con un borrador vacío).
+ * Envía UUID, id local y cédula: el servidor no depende del número de la URL.
  */
-export async function pullPatientChartOnDemand(patientSyncId: string): Promise<boolean> {
+export async function pullPatientChartOnDemand(
+  patientSyncId: string,
+  lookup?: { localId?: string | number | null; documentNumber?: string | null },
+): Promise<boolean> {
   const syncId = String(patientSyncId || '').trim()
-  if (!syncId) return false
+  const localId = String(lookup?.localId ?? '').trim()
+  const documentNumber = String(lookup?.documentNumber ?? '').trim()
+  const routeKey = syncId || localId || documentNumber
+  if (!routeKey) return false
   const auth = getStoredApiAuth()
   if (!auth?.token) return false
+  const params = new URLSearchParams()
+  if (syncId) params.set('patientSyncId', syncId)
+  if (localId) params.set('localId', localId)
+  if (documentNumber) params.set('documentNumber', documentNumber)
+  const query = params.toString()
   const { response, payload } = await syncFetch(
-    `/api/sync/patient/${encodeURIComponent(syncId)}`,
+    `/api/patients/${encodeURIComponent(routeKey)}/chart${query ? `?${query}` : ''}`,
     { timeoutMs: 45_000 },
   )
   if (!response.ok) {
     console.warn('[Sync] pullPatientChartOnDemand failed', {
       syncId,
+      localId,
       status: response.status,
       error: payload?.error,
       code: payload?.code,

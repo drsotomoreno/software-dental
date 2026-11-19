@@ -15,6 +15,7 @@ import ripsRoutes from './server/routes/rips.routes.js'
 import invoicesRoutes from './server/routes/invoices.routes.js'
 import authRoutes from './server/routes/auth.routes.js'
 import clinicalSyncRoutes from './server/routes/clinicalSync.routes.js'
+import patientChartRoutes from './server/routes/patientChart.routes.js'
 import googleDriveRoutes from './server/routes/googleDrive.routes.js'
 import kioskRoutes from './server/routes/kiosk.routes.js'
 import superadminRoutes from './server/routes/superadmin.routes.js'
@@ -110,6 +111,7 @@ app.use('/api/health', healthRoutes)
 app.use('/api/rips', ripsRoutes)
 app.use('/api/invoices', invoicesRoutes)
 app.use('/api/sync', clinicalSyncRoutes)
+app.use('/api/patients', patientChartRoutes)
 app.use('/api/integrations/google-drive', googleDriveRoutes)
 app.use('/api/drive', googleDriveRoutes)
 app.use('/api/v1/kiosk', kioskRoutes)

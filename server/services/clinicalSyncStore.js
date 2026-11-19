@@ -21,6 +21,7 @@ import { conservarFechaApertura } from '../../shared/patientOpenedAt.js'
 import { clinicKeyInScope } from '../../shared/clinicalSyncScope.js'
 import { mergeSyncedRecordNonDestructive } from '../../shared/clinicalSyncMerge.js'
 import { omitHeavyClinicalDraftForms } from '../../shared/clinicalSyncHeavyPayload.js'
+import { stripListingHeavyStrings } from '../../shared/clinicalInlineMedia.js'
 import {
   assertClinicalArrayLimits,
   isClinicalArrayCircuitError,
@@ -835,12 +836,15 @@ async function loadStore() {
     }
     const raw = await readFile(STORE_FILE, 'utf8')
     const parsed = JSON.parse(raw)
-    const store = mergeClinicalStores(
+    const merged = mergeClinicalStores(
       emptyStore(),
       parsed && typeof parsed === 'object' ? parsed : emptyStore(),
     )
-    storeCache = { mtimeMs: st.mtimeMs, size: st.size, store }
-    return store
+    const hardened = await hardenLoadedStore(merged)
+    if (!hardened.rewritten) {
+      storeCache = { mtimeMs: st.mtimeMs, size: st.size, store: hardened.store }
+    }
+    return hardened.store
   } catch (error) {
     if (error?.code === 'CLINICAL_SYNC_TOO_LARGE') throw error
     invalidateStoreCache()
@@ -863,10 +867,27 @@ async function loadStore() {
       STORE_KEY,
       mergeClinicalStores,
     )
-    const store = mergeClinicalStores(emptyStore(), parsed)
-    storeCache = { mtimeMs: 0, size: 0, store }
-    return store
+    const hardened = await hardenLoadedStore(mergeClinicalStores(emptyStore(), parsed))
+    if (!hardened.rewritten) {
+      storeCache = { mtimeMs: 0, size: 0, store: hardened.store }
+    }
+    return hardened.store
   }
+}
+
+/**
+ * Al cargar: saca data:image / base64 > 50 KB de clinicalDraft.
+ * Si hubo extracción, reescribe el JSON ya adelgazado (una sola vez).
+ */
+async function hardenLoadedStore(store) {
+  const { persistExtractedClinicalMedia } = await import('./clinicalMediaStore.js')
+  const { value, extracted } = await persistExtractedClinicalMedia(store)
+  if (!extracted) return { store: value, rewritten: false }
+  console.warn(
+    `[clinical-sync] Extraídos ${extracted} binarios embebidos de clinicalDraft al cargar el store.`,
+  )
+  await saveStore(value)
+  return { store: storeCache.store || value, rewritten: true }
 }
 
 async function saveStore(store) {
@@ -876,7 +897,9 @@ async function saveStore(store) {
   invalidateStoreCache()
   invalidateMetaCache()
   const base = store && typeof store === 'object' ? store : emptyStore()
-  const sanitized = stripHeavyKeepingClinicalDrafts(base)
+  const stripped = stripHeavyKeepingClinicalDrafts(base)
+  const { persistExtractedClinicalMedia } = await import('./clinicalMediaStore.js')
+  const { value: sanitized } = await persistExtractedClinicalMedia(stripped)
   await writeDurableJsonReplace(STORE_FILE, sanitized, STORE_KEY)
   // Re-cache tras escritura para el próximo pull (mtime fresco).
   try {
@@ -1151,22 +1174,106 @@ function deliverSinglePatientRecord(record) {
   return { ...record, payload: stripped }
 }
 
-function recordBelongsToPatient(record, syncKey) {
+const PATIENT_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function normalizeNeedles(patientSyncId, hints = {}) {
+  const values = [
+    patientSyncId,
+    hints.patientSyncId,
+    hints.localId,
+    hints.documentNumber,
+    hints.routeId,
+  ]
+  return [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))]
+}
+
+function payloadIdentityValues(record) {
   const payload = record?.payload && typeof record.payload === 'object' ? record.payload : {}
-  const ids = [record?.syncId, payload.patientSyncId, payload.patientId, payload.syncId]
-  return ids.some((value) => {
-    const text = String(value || '').trim()
-    return text === syncKey || text === `draft:${syncKey}`
+  return [
+    record?.syncId,
+    payload.patientSyncId,
+    payload.patientId,
+    payload.syncId,
+    payload.id,
+    payload.localId,
+    payload.documentNumber,
+    payload.cedula,
+    payload.numeroDocumento,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+}
+
+function recordMatchesNeedles(record, needles) {
+  const wanted = new Set((needles || []).map((value) => String(value || '').trim()).filter(Boolean))
+  if (wanted.size === 0) return false
+  return payloadIdentityValues(record).some((value) => {
+    const bare = value.replace(/^draft:/, '')
+    return wanted.has(value) || wanted.has(bare)
   })
+}
+
+function expandNeedles(clinic, needles) {
+  const set = new Set(needles)
+  const buckets = ['patients', 'drafts', 'clinicalRecords', 'odontograms']
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const bucket of buckets) {
+      for (const record of Object.values(clinic?.[bucket] || {})) {
+        if (!recordMatchesNeedles(record, [...set])) continue
+        for (const value of payloadIdentityValues(record)) {
+          const bare = value.replace(/^draft:/, '')
+          if (bare && !set.has(bare)) {
+            set.add(bare)
+            grew = true
+          }
+        }
+      }
+    }
+  }
+  return [...set]
+}
+
+function preferPatientSyncId(ids) {
+  const list = (ids || []).map((value) => String(value || '').trim()).filter(Boolean)
+  const uuid = list.find((value) => PATIENT_UUID_RE.test(value))
+  if (uuid) return uuid
+  const named = list.find((value) => !/^\d+$/.test(value) && !value.startsWith('draft:'))
+  return named || list[0] || ''
+}
+
+function findDraftForNeedles(clinic, needles) {
+  for (const record of Object.values(clinic?.drafts || {})) {
+    if (recordMatchesNeedles(record, needles)) return record
+  }
+  return null
+}
+
+function chartIdentityFromClinic(clinic, needles) {
+  let documentNumber = ''
+  let localId = ''
+  for (const record of Object.values(clinic?.patients || {})) {
+    if (!recordMatchesNeedles(record, needles)) continue
+    const payload = record.payload && typeof record.payload === 'object' ? record.payload : {}
+    documentNumber = documentNumber || String(payload.documentNumber || payload.cedula || '').trim()
+    localId = localId || String(payload.id || payload.localId || '').trim()
+  }
+  return {
+    patientSyncId: preferPatientSyncId(needles),
+    documentNumber,
+    localId,
+  }
 }
 
 /**
  * Paquete de una ficha: borrador íntegro + historias firmadas + odontograma + exámenes.
  * No aplica el corte de 50 KB. Las historias firmadas se devuelven tal cual (append-only).
+ * `hints` acepta localId y documentNumber: el id de la URL (/pacientes/1407) no es la clave.
  */
-export async function pullPatientChart(clinicId, patientSyncId, aliasIds = []) {
-  const syncKey = String(patientSyncId || '').trim()
-  const draft = await pullPatientDraft(clinicId, syncKey, aliasIds)
+export async function pullPatientChart(clinicId, patientSyncId, aliasIds = [], hints = {}) {
+  const needles = normalizeNeedles(patientSyncId, hints)
   const ids = scopeIds(clinicId, aliasIds)
   let clinic = null
   if (storeCache.store && ids.length) {
@@ -1184,11 +1291,22 @@ export async function pullPatientChart(clinicId, patientSyncId, aliasIds = []) {
       if (error?.code !== 'CLINICAL_SYNC_TOO_LARGE') throw error
     }
   }
+  const expanded = clinic ? expandNeedles(clinic, needles) : needles
+  let draft = clinic ? findDraftForNeedles(clinic, expanded) : null
+  if (!draft) {
+    for (const needle of expanded) {
+      draft = await pullPatientDraft(clinicId, needle, aliasIds)
+      if (draft) break
+    }
+  }
   const pick = (bucket) =>
     Object.values(clinic?.[bucket] || {}).filter(
-      (record) => record && recordBelongsToPatient(record, syncKey),
+      (record) => record && recordMatchesNeedles(record, expanded),
     )
+  const identity = chartIdentityFromClinic(clinic, expanded)
   return {
+    ...identity,
+    patientSyncId: identity.patientSyncId || preferPatientSyncId(expanded),
     draft: draft ? deliverSinglePatientRecord(draft) : null,
     clinicalRecords: clinic ? pick('clinicalRecords').map((record) => deliverSinglePatientRecord(record)) : [],
     odontograms: clinic ? pick('odontograms') : [],
@@ -1277,26 +1395,31 @@ export async function pullClinicSnapshot(clinicId, aliasIds = [], options = {}) 
 
   const attachments = []
   for (const record of Object.values(clinic.attachments).filter(Boolean)) {
-    attachments.push(await hydrateAttachment(ids, record, includeBlobs))
+    // Listado (incluso full=1): no reinyectar bytes. includeBlobs no vuelve a inflar el JSON.
+    attachments.push(await hydrateAttachment(ids, record, false && includeBlobs))
   }
   const syncQueue = []
   for (const record of Object.values(clinic.sync_queue).filter(Boolean)) {
-    syncQueue.push(await hydrateAttachment(ids, record, includeBlobs))
+    syncQueue.push(await hydrateAttachment(ids, record, false))
   }
 
-  // Listado masivo: el corte de 50 KB solo aquí. La ficha de un paciente no pasa por esta función.
-  return omitHeavyClinicalDraftForms({
-    patients,
-    appointments,
-    clinicalRecords: Object.values(clinic.clinicalRecords).filter(Boolean),
-    odontograms: Object.values(clinic.odontograms).filter(Boolean),
-    diagnosticAids: listedDiagnosticAids(clinic),
-    attachments,
-    drafts: [],
-    sync_queue: syncQueue,
-    serverTime,
-    slim: false,
-  })
+  // Listado masivo: primero se cortan dataURL/base64 > 30 KB (sin JSON.stringify del blob)
+  // y después el corte de clinicalDraft pesado. La ficha de un paciente no pasa por aquí.
+  // valuationDraft no se anula: este listado ya entrega drafts: [].
+  return omitHeavyClinicalDraftForms(
+    stripListingHeavyStrings({
+      patients,
+      appointments,
+      clinicalRecords: Object.values(clinic.clinicalRecords).filter(Boolean),
+      odontograms: Object.values(clinic.odontograms).filter(Boolean),
+      diagnosticAids: listedDiagnosticAids(clinic),
+      attachments,
+      drafts: [],
+      sync_queue: syncQueue,
+      serverTime,
+      slim: false,
+    }),
+  )
 }
 
 export async function pushClinicalRecords(clinicId, patients = [], appointments = [], aliasIds = []) {
@@ -1358,8 +1481,11 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
     )
   }
 
-  // Binarios fuera. El borrador de cada paciente se queda entero; las listas se deduplican abajo.
-  const safeBody = stripHeavyKeepingClinicalDrafts(withSignatures)
+  // Binarios sueltos fuera. clinicalDraft se queda, pero data:image / base64 > 50 KB
+  // se extraen a disco para que clinical-sync.json no vuelva a tumbar V8.
+  const strippedBody = stripHeavyKeepingClinicalDrafts(withSignatures)
+  const { persistExtractedClinicalMedia } = await import('./clinicalMediaStore.js')
+  const { value: safeBody } = await persistExtractedClinicalMedia(strippedBody)
 
   return enqueueWrite(async () => {
     const store = await loadStore()
@@ -1468,6 +1594,15 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
 
     replicateAliases(store, canonical, clinic, aliasIds)
     await saveStore(store)
+    try {
+      const { persistTouchedPatientCharts } = await import('./clinicalPostgresStore.js')
+      await persistTouchedPatientCharts(canonical, clinic, body)
+    } catch (error) {
+      console.warn(
+        '[clinical-charts] RDS no recibió la ficha; el espejo JSON quedó guardado:',
+        error instanceof Error ? error.message : error,
+      )
+    }
     try {
       const { mirrorClinicPatients } = await import('./clinicPatientMirror.js')
       await mirrorClinicPatients(canonical, Object.values(clinic.patients))

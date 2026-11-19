@@ -16,6 +16,7 @@ import {
 } from '../services/clinicalSyncStore.js'
 import { isClinicalArrayCircuitError } from '../../shared/clinicalSyncCircuitBreaker.js'
 import { heapPressurePayload, isHeapNearLimit } from '../utils/heapPressure.js'
+import { sendJsonStream } from '../utils/jsonStream.js'
 
 function driveRequiredPayload(error) {
   return {
@@ -187,7 +188,7 @@ router.get('/clinical', async (req, res) => {
       auth.session.accessTier,
       await pullClinicSnapshot(auth.canonical, aliases, { includeBlobs }),
     )
-    return sendJson(res, 200, {
+    return sendJsonStream(res, 200, {
       ...snapshotResponse(auth, snapshot),
       patients: snapshot.patients,
       appointments: snapshot.appointments,
@@ -217,7 +218,8 @@ router.get('/pull', async (req, res) => {
       auth.session.accessTier,
       await pullClinicSnapshot(auth.canonical, aliases, { includeBlobs, slim }),
     )
-    return sendJson(res, 200, snapshotResponse(auth, snapshot))
+    // full=1 también: sin dataURL/base64 > 30 KB y sin un JSON.stringify único del cubo.
+    return sendJsonStream(res, 200, snapshotResponse(auth, snapshot))
   } catch (error) {
     console.error('[Sync] Error en GET /api/sync/pull:', error)
     const message = error instanceof Error ? error.message : String(error)
@@ -299,8 +301,13 @@ router.get('/patient/:patientSyncId', async (req, res) => {
     if (!patientSyncId) {
       return sendJson(res, 400, { success: false, ok: false, error: 'Falta patientSyncId.' })
     }
-    const chart = await pullPatientChart(auth.canonical, patientSyncId, auth.aliases)
-    return sendJson(res, 200, {
+    const chart = await pullPatientChart(auth.canonical, patientSyncId, auth.aliases, {
+      patientSyncId,
+      localId: req.query?.localId,
+      documentNumber: req.query?.documentNumber,
+      routeId: patientSyncId,
+    })
+    return sendJsonStream(res, 200, {
       success: true,
       ok: true,
       clinicId: auth.canonical,
