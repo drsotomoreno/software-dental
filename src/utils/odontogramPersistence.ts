@@ -91,11 +91,21 @@ function notesOf(value: unknown): unknown[] | undefined {
   return Array.isArray(notes) ? notes : undefined
 }
 
-/** La sección 4 del borrador más nuevo no se pierde detrás de un cierre anterior. */
+/**
+ * Ficha viva (`draft`) vs historia firmada (`base`).
+ *
+ * Res. 1995 / offline-first: si el borrador tiene contenido clínico, es la única
+ * fuente de verdad editable. `draftIsNewer` / `signedRecord.updatedAt` YA NO
+ * descartan anamnesis, examen, anexos, plan, consentimientos ni presupuestos.
+ * La firmada solo aporta evoluciones selladas y firmas cuando el draft no las tiene.
+ *
+ * El 3.er argumento se conserva por compatibilidad de llamadas; se ignora al
+ * decidir prioridad de secciones con contenido.
+ */
 export function mergeLivingChart<T extends LivingChart>(
   base: T,
   draft: T | null | undefined,
-  draftIsNewer: boolean,
+  _draftIsNewer = true,
 ): T {
   if (!draft) return base
 
@@ -108,61 +118,59 @@ export function mergeLivingChart<T extends LivingChart>(
     draft as Record<string, unknown>,
   )
 
-  if (draftIsNewer) {
-    const draftRecord = draft as T & {
-      anamnesis?: unknown
-      stomatologicalExam?: unknown
-      specializedAnnexes?: unknown
-      treatmentPlan?: unknown
-      informedConsent?: unknown
-    }
-    const baseRecord = base as T & {
-      anamnesis?: unknown
-      stomatologicalExam?: unknown
-      specializedAnnexes?: unknown
-      treatmentPlan?: unknown
-      informedConsent?: unknown
-    }
-    return {
-      ...base,
-      ...draft,
-      ...paymentSections,
-      ...budgetSections,
-      anamnesis: anamnesisHasContent(draftRecord.anamnesis)
-        ? draftRecord.anamnesis
-        : (baseRecord.anamnesis ?? draftRecord.anamnesis),
-      stomatologicalExam: stomatologicalExamHasContent(draftRecord.stomatologicalExam)
-        ? draftRecord.stomatologicalExam
-        : (baseRecord.stomatologicalExam ?? draftRecord.stomatologicalExam),
-      specializedAnnexes: specializedAnnexesHaveContent(draftRecord.specializedAnnexes)
-        ? draftRecord.specializedAnnexes
-        : (baseRecord.specializedAnnexes ?? draftRecord.specializedAnnexes),
-      diagnoses: hasDiagnoses(draft) ? draft.diagnoses : base.diagnoses,
-      diagnosticChart: hasChartEntries(draft) ? draft.diagnosticChart : base.diagnosticChart,
-      findings: draft.findings?.trim() ? draft.findings : base.findings || draft.findings,
-      treatmentPlan: treatmentPlanHasContent(draftRecord.treatmentPlan)
-        ? draftRecord.treatmentPlan
-        : (baseRecord.treatmentPlan ?? draftRecord.treatmentPlan),
-      evolutionNotes: mergeSignedEvolutionNotes(notesOf(base), notesOf(draft)),
-      informedConsent: keepStoredConsentSignatures(
-        baseRecord.informedConsent,
-        informedConsentHasContent(draftRecord.informedConsent)
-          ? draftRecord.informedConsent
-          : (baseRecord.informedConsent ?? draftRecord.informedConsent),
-      ),
-    } as T
+  const draftRecord = draft as T & {
+    anamnesis?: unknown
+    stomatologicalExam?: unknown
+    specializedAnnexes?: unknown
+    treatmentPlan?: unknown
+    informedConsent?: unknown
+    treatmentPlanAuthorization?: unknown
+    orthodonticsBudget?: unknown
+    dentalImplantsBudget?: unknown
+  }
+  const baseRecord = base as T & {
+    anamnesis?: unknown
+    stomatologicalExam?: unknown
+    specializedAnnexes?: unknown
+    treatmentPlan?: unknown
+    informedConsent?: unknown
+    treatmentPlanAuthorization?: unknown
+    orthodonticsBudget?: unknown
+    dentalImplantsBudget?: unknown
   }
 
   return {
     ...base,
+    ...draft,
     ...paymentSections,
     ...budgetSections,
-    diagnoses: hasDiagnoses(base) ? base.diagnoses : (draft.diagnoses ?? base.diagnoses),
-    diagnosticChart: hasChartEntries(base)
-      ? base.diagnosticChart
-      : (draft.diagnosticChart ?? base.diagnosticChart),
-    findings: base.findings?.trim() ? base.findings : (draft.findings || base.findings),
-  }
+    anamnesis: anamnesisHasContent(draftRecord.anamnesis)
+      ? draftRecord.anamnesis
+      : (baseRecord.anamnesis ?? draftRecord.anamnesis),
+    stomatologicalExam: stomatologicalExamHasContent(draftRecord.stomatologicalExam)
+      ? draftRecord.stomatologicalExam
+      : (baseRecord.stomatologicalExam ?? draftRecord.stomatologicalExam),
+    specializedAnnexes: specializedAnnexesHaveContent(draftRecord.specializedAnnexes)
+      ? draftRecord.specializedAnnexes
+      : (baseRecord.specializedAnnexes ?? draftRecord.specializedAnnexes),
+    diagnoses: hasDiagnoses(draft) ? draft.diagnoses : base.diagnoses,
+    diagnosticChart: hasChartEntries(draft) ? draft.diagnosticChart : base.diagnosticChart,
+    findings: draft.findings?.trim() ? draft.findings : base.findings || draft.findings,
+    treatmentPlan: treatmentPlanHasContent(draftRecord.treatmentPlan)
+      ? draftRecord.treatmentPlan
+      : (baseRecord.treatmentPlan ?? draftRecord.treatmentPlan),
+    orthodonticsBudget: draftRecord.orthodonticsBudget ?? baseRecord.orthodonticsBudget,
+    dentalImplantsBudget: draftRecord.dentalImplantsBudget ?? baseRecord.dentalImplantsBudget,
+    treatmentPlanAuthorization:
+      draftRecord.treatmentPlanAuthorization ?? baseRecord.treatmentPlanAuthorization,
+    evolutionNotes: mergeSignedEvolutionNotes(notesOf(base), notesOf(draft)),
+    informedConsent: keepStoredConsentSignatures(
+      baseRecord.informedConsent,
+      informedConsentHasContent(draftRecord.informedConsent)
+        ? draftRecord.informedConsent
+        : (baseRecord.informedConsent ?? draftRecord.informedConsent),
+    ),
+  } as T
 }
 
 /** La sección 4 vive en el borrador clínico o en el de valoración. */

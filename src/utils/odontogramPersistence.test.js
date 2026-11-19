@@ -203,7 +203,7 @@ test('una firma nueva del consentimiento reemplaza solo ese trazo', () => {
   assert.equal(merged.informedConsent.professionalSignatureDataUrl, 'data:image/png;base64,nueva')
 })
 
-test('un cierre más nuevo no se pisa con un borrador viejo que aún tiene datos', () => {
+test('un cierre más nuevo no se pisa con un borrador vacío', () => {
   const signed = {
     diagnoses: [{ code: 'K04.0', description: 'Pulpitis', type: 'principal' }],
     diagnosticChart: {
@@ -221,4 +221,33 @@ test('un cierre más nuevo no se pisa con un borrador viejo que aún tiene datos
   const merged = mergeLivingChart(signed, draft, false)
   assert.equal(merged.diagnoses[0].code, 'K04.0')
   assert.equal(merged.diagnosticChart.entries[0].dienteId, '21')
+})
+
+test('draft con contenido gana aunque signedRecord.updatedAt sea más nuevo (Isabel)', () => {
+  const signed = {
+    anamnesis: { chiefComplaint: 'Motivo viejo firmado' },
+    diagnoses: [{ code: 'K04.0', description: 'Pulpitis', type: 'principal' }],
+    diagnosticChart: { entries: [], notes: '' },
+    findings: 'Firmado',
+    treatmentPlan: [{ id: 'plan-old', procedure: 'Endodoncia' }],
+    specializedAnnexes: { orthodontics: null },
+  }
+  const draft = {
+    anamnesis: { chiefComplaint: 'Motivo editado hoy' },
+    diagnoses: [{ code: 'K02.1', description: 'Caries', type: 'principal' }],
+    diagnosticChart: {
+      entries: [{ dienteId: '16', diagnosisCode: 'K02.1', diagnosisDescription: 'Caries', color: '#3B82F6' }],
+      notes: '',
+    },
+    findings: 'Editado',
+    treatmentPlan: [{ id: 'plan-new', procedure: 'Resina' }],
+    specializedAnnexes: { orthodontics: { notes: 'Anexo nuevo' } },
+  }
+
+  const merged = mergeLivingChart(signed, draft, false)
+  assert.equal(merged.anamnesis.chiefComplaint, 'Motivo editado hoy')
+  assert.equal(merged.diagnoses[0].code, 'K02.1')
+  assert.equal(merged.findings, 'Editado')
+  assert.equal(merged.treatmentPlan[0].procedure, 'Resina')
+  assert.equal(merged.specializedAnnexes.orthodontics.notes, 'Anexo nuevo')
 })

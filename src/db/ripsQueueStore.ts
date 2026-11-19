@@ -120,10 +120,13 @@ async function markEvolutionWorkflowClosed(patientId: string, evolutionId: strin
       clinicalDraft !== draft.clinicalDraft ||
       valuationDraft !== draft.valuationDraft
     if (changed) {
+      const adminNow = nowIso()
       const next: PatientClinicalDraft = {
         ...draft,
         evolutionNotes,
-        updatedAt: nowIso(),
+        // RIPS/admin: no incrementar clinicalRevision ni alterar prioridad del draft.
+        administrativeUpdatedAt: adminNow,
+        updatedAt: draft.updatedAt || adminNow,
       }
       if (clinicalDraft && clinicalDraft !== draft.clinicalDraft) next.clinicalDraft = clinicalDraft
       if (valuationDraft && valuationDraft !== draft.valuationDraft) next.valuationDraft = valuationDraft
@@ -145,10 +148,13 @@ async function markEvolutionWorkflowClosed(patientId: string, evolutionId: strin
     seen.add(recordKey)
     const evolutionNotes = closeNotes(record.evolutionNotes, evolutionId)
     if (!evolutionNotes || evolutionNotes === record.evolutionNotes || record.id == null) continue
+    const adminNow = nowIso()
     await db.clinicalRecords.update(record.id, {
       evolutionNotes,
-      updatedAt: nowIso(),
-    })
+      // Reloj administrativo: no debe usarse para pisar patientClinicalDrafts.
+      administrativeUpdatedAt: adminNow,
+      updatedAt: record.updatedAt || adminNow,
+    } as Partial<typeof record> & { administrativeUpdatedAt?: string })
   }
 }
 

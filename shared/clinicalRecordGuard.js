@@ -6,6 +6,7 @@
 
 import { generalBudgetHasContent } from './clinicalBudgetMerge.js'
 import { paymentControlHasContent } from './paymentControlMerge.js'
+import { clinicalRevisionOf } from './clinicalRevision.js'
 import {
   clinicalSealsEqual,
   evolutionSealsEqual,
@@ -476,6 +477,8 @@ export function shouldReplaceClinicalDocument(prev, next) {
   const nextBody = clinicalBodyHasContent(next)
   const prevHash = text(unwrapClinicalPayload(prev).contentHash)
   const nextHash = text(unwrapClinicalPayload(next).contentHash)
+  const prevRev = clinicalRevisionOf(prev)
+  const nextRev = clinicalRevisionOf(next)
 
   // Sello criptográfico recalculado en servidor/cliente (no confiar en contentHash).
   // Debe ir antes de LWW / “gana secciones”: el núcleo firmado es inmutable.
@@ -485,6 +488,12 @@ export function shouldReplaceClinicalDocument(prev, next) {
 
   if (prevBody && !nextBody) return false
   if (!prevBody && nextBody) return true
+
+  // Revisión clínica monotónica: edición legítima del profesional (incluso si
+  // borró intencionalmente un ítem) gana sobre dropsClinicalSections.
+  if (nextRev > prevRev) return true
+  if (prevRev > nextRev) return false
+
   if (dropsClinicalSections(prev, next)) return false
   if (gainsClinicalSections(prev, next)) return true
 

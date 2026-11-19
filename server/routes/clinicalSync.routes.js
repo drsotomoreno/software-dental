@@ -401,10 +401,14 @@ router.post('/push', async (req, res) => {
       clinicId: auth.canonical,
       tenant_id: auth.canonical,
       accepted: result.accepted,
+      rejectedDraftSyncIds: result.accepted?.rejectedDraftSyncIds || [],
       serverTime: result.serverTime,
     })
   } catch (error) {
-    if (sendCircuitError(res, error)) return
+    if (sendCircuitError(res, error)) {
+      // Circuit aislado por draft: el cliente reintenta el resto.
+      return
+    }
     if (isGoogleDriveRequiredError(error)) {
       return sendJson(res, error.status || 428, driveRequiredPayload(error))
     }

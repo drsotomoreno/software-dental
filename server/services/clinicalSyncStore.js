@@ -86,6 +86,7 @@ function emptyClinic() {
     attachments: {},
     drafts: {},
     sync_queue: {},
+    clinicalAuditLogs: {},
   }
 }
 
@@ -936,23 +937,31 @@ function rawClinicId(raw) {
   return String(raw.clinicId || payload?.clinicId || '').trim()
 }
 
-function prepareIncomingClinicalRows(rows, target) {
+/**
+ * Prepara filas clínicas. Un draft con circuit breaker NO tumba el push entero:
+ * se aísla en `rejected` y el resto de la clínica continúa.
+ */
+function prepareIncomingClinicalRows(rows, target, rejectedOut = null) {
   if (!Array.isArray(rows)) return []
-  return rows.map((raw) => {
+  const accepted = []
+  for (const raw of rows) {
     const sanitized = sanitizeClinicalRecordArrays(raw)
     const payload = sanitized?.payload && typeof sanitized.payload === 'object' ? sanitized.payload : {}
     const syncId = String(sanitized?.syncId || payload.syncId || payload.id || '')
     const previous = syncId && target ? target[syncId] : null
     try {
       assertClinicalArrayLimits(previous, sanitized)
+      accepted.push(sanitized)
     } catch (error) {
       if (isClinicalArrayCircuitError(error)) {
-        console.error('[Sync] CIRCUIT OPEN', error.message, error.details || {})
+        console.error('[Sync] CIRCUIT OPEN (aislado)', error.message, error.details || {})
+        if (rejectedOut && syncId) rejectedOut.push(syncId)
+        continue
       }
       throw error
     }
-    return sanitized
-  })
+  }
+  return accepted
 }
 
 function mergeIncomingMap(target, incoming, clinicId, acceptedKey, accepted, aliasIds = []) {
@@ -1319,9 +1328,13 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
     attachments: 0,
     drafts: 0,
     sync_queue: 0,
+    clinicalAuditLogs: 0,
     rejected: 0,
     patientSyncIds: [],
     appointmentSyncIds: [],
+    draftSyncIds: [],
+    draftRevisions: {},
+    rejectedDraftSyncIds: [],
   }
   if (!canonical) {
     return { accepted: emptyAccepted, serverTime: new Date().toISOString() }
@@ -1387,12 +1400,26 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
         }
       }
     }
-    body.clinicalRecords = prepareIncomingClinicalRows(body.clinicalRecords, clinic.clinicalRecords)
-    body.drafts = prepareIncomingClinicalRows(body.drafts, clinic.drafts)
+    const rejectedDraftSyncIds = []
+    body.clinicalRecords = prepareIncomingClinicalRows(
+      body.clinicalRecords,
+      clinic.clinicalRecords,
+      rejectedDraftSyncIds,
+    )
+    body.drafts = prepareIncomingClinicalRows(body.drafts, clinic.drafts, rejectedDraftSyncIds)
+    accepted.rejectedDraftSyncIds = rejectedDraftSyncIds
+    accepted.rejected += rejectedDraftSyncIds.length
     mergeIncomingMap(clinic.clinicalRecords, body.clinicalRecords, canonical, 'clinicalRecords', accepted, aliasIds)
     mergeIncomingMap(clinic.odontograms, body.odontograms, canonical, 'odontograms', accepted, aliasIds)
     mergeIncomingMap(clinic.diagnosticAids, body.diagnosticAids, canonical, 'diagnosticAids', accepted, aliasIds)
     mergeIncomingMap(clinic.drafts, body.drafts, canonical, 'drafts', accepted, aliasIds)
+    for (const raw of Array.isArray(body.drafts) ? body.drafts : []) {
+      const record = normalizeRecord(raw, canonical)
+      if (!record?.syncId) continue
+      accepted.draftSyncIds.push(record.syncId)
+      const rev = Number(record.payload?.clinicalRevision || 0)
+      if (Number.isFinite(rev) && rev > 0) accepted.draftRevisions[record.syncId] = rev
+    }
 
     const queueItems = [
       ...(Array.isArray(body.sync_queue) ? body.sync_queue : []),
@@ -1425,6 +1452,18 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
         accepted[acceptedKey] += 1
         if (acceptedKey !== 'sync_queue') accepted.sync_queue += 1
       }
+    }
+
+    try {
+      const { appendClinicalAuditLogs } = await import('./clinicalAuditLogStore.js')
+      const auditRows = Array.isArray(body.clinicalAuditLogs) ? body.clinicalAuditLogs : []
+      const auditCount = await appendClinicalAuditLogs(canonical, auditRows, clinic)
+      accepted.clinicalAuditLogs = auditCount
+    } catch (error) {
+      console.warn(
+        '[Sync] Bitácora clínica no persistida:',
+        error instanceof Error ? error.message : error,
+      )
     }
 
     replicateAliases(store, canonical, clinic, aliasIds)

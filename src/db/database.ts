@@ -30,7 +30,10 @@ import type {
   OfflineSyncQueueItem,
   OfflineUsuario,
 } from '@/types/offlineMirror'
-import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
+import type {
+  ClinicalAuditLogEntry,
+  PatientClinicalDraft,
+} from '@/types/patientClinicalDraft'
 import type { CatalogItem, CatalogMeta } from '@/types/catalog'
 import type {
   DeletedDiagnosticAidTombstone,
@@ -116,6 +119,8 @@ export class DentalDatabase extends Dexie {
   auditLogs!: EntityTable<AuditLogEntry, 'id'>
   clinicalAddendums!: EntityTable<ClinicalRecordAddendum, 'id'>
   patientClinicalDrafts!: EntityTable<PatientClinicalDraft, 'patientId'>
+  /** Bitácora médico-legal append-only (Res. 1995): nunca update/delete de filas. */
+  clinicalAuditLogs!: EntityTable<ClinicalAuditLogEntry, 'id'>
   catalogMeta!: EntityTable<CatalogMeta, 'id'>
   catalogItems!: EntityTable<CatalogItem, 'id'>
   diagnosticAids!: EntityTable<DiagnosticAid, 'id'>
@@ -929,6 +934,12 @@ export class DentalDatabase extends Dexie {
     // v37 — tumbas de exámenes complementarios (Quitar → no reaparecen tras F5/sync).
     this.version(37).stores({
       deletedDiagnosticAids: 'id, clinicId, deletedAt',
+    })
+
+    // v38 — bitácora clínica inmutable + índices de sync del borrador vivo.
+    this.version(38).stores({
+      clinicalAuditLogs: 'id, patientSyncId, clinicaId, createdAt, clinicalRevision',
+      patientClinicalDrafts: 'patientId, updatedAt, patientSyncId, syncStatus, clinicalRevision',
     })
   }
 }

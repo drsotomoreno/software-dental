@@ -15,7 +15,11 @@ import type {
   OrthodonticsBudget,
 } from '@/types/clinicalRecord'
 import type { OdontogramData } from '@/types/odontogram'
-import type { PatientClinicalDraft } from '@/types/patientClinicalDraft'
+import type {
+  ClinicalAuditSource,
+  ClinicalDraftSaveResult,
+  PatientClinicalDraft,
+} from '@/types/patientClinicalDraft'
 import { normalizeAnamnesis } from '@/types/anamnesis'
 import { normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import { keepStoredConsentSignatures } from '@/types/consent'
@@ -27,8 +31,13 @@ import {
 } from '../../shared/clinicalRecordGuard.js'
 import { preferGeneralBudgetSections } from '../../shared/clinicalBudgetMerge.js'
 import { mergeClinicalPaymentSections } from '../../shared/paymentControlMerge.js'
+import {
+  computeClinicalFormHash,
+} from '../../shared/clinicalFormHash.js'
+import { nextClinicalRevision } from '../../shared/clinicalRevision.js'
+import { appendClinicalAuditLog } from './clinicalAuditLog'
 import { sortEvolutionNotesChronologically } from './recordIntegrity'
-import { toPatientForeignKey } from './patientId'
+import { getPatientByRouteId, toPatientForeignKey } from './patientId'
 import {
   lineSubtotal,
   normalizeDentalImplantsBudget,
@@ -190,23 +199,71 @@ export async function persistCorrectedEvolutionSessionClocks(
   return true
 }
 
+/**
+ * Clave canónica del borrador: preferir `patient.syncId`; si no hay, id de ruta.
+ * Fusiona filas duplicadas (numérico vs UUID) al leer.
+ */
+export async function resolveCanonicalDraftPatientId(patientRouteId: string): Promise<{
+  canonicalId: string
+  patientSyncId: string
+  aliases: string[]
+}> {
+  const routeKey = toPatientForeignKey(patientRouteId)
+  const patient = await getPatientByRouteId(routeKey)
+  const syncId = String(patient?.syncId || '').trim()
+  const numericId =
+    patient?.id != null
+      ? String(patient.id)
+      : /^\d+$/.test(routeKey)
+        ? routeKey
+        : ''
+  const canonicalId = syncId || numericId || routeKey
+  const aliases = [...new Set([routeKey, syncId, numericId].filter(Boolean))]
+  return { canonicalId, patientSyncId: syncId || canonicalId, aliases }
+}
+
+async function mergeDuplicateDraftRows(
+  canonicalId: string,
+  patientSyncId: string,
+  aliases: string[],
+): Promise<PatientClinicalDraft | undefined> {
+  const rows: PatientClinicalDraft[] = []
+  for (const key of aliases) {
+    const row = await db.patientClinicalDrafts.get(key)
+    if (row) rows.push(row)
+  }
+  if (rows.length === 0) return undefined
+
+  rows.sort((a, b) => {
+    const revDiff = (Number(b.clinicalRevision) || 0) - (Number(a.clinicalRevision) || 0)
+    if (revDiff !== 0) return revDiff
+    return String(b.clinicalUpdatedAt || b.updatedAt || '').localeCompare(
+      String(a.clinicalUpdatedAt || a.updatedAt || ''),
+    )
+  })
+  const winner = {
+    ...rows[0],
+    patientId: canonicalId,
+    patientSyncId: patientSyncId || rows[0].patientSyncId,
+  }
+
+  if (winner.patientId !== rows[0].patientId || rows.length > 1) {
+    await db.patientClinicalDrafts.put(winner)
+    for (const row of rows) {
+      if (row.patientId !== canonicalId) {
+        await db.patientClinicalDrafts.delete(row.patientId)
+      }
+    }
+  }
+  return winner
+}
+
 export async function getPatientClinicalDraft(
   patientRouteId: string,
 ): Promise<PatientClinicalDraft | undefined> {
-  const patientId = toPatientForeignKey(patientRouteId)
-  const direct = await db.patientClinicalDrafts.get(patientId)
-  if (direct) return direct
-
-  // Borradores sincronizados a veces quedan indexados por syncId del paciente.
-  const patient = await db.patients.get(
-    /^\d+$/.test(patientId) ? Number(patientId) : patientId,
-  )
-  const syncId = patient?.syncId?.trim()
-  if (syncId && syncId !== patientId) {
-    const bySync = await db.patientClinicalDrafts.get(syncId)
-    if (bySync) return bySync
-  }
-  return undefined
+  const { canonicalId, patientSyncId, aliases } =
+    await resolveCanonicalDraftPatientId(patientRouteId)
+  return mergeDuplicateDraftRows(canonicalId, patientSyncId, aliases)
 }
 
 /**
@@ -256,102 +313,210 @@ function hasAnamnesisPrefer(
   return c ?? v
 }
 
+async function persistDraftRow(
+  patientRouteId: string,
+  patch: {
+    clinicalDraft?: ClinicalRecordFormData | null
+    valuationDraft?: ClinicalRecordFormData | null
+    odontogramDraft?: OdontogramData | null
+    evolutionNotes?: EvolutionNote[]
+  },
+  options?: { source?: ClinicalAuditSource; previousForm?: unknown },
+): Promise<ClinicalDraftSaveResult> {
+  const { canonicalId, patientSyncId, aliases } =
+    await resolveCanonicalDraftPatientId(patientRouteId)
+  const existing = await mergeDuplicateDraftRows(canonicalId, patientSyncId, aliases)
+  const now = new Date().toISOString()
+  const livingForm =
+    patch.clinicalDraft ??
+    patch.valuationDraft ??
+    existing?.clinicalDraft ??
+    existing?.valuationDraft ??
+    null
+  const contentHash = computeClinicalFormHash(livingForm)
+  const clinicalRevision = nextClinicalRevision(existing)
+
+  const next: PatientClinicalDraft = {
+    patientId: canonicalId,
+    patientSyncId,
+    evolutionNotes: patch.evolutionNotes ?? existing?.evolutionNotes ?? [],
+    valuationDraft:
+      patch.valuationDraft !== undefined
+        ? patch.valuationDraft
+        : (existing?.valuationDraft ?? null),
+    clinicalDraft:
+      patch.clinicalDraft !== undefined ? patch.clinicalDraft : (existing?.clinicalDraft ?? null),
+    odontogramDraft:
+      patch.odontogramDraft !== undefined
+        ? patch.odontogramDraft
+        : (existing?.odontogramDraft ?? null),
+    clinicalRevision,
+    clinicalUpdatedAt: now,
+    administrativeUpdatedAt: existing?.administrativeUpdatedAt,
+    contentHash,
+    syncStatus: 'pending',
+    syncError: null,
+    updatedAt: now,
+  }
+
+  try {
+    await db.transaction('rw', db.patientClinicalDrafts, async () => {
+      await db.patientClinicalDrafts.put(next)
+      for (const alias of aliases) {
+        if (alias !== canonicalId) await db.patientClinicalDrafts.delete(alias)
+      }
+    })
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Error al escribir IndexedDB'
+    return { ok: false, reason }
+  }
+
+  notifyDraftChanged()
+  void appendClinicalAuditLog({
+    patientSyncId,
+    clinicalRevision,
+    contentHash,
+    previousForm: options?.previousForm,
+    nextForm: livingForm,
+    source: options?.source ?? 'autosave',
+  })
+
+  return { ok: true, clinicalRevision, contentHash, patientId: canonicalId }
+}
+
 export async function savePatientValuationDraft(
   patientRouteId: string,
   valuationDraft: ClinicalRecordFormData,
-): Promise<void> {
-  const patientId = toPatientForeignKey(patientRouteId)
-  const existing = await db.patientClinicalDrafts.get(patientId)
-  const now = new Date().toISOString()
+  options?: { source?: ClinicalAuditSource },
+): Promise<ClinicalDraftSaveResult> {
+  const existing = await getPatientClinicalDraft(patientRouteId)
   const normalizedValuation = normalizeClinicalDraft(valuationDraft)
-  if (!shouldPersistClinicalDraft(existing?.valuationDraft, normalizedValuation)) return
+  if (!shouldPersistClinicalDraft(existing?.valuationDraft, normalizedValuation)) {
+    return { ok: false, reason: 'Guard rechazó un borrador vacío sobre historia con contenido' }
+  }
 
-  await db.patientClinicalDrafts.put({
-    patientId,
-    evolutionNotes: existing?.evolutionNotes ?? [],
-    valuationDraft: {
-      ...normalizedValuation,
-      ...mergeClinicalPaymentSections(existing?.valuationDraft, normalizedValuation),
-      ...preferGeneralBudgetSections(existing?.valuationDraft, normalizedValuation),
-      ...preferSpecialtyBudgets(existing?.valuationDraft, normalizedValuation),
-      informedConsent: keepStoredConsentSignatures(
-        existing?.valuationDraft?.informedConsent,
-        normalizedValuation.informedConsent,
-      ),
+  return persistDraftRow(
+    patientRouteId,
+    {
+      valuationDraft: {
+        ...normalizedValuation,
+        ...mergeClinicalPaymentSections(existing?.valuationDraft, normalizedValuation),
+        ...preferGeneralBudgetSections(existing?.valuationDraft, normalizedValuation),
+        ...preferSpecialtyBudgets(existing?.valuationDraft, normalizedValuation),
+        informedConsent: keepStoredConsentSignatures(
+          existing?.valuationDraft?.informedConsent,
+          normalizedValuation.informedConsent,
+        ),
+      },
+      clinicalDraft: existing?.clinicalDraft ?? null,
+      odontogramDraft: existing?.odontogramDraft ?? null,
+      evolutionNotes: existing?.evolutionNotes ?? [],
     },
-    clinicalDraft: existing?.clinicalDraft ?? null,
-    odontogramDraft: existing?.odontogramDraft ?? null,
-    updatedAt: now,
-  })
-  notifyDraftChanged()
+    { source: options?.source ?? 'autosave', previousForm: existing?.valuationDraft },
+  )
 }
 
 export async function savePatientClinicalDraft(
   patientRouteId: string,
   clinicalDraft: ClinicalRecordFormData,
   odontogramDraft?: OdontogramData | null,
-): Promise<void> {
-  const patientId = toPatientForeignKey(patientRouteId)
-  const existing = await db.patientClinicalDrafts.get(patientId)
-  const now = new Date().toISOString()
+  options?: { source?: ClinicalAuditSource },
+): Promise<ClinicalDraftSaveResult> {
+  const existing = await getPatientClinicalDraft(patientRouteId)
   const normalized = normalizeClinicalDraft(clinicalDraft)
-  if (!shouldPersistClinicalDraft(existing?.clinicalDraft ?? existing, normalized)) return
+  if (!shouldPersistClinicalDraft(existing?.clinicalDraft ?? existing, normalized)) {
+    return { ok: false, reason: 'Guard rechazó un borrador vacío sobre historia con contenido' }
+  }
 
-  await db.patientClinicalDrafts.put({
-    patientId,
-    evolutionNotes: mergeDraftEvolutionNotes(
-      normalized.evolutionNotes ?? [],
-      existing?.clinicalDraft?.evolutionNotes,
-      existing?.evolutionNotes,
-    ),
-    valuationDraft: existing?.valuationDraft ?? null,
-    clinicalDraft: {
-      ...normalized,
-      // Abonos y presupuesto generales: el React state de una terminal no puede
-      // borrar evidencia médico-legal que otra terminal ya dejó en IndexedDB.
-      ...mergeClinicalPaymentSections(existing?.clinicalDraft, normalized),
-      ...preferGeneralBudgetSections(existing?.clinicalDraft, normalized),
-      ...preferSpecialtyBudgets(existing?.clinicalDraft, normalized),
-      informedConsent: keepStoredConsentSignatures(
-        existing?.clinicalDraft?.informedConsent,
-        normalized.informedConsent,
-      ),
-      evolutionNotes: preserveImmutableEvolutionNotes(
+  return persistDraftRow(
+    patientRouteId,
+    {
+      clinicalDraft: {
+        ...normalized,
+        ...mergeClinicalPaymentSections(existing?.clinicalDraft, normalized),
+        ...preferGeneralBudgetSections(existing?.clinicalDraft, normalized),
+        ...preferSpecialtyBudgets(existing?.clinicalDraft, normalized),
+        informedConsent: keepStoredConsentSignatures(
+          existing?.clinicalDraft?.informedConsent,
+          normalized.informedConsent,
+        ),
+        evolutionNotes: preserveImmutableEvolutionNotes(
+          normalized.evolutionNotes ?? [],
+          existing?.clinicalDraft?.evolutionNotes,
+        ),
+      },
+      valuationDraft: existing?.valuationDraft ?? null,
+      odontogramDraft: odontogramDraft ?? existing?.odontogramDraft ?? null,
+      evolutionNotes: mergeDraftEvolutionNotes(
         normalized.evolutionNotes ?? [],
         existing?.clinicalDraft?.evolutionNotes,
+        existing?.evolutionNotes,
       ),
     },
-    odontogramDraft: odontogramDraft ?? existing?.odontogramDraft ?? null,
-    updatedAt: now,
+    { source: options?.source ?? 'autosave', previousForm: existing?.clinicalDraft },
+  )
+}
+
+export async function markPatientClinicalDraftSynced(
+  patientRouteId: string,
+  acceptedRevision?: number,
+): Promise<void> {
+  const existing = await getPatientClinicalDraft(patientRouteId)
+  if (!existing) return
+  if (
+    acceptedRevision != null &&
+    Number.isFinite(acceptedRevision) &&
+    (existing.clinicalRevision || 0) > acceptedRevision
+  ) {
+    return
+  }
+  await db.patientClinicalDrafts.put({
+    ...existing,
+    syncStatus: 'synced',
+    syncError: null,
+    administrativeUpdatedAt: new Date().toISOString(),
   })
-  notifyDraftChanged()
+}
+
+export async function markPatientClinicalDraftSyncError(
+  patientRouteId: string,
+  reason: string,
+): Promise<void> {
+  const existing = await getPatientClinicalDraft(patientRouteId)
+  if (!existing) return
+  await db.patientClinicalDrafts.put({
+    ...existing,
+    syncStatus: 'error',
+    syncError: reason,
+    administrativeUpdatedAt: new Date().toISOString(),
+  })
 }
 
 export async function appendPatientEvolutionNote(
   patientRouteId: string,
   note: EvolutionNote,
-): Promise<void> {
-  const patientId = toPatientForeignKey(patientRouteId)
-  const existing = await db.patientClinicalDrafts.get(patientId)
-  const now = new Date().toISOString()
-
+): Promise<ClinicalDraftSaveResult> {
+  const existing = await getPatientClinicalDraft(patientRouteId)
   const evolutionNotes = sortEvolutionNotesChronologically([
     ...(existing?.evolutionNotes ?? []),
     note,
   ])
 
-  await db.patientClinicalDrafts.put({
-    patientId,
-    evolutionNotes,
-    valuationDraft: existing?.valuationDraft ?? null,
-    clinicalDraft: existing?.clinicalDraft ?? null,
-    odontogramDraft: existing?.odontogramDraft ?? null,
-    updatedAt: now,
-  })
-  notifyDraftChanged()
+  return persistDraftRow(
+    patientRouteId,
+    {
+      evolutionNotes,
+      valuationDraft: existing?.valuationDraft ?? null,
+      clinicalDraft: existing?.clinicalDraft ?? null,
+      odontogramDraft: existing?.odontogramDraft ?? null,
+    },
+    { source: 'manual_flush', previousForm: existing?.clinicalDraft },
+  )
 }
 
 export async function clearPatientClinicalDraft(patientRouteId: string): Promise<void> {
-  const patientId = toPatientForeignKey(patientRouteId)
-  await db.patientClinicalDrafts.delete(patientId)
+  const { aliases } = await resolveCanonicalDraftPatientId(patientRouteId)
+  for (const key of aliases) {
+    await db.patientClinicalDrafts.delete(key)
+  }
 }

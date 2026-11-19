@@ -97,10 +97,17 @@ import {
   getPatientClinicalDraft,
   persistCorrectedEvolutionSessionClocks,
   pickLivingDraftForm,
+  resolveCanonicalDraftPatientId,
+  savePatientClinicalDraft,
   savePatientValuationDraft,
 } from '@/utils/patientClinicalDraft'
+import {
+  clearEmergencyClinicalDraft,
+  emergencyDraftIsNewerThanDexie,
+  readEmergencyClinicalDraft,
+} from '@/utils/clinicalEmergencyDraft'
 import { clinicalFormHasContent } from '../../shared/clinicalRecordGuard.js'
-import { isRemoteDraftNewer } from '@/utils/clinicalDraftMerge'
+import { computeClinicalFormHash } from '../../shared/clinicalFormHash.js'
 import { preferGeneralBudgetSections } from '../../shared/clinicalBudgetMerge.js'
 import { mergeClinicalPaymentSections } from '../../shared/paymentControlMerge.js'
 import {
@@ -205,6 +212,7 @@ export function PatientDetailPage() {
   const [saving, setSaving] = useState(false)
 
   const [message, setMessage] = useState('')
+  const [hydrationHash, setHydrationHash] = useState<string | null>(null)
 
   const [viewMode, setViewMode] = useState<ViewMode>('edit')
 
@@ -461,25 +469,38 @@ export function PatientDetailPage() {
     livingChartLocked,
   )
 
-  const { lastSavedAt: clinicalAutoSavedAt, saving: clinicalAutoSaving } = useClinicalAutoSave({
+  const {
+    lastSavedAt: clinicalAutoSavedAt,
+    saving: clinicalAutoSaving,
+    saveStatus: clinicalSaveStatus,
+    saveError: clinicalSaveError,
+    markHydratedHash,
+  } = useClinicalAutoSave({
     patientRouteId: id,
     clinicalData,
     odontogram,
     enabled: Boolean(id) && Boolean(clinicalData) && !isArchiveView,
     valuationOnly: isValuationOnly,
+    hydrationHash,
     onOdontogramPersisted: (persisted) => {
       setOdontogram((prev) => odontogramAfterPersist(prev, persisted))
     },
+    onSaveError: (reason) => {
+      setMessage(`No se pudo guardar la historia clínica: ${reason}`)
+    },
   })
 
-  const clinicalAutoSaveLabel = clinicalAutoSaving
-    ? 'Guardando…'
-    : clinicalAutoSavedAt
-      ? `Guardado automáticamente ${new Date(clinicalAutoSavedAt).toLocaleTimeString('es-CO', {
-          hour: '2-digit',
-          minute: '2-digit',
-        })}`
-      : null
+  const clinicalAutoSaveLabel =
+    clinicalSaveStatus === 'error'
+      ? `Error al guardar${clinicalSaveError ? `: ${clinicalSaveError}` : ''}`
+      : clinicalAutoSaving
+        ? 'Guardando…'
+        : clinicalAutoSavedAt
+          ? `Guardado automáticamente ${new Date(clinicalAutoSavedAt).toLocaleTimeString('es-CO', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}`
+          : null
 
 
 
@@ -622,6 +643,10 @@ export function PatientDetailPage() {
     }
 
     // Offline-first: libera "Cargando historia clínica..." en el mismo tick.
+    // Marca el shell como "ya persistido" para no autosave vacío sobre Dexie.
+    const shellHash = computeClinicalFormHash(shellForm)
+    setHydrationHash(shellHash)
+    markHydratedHash(shellHash)
     setClinicalData(shellForm)
     clinicalInitForPatientRef.current = id
 
@@ -689,6 +714,40 @@ export function PatientDetailPage() {
 
         if (foreignKey) {
           try {
+            // Rescate síncrono pagehide/beforeunload → localStorage → Dexie.
+            try {
+              const { canonicalId, patientSyncId, aliases } =
+                await resolveCanonicalDraftPatientId(foreignKey)
+              const emergency =
+                readEmergencyClinicalDraft(canonicalId) ||
+                (patientSyncId !== canonicalId
+                  ? readEmergencyClinicalDraft(patientSyncId)
+                  : null)
+              const localDraft = await getPatientClinicalDraft(foreignKey)
+              if (emergency && emergencyDraftIsNewerThanDexie(emergency, localDraft)) {
+                const restored = emergency.valuationOnly
+                  ? await savePatientValuationDraft(foreignKey, emergency.clinicalData, {
+                      source: 'emergency_recovery',
+                    })
+                  : await savePatientClinicalDraft(
+                      foreignKey,
+                      emergency.clinicalData,
+                      emergency.odontogram ?? null,
+                      { source: 'emergency_recovery' },
+                    )
+                if (restored.ok) {
+                  clearEmergencyClinicalDraft(canonicalId, aliases)
+                  if (!options?.quiet) {
+                    setMessage(
+                      'Se recuperó un borrador de emergencia no confirmado al cerrar la ficha.',
+                    )
+                  }
+                }
+              }
+            } catch {
+              // Rescate opcional.
+            }
+
             let draft = await withDexieTimeout(
               getPatientClinicalDraft(foreignKey),
               'getPatientClinicalDraft',
@@ -727,25 +786,21 @@ export function PatientDetailPage() {
             }
 
             if (draft && living && !draftClinicalData) {
-              const newer = signedRecord
-                ? isRemoteDraftNewer(
-                    signedRecord.updatedAt || signedRecord.signedAt || signedRecord.createdAt,
-                    draft.updatedAt,
-                  )
-                : true
+              // Ficha viva = fuente de verdad editable. signedRecord.updatedAt (RIPS/admin)
+              // jamás descarta secciones del draft con contenido.
               base = mergeLivingChart(
                 base,
                 {
                   ...living,
                   diagnosticChart: normalizeClinicalDiagnosticChart(living.diagnosticChart),
                 },
-                newer,
+                true,
               )
               base = {
                 ...base,
                 specializedAnnexes: normalizeSpecializedAnnexes(base.specializedAnnexes),
               }
-              loadedDraft = newer || !signedRecord
+              loadedDraft = clinicalFormHasContent(living)
             }
             if (draft?.evolutionNotes?.length) {
               const existingIds = new Set((base.evolutionNotes ?? []).map((note) => note.id))
@@ -780,30 +835,19 @@ export function PatientDetailPage() {
 
         if (cancelled) return base
 
+        const hydratedHash = computeClinicalFormHash(base)
+        setHydrationHash(hydratedHash)
+        markHydratedHash(hydratedHash)
+
         setClinicalData((prev) => {
-          // Tras sync en segundo plano: solo reemplaza si hay contenido más rico/nuevo.
+          // Tras sync en segundo plano: nunca pisar edición local con firmada/admin.
           if (options?.quiet && prev) {
             if (clinicalFormHasContent(prev) && !clinicalFormHasContent(base)) {
               return prev
             }
-            if (
-              clinicalFormHasContent(prev) &&
-              clinicalFormHasContent(base) &&
-              !isRemoteDraftNewer(
-                String(
-                  (prev as ClinicalRecordFormData & { updatedAt?: string }).updatedAt ||
-                    prev.evolutionNotes?.[0]?.createdAt ||
-                    '',
-                ),
-                String(
-                  signedRecord?.updatedAt ||
-                    signedRecord?.signedAt ||
-                    signedRecord?.createdAt ||
-                    (base as ClinicalRecordFormData & { updatedAt?: string }).updatedAt ||
-                    '',
-                ),
-              )
-            ) {
+            const prevHash = computeClinicalFormHash(prev)
+            const nextHash = computeClinicalFormHash(base)
+            if (prevHash && nextHash && prevHash !== nextHash && clinicalFormHasContent(prev)) {
               return prev
             }
           }
@@ -1856,16 +1900,16 @@ export function PatientDetailPage() {
               ...living,
               diagnosticChart: normalizeClinicalDiagnosticChart(living.diagnosticChart),
             },
-            isRemoteDraftNewer(
-              latest.updatedAt || latest.signedAt || latest.createdAt,
-              draft.updatedAt,
-            ),
+            true,
           )
           form = {
             ...form,
             specializedAnnexes: normalizeSpecializedAnnexes(form.specializedAnnexes),
           }
         }
+        const nextHash = computeClinicalFormHash(form)
+        setHydrationHash(nextHash)
+        markHydratedHash(nextHash)
         setClinicalData(form)
       } else {
         setClinicalData(createEmptyClinicalForm(professionalLicense, professionalLicense))
@@ -2075,9 +2119,11 @@ export function PatientDetailPage() {
           {clinicalAutoSaveLabel && !isArchiveView && (
             <span
               className={`rounded-full px-3 py-1 text-sm font-medium ${
-                clinicalAutoSaving
-                  ? 'bg-amber-100 text-amber-800'
-                  : 'bg-slate-100 text-slate-600'
+                clinicalSaveStatus === 'error'
+                  ? 'bg-red-100 text-red-800'
+                  : clinicalAutoSaving
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-slate-100 text-slate-600'
               }`}
             >
               {clinicalAutoSaveLabel}

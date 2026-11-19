@@ -539,18 +539,27 @@ async function mergeDiagnosticAids(records: ClinicalSyncRecord[]): Promise<boole
 
 async function mergeDrafts(records: ClinicalSyncRecord[]): Promise<boolean> {
   let changed = false
+  const { localDraftBlocksRemoteOverwrite } = await import('../../shared/clinicalRevision.js')
   for (const remote of records) {
     const payload = payloadOf(remote)
     const patientId = await resolveLocalPatientId(payload)
     if (!patientId) continue
     const remoteUpdatedAt = remote.updatedAt || String(payload.updatedAt || '')
-    const local = await db.patientClinicalDrafts.get(patientId)
+    const syncId = String(payload.patientSyncId || '').trim()
+    const local =
+      (await db.patientClinicalDrafts.get(patientId)) ||
+      (syncId ? await db.patientClinicalDrafts.get(syncId) : undefined)
     const next: PatientClinicalDraft = {
       ...(payload as unknown as PatientClinicalDraft),
-      patientId,
+      patientId: local?.patientId || patientId,
+      patientSyncId: syncId || local?.patientSyncId,
       updatedAt: remoteUpdatedAt || new Date().toISOString(),
     }
     const remoteRecord = { ...remote, payload: next, updatedAt: next.updatedAt }
+    // pending local / clinicalRevision mayor: PROHIBIDO sobrescribir con GET viejo.
+    if (local && localDraftBlocksRemoteOverwrite(local, next)) {
+      continue
+    }
     if (local && !shouldReplaceClinicalDocument(local, remoteRecord)) {
       const remoteIsEmptyShell =
         !clinicalBodyHasContent(next) && !isSignedClinicalDocument(next)
@@ -986,11 +995,20 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
   })
   const syncQueuePayload = builtQueue.filter((row): row is ClinicalSyncRecord => row != null)
 
+  let clinicalAuditLogs: unknown[] = []
+  try {
+    const { listPendingClinicalAuditLogs } = await import('@/utils/clinicalAuditLog')
+    clinicalAuditLogs = await listPendingClinicalAuditLogs(100)
+  } catch {
+    clinicalAuditLogs = []
+  }
+
   const pushBody = stripHeavyBinaryFields({
     clinicalRecords: clinicalRecordsPayload,
     odontograms: odontogramsPayload,
     diagnosticAids: diagnosticAidsPayload,
     drafts: draftsPayload,
+    clinicalAuditLogs,
     sync_queue: syncQueuePayload,
     attachments: syncQueuePayload,
     deletedDiagnosticAids: tombstones.map((row) => ({
@@ -1008,10 +1026,78 @@ export async function pushClinicSnapshotLocal(clinicId: string): Promise<boolean
   if (notifyIfGoogleDriveRequired(metadataResponse.response, metadataResponse.payload)) {
     return false
   }
-  if (!metadataResponse.response.ok) return false
+  if (!metadataResponse.response.ok) {
+    const reason = String(
+      metadataResponse.payload?.error ||
+        `HTTP ${metadataResponse.response.status}`,
+    )
+    console.warn('[Sync] push falló:', reason)
+    const { markPatientClinicalDraftSyncError } = await import('@/utils/patientClinicalDraft')
+    const rejected = Array.isArray(metadataResponse.payload?.rejectedDraftSyncIds)
+      ? (metadataResponse.payload.rejectedDraftSyncIds as string[])
+      : []
+    if (rejected.length > 0) {
+      for (const syncId of rejected) {
+        const patientSyncId = String(syncId).replace(/^draft:/, '')
+        await markPatientClinicalDraftSyncError(patientSyncId, reason)
+      }
+      // Reintento sin los drafts problemáticos para no bloquear al resto de la clínica.
+      const safeDrafts = draftsPayload.filter(
+        (row) => !rejected.includes(String(row.syncId || '')),
+      )
+      if (safeDrafts.length > 0 && safeDrafts.length < draftsPayload.length) {
+        const retry = await syncFetch('/api/sync/push', {
+          method: 'POST',
+          body: JSON.stringify({ ...pushBody, drafts: safeDrafts }),
+        })
+        if (retry.response.ok) {
+          await acknowledgeDraftPush(retry.payload, safeDrafts)
+          await markSyncQueueSynced(pendingQueue.map((item) => item.id).filter(Boolean))
+          return true
+        }
+      }
+    } else {
+      for (const row of drafts) {
+        await markPatientClinicalDraftSyncError(
+          String(row.patientSyncId || row.patientId || ''),
+          reason,
+        )
+      }
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('mhd:clinical-sync-error', {
+          detail: { reason, rejectedDraftSyncIds: rejected },
+        }),
+      )
+    }
+    return false
+  }
 
+  await acknowledgeDraftPush(metadataResponse.payload, draftsPayload)
   await markSyncQueueSynced(pendingQueue.map((item) => item.id).filter(Boolean))
   return true
+}
+
+async function acknowledgeDraftPush(
+  payload: Record<string, unknown> | null | undefined,
+  draftsPayload: ClinicalSyncRecord[],
+): Promise<void> {
+  const { markPatientClinicalDraftSynced } = await import('@/utils/patientClinicalDraft')
+  const accepted = payload?.accepted
+  const acceptedDrafts =
+    accepted && typeof accepted === 'object'
+      ? (accepted as { draftSyncIds?: string[]; draftRevisions?: Record<string, number> })
+      : null
+  const syncIds =
+    Array.isArray(acceptedDrafts?.draftSyncIds) && acceptedDrafts.draftSyncIds.length > 0
+      ? acceptedDrafts.draftSyncIds
+      : draftsPayload.map((row) => String(row.syncId || ''))
+  for (const syncId of syncIds) {
+    const patientSyncId = String(syncId).replace(/^draft:/, '')
+    const revision = acceptedDrafts?.draftRevisions?.[syncId]
+    await markPatientClinicalDraftSynced(patientSyncId, revision)
+  }
 }
 
 /** Pull forzado al iniciar sesión: snapshot completo con archivos, antes de renderizar. */
