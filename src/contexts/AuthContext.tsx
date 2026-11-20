@@ -45,7 +45,8 @@ interface AuthContextValue {
     incoming: ApiSubscriptionUser,
     password: string,
   ) => Promise<{ ok: true; requiresSubscription?: boolean } | { ok: false; error: string }>
-  logout: () => Promise<void>
+  /** Cierra sesión solo si no hay cambios clínicos pendientes sin respaldar. */
+  logout: () => Promise<{ ok: true } | { ok: false; error: string }>
   refreshSessionUser: () => Promise<void>
   applySessionUser: (apiUser: ApiSubscriptionUser) => void
   can: (permission: Permission) => boolean
@@ -358,7 +359,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(mapApiUserToAuthUser(apiUser, token))
   }, [])
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
+    // Guardia médico-legal: flush + sync; bloquear si quedan pendientes.
+    const { guardClinicalLogout, invalidateClinicPullCacheOnLogout, LOGOUT_BLOCKED_MESSAGE } =
+      await import('@/services/clinicalLogoutGuard')
+    const guard = await guardClinicalLogout()
+    if (!guard.ok) {
+      return { ok: false, error: guard.reason || LOGOUT_BLOCKED_MESSAGE }
+    }
+
     if (user) {
       await logAuditEvent({
         action: 'LOGOUT',
@@ -367,20 +376,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
       })
     }
-    // Antes de soltar la sesión: vaciar borrador pendiente y empujar al servidor.
-    // IndexedDB de la clínica NO se borra (evidencia médico-legal).
-    try {
-      const { flushPendingClinicalDraft } = await import('@/services/clinicalSyncState')
-      await flushPendingClinicalDraft()
-    } catch (error) {
-      console.error('[auth] No se pudo vaciar el borrador clínico pendiente:', error)
-    }
-    try {
-      const { forzarSincronizacionLocal } = await import('@/services/clinicalSyncService')
-      await forzarSincronizacionLocal()
-    } catch (error) {
-      console.error('[auth] No se pudo sincronizar antes del cierre de sesión:', error)
-    }
+
     clearStoredApiAuth()
     clearExpressRegisterFlag()
     try {
@@ -390,13 +386,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('[auth] No se pudo cerrar el vault de cifrado local:', error)
     }
     await logoutSession(user?.sessionId ?? (await getStoredSessionToken()))
-    try {
-      const { clearClinicIsolationOnLogout } = await import('@/services/clinicLocalIsolation')
-      await clearClinicIsolationOnLogout()
-    } catch (error) {
-      console.error('[auth] No se pudo limpiar marcas de clínica al cerrar sesión:', error)
-    }
+    // No borra Dexie clínico (evidencia). Solo invalida marcas de pull para network-first.
+    await invalidateClinicPullCacheOnLogout()
     setUser(null)
+    return { ok: true }
   }, [user])
 
   useEffect(() => {

@@ -42,12 +42,12 @@ export function BudgetModule({
   onGlobalDiscountChange,
   showToolbar = true,
   hideSummary = false,
-  onImportFromTreatmentPlan,
-  canImportFromTreatmentPlan = false,
   importNotice = null,
   toolbarExtraActions = null,
   onAddOrthodonticsBudget,
 }: BudgetModuleProps) {
+  // Props legadas `onImportFromTreatmentPlan` / `canImportFromTreatmentPlan`
+  // se conservan en la interfaz; la sección 7 unificada ya no las usa.
   const tariffMap = useTariffStore((state) => state.tariffMap)
   const [procedureSearch, setProcedureSearch] = useState('')
 
@@ -165,28 +165,12 @@ export function BudgetModule({
             </div>
           ) : null}
 
-          {onImportFromTreatmentPlan && (
-            <div>
-              <button
-                type="button"
-                onClick={onImportFromTreatmentPlan}
-                disabled={!canImportFromTreatmentPlan}
-                className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                title={
-                  canImportFromTreatmentPlan
-                    ? 'Agregar al presupuesto los procedimientos del plan de tratamiento'
-                    : 'Registre procedimientos en el plan de tratamiento primero'
-                }
-              >
-                Importar desde plan de tratamiento
-              </button>
-              {importNotice && (
-                <p className="mt-2 text-xs text-dental-700" role="status">
-                  {importNotice}
-                </p>
-              )}
-            </div>
-          )}
+          {/* «Importar desde plan de tratamiento» eliminado: plan y presupuesto son la misma sección 7. */}
+          {importNotice ? (
+            <p className="text-xs text-dental-700" role="status">
+              {importNotice}
+            </p>
+          ) : null}
 
           <div>
             <FieldVoiceHeader

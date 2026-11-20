@@ -1,73 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-
 import { useAuth } from '@/contexts/AuthContext'
-
 import type {
-
   BudgetLineItem,
-
   BudgetSummary,
-
   DentalImplantsBudget,
-
   OrthodonticsBudget,
-
   TreatmentPlanItem,
-
 } from '@/types/clinicalRecord'
-
 import type { DentalImplantsAnnex, OrthodonticsAnnex } from '@/types/specializedAnnexes'
-
 import { DEFAULT_IVA_RATE } from '@/types/pricing'
-
-import {
-
-  CLINICAL_HISTORY_SECTION_NUMBERS,
-
-  CLINICAL_SECTION_TITLE_CLASS,
-
-  clinicalSectionTitle,
-
-} from '@/constants/clinicalHistorySections'
-
 import { computeBudgetTotals } from '@/hooks/useBudget'
-
 import { BudgetModule } from '@/modules/budget/BudgetModule'
-
 import { useTariffSync } from '@/modules/tariff/useTariffSync'
-
 import {
-
-  buildBudgetFromTreatmentPlan,
-
   calcSpecialtyBudgetTotal,
-
   formatCurrency,
-
-  treatmentPlanBudgetImportNotice,
-
   normalizeDentalImplantsBudget,
-
   normalizeOrthodonticsBudget,
-
 } from '@/utils'
-
-import {
-
-  mapBudgetItemsToLines,
-
-  mapLinesToBudgetItems,
-
-} from '@/utils/budgetAdapter'
-
+import { mapBudgetItemsToLines, mapLinesToBudgetItems } from '@/utils/budgetAdapter'
 import { OrthodonticsBudgetSection } from './OrthodonticsBudgetSection'
-
 import { DentalImplantsBudgetSection } from './DentalImplantsBudgetSection'
-
-import { OrthodonticTreatmentPlanAndBudget } from './orthodontics'
-
 import { FieldVoiceHeader } from '@/components/voice'
-
 import { parseDictatedInteger } from '@/utils/voiceDictation'
 import { calcBillableLineTotal } from '@/utils/cupsBillingRules'
 import {
@@ -77,115 +31,66 @@ import {
 import { shouldShowDentalImplantsBudgetSection } from '@/utils/dentalImplantsBudgetLines'
 
 interface BudgetFormProps {
-
   budgetItems: BudgetLineItem[]
-
   orthodonticsBudget?: OrthodonticsBudget
-
   dentalImplantsBudget?: DentalImplantsBudget
-
   dentalImplantsAnnex?: DentalImplantsAnnex | null
-
   orthodonticsAnnex?: OrthodonticsAnnex | null
-
   budget: BudgetSummary
-
   treatmentPlan: TreatmentPlanItem[]
-
   disabled?: boolean
-
+  /**
+   * Modo unificado (sección 7): sin título ni tabla de líneas (viven en TreatmentPlanForm).
+   * Solo especialidades + descuento/total.
+   */
+  unifiedCompanion?: boolean
   onChange: (patch: {
-
     budgetItems: BudgetLineItem[]
-
     orthodonticsBudget: OrthodonticsBudget
-
     dentalImplantsBudget: DentalImplantsBudget
-
     budget: BudgetSummary
-
   }) => void
-
   onOrthodonticsAnnexChange?: (patch: Partial<OrthodonticsAnnex>) => void
-
 }
-
-
 
 function buildClinicalBudgetSummary(
-
   lineSubtotal: number,
-
   globalDiscount: number,
-
   orthodontics: OrthodonticsBudget,
-
   dentalImplants: DentalImplantsBudget,
-
 ): BudgetSummary {
-
   const specialtySubtotal = calcSpecialtyBudgetTotal(orthodontics, dentalImplants)
-
   const combinedSubtotal = lineSubtotal + specialtySubtotal
-
   const taxableBase = Math.max(0, combinedSubtotal - globalDiscount)
-
   const total = taxableBase + Math.round(taxableBase * DEFAULT_IVA_RATE)
 
-
-
   return {
-
     subtotal: combinedSubtotal,
-
     discount: globalDiscount,
-
     total,
-
     currency: 'COP',
-
   }
-
 }
 
-
-
 export function BudgetForm({
-
   budgetItems,
-
   orthodonticsBudget: orthodonticsBudgetProp,
-
   dentalImplantsBudget: dentalImplantsBudgetProp,
-
   dentalImplantsAnnex = null,
-
   orthodonticsAnnex = null,
-
   budget,
-
   treatmentPlan,
-
   disabled = false,
-
+  unifiedCompanion = true,
   onChange,
-
   onOrthodonticsAnnexChange,
-
 }: BudgetFormProps) {
-
   const orthodonticsBudget = normalizeOrthodonticsBudget(orthodonticsBudgetProp)
-
   const dentalImplantsBudget = normalizeDentalImplantsBudget(dentalImplantsBudgetProp)
-
   const { user } = useAuth()
-
   useTariffSync(user?.id)
 
-  const [importNotice, setImportNotice] = useState<string | null>(null)
-
   const [showOrthodonticBudget, setShowOrthodonticBudget] = useState(false)
-
   const orthodonticBudgetVisible =
     showOrthodonticBudget ||
     Boolean(orthodonticsAnnex?.treatmentType) ||
@@ -211,14 +116,9 @@ export function BudgetForm({
 
   const persistedOmissionRef = useRef('')
 
-
-
   const lineTotals = useMemo(
-
     () => computeBudgetTotals(moduleItems, budget.discount, DEFAULT_IVA_RATE),
-
     [moduleItems, budget.discount],
-
   )
 
   useEffect(() => {
@@ -251,137 +151,68 @@ export function BudgetForm({
     onChange,
   ])
 
-
-
   const emitItemsWithDiscount = (
-
     items: ReturnType<typeof mapLinesToBudgetItems>,
-
     discount: number,
-
   ) => {
-
     const lines = mapBudgetItemsToLines(items, clinicalBudgetItems)
-
     const subtotal = computeBudgetTotals(items, discount, DEFAULT_IVA_RATE).subtotal
-
     onChange({
-
       budgetItems: lines,
-
       orthodonticsBudget,
-
       dentalImplantsBudget,
-
       budget: buildClinicalBudgetSummary(subtotal, discount, orthodonticsBudget, dentalImplantsBudget),
-
     })
-
   }
 
-
+  const emitDiscountOnly = (discount: number) => {
+    onChange({
+      budgetItems: clinicalBudgetItems,
+      orthodonticsBudget,
+      dentalImplantsBudget,
+      budget: buildClinicalBudgetSummary(
+        lineTotals.subtotal,
+        Math.max(0, discount),
+        orthodonticsBudget,
+        dentalImplantsBudget,
+      ),
+    })
+  }
 
   const emitOrtho = (ortho: OrthodonticsBudget) => {
-
     onChange({
-
       budgetItems: clinicalBudgetItems,
-
       orthodonticsBudget: ortho,
-
       dentalImplantsBudget,
-
-      budget: buildClinicalBudgetSummary(lineTotals.subtotal, budget.discount, ortho, dentalImplantsBudget),
-
+      budget: buildClinicalBudgetSummary(
+        lineTotals.subtotal,
+        budget.discount,
+        ortho,
+        dentalImplantsBudget,
+      ),
     })
-
   }
-
-
 
   const emitImplants = (implants: DentalImplantsBudget) => {
-
     onChange({
-
       budgetItems: clinicalBudgetItems,
-
       orthodonticsBudget,
-
       dentalImplantsBudget: implants,
-
       budget: buildClinicalBudgetSummary(
-
         lineTotals.subtotal,
-
         budget.discount,
-
         orthodonticsBudget,
-
         implants,
-
       ),
-
     })
-
   }
-
-
-
-  const importFromTreatmentPlan = () => {
-
-    const lines = buildBudgetFromTreatmentPlan(treatmentPlan, clinicalBudgetItems)
-
-    const subtotal = lines.reduce(
-
-      (sum, line) => sum + calcBillableLineTotal(line.unitPrice, line.quantity, line.cupsCode),
-
-      0,
-
-    )
-
-    onChange({
-
-      budgetItems: lines,
-
-      orthodonticsBudget,
-
-      dentalImplantsBudget,
-
-      budget: buildClinicalBudgetSummary(subtotal, budget.discount, orthodonticsBudget, dentalImplantsBudget),
-
-    })
-
-    setImportNotice(treatmentPlanBudgetImportNotice(treatmentPlan, clinicalBudgetItems, lines))
-
-    window.requestAnimationFrame(() => {
-
-      document.getElementById('clinical-budget-lines')?.scrollIntoView({
-
-        behavior: 'smooth',
-
-        block: 'nearest',
-
-      })
-
-    })
-
-  }
-
-
 
   const combinedSummary = buildClinicalBudgetSummary(
-
     lineTotals.subtotal,
-
     budget.discount,
-
     orthodonticsBudget,
-
     dentalImplantsBudget,
-
   )
-
-
 
   const showOrthodonticsBudget = shouldShowOrthodonticsBudgetSection(
     orthodonticsBudget,
@@ -395,34 +226,24 @@ export function BudgetForm({
     (showOrthodonticsBudget && orthodonticsBudget.active) ||
     (showDentalImplantsBudget && dentalImplantsBudget.active)
 
+  const showSummary =
+    clinicalBudgetItems.length > 0 || hasSpecialtyBudget || combinedSummary.total > 0
+
   return (
+    <section className={unifiedCompanion ? 'space-y-4' : 'card'}>
+      {!unifiedCompanion ? (
+        <h3 className="mb-2 text-base font-semibold text-slate-800">
+          Presupuesto (legado) <span className="text-red-500">*</span>
+        </h3>
+      ) : null}
 
-    <section className="card">
-
-      <h3 className={`mb-2 ${CLINICAL_SECTION_TITLE_CLASS}`}>
-
-        {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.presupuesto, 'Presupuesto')}{' '}
-
-        <span className="text-red-500">*</span>
-
-      </h3>
-
-      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
-        Autocarga el precio desde Mis Precios y Procedimientos al seleccionar un tratamiento. El
-        precio unitario en cada fila puede ajustarse para esta atención sin modificar el catálogo
-        global.
-      </p>
-
-      {(!disabled || clinicalBudgetItems.length > 0) && (
+      {!unifiedCompanion && (!disabled || clinicalBudgetItems.length > 0) ? (
         <BudgetModule
           items={moduleItems}
           globalDiscount={budget.discount}
           disabled={disabled}
           onItemsChange={(items) => emitItemsWithDiscount(items, budget.discount)}
           onGlobalDiscountChange={(discount) => emitItemsWithDiscount(moduleItems, discount)}
-          canImportFromTreatmentPlan={treatmentPlan.some((t) => (t.procedure ?? '').trim())}
-          onImportFromTreatmentPlan={importFromTreatmentPlan}
-          importNotice={importNotice}
           hideSummary
           onAddOrthodonticsBudget={
             onOrthodonticsAnnexChange && !disabled && !orthodonticBudgetVisible
@@ -430,27 +251,9 @@ export function BudgetForm({
               : undefined
           }
         />
-      )}
-
-      {orthodonticBudgetVisible && orthodonticsAnnex && onOrthodonticsAnnexChange ? (
-        <div id="clinical-orthodontics-budget-box" className="mb-6">
-          <OrthodonticTreatmentPlanAndBudget
-            mode="full"
-            treatmentType={orthodonticsAnnex.treatmentType}
-            conventionalBracketType={orthodonticsAnnex.conventionalBracketType}
-            alignerTreatmentMode={orthodonticsAnnex.alignerTreatmentMode}
-            alignerPhaseCount={orthodonticsAnnex.alignerPhaseCount}
-            maxillaryOrthopedicsAppliance={orthodonticsAnnex.maxillaryOrthopedicsAppliance}
-            treatmentDurationMonths={orthodonticsAnnex.treatmentDurationMonths}
-            orthodonticBudget={orthodonticsAnnex.orthodonticBudget}
-            onTreatmentPlanChange={(patch) => onOrthodonticsAnnexChange(patch)}
-            onBudgetChange={(orthodonticBudget) => onOrthodonticsAnnexChange({ orthodonticBudget })}
-            disabled={disabled}
-          />
-        </div>
       ) : null}
 
-      {/* Caja verde solo si no está la del anexo (evita editar pago inicial/cuotas dos veces). */}
+      {/* Caja verde solo si el bloque del anexo unificado no está visible. */}
       {showOrthodonticsBudget && !orthodonticBudgetVisible && (
         <OrthodonticsBudgetSection
           orthodonticsBudget={orthodonticsBudget}
@@ -467,110 +270,51 @@ export function BudgetForm({
         />
       )}
 
-
-
       {clinicalBudgetItems.length === 0 && !hasSpecialtyBudget && disabled && (
-
-        <p className="text-sm text-slate-500 dark:text-slate-400">Agregue tratamientos al presupuesto.</p>
-
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Agregue tratamientos al plan de tratamiento y presupuesto.
+        </p>
       )}
 
-
-
-      {(clinicalBudgetItems.length > 0 || hasSpecialtyBudget) && (
-
-        <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 sm:grid-cols-2 lg:grid-cols-4 dark:border-slate-700">
-
+      {showSummary && (
+        <div className="mt-2 grid gap-4 border-t border-slate-200 pt-4 sm:grid-cols-2 lg:grid-cols-4 dark:border-slate-700">
           <div>
-
             <span className="text-sm text-slate-500 dark:text-slate-400">Subtotal clínico</span>
-
             <p className="text-lg font-semibold">{formatCurrency(combinedSummary.subtotal)}</p>
-
           </div>
-
           <div>
-
-            <span className="text-sm text-slate-500 dark:text-slate-400">
-
-              IVA excluido (0%)
-
-            </span>
-
-            <p className="text-lg font-semibold">
-
-              {formatCurrency(0)}
-
-            </p>
-
+            <span className="text-sm text-slate-500 dark:text-slate-400">IVA excluido (0%)</span>
+            <p className="text-lg font-semibold">{formatCurrency(0)}</p>
           </div>
-
           <div>
-
             <FieldVoiceHeader
-
               label="Descuento global (COP)"
-
               targetInputId="budget-form-global-discount"
-
               disabled={disabled}
-
               getValue={() => String(budget.discount || '')}
-
               onValueChange={(text) => {
-
                 const parsed = parseDictatedInteger(text)
-
-                if (parsed != null) emitItemsWithDiscount(moduleItems, Math.max(0, parsed))
-
+                if (parsed != null) emitDiscountOnly(Math.max(0, parsed))
               }}
-
             />
-
             <input
-
               id="budget-form-global-discount"
-
               type="number"
-
               min={0}
-
               disabled={disabled}
-
               value={budget.discount}
-
-              onChange={(e) =>
-
-                emitItemsWithDiscount(moduleItems, Number(e.target.value))
-
-              }
-
+              onChange={(e) => emitDiscountOnly(Number(e.target.value))}
               className="input-field"
-
             />
-
           </div>
-
           <div>
-
             <span className="text-sm text-slate-500 dark:text-slate-400">Total estimado</span>
-
             <p className="text-xl font-bold text-dental-700 dark:text-dental-400">
-
               {formatCurrency(combinedSummary.total)}
-
             </p>
-
           </div>
-
         </div>
-
       )}
-
     </section>
-
   )
-
 }
-
-

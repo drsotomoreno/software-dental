@@ -194,17 +194,28 @@ export async function fetchPatientChartV2(
     const patch = clinicalBaseToFormPatch(body.clinicalBase)
     if (Object.keys(patch).length > 0 && syncId) {
       const existing = await db.patientClinicalDrafts.get(syncId)
-      const baseForm = {
-        ...(existing?.clinicalDraft || existing?.valuationDraft || {}),
-        ...patch,
-      } as ClinicalRecordFormData
-      await savePatientClinicalDraft(syncId, baseForm, null, { source: 'sync_pull' })
-      if (body.clinicalBase?.version != null) {
-        await db.patientClinicalDrafts.update(syncId, {
-          clinicalRevision: Number(body.clinicalBase.version) || 1,
-          syncStatus: 'synced',
-          patientSyncId: syncId,
-        })
+      const { localDraftBlocksRemoteOverwrite } = await import('../../shared/clinicalRevision.js')
+      // Network-first: no pisar ediciones locales pendientes / revisión mayor.
+      if (existing && localDraftBlocksRemoteOverwrite(existing, { clinicalRevision: body.clinicalBase?.version })) {
+        if (body.clinicalBase?.version != null) {
+          // Solo actualiza la versión conocida del servidor; conserva el draft local.
+          await db.patientClinicalDrafts.update(syncId, {
+            patientSyncId: syncId,
+          })
+        }
+      } else {
+        const baseForm = {
+          ...(existing?.clinicalDraft || existing?.valuationDraft || {}),
+          ...patch,
+        } as ClinicalRecordFormData
+        await savePatientClinicalDraft(syncId, baseForm, null, { source: 'sync_pull' })
+        if (body.clinicalBase?.version != null) {
+          await db.patientClinicalDrafts.update(syncId, {
+            clinicalRevision: Number(body.clinicalBase.version) || 1,
+            syncStatus: 'synced',
+            patientSyncId: syncId,
+          })
+        }
       }
     }
 
@@ -296,8 +307,8 @@ export async function patchClinicalSectionV2(
     )
     const body = await response.json().catch(() => ({}))
     if (response.status === 409) {
-      // Conflicto: refrescar chart y reencolar con fusión no destructiva.
-      await fetchPatientChartV2(syncId)
+      // Conflicto multiusuario: NO sobrescribir el borrador local.
+      // La UI debe pedir recarga explícita de la versión del servidor.
       await enqueueOutbox({
         idempotencyKey: generateId(),
         patientSyncId: syncId,
@@ -313,7 +324,7 @@ export async function patchClinicalSectionV2(
         code: body.code || 'VERSION_CONFLICT',
         version: body.version,
         error: body.error || 'Conflicto de versión',
-        queued: true,
+        queued: false,
       }
     }
     if (!response.ok) {

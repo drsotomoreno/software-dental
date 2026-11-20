@@ -38,7 +38,11 @@ export function TopNavbar() {
 
   const handleLogout = async () => {
     setMenuOpen(false)
-    await logout()
+    const result = await logout()
+    if (result && typeof result === 'object' && 'ok' in result && result.ok === false) {
+      window.alert(result.error)
+      return
+    }
     navigate('/login')
   }
 

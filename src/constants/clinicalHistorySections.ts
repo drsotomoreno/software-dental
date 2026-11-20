@@ -5,12 +5,17 @@ export const CLINICAL_HISTORY_SECTION_NUMBERS = {
   diagnosticos: 4,
   examenesComplementarios: 5,
   anexos: 6,
+  /** Plan de Tratamiento y Presupuesto unificados (antes 7 + 8). */
   tratamiento: 7,
-  presupuesto: 8,
-  planPagos: 9,
-  consentimiento: 10,
-  evolucion: 11,
-  exportacionHistoria: 12,
+  /**
+   * Clave legada de impresión/PDF. Comparte el número 7 con `tratamiento`
+   * para no romper consumidores que leen `presupuesto`; ya no es sección aparte.
+   */
+  presupuesto: 7,
+  planPagos: 8,
+  consentimiento: 9,
+  evolucion: 10,
+  exportacionHistoria: 11,
 } as const
 
 export type ClinicalHistoryPrintSectionId =
@@ -69,13 +74,13 @@ export const CLINICAL_HISTORY_PRINT_SECTIONS: ClinicalHistoryPrintSection[] = [
   },
   {
     id: 'tratamiento',
-    label: 'Plan de Tratamiento',
+    label: 'Plan de Tratamiento y Presupuesto',
     number: CLINICAL_HISTORY_SECTION_NUMBERS.tratamiento,
   },
   {
+    // Continuación de la sección 7 en PDF (detalle financiero legado).
     id: 'presupuesto',
-    label: 'Presupuesto',
-    number: CLINICAL_HISTORY_SECTION_NUMBERS.presupuesto,
+    label: 'Detalle de Presupuesto',
   },
   {
     id: 'planPagos',

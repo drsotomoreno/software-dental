@@ -65,4 +65,18 @@ export interface ClinicalAuditLogEntry {
   changedSections: string[]
   source: ClinicalAuditSource
   createdAt: string
+  /**
+   * Snapshot médico-legal de plan/presupuesto cuando esas secciones cambian.
+   * No indexado; se sincroniza con clinical_audit_logs.
+   */
+  beforeSnapshot?: {
+    treatmentPlan?: unknown
+    budgetItems?: unknown
+    budget?: unknown
+  } | null
+  afterSnapshot?: {
+    treatmentPlan?: unknown
+    budgetItems?: unknown
+    budget?: unknown
+  } | null
 }

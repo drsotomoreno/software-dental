@@ -353,7 +353,7 @@ export interface ClinicalRecord {
   paymentPlan: PaymentPlanItem[]
   /** Sección 9: abonos, facturas y saldo */
   paymentControl: PaymentRecord[]
-  /** Filas clínicas de la sección 9 (zona, CIE, CUPS y precio) */
+  /** Filas clínicas del plan de pagos (zona, CIE, CUPS y precio) */
   paymentControlLines?: PaymentControlLine[]
   orthodonticsPaymentControl: OrthodonticsPaymentRecord[]
   /** Sección 9: Notas de evolución */

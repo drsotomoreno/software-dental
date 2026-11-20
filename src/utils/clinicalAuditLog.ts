@@ -22,6 +22,20 @@ export async function appendClinicalAuditLog(input: {
     input.changedSections ??
     detectChangedClinicalSections(input.previousForm, input.nextForm)
 
+  const planOrBudgetTouched = changedSections.some((section) =>
+    ['treatmentPlan', 'budgetItems', 'budget', 'orthodonticsBudget', 'dentalImplantsBudget'].includes(
+      section,
+    ),
+  )
+  const prevForm =
+    input.previousForm && typeof input.previousForm === 'object'
+      ? (input.previousForm as Record<string, unknown>)
+      : null
+  const nextForm =
+    input.nextForm && typeof input.nextForm === 'object'
+      ? (input.nextForm as Record<string, unknown>)
+      : null
+
   const entry: ClinicalAuditLogEntry = {
     id: generateId(),
     patientSyncId,
@@ -33,6 +47,24 @@ export async function appendClinicalAuditLog(input: {
     changedSections,
     source: input.source,
     createdAt: new Date().toISOString(),
+    ...(planOrBudgetTouched
+      ? {
+          beforeSnapshot: prevForm
+            ? {
+                treatmentPlan: prevForm.treatmentPlan,
+                budgetItems: prevForm.budgetItems,
+                budget: prevForm.budget,
+              }
+            : null,
+          afterSnapshot: nextForm
+            ? {
+                treatmentPlan: nextForm.treatmentPlan,
+                budgetItems: nextForm.budgetItems,
+                budget: nextForm.budget,
+              }
+            : null,
+        }
+      : {}),
   }
 
   try {

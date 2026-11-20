@@ -103,7 +103,7 @@ export async function upsertPatientClinicalChart(input) {
   const clinicaId = String(input?.clinicaId || input?.clinica_id || '').trim()
   const patientSyncId = String(input?.patientSyncId || input?.patient_sync_id || '').trim()
   if (!clinicaId || !patientSyncId) {
-    return { applied: false, clinicalRevision: 0 }
+    return { applied: false, clinicalRevision: 0, conflict: false }
   }
   const { clinicalRevision, contentHash } = chartMeta(input)
   const documentNumber = String(input?.documentNumber || input?.document_number || '').trim() || null
@@ -122,6 +122,27 @@ export async function upsertPatientClinicalChart(input) {
   return withPgClient(async (client) => {
     await client.query('BEGIN')
     try {
+      const before = await client.query(
+        `SELECT clinical_revision, content_hash, chart_data
+           FROM patient_clinical_charts
+          WHERE clinica_id = $1::text AND patient_sync_id = $2::text
+          LIMIT 1
+          FOR UPDATE`,
+        [clinicaId, patientSyncId],
+      )
+      const prevRow = before.rows[0] || null
+      const prevRevision = Number(prevRow?.clinical_revision || 0)
+      // Optimistic lock: no sobrescribir si el servidor ya tiene revisión mayor.
+      if (prevRevision > clinicalRevision) {
+        await client.query('ROLLBACK')
+        return {
+          applied: false,
+          conflict: true,
+          clinicalRevision: prevRevision,
+          code: 'VERSION_CONFLICT',
+        }
+      }
+
       const result = await client.query(UPSERT_SQL, [
         clinicaId,
         patientSyncId,
@@ -131,9 +152,15 @@ export async function upsertPatientClinicalChart(input) {
         JSON.stringify(stored.value),
         updatedBy,
       ])
+
+      // Auditoría detallada (before/after plan/presupuesto) la escribe el cliente
+      // en clinicalAuditLogs y se mirror a RDS vía /api/sync/push.
+      void prevRow
+
       await client.query('COMMIT')
       return {
         applied: result.rowCount > 0,
+        conflict: false,
         clinicalRevision: result.rows[0]?.clinical_revision ?? clinicalRevision,
       }
     } catch (error) {
@@ -271,7 +298,7 @@ export async function persistTouchedPatientCharts(clinicId, _clinic, body) {
       documentNumber,
     })
     if (chartIsEmpty(chart)) continue
-    await upsertPatientClinicalChart({
+    const result = await upsertPatientClinicalChart({
       clinicaId: clinicId,
       patientSyncId: chart.patientSyncId || patientSyncId || localId,
       documentNumber: chart.documentNumber || documentNumber,
@@ -281,8 +308,13 @@ export async function persistTouchedPatientCharts(clinicId, _clinic, body) {
       odontograms: chart.odontograms,
       diagnosticAids: chart.diagnosticAids,
       updatedBy: String(incoming.updatedBy || incoming.userEmail || '').trim(),
+      userEmail: String(incoming.userEmail || '').trim(),
     })
-    written += 1
+    if (result?.conflict) {
+      // No incrementar written: el cliente debe resolver 409 vía EMR v2 / recarga.
+      continue
+    }
+    if (result?.applied) written += 1
   }
   return written
 }

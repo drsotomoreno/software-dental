@@ -146,7 +146,9 @@ import { useAudit } from '@/hooks/useAudit'
 import { normalizeClinicalRecordPayments } from '@/services/paymentInvoiceService'
 import { useClinicalVoiceRegistry } from '@/hooks/useClinicalVoiceRegistry'
 import { useClinicalAutoSave } from '@/hooks/useClinicalAutoSave'
+import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { fetchPatientChartV2, subscribeEmrV2PatientUpdated } from '@/services/emrV2Client'
+import { localDraftBlocksRemoteOverwrite } from '../../shared/clinicalRevision.js'
 import { VoiceClinicalAssistant, type ClinicalVoiceContext } from '@/components/voice'
 import { confirmUserPassword } from '@/services/authService'
 import { createDigitalSignature, validateSignatureCapture } from '@/services/signatureService'
@@ -218,6 +220,9 @@ export function PatientDetailPage() {
 
   const [message, setMessage] = useState('')
   const [hydrationHash, setHydrationHash] = useState<string | null>(null)
+  const [workingOffline, setWorkingOffline] = useState(false)
+  const [versionConflictMessage, setVersionConflictMessage] = useState<string | null>(null)
+  const isOnline = useOnlineStatus()
 
   const [viewMode, setViewMode] = useState<ViewMode>('edit')
 
@@ -545,9 +550,11 @@ export function PatientDetailPage() {
     lastSavedAt: clinicalAutoSavedAt,
     saving: clinicalAutoSaving,
     saveStatus: clinicalSaveStatus,
+    cloudSyncStatus: clinicalCloudSyncStatus,
     saveError: clinicalSaveError,
     serverVersion: clinicalServerVersion,
     markHydratedHash,
+    seedServerVersion,
   } = useClinicalAutoSave({
     patientRouteId: patient?.syncId || id,
     clinicalData,
@@ -561,7 +568,16 @@ export function PatientDetailPage() {
     onSaveError: (reason) => {
       setMessage(`No se pudo guardar la historia clínica: ${reason}`)
     },
+    onVersionConflict: ({ section, serverVersion }) => {
+      setVersionConflictMessage(
+        `Conflicto de versión (sección ${section}, v${serverVersion}): otro usuario o equipo guardó primero. Recargue la ficha para obtener la versión del servidor antes de seguir editando.`,
+      )
+    },
   })
+
+  useEffect(() => {
+    setWorkingOffline(!isOnline)
+  }, [isOnline])
 
   const clinicalAutoSaveLabel =
     clinicalSaveStatus === 'error'
@@ -606,9 +622,18 @@ export function PatientDetailPage() {
       if (event.patientSyncId !== syncId) return
       void fetchPatientChartV2(syncId).then(async (result) => {
         if (!result.ok) return
-        setMessage('Actualizado en tiempo real')
         try {
           const draft = await getPatientClinicalDraft(syncId)
+          if (draft && localDraftBlocksRemoteOverwrite(draft, null)) {
+            setMessage(
+              'Hay cambios locales pendientes: no se sobrescribió con la versión remota. Guarde o sincronice antes de recargar.',
+            )
+            return
+          }
+          setMessage('Actualizado en tiempo real')
+          if (result.chart?.clinicalBase?.version != null) {
+            seedServerVersion(Number(result.chart.clinicalBase.version))
+          }
           const living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
           if (living) {
             setClinicalData((prev) =>
@@ -897,30 +922,43 @@ export function PatientDetailPage() {
             )
             let living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
 
-            // El pull de login no trae la historia. Si falta el borrador o la historia firmada, bajar este paciente.
-            const needsServerChart =
-              !draftClinicalData &&
-              Boolean(currentPatient?.syncId) &&
-              (!signedRecord || !clinicalFormHasContent(living))
-            if (needsServerChart && currentPatient?.syncId) {
+            // Network-first: con red, consultar PostgreSQL antes de habilitar edición.
+            // Sin red → Dexie + banner. Borrador local pending/error no se pisa.
+            const browserOnline =
+              typeof navigator === 'undefined' ? true : navigator.onLine !== false
+            if (!browserOnline) {
+              if (!options?.quiet) setWorkingOffline(true)
+            } else if (!draftClinicalData && currentPatient?.syncId) {
+              const localBlocks =
+                Boolean(draft) && localDraftBlocksRemoteOverwrite(draft, null)
               try {
-                // Preferir EMR v2 (lazy migration RDS); fallback legacy chart pull.
-                const v2 = await fetchPatientChartV2(currentPatient.syncId)
-                if (v2.ok) {
-                  draft = (await getPatientClinicalDraft(currentPatient.syncId || foreignKey)) ?? draft
-                  living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
-                } else {
-                  const { pullPatientChartOnDemand } = await import('@/services/clinicalSyncService')
-                  const remote = await pullPatientChartOnDemand(
-                    currentPatient.syncId || String(currentPatient.id ?? foreignKey),
-                    {
-                      localId: currentPatient.id ?? foreignKey,
-                      documentNumber: currentPatient.documentNumber,
-                    },
-                  )
-                  if (remote) {
-                    draft = (await getPatientClinicalDraft(foreignKey)) ?? draft
+                if (!options?.quiet) setWorkingOffline(false)
+                if (!localBlocks) {
+                  const v2 = await fetchPatientChartV2(currentPatient.syncId)
+                  if (v2.ok) {
+                    if (v2.chart?.clinicalBase?.version != null) {
+                      seedServerVersion(Number(v2.chart.clinicalBase.version))
+                    }
+                    draft =
+                      (await getPatientClinicalDraft(currentPatient.syncId || foreignKey)) ?? draft
                     living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+                  } else {
+                    const { pullPatientChartOnDemand } = await import(
+                      '@/services/clinicalSyncService'
+                    )
+                    const remote = await pullPatientChartOnDemand(
+                      currentPatient.syncId || String(currentPatient.id ?? foreignKey),
+                      {
+                        localId: currentPatient.id ?? foreignKey,
+                        documentNumber: currentPatient.documentNumber,
+                      },
+                    )
+                    if (remote) {
+                      draft = (await getPatientClinicalDraft(foreignKey)) ?? draft
+                      living = pickLivingDraftForm(draft?.clinicalDraft, draft?.valuationDraft)
+                    } else if (v2.status === 0) {
+                      if (!options?.quiet) setWorkingOffline(true)
+                    }
                   }
                 }
                 if (!signedRecord) {
@@ -937,7 +975,7 @@ export function PatientDetailPage() {
                   }
                 }
               } catch {
-                // Red opcional: se muestra lo local.
+                if (!options?.quiet) setWorkingOffline(true)
               }
             }
 
@@ -2217,6 +2255,34 @@ export function PatientDetailPage() {
 
     <div className="space-y-6">
 
+      {workingOffline && !isArchiveView ? (
+        <div
+          role="status"
+          className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          Sin conexión a internet: trabajando en modo local. Los cambios se subirán al reconectar.
+        </div>
+      ) : null}
+
+      {versionConflictMessage && !isArchiveView ? (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900"
+        >
+          <span>{versionConflictMessage}</span>
+          <button
+            type="button"
+            className="btn-secondary text-xs"
+            onClick={() => {
+              setVersionConflictMessage(null)
+              window.location.reload()
+            }}
+          >
+            Recargar versión del servidor
+          </button>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
 
         <div>
@@ -2486,6 +2552,7 @@ export function PatientDetailPage() {
 
           disabled={isArchiveView}
           lockLivingChart={livingChartLocked}
+          cloudSyncStatus={clinicalCloudSyncStatus}
 
           professionalName={professionalName}
 

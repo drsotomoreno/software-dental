@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import type { ClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
-import type { Cie10Diagnosis, TreatmentPlanItem } from '@/types/clinicalRecord'
+import type { BudgetLineItem, Cie10Diagnosis, TreatmentPlanItem } from '@/types/clinicalRecord'
 import type { OrthodonticsAnnex, SpecializedAnnexes } from '@/types/specializedAnnexes'
 import { COMMON_CIE10_CODES, COMMON_DENTAL_PROCEDURES } from '@/constants/dental'
 import { OrthodonticTreatmentPlanAndBudget } from './orthodontics'
@@ -13,6 +13,7 @@ import {
   clinicalSectionTitle,
 } from '@/constants/clinicalHistorySections'
 import { Toast } from '@/components/ui/Toast'
+import { FieldVoiceHeader } from '@/components/voice'
 import { useCatalogSearch } from '@/hooks/useCatalogSearch'
 import { useToast } from '@/hooks/useToast'
 import { useTariffSync } from '@/modules/tariff/useTariffSync'
@@ -38,10 +39,16 @@ import {
   formatAnatomicalZone,
   parseAnatomicalZone,
 } from '@/utils/treatmentPlanZone'
+import {
+  patchBudgetOrphanLine,
+  resolveUnifiedTreatmentBudgetRows,
+} from '@/utils/unifiedTreatmentBudget'
 
 interface TreatmentPlanFormProps {
   treatmentPlan: TreatmentPlanItem[]
   treatmentPlanNotes?: string
+  /** Líneas de presupuesto legado — lectura híbrida sin borrar datos antiguos. */
+  budgetItems?: BudgetLineItem[]
   diagnoses?: Cie10Diagnosis[]
   /** Esquema de la sección 4. Cada pieza asignada se importa como fila del plan. */
   diagnosticChart?: ClinicalDiagnosticChart | null
@@ -50,8 +57,12 @@ interface TreatmentPlanFormProps {
   budgetLinkedItemIds?: string[]
   disabled?: boolean
   onChange: (patch: { treatmentPlan: TreatmentPlanItem[]; treatmentPlanNotes?: string }) => void
+  /** Edición/eliminación de huérfanas del presupuesto (registros antiguos). */
+  onBudgetItemsChange?: (budgetItems: BudgetLineItem[]) => void
   onMoveToBudget?: (itemId: string) => void
   onOrthodonticsAnnexChange?: (patch: Partial<OrthodonticsAnnex>) => void
+  /** Estado de sync nube (auto-guardado Sección 7). */
+  cloudSyncStatus?: 'idle' | 'syncing' | 'saved' | 'pending_offline' | 'conflict' | 'error'
 }
 
 const DEFAULT_TREATMENT_PHASE = 'fase_ii' as const
@@ -99,7 +110,7 @@ function PriceCell({
     <input
       inputMode="numeric"
       disabled={disabled}
-      aria-label="Precio"
+      aria-label="Precio unitario de esta atención"
       className="input-field h-8 px-2 text-right text-sm tabular-nums"
       value={editing ? draft : formatCurrency(value || 0)}
       onFocus={() => {
@@ -120,12 +131,15 @@ function PriceCell({
 export function TreatmentPlanForm({
   treatmentPlan,
   treatmentPlanNotes = '',
+  budgetItems = [],
   diagnoses = [],
   diagnosticChart,
   specializedAnnexes,
   disabled = false,
   onChange,
+  onBudgetItemsChange,
   onOrthodonticsAnnexChange,
+  cloudSyncStatus = 'idle',
 }: TreatmentPlanFormProps) {
   const [openMenu, setOpenMenu] = useState<{ id: string; field: 'cie' | 'cups'; query: string } | null>(
     null,
@@ -133,11 +147,14 @@ export function TreatmentPlanForm({
   const [annexPickerOpen, setAnnexPickerOpen] = useState(false)
   const [annexChoices, setAnnexChoices] = useState<TreatmentPlanItem[]>([])
   const [selectedAnnexIds, setSelectedAnnexIds] = useState<string[]>([])
-  const [showOrthodonticPlan, setShowOrthodonticPlan] = useState(false)
+  const [showOrthodonticBlock, setShowOrthodonticBlock] = useState(false)
+  const [procedureSearch, setProcedureSearch] = useState('')
   const { toastMessage, showToast, clearToast } = useToast()
   const orthodontics = specializedAnnexes?.orthodontics
-  const orthodonticPlanVisible =
-    showOrthodonticPlan || Boolean(orthodontics?.treatmentType)
+  const orthodonticBlockVisible =
+    showOrthodonticBlock ||
+    Boolean(orthodontics?.treatmentType) ||
+    Boolean(orthodontics?.orthodonticBudget)
   const cieQuery = openMenu?.field === 'cie' ? openMenu.query : ''
   const cupsQuery = openMenu?.field === 'cups' ? openMenu.query : ''
   const cieCatalog = useCatalogSearch('cie10', cieQuery, 20)
@@ -172,6 +189,23 @@ export function TreatmentPlanForm({
     [diagnoses, treatmentPlan, diagnosticChart],
   )
 
+  const unifiedRows = useMemo(
+    () => resolveUnifiedTreatmentBudgetRows(treatmentPlan, budgetItems),
+    [treatmentPlan, budgetItems],
+  )
+
+  const tariffSearchResults = useMemo(() => {
+    const query = procedureSearch.trim().toLowerCase()
+    if (!query) return []
+    return Object.values(tariffMap)
+      .filter(
+        (item) =>
+          item.isActive &&
+          (item.code.toLowerCase().includes(query) || item.name.toLowerCase().includes(query)),
+      )
+      .slice(0, 15)
+  }, [tariffMap, procedureSearch])
+
   const cieOptions = useMemo(() => {
     const map = new Map<string, CieOption>()
     const query = cieQuery.trim().toLowerCase()
@@ -203,7 +237,7 @@ export function TreatmentPlanForm({
     [cupsQuery, prices],
   )
 
-  const total = sumTreatmentPlanPrices(treatmentPlan)
+  const total = sumTreatmentPlanPrices(unifiedRows.map((row) => row.view))
 
   const addTreatmentItem = () => {
     const item: TreatmentPlanItem = {
@@ -217,6 +251,24 @@ export function TreatmentPlanForm({
       source: 'manual',
     }
     emit([...treatmentPlan, item])
+  }
+
+  const addFromTariff = (code: string) => {
+    const tariff = tariffMap[code]
+    if (!tariff) return
+    const item: TreatmentPlanItem = {
+      id: generateId(),
+      phase: DEFAULT_TREATMENT_PHASE,
+      procedure: tariff.name,
+      cupsCode: tariff.code,
+      quantity: getDefaultQuantityForCups(tariff.code),
+      unitPrice: tariff.price > 0 ? tariff.price : 0,
+      patientApproved: 'pendiente',
+      executionStatus: 'pendiente',
+      source: 'manual',
+    }
+    emit([...treatmentPlan, item])
+    setProcedureSearch('')
   }
 
   const importFromDiagnoses = () => {
@@ -256,7 +308,6 @@ export function TreatmentPlanForm({
       showToast('Seleccione al menos un procedimiento para importar')
       return
     }
-    // Rehabilitación: solo la caja resumida (no diente a diente); reemplaza legacy «— pieza».
     emit(mergeAnnexImportsIntoTreatmentPlan(treatmentPlan, chosen))
     setAnnexPickerOpen(false)
   }
@@ -265,8 +316,26 @@ export function TreatmentPlanForm({
     emit(treatmentPlan.map((item) => (item.id === id ? { ...item, ...patch } : item)))
   }
 
-  const removeTreatmentItem = (id: string) => {
-    emit(treatmentPlan.filter((item) => item.id !== id))
+  const updateUnifiedRow = (
+    kind: 'plan' | 'budget_orphan',
+    rowId: string,
+    patch: Partial<TreatmentPlanItem>,
+  ) => {
+    if (kind === 'plan') {
+      updateTreatmentItem(rowId, patch)
+      return
+    }
+    if (!onBudgetItemsChange) return
+    onBudgetItemsChange(patchBudgetOrphanLine(budgetItems, rowId, patch))
+  }
+
+  const removeUnifiedRow = (kind: 'plan' | 'budget_orphan', rowId: string) => {
+    if (kind === 'plan') {
+      emit(treatmentPlan.filter((item) => item.id !== rowId))
+      return
+    }
+    if (!onBudgetItemsChange) return
+    onBudgetItemsChange(budgetItems.filter((item) => item.id !== rowId))
   }
 
   const focusRow = (id: string) => {
@@ -279,12 +348,50 @@ export function TreatmentPlanForm({
     }, 120)
   }
 
+  const syncBadge =
+    cloudSyncStatus === 'syncing' ? (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+        <span
+          className="h-3 w-3 animate-spin rounded-full border-2 border-slate-400 border-t-transparent"
+          aria-hidden
+        />
+        Sincronizando...
+      </span>
+    ) : cloudSyncStatus === 'saved' ? (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+        Guardado en la nube ✓
+      </span>
+    ) : cloudSyncStatus === 'pending_offline' ? (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
+        Pendiente de sincronizar (Sin red)
+      </span>
+    ) : cloudSyncStatus === 'conflict' ? (
+      <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700">
+        Conflicto de versión — recargue
+      </span>
+    ) : cloudSyncStatus === 'error' ? (
+      <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700">
+        Error al guardar
+      </span>
+    ) : null
+
   return (
     <section className="card">
-      <h3 className={`mb-3 ${CLINICAL_SECTION_TITLE_CLASS}`}>
-        {clinicalSectionTitle(CLINICAL_HISTORY_SECTION_NUMBERS.tratamiento, 'Plan de Tratamiento')}{' '}
-        <span className="text-red-500">*</span>
-      </h3>
+      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+        <h3 className={CLINICAL_SECTION_TITLE_CLASS}>
+          {clinicalSectionTitle(
+            CLINICAL_HISTORY_SECTION_NUMBERS.tratamiento,
+            'Plan de Tratamiento y Presupuesto',
+          )}{' '}
+          <span className="text-red-500">*</span>
+        </h3>
+        {syncBadge}
+      </div>
+      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+        Autocarga el precio desde Mis Precios y Procedimientos al seleccionar un tratamiento. El
+        precio unitario en cada fila puede ajustarse para esta atención sin modificar el catálogo
+        global.
+      </p>
 
       {!disabled && (
         <div className="mb-3 flex flex-wrap gap-2">
@@ -299,13 +406,15 @@ export function TreatmentPlanForm({
           <button type="button" onClick={importFromAnnexes} className="btn-secondary text-xs">
             Importar desde anexos
           </button>
-          {onOrthodonticsAnnexChange && !orthodonticPlanVisible ? (
+          {onOrthodonticsAnnexChange && !orthodonticBlockVisible ? (
             <button
               type="button"
-              onClick={() => setShowOrthodonticPlan(true)}
+              onClick={() => setShowOrthodonticBlock(true)}
               className="btn-secondary text-xs"
+              aria-label="Añadir Presupuesto de Ortodoncia"
+              title="Añadir Presupuesto de Ortodoncia (plan y calculadora del anexo)"
             >
-              + Plan de Tratamiento de Ortodoncia
+              + Plan / Presupuesto de Ortodoncia
             </button>
           ) : null}
           <button type="button" onClick={addTreatmentItem} className="btn-primary text-xs">
@@ -314,10 +423,10 @@ export function TreatmentPlanForm({
         </div>
       )}
 
-      {orthodonticPlanVisible && orthodontics && onOrthodonticsAnnexChange ? (
-        <div className="mb-4">
+      {orthodonticBlockVisible && orthodontics && onOrthodonticsAnnexChange ? (
+        <div id="clinical-orthodontics-budget-box" className="mb-4">
           <OrthodonticTreatmentPlanAndBudget
-            mode="plan"
+            mode="full"
             treatmentType={orthodontics.treatmentType}
             conventionalBracketType={orthodontics.conventionalBracketType}
             alignerTreatmentMode={orthodontics.alignerTreatmentMode}
@@ -332,37 +441,89 @@ export function TreatmentPlanForm({
         </div>
       ) : null}
 
+      {!disabled && (
+        <div className="mb-4 space-y-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/40">
+          <FieldVoiceHeader
+            label="Autocarga desde tarifario (CUPS / personalizados)"
+            targetInputId="unified-plan-budget-tariff-search"
+            labelClassName="text-xs font-medium text-slate-600 dark:text-slate-300"
+            getValue={() => procedureSearch}
+            onValueChange={setProcedureSearch}
+          />
+          <input
+            id="unified-plan-budget-tariff-search"
+            type="search"
+            value={procedureSearch}
+            onChange={(event) => setProcedureSearch(event.target.value)}
+            placeholder="Código CUPS o descripción..."
+            className="input-field"
+          />
+          {procedureSearch && (
+            <ul className="max-h-44 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              {tariffSearchResults.length === 0 ? (
+                <li className="px-3 py-2 text-sm text-slate-500">
+                  Sin coincidencias — puede agregar manualmente con precio 0.
+                </li>
+              ) : (
+                tariffSearchResults.map((tariff) => (
+                  <li key={tariff.code}>
+                    <button
+                      type="button"
+                      onClick={() => addFromTariff(tariff.code)}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                    >
+                      <span className="truncate">
+                        {tariff.name}
+                        <span className="ml-2 font-mono text-xs text-slate-400">
+                          {formatCupsCodeDotted(tariff.code)}
+                        </span>
+                      </span>
+                      <span className="shrink-0 tabular-nums text-dental-700">
+                        {formatCurrency(tariff.price)}
+                      </span>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               <th className="px-2 py-2">Diente / Zona</th>
-              <th className="px-2 py-2">Diagnóstico CIE</th>
-              <th className="px-2 py-2">Procedimiento</th>
-              <th className="w-36 px-2 py-2 text-right">Precio</th>
+              <th className="px-2 py-2">Diagnóstico CIE-10</th>
+              <th className="px-2 py-2">Procedimiento / CUPS</th>
+              <th className="w-40 px-2 py-2 text-right">Precio unitario (Editable por atención)</th>
               <th className="w-28 px-2 py-2 text-right">Acciones</th>
             </tr>
           </thead>
           <tbody>
-            {treatmentPlan.length === 0 ? (
+            {unifiedRows.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-2 py-6 text-center text-sm text-slate-400">
                   —
                 </td>
               </tr>
             ) : (
-              treatmentPlan.map((item) => {
-                const cieOpen = openMenu?.id === item.id && openMenu.field === 'cie'
-                const cupsOpen = openMenu?.id === item.id && openMenu.field === 'cups'
+              unifiedRows.map((row) => {
+                const item = row.view
+                const cieOpen = openMenu?.id === row.rowId && openMenu.field === 'cie'
+                const cupsOpen = openMenu?.id === row.rowId && openMenu.field === 'cups'
                 return (
-                  <tr key={item.id} className="border-b border-slate-100 align-top">
+                  <tr key={`${row.kind}-${row.rowId}`} className="border-b border-slate-100 align-top">
                     <td className="px-2 py-1.5">
                       <input
-                        id={`plan-zone-${item.id}`}
+                        id={`plan-zone-${row.rowId}`}
                         list="plan-zone-presets"
                         disabled={disabled}
                         value={formatAnatomicalZone(item)}
-                        onChange={(event) => updateTreatmentItem(item.id, parseAnatomicalZone(event.target.value))}
+                        onChange={(event) =>
+                          updateUnifiedRow(row.kind, row.rowId, parseAnatomicalZone(event.target.value))
+                        }
                         placeholder="16, 14-18, Q1"
                         className="input-field h-8 px-2 text-sm"
                         aria-label="Diente o zona"
@@ -374,17 +535,17 @@ export function TreatmentPlanForm({
                         value={cieOpen ? openMenu.query : formatCieLabel(item)}
                         onFocus={() => {
                           if (disabled) return
-                          setOpenMenu({ id: item.id, field: 'cie', query: formatCieLabel(item) })
+                          setOpenMenu({ id: row.rowId, field: 'cie', query: formatCieLabel(item) })
                         }}
-                        onBlur={() => closeMenuSoon(item.id, 'cie')}
+                        onBlur={() => closeMenuSoon(row.rowId, 'cie')}
                         onChange={(event) => {
                           const query = event.target.value
-                          setOpenMenu({ id: item.id, field: 'cie', query })
-                          updateTreatmentItem(item.id, parseCieLabel(query))
+                          setOpenMenu({ id: row.rowId, field: 'cie', query })
+                          updateUnifiedRow(row.kind, row.rowId, parseCieLabel(query))
                         }}
                         placeholder="CIE-10"
                         className="input-field h-8 px-2 text-sm"
-                        aria-label="Diagnóstico CIE"
+                        aria-label="Diagnóstico CIE-10"
                         autoComplete="off"
                       />
                       {cieOpen && (
@@ -393,13 +554,13 @@ export function TreatmentPlanForm({
                             <li className="px-2 py-1.5 text-xs text-slate-400">—</li>
                           ) : (
                             cieOptions.map((option) => (
-                              <li key={`${item.id}-${option.code}`}>
+                              <li key={`${row.rowId}-${option.code}`}>
                                 <button
                                   type="button"
                                   className="flex w-full gap-2 px-2 py-1.5 text-left text-xs hover:bg-slate-50"
                                   onMouseDown={(event) => event.preventDefault()}
                                   onClick={() => {
-                                    updateTreatmentItem(item.id, {
+                                    updateUnifiedRow(row.kind, row.rowId, {
                                       diagnosisCode: option.code,
                                       diagnosisDescription: option.description,
                                     })
@@ -421,18 +582,18 @@ export function TreatmentPlanForm({
                         value={cupsOpen ? openMenu.query : item.procedure}
                         onFocus={() => {
                           if (disabled) return
-                          setOpenMenu({ id: item.id, field: 'cups', query: item.procedure })
+                          setOpenMenu({ id: row.rowId, field: 'cups', query: item.procedure })
                         }}
-                        onBlur={() => closeMenuSoon(item.id, 'cups')}
+                        onBlur={() => closeMenuSoon(row.rowId, 'cups')}
                         onChange={(event) => {
                           const query = event.target.value
-                          setOpenMenu({ id: item.id, field: 'cups', query })
-                          updateTreatmentItem(item.id, { procedure: query })
+                          setOpenMenu({ id: row.rowId, field: 'cups', query })
+                          updateUnifiedRow(row.kind, row.rowId, { procedure: query })
                         }}
                         placeholder="CUPS .03"
                         title={item.procedure || undefined}
                         className="input-field h-8 px-2 pr-24 text-sm"
-                        aria-label="Procedimiento"
+                        aria-label="Procedimiento / CUPS"
                         autoComplete="off"
                       />
                       {item.cupsCode && !cupsOpen && (
@@ -446,14 +607,14 @@ export function TreatmentPlanForm({
                             <li className="px-2 py-1.5 text-xs text-slate-400">—</li>
                           ) : (
                             cupsOptions.map((option) => (
-                              <li key={`${item.id}-${option.cupsCode}-${option.procedure}`}>
+                              <li key={`${row.rowId}-${option.cupsCode}-${option.procedure}`}>
                                 <button
                                   type="button"
                                   className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs hover:bg-slate-50"
                                   onMouseDown={(event) => event.preventDefault()}
                                   onClick={() => {
                                     const price = catalogUnitPrice(option.cupsCode)
-                                    updateTreatmentItem(item.id, {
+                                    updateUnifiedRow(row.kind, row.rowId, {
                                       procedure: option.procedure,
                                       cupsCode: option.cupsCode,
                                       quantity: getDefaultQuantityForCups(option.cupsCode),
@@ -484,7 +645,9 @@ export function TreatmentPlanForm({
                       <PriceCell
                         value={item.unitPrice}
                         disabled={disabled}
-                        onCommit={(unitPrice) => updateTreatmentItem(item.id, { unitPrice })}
+                        onCommit={(unitPrice) =>
+                          updateUnifiedRow(row.kind, row.rowId, { unitPrice })
+                        }
                       />
                     </td>
                     <td className="px-2 py-1.5 text-right">
@@ -492,14 +655,14 @@ export function TreatmentPlanForm({
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"
-                            onClick={() => focusRow(item.id)}
+                            onClick={() => focusRow(row.rowId)}
                             className="text-xs font-medium text-dental-700 hover:text-dental-800"
                           >
                             Editar
                           </button>
                           <button
                             type="button"
-                            onClick={() => removeTreatmentItem(item.id)}
+                            onClick={() => removeUnifiedRow(row.kind, row.rowId)}
                             className="text-xs font-medium text-red-600 hover:text-red-700"
                           >
                             Eliminar
@@ -514,7 +677,10 @@ export function TreatmentPlanForm({
           </tbody>
           <tfoot>
             <tr className="border-t border-slate-200">
-              <td colSpan={3} className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <td
+                colSpan={3}
+                className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500"
+              >
                 Valor Total
               </td>
               <td className="px-2 py-2 text-right text-sm font-semibold tabular-nums text-slate-900">
@@ -556,7 +722,9 @@ export function TreatmentPlanForm({
                       <input
                         type="checkbox"
                         aria-label="Seleccionar todos"
-                        checked={selectedAnnexIds.length === annexChoices.length && annexChoices.length > 0}
+                        checked={
+                          selectedAnnexIds.length === annexChoices.length && annexChoices.length > 0
+                        }
                         onChange={() =>
                           setSelectedAnnexIds(
                             selectedAnnexIds.length === annexChoices.length

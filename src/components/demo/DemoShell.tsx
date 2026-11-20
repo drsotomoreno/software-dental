@@ -32,7 +32,11 @@ export function DemoShell() {
   const handleLogout = async () => {
     setLoggingOut(true)
     try {
-      await logout()
+      const result = await logout()
+      if (result && typeof result === 'object' && 'ok' in result && result.ok === false) {
+        window.alert(result.error)
+        return
+      }
       navigate('/login', { replace: true })
     } finally {
       setLoggingOut(false)

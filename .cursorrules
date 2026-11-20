@@ -84,10 +84,16 @@ válido un documento de este tipo si falta alguna de las dos firmas.
 
 ---
 
-## SECCIÓN 8 — PRESUPUESTO DE ORTODONCIA (NO ELIMINAR)
+## SECCIÓN 7 UNIFICADA — PRESUPUESTO DE ORTODONCIA (NO ELIMINAR)
 
-- Debe existir el botón **«Añadir Presupuesto de Ortodoncia»** en la toolbar
-  de la sección 8 (`BudgetModule` / `BudgetForm`).
+- Las antiguas secciones 7 (Plan) y 8 (Presupuesto) viven en una sola tarjeta:
+  **7. Plan de Tratamiento y Presupuesto** (`TreatmentPlanForm` +
+  `BudgetForm` companion). Las claves de datos `treatmentPlan` /
+  `budgetItems` se conservan (lectura híbrida; cero pérdida).
+- Debe existir en la toolbar el acceso a ortodoncia: botón unificado
+  **«+ Plan / Presupuesto de Ortodoncia»** (equivalente al legado
+  **«Añadir Presupuesto de Ortodoncia»** en `BudgetModule` / modo no
+  unificado de `BudgetForm`).
 - Al pulsarlo se muestra el mismo bloque del anexo:
   `OrthodonticTreatmentPlanAndBudget` (título *Plan de Tratamiento y
   Presupuesto de Ortodoncia*), sincronizado con `specializedAnnexes.orthodontics`.

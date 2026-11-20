@@ -275,7 +275,7 @@ type BudgetSummarizer = (
   dentalImplants?: DentalImplantsBudget,
 ) => BudgetSummary
 
-/** Copia el plan de tratamiento (sección 7) al presupuesto general (sección 8). */
+/** Proyecta el plan unificado (sección 7) hacia `budgetItems` (misma entidad lógica). */
 export function syncTreatmentPlanIntoGeneralBudget(
   treatmentPlan: TreatmentPlanItem[],
   budgetItems: BudgetLineItem[],

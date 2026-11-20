@@ -101,7 +101,7 @@ export function InformedConsentForm({
         {
           ...(record.informedConsent ?? {}),
           // Si el cuerpo perdió firmas/fecha pero el ledger o el cierre las tienen,
-          // el listado de la sección 10 debe seguir reconociendo el consentimiento.
+          // el listado de la sección 9 (consentimiento) debe seguir reconociendo el consentimiento.
           signedAt: record.informedConsent?.signedAt ?? record.signedAt ?? ledger?.signedAt,
           selectedConsentIds: bodyIds.length > 0 ? bodyIds : ledgerIds,
         } as InformedConsent,

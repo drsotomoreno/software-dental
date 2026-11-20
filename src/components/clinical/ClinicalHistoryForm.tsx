@@ -22,6 +22,7 @@ import {
 } from '@/utils'
 import {
   addTreatmentPlanItemToBudget,
+  calcBudgetSummary,
   calcClinicalBudgetSummaryWithTax,
   syncTreatmentPlanIntoGeneralBudget,
 } from '@/utils/budget'
@@ -157,6 +158,8 @@ interface ClinicalHistoryFormProps {
   disabled?: boolean
   /** Si es true, congela también odontograma, plan y exámenes. Por defecto no: Res. 1995/1999. */
   lockLivingChart?: boolean
+  /** Indicador de sync nube para la tarjeta 7 unificada. */
+  cloudSyncStatus?: 'idle' | 'syncing' | 'saved' | 'pending_offline' | 'conflict' | 'error'
   professionalName?: string
   professionalLicense?: string
   authorUserId?: string
@@ -225,6 +228,7 @@ export function ClinicalHistoryForm({
   onChange,
   disabled = false,
   lockLivingChart = false,
+  cloudSyncStatus = 'idle',
   professionalName = '',
   professionalLicense = '',
   authorUserId = '',
@@ -380,8 +384,8 @@ export function ClinicalHistoryForm({
     })
   }, [odontogram, livingLocked])
 
-  // Sección 7 → sección 8: cada fila con diagnóstico, procedimiento o precio
-  // entra al presupuesto. La ortodoncia sigue en su calculadora, sin duplicar la fila.
+  // Sección 7 unificada: cada fila del plan (diagnóstico, procedimiento o precio)
+  // se proyecta a budgetItems. La ortodoncia sigue en su calculadora, sin duplicar la fila.
   useEffect(() => {
     if (livingLocked || disabled) return
 
@@ -714,19 +718,20 @@ export function ClinicalHistoryForm({
           })
         }}
         onBudgetItemsChange={(budgetItems) => {
-          const projected = syncTreatmentPlanIntoGeneralBudget(
-            form.treatmentPlan,
-            budgetItems,
-            form.budget?.discount ?? 0,
-            form.orthodonticsBudget,
-            form.dentalImplantsBudget,
-          )
+          // Huérfanas de presupuesto legado: editar/borrar sin reescribir el plan
+          // (inmutabilidad / contentHash) ni fusionar por huella de procedimiento.
           update({
-            budgetItems: projected.budgetItems,
-            budget: projected.budget,
+            budgetItems,
+            budget: calcBudgetSummary(
+              budgetItems,
+              form.budget?.discount ?? 0,
+              form.orthodonticsBudget,
+              form.dentalImplantsBudget,
+            ),
           })
         }}
         onMoveToBudget={moveTreatmentPlanItemToBudget}
+        cloudSyncStatus={cloudSyncStatus}
         onOrthodonticsAnnexChange={(patch) => {
           const annexes = form.specializedAnnexes
           update({

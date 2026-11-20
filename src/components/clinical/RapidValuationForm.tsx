@@ -31,7 +31,7 @@ interface RapidValuationFormProps {
   consentRecordedAt?: string | null
   acceptingTreatment?: boolean
   disabled?: boolean
-  /** Nuevo Paciente: oculta la sección 8 (BudgetForm) y muestra Presupuesto Rápido. */
+  /** Nuevo Paciente: oculta el bloque unificado plan/presupuesto y muestra Presupuesto Rápido. */
   replaceBudgetWithQuick?: boolean
 }
 
@@ -240,6 +240,7 @@ export function RapidValuationForm({
             <TreatmentPlanForm
               treatmentPlan={form.treatmentPlan}
               treatmentPlanNotes={form.treatmentPlanNotes}
+              budgetItems={form.budgetItems}
               diagnoses={form.diagnoses}
               diagnosticChart={form.diagnosticChart}
               specializedAnnexes={form.specializedAnnexes}
@@ -249,6 +250,7 @@ export function RapidValuationForm({
               budgetLinkedItemIds={budgetLinkedPlanItemIds}
               disabled={disabled}
               onChange={(patch) => update(patch)}
+              onBudgetItemsChange={(budgetItems) => update({ budgetItems })}
               onMoveToBudget={moveTreatmentPlanItemToBudget}
             />
           </div>
@@ -264,6 +266,7 @@ export function RapidValuationForm({
               budget={form.budget}
               treatmentPlan={form.treatmentPlan}
               disabled={disabled}
+              unifiedCompanion
               onChange={(patch) => update(patch)}
             />
           </div>
