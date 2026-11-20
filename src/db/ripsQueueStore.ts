@@ -305,7 +305,9 @@ export async function getRipsQueueByEvolution(evolutionId: string): Promise<Rips
 }
 
 export async function listRipsQueueByPatient(patientId: string): Promise<RipsQueueEntry[]> {
-  const rows = await db.rips_queue.where('patientId').equals(patientId).toArray()
+  const key = String(patientId ?? '').trim()
+  if (!key) return []
+  const rows = await db.rips_queue.where('patientId').equals(key).toArray()
   return rows.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 }
 

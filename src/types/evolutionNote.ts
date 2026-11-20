@@ -125,6 +125,11 @@ export interface EvolutionNote {
   /** SHA-256 del contenido de la nota (Ley 527 de 1999). */
   contentHash?: string
   /**
+   * Sidecar no clínico: id asignado a una nota legada que se firmó sin `id`.
+   * No entra al SHA-256 (`buildEvolutionNoteHashPayload` lo omite).
+   */
+  idRecoveredFromLegacy?: boolean
+  /**
    * Pago de esta atención (Sección 11). Vive fuera del hash clínico:
    * asociar un recibo, o marcar sin costo / pendiente, no reescribe la nota firmada.
    */

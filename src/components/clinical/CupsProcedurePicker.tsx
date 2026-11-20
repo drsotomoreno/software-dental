@@ -41,20 +41,19 @@ export function CupsProcedurePicker({
 
   const { user } = useAuth()
   const cupsCatalog = useCatalogSearch('cups', search, 40)
+  const tariffUserId = String(user?.id ?? '').trim()
   const prices = useLiveQuery(
-    () => (user?.id ? db.prices.where('userId').equals(user.id).toArray() : []),
-    [user?.id],
+    () => (tariffUserId ? db.prices.where('userId').equals(tariffUserId).toArray() : []),
+    [tariffUserId],
   )
   const organizationId = user ? userProfileToOrganizationId(user) : ''
+  const orgKey = String(organizationId ?? '').trim()
   const professionalSpecialty =
     user?.rehusSpecialty ?? user?.thsSpecialty ?? GENERAL_DENTISTRY_REHUS_SPECIALTY
 
   const dentalServices = useLiveQuery(
-    () =>
-      organizationId
-        ? db.dentalServices.where('organizationId').equals(organizationId).toArray()
-        : [],
-    [organizationId],
+    () => (orgKey ? db.dentalServices.where('organizationId').equals(orgKey).toArray() : []),
+    [orgKey],
   )
 
   const dentalServiceSpecialties = useLiveQuery(

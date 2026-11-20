@@ -37,7 +37,8 @@ import {
 } from '../../shared/clinicalFormHash.js'
 import { nextClinicalRevision } from '../../shared/clinicalRevision.js'
 import { appendClinicalAuditLog } from './clinicalAuditLog'
-import { sortEvolutionNotesChronologically } from './recordIntegrity'
+import { ensureEvolutionNoteIds, sortEvolutionNotesChronologically } from './recordIntegrity'
+import { evolutionNoteIdsWereRepaired } from '../../shared/evolutionNoteIds.js'
 import { getPatientByRouteId, toPatientForeignKey } from './patientId'
 import {
   lineSubtotal,
@@ -160,6 +161,14 @@ function notasConRelojClinico(
   return next === notes ? notes : next
 }
 
+function notasConIdRecuperado(
+  notes: EvolutionNote[] | null | undefined,
+): EvolutionNote[] | null | undefined {
+  if (!notes?.length) return notes
+  const next = ensureEvolutionNoteIds(notes)
+  return evolutionNoteIdsWereRepaired(notes, next) ? next : notes
+}
+
 /**
  * Reescribe solo la fecha de sesión de borradores que todavía tienen el reloj UTC.
  * No sustituye el resto de la historia ni toca una nota ya firmada.
@@ -174,6 +183,48 @@ export async function persistCorrectedEvolutionSessionClocks(
   const evolutionNotes = notasConRelojClinico(existing.evolutionNotes) ?? existing.evolutionNotes
   const clinicalNotes = notasConRelojClinico(existing.clinicalDraft?.evolutionNotes)
   const valuationNotes = notasConRelojClinico(existing.valuationDraft?.evolutionNotes)
+  const topChanged = evolutionNotes !== existing.evolutionNotes
+  const clinicalChanged = Boolean(
+    existing.clinicalDraft && clinicalNotes !== existing.clinicalDraft.evolutionNotes,
+  )
+  const valuationChanged = Boolean(
+    existing.valuationDraft && valuationNotes !== existing.valuationDraft.evolutionNotes,
+  )
+  if (!topChanged && !clinicalChanged && !valuationChanged) return false
+
+  await db.patientClinicalDrafts.put({
+    ...existing,
+    evolutionNotes,
+    clinicalDraft:
+      clinicalChanged && existing.clinicalDraft
+        ? { ...existing.clinicalDraft, evolutionNotes: clinicalNotes ?? [] }
+        : existing.clinicalDraft,
+    valuationDraft:
+      valuationChanged && existing.valuationDraft
+        ? { ...existing.valuationDraft, evolutionNotes: valuationNotes ?? [] }
+        : existing.valuationDraft,
+    updatedAt: new Date().toISOString(),
+  })
+  notifyDraftChanged()
+  return true
+}
+
+/**
+ * Persiste ids determinísticos (`recovered-${contentHash|stamp}`) en Dexie para
+ * notas huérfanas. No altera texto clínico ni contentHash (sidecar
+ * `idRecoveredFromLegacy`). El push de chart_data replica el mismo id a RDS.
+ * No hace UPDATE sobre filas bloqueadas de `emr_v2_evolutions`.
+ */
+export async function persistRecoveredEvolutionNoteIds(
+  patientRouteId: string,
+): Promise<boolean> {
+  const patientId = toPatientForeignKey(patientRouteId)
+  const existing = await db.patientClinicalDrafts.get(patientId)
+  if (!existing) return false
+
+  const evolutionNotes = notasConIdRecuperado(existing.evolutionNotes) ?? existing.evolutionNotes
+  const clinicalNotes = notasConIdRecuperado(existing.clinicalDraft?.evolutionNotes)
+  const valuationNotes = notasConIdRecuperado(existing.valuationDraft?.evolutionNotes)
   const topChanged = evolutionNotes !== existing.evolutionNotes
   const clinicalChanged = Boolean(
     existing.clinicalDraft && clinicalNotes !== existing.clinicalDraft.evolutionNotes,

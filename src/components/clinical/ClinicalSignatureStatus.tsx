@@ -11,9 +11,10 @@ interface ClinicalSignatureStatusProps {
  * No indica si las notas de evolución o el consentimiento están firmados.
  */
 export function ClinicalSignatureStatus({ patientId }: ClinicalSignatureStatusProps) {
+  const safePatientId = String(patientId ?? '').trim()
   const status = useLiveQuery(
-    () => (patientId ? getMainHistorySignatureStatus(patientId) : null),
-    [patientId],
+    () => (safePatientId ? getMainHistorySignatureStatus(safePatientId) : null),
+    [safePatientId],
   )
 
   if (status === undefined || status === null) return null

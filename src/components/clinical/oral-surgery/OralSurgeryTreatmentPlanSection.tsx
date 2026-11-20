@@ -38,9 +38,10 @@ export function OralSurgeryTreatmentPlanSection({
   const cupsMeta = useCatalogMeta('cups')
 
   const { user } = useAuth()
+  const tariffUserId = String(user?.id ?? '').trim()
   const prices = useLiveQuery(
-    () => (user?.id ? db.prices.where('userId').equals(user.id).toArray() : []),
-    [user?.id],
+    () => (tariffUserId ? db.prices.where('userId').equals(tariffUserId).toArray() : []),
+    [tariffUserId],
   )
 
   const procedureOptions = useMemo(() => {

@@ -7,9 +7,10 @@ import { useTariffStore } from '@/store/useTariffStore'
 /** Sincroniza IndexedDB (CUPS + precios del usuario) con el store Zustand O(1). */
 export function useTariffSync(userId: string | undefined) {
   const setTariffs = useTariffStore((state) => state.setTariffs)
+  const safeUserId = String(userId ?? '').trim()
   const priceRevision = useLiveQuery(
-    () => (userId ? db.prices.where('userId').equals(userId).count() : 0),
-    [userId],
+    () => (safeUserId ? db.prices.where('userId').equals(safeUserId).count() : 0),
+    [safeUserId],
   )
   const catalogRevision = useLiveQuery(
     () => db.catalogItems.where('catalogType').equals('cups').count(),
@@ -19,7 +20,7 @@ export function useTariffSync(userId: string | undefined) {
   const loadingRef = useRef(false)
 
   useEffect(() => {
-    if (!userId) {
+    if (!safeUserId) {
       setTariffs([])
       return
     }
@@ -27,7 +28,7 @@ export function useTariffSync(userId: string | undefined) {
     let cancelled = false
     loadingRef.current = true
 
-    loadAllTariffs(userId)
+    loadAllTariffs(safeUserId)
       .then((tariffs) => {
         if (!cancelled) setTariffs(tariffs)
       })
@@ -41,7 +42,7 @@ export function useTariffSync(userId: string | undefined) {
     return () => {
       cancelled = true
     }
-  }, [userId, setTariffs, priceRevision, catalogRevision])
+  }, [safeUserId, setTariffs, priceRevision, catalogRevision])
 
   return useTariffStore((state) => state.isLoaded)
 }

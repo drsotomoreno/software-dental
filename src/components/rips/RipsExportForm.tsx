@@ -108,7 +108,7 @@ export function RipsExportForm({
     return rows.flat()
   }, [sourceKey])
 
-  const organizationId = userProfileToOrganizationId(professional)
+  const organizationId = String(userProfileToOrganizationId(professional) ?? '').trim()
   const dentalServices = useLiveQuery(
     () =>
       organizationId

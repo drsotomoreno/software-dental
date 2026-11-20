@@ -97,6 +97,7 @@ import {
   clearPatientClinicalDraft,
   getPatientClinicalDraft,
   persistCorrectedEvolutionSessionClocks,
+  persistRecoveredEvolutionNoteIds,
   pickLivingDraftForm,
   reconcilePatientDraftKeys,
   resolveCanonicalDraftPatientId,
@@ -480,9 +481,10 @@ export function PatientDetailPage() {
 
   const professionalLicense = user?.documentNumber ?? ''
 
+  const savedProfileUserId = String(user?.id ?? '').trim()
   const savedProfile = useLiveQuery(
-    () => (user?.id ? db.users.get(user.id) : undefined),
-    [user?.id],
+    () => (savedProfileUserId ? db.users.get(savedProfileUserId) : undefined),
+    [savedProfileUserId],
   )
   const savedSignature: SignatureCaptureResult | null =
     savedProfile?.savedSignatureDataUrl && savedProfile.savedSignatureMeta
@@ -1013,18 +1015,36 @@ export function PatientDetailPage() {
         }
 
         const originalNotes = base.evolutionNotes ?? []
-        const evolutionNotes = corregirFechasSesionClinica(originalNotes)
-        if (evolutionNotes !== originalNotes) {
+        const clockFixedNotes = corregirFechasSesionClinica(originalNotes)
+        const evolutionNotes = sortEvolutionNotesChronologically(clockFixedNotes)
+        const notesRepaired =
+          clockFixedNotes !== originalNotes ||
+          evolutionNotes.some(
+            (note, index) =>
+              !String(originalNotes[index]?.id ?? '').trim() &&
+              Boolean(String(note?.id ?? '').trim()),
+          )
+        if (notesRepaired) {
           base = {
             ...base,
-            evolutionNotes: sortEvolutionNotesChronologically(evolutionNotes),
+            evolutionNotes,
           }
         }
 
         if (cancelled) return base
 
-        if (evolutionNotes !== originalNotes && foreignKey) {
+        if (clockFixedNotes !== originalNotes && foreignKey) {
           void persistCorrectedEvolutionSessionClocks(foreignKey).catch(() => undefined)
+        }
+        if (
+          foreignKey &&
+          evolutionNotes.some(
+            (note, index) =>
+              !String(originalNotes[index]?.id ?? '').trim() &&
+              Boolean(String(note?.id ?? '').trim()),
+          )
+        ) {
+          void persistRecoveredEvolutionNoteIds(foreignKey).catch(() => undefined)
         }
 
         if (cancelled) return base

@@ -26,9 +26,10 @@ export function ClinicalHistoryPrintDialog({
   clinicalData,
   odontogram,
 }: ClinicalHistoryPrintDialogProps) {
+  const safePatientId = String(patient.id ?? '').trim()
   const mainHistorySignature = useLiveQuery(
-    () => getMainHistorySignatureStatus(String(patient.id ?? '')),
-    [patient.id],
+    () => (safePatientId ? getMainHistorySignatureStatus(safePatientId) : null),
+    [safePatientId],
   )
   const [open, setOpen] = useState(false)
   const [printing, setPrinting] = useState(false)

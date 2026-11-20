@@ -196,9 +196,9 @@ export function EvolutionRipsPanel({
       invoices: pago.invoices,
       documentKind: 'documentKind' in pago ? pago.documentKind : undefined,
     }))
-    if (!patientId) return armarOpcionesPago({ pagos })
+    const key = String(patientId ? toPatientForeignKey(patientId) : '').trim()
+    if (!key) return armarOpcionesPago({ pagos })
 
-    const key = toPatientForeignKey(patientId)
     const numeric = toDexiePrimaryKey(patientId)
     const [porTexto, porNumero, facturas] = await Promise.all([
       db.clinicalRecords.where('patientId').equals(key).toArray(),

@@ -98,17 +98,18 @@ export function EvolutionDentalServiceSelect({
 
   const cupsCatalog = useCatalogSearch('cups', search, 40)
 
+  const tariffUserId = String(user?.id ?? '').trim()
+  const orgKey = String(organizationId ?? '').trim()
+
   const prices = useLiveQuery(
-    () => (user?.id ? db.prices.where('userId').equals(user.id).toArray() : []),
-    [user?.id],
+    () => (tariffUserId ? db.prices.where('userId').equals(tariffUserId).toArray() : []),
+    [tariffUserId],
   )
 
   const dentalServices = useLiveQuery(
     () =>
-      organizationId
-        ? db.dentalServices.where('organizationId').equals(organizationId).toArray()
-        : [],
-    [organizationId],
+      orgKey ? db.dentalServices.where('organizationId').equals(orgKey).toArray() : [],
+    [orgKey],
   )
 
   const dentalServiceSpecialties = useLiveQuery(

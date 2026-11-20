@@ -52,7 +52,7 @@ export function FiscalProfileSettings({ settings, onPersist }: FiscalProfileSett
 
 export function TemporaryRipsPanel() {
   const { user } = useAuth()
-  const clinicId = user?.clinicId || user?.id
+  const clinicId = String(user?.clinicId || user?.id || '').trim()
   const records = useLiveQuery(
     () =>
       clinicId

@@ -18,11 +18,12 @@ export type { CloseEvolutionResult, RipsEvolutionCloseData } from '@/db/ripsQueu
  * Si la validación falla, `highlightFields` indica qué resaltar y el borrador no se cierra.
  */
 export function useRipsQueue(patientId?: string) {
+  const safePatientId = String(patientId ?? '').trim()
   const entries = useLiveQuery(async (): Promise<RipsQueueEntry[]> => {
     const { getCurrentClinicId } = await import('@/services/clinicalSyncState')
-    const clinicId = getCurrentClinicId()
-    if (patientId) {
-      const rows = await listRipsQueueByPatient(patientId)
+    const clinicId = String(getCurrentClinicId() ?? '').trim()
+    if (safePatientId) {
+      const rows = await listRipsQueueByPatient(safePatientId)
       if (!clinicId) return rows
       return rows.filter((row) => {
         const rowClinic = (row as RipsQueueEntry & { clinicId?: string }).clinicId
@@ -31,7 +32,7 @@ export function useRipsQueue(patientId?: string) {
     }
     if (!clinicId) return []
     return db.rips_queue.where('clinicId').equals(clinicId).reverse().sortBy('updatedAt')
-  }, [patientId])
+  }, [safePatientId])
 
   const [lastResult, setLastResult] = useState<CloseEvolutionResult | null>(null)
 

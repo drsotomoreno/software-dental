@@ -2,7 +2,10 @@ import type { ClinicalRecord } from '@/types/clinicalRecord'
 import type { EvolutionNote } from '@/types/evolutionNote'
 import { omitEvolutionNoteRipsMetadata } from '@/types/evolutionNoteRips'
 import { normalizeSpecializedAnnexes } from '@/types/specializedAnnexes'
-import { ensureEvolutionNoteIds as ensureEvolutionNoteIdsShared } from '../../shared/evolutionNoteIds.js'
+import {
+  ensureEvolutionNoteIds as ensureEvolutionNoteIdsShared,
+  stripRecoveredEvolutionNoteIdForHash,
+} from '../../shared/evolutionNoteIds.js'
 import { computeContentHash, serializeForHash } from './crypto'
 
 export function ensureEvolutionNoteIds(notes: EvolutionNote[] | undefined | null): EvolutionNote[] {
@@ -42,7 +45,7 @@ export function buildRecordHashPayload(record: ClinicalRecord) {
       : {}),
     orthodonticsPaymentControl: record.orthodonticsPaymentControl ?? [],
     evolutionNotes: sortEvolutionNotesChronologically(record.evolutionNotes ?? []).map((note) =>
-      omitEvolutionNoteRipsMetadata(note),
+      stripRecoveredEvolutionNoteIdForHash(omitEvolutionNoteRipsMetadata(note)),
     ),
     informedConsent: record.informedConsent,
   }

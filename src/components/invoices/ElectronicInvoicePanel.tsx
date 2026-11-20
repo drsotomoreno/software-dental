@@ -69,12 +69,13 @@ export function ElectronicInvoicePanel({
   const [foliosDepleted, setFoliosDepleted] = useState(() => getFoliosAvailable() <= 0)
 
   const dentalServices = useLiveQuery(() => db.dentalServices.toArray(), [])
+  const invoicePatientKey = String(patientId ?? '').trim()
   const storedInvoices = useLiveQuery(() => {
-    if (patientId) {
-      return db.electronicInvoices.where('patientId').equals(patientId).sortBy('issueDate')
+    if (invoicePatientKey) {
+      return db.electronicInvoices.where('patientId').equals(invoicePatientKey).sortBy('issueDate')
     }
     return listElectronicInvoices()
-  }, [patientId])
+  }, [invoicePatientKey])
 
   useEffect(() => {
     const refresh = () => {

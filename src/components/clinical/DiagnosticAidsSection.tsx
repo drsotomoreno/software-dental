@@ -547,10 +547,15 @@ export function DiagnosticAidsSection({
   /** Alta recién devuelta por el registro, visible aunque el liveQuery aún no reemita. */
   const [optimisticItems, setOptimisticItems] = useState<DiagnosticAid[]>([]);
 
-  const items = useLiveQuery(
-    () => listDiagnosticAidsForPatient(patientId),
+  const safePatientId = String(patientId ?? '').trim();
 
-    [patientId],
+  const items = useLiveQuery(
+    () =>
+      safePatientId
+        ? listDiagnosticAidsForPatient(safePatientId)
+        : Promise.resolve([] as DiagnosticAid[]),
+
+    [safePatientId],
 
     [] as DiagnosticAid[],
   );

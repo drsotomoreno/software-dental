@@ -10,7 +10,82 @@ import { fileURLToPath } from 'node:url'
 import { withPgClient } from './durableStore.js'
 import { splitSqlStatements } from './consultasRepository.js'
 import { computeClinicalFormHash } from '../../shared/clinicalFormHash.js'
+import { ensureEvolutionNoteIds } from '../../shared/evolutionNoteIds.js'
 import { persistExtractedClinicalMedia, rehydrateClinicalMedia } from './clinicalMediaStore.js'
+
+/**
+ * Rellena ids faltantes en notas de evolución del chart JSON (Dexie → RDS).
+ * Determinístico (`recovered-${contentHash}`) para que todos los dispositivos
+ * compartan el mismo identificador. No toca `emr_v2_evolutions` bloqueadas.
+ */
+function repairEvolutionNoteIdsInForm(form) {
+  if (!form || typeof form !== 'object' || !Array.isArray(form.evolutionNotes)) return form
+  const before = form.evolutionNotes
+  const nextNotes = ensureEvolutionNoteIds(before)
+  const repaired = nextNotes.some(
+    (note, index) =>
+      !String(before[index]?.id ?? '').trim() && Boolean(String(note?.id ?? '').trim()),
+  )
+  if (!repaired) return form
+  return { ...form, evolutionNotes: nextNotes }
+}
+
+function repairChartEvolutionNoteIds(chart) {
+  if (!chart || typeof chart !== 'object') return chart
+  let changed = false
+  const next = { ...chart }
+
+  if (next.draft && typeof next.draft === 'object') {
+    const draft = { ...next.draft }
+    if (draft.payload && typeof draft.payload === 'object' && !Array.isArray(draft.payload)) {
+      const payload = { ...draft.payload }
+      const clinicalDraft = repairEvolutionNoteIdsInForm(payload.clinicalDraft)
+      const valuationDraft = repairEvolutionNoteIdsInForm(payload.valuationDraft)
+      let payloadChanged = false
+      if (clinicalDraft !== payload.clinicalDraft) {
+        payload.clinicalDraft = clinicalDraft
+        payloadChanged = true
+      }
+      if (valuationDraft !== payload.valuationDraft) {
+        payload.valuationDraft = valuationDraft
+        payloadChanged = true
+      }
+      if (Array.isArray(payload.evolutionNotes)) {
+        const top = repairEvolutionNoteIdsInForm(payload)
+        if (top !== payload) {
+          payload.evolutionNotes = top.evolutionNotes
+          payloadChanged = true
+        }
+      }
+      if (payloadChanged) {
+        draft.payload = payload
+        next.draft = draft
+        changed = true
+      }
+    } else {
+      const repaired = repairEvolutionNoteIdsInForm(draft)
+      if (repaired !== draft) {
+        next.draft = repaired
+        changed = true
+      }
+    }
+  }
+
+  if (Array.isArray(next.clinicalRecords)) {
+    let recordsChanged = false
+    const records = next.clinicalRecords.map((record) => {
+      const repaired = repairEvolutionNoteIdsInForm(record)
+      if (repaired !== record) recordsChanged = true
+      return repaired
+    })
+    if (recordsChanged) {
+      next.clinicalRecords = records
+      changed = true
+    }
+  }
+
+  return changed ? next : chart
+}
 
 const DIR = dirname(fileURLToPath(import.meta.url))
 const MIGRATION = join(DIR, '../db/migrations/20261119150000_patient_clinical_charts.sql')
@@ -108,7 +183,7 @@ export async function upsertPatientClinicalChart(input) {
   const { clinicalRevision, contentHash } = chartMeta(input)
   const documentNumber = String(input?.documentNumber || input?.document_number || '').trim() || null
   const updatedBy = String(input?.updatedBy || input?.updated_by || '').trim() || null
-  const stored = await persistExtractedClinicalMedia({
+  const repairedInput = repairChartEvolutionNoteIds({
     patientSyncId,
     documentNumber,
     localId: input?.localId || null,
@@ -117,6 +192,7 @@ export async function upsertPatientClinicalChart(input) {
     odontograms: Array.isArray(input?.odontograms) ? input.odontograms : [],
     diagnosticAids: Array.isArray(input?.diagnosticAids) ? input.diagnosticAids : [],
   })
+  const stored = await persistExtractedClinicalMedia(repairedInput)
 
   await ensureSchema()
   return withPgClient(async (client) => {
@@ -223,11 +299,13 @@ export async function readOrMigratePatientChart(input) {
   }
   if (row?.chart_data) {
     const data = await rehydrateClinicalMedia(row.chart_data)
+    const repaired =
+      data && typeof data === 'object' ? repairChartEvolutionNoteIds(data) : data
     return {
       source: 'postgres',
       clinicalRevision: row.clinical_revision,
       contentHash: row.content_hash,
-      ...(data && typeof data === 'object' ? data : {}),
+      ...(repaired && typeof repaired === 'object' ? repaired : {}),
     }
   }
 

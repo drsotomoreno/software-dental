@@ -37,9 +37,10 @@ export function TreatingDentistSignatureSection({
   onSaveProfileSignature,
   onRegister,
 }: TreatingDentistSignatureSectionProps) {
+  const safePatientId = String(patientId ?? '').trim()
   const status = useLiveQuery(
-    () => (patientId ? getMainHistorySignatureStatus(patientId) : null),
-    [patientId],
+    () => (safePatientId ? getMainHistorySignatureStatus(safePatientId) : null),
+    [safePatientId],
   )
   const [capture, setCapture] = useState<SignatureCaptureResult | null>(null)
   const [appliedFromProfile, setAppliedFromProfile] = useState(false)
