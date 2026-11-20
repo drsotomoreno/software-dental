@@ -276,8 +276,10 @@ function redirectAfterDriveOAuth(query, { ok, errorCode }) {
 }
 
 router.get('/callback', async (req, res) => {
+  // Fuera del try: el catch redirige con state/returnPath y no puede
+  // referenciar un `const query` block-scoped (ReferenceError → JSON opaco).
+  const query = req.query && typeof req.query === 'object' ? req.query : {}
   try {
-    const query = req.query && typeof req.query === 'object' ? req.query : {}
     if (query.error) {
       if (res.headersSent || res.writableEnded) return
       return res.redirect(302, redirectAfterDriveOAuth(query, {

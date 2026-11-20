@@ -114,3 +114,24 @@ test('GoogleDriveReconnectRequiredError expone código contractual', () => {
   assert.equal(isGoogleDriveReconnectRequiredError(err), true)
   assert.equal(isGoogleDriveAuthFailure(err), true)
 })
+
+test('GET /callback declara query fuera del try (no ReferenceError en catch)', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { dirname, join } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../routes/googleDrive.routes.js'),
+    'utf8',
+  )
+  const callback = src.match(/router\.get\(\s*'\/callback'[\s\S]*?\n\}\)/)
+  assert.ok(callback, 'debe existir el handler /callback')
+  const body = callback[0]
+  const queryBeforeTry = body.search(/const query = req\.query/)
+  const tryIdx = body.search(/\btry\s*\{/)
+  const catchUsesQuery = /catch\s*\([^)]*\)\s*\{[\s\S]*redirectAfterDriveOAuth\(\s*query/.test(
+    body,
+  )
+  assert.ok(queryBeforeTry >= 0, 'debe declarar query')
+  assert.ok(tryIdx > queryBeforeTry, 'query debe declararse antes del try')
+  assert.equal(catchUsesQuery, true, 'el catch debe reutilizar query sin redeclararlo')
+})
