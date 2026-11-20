@@ -13,6 +13,10 @@ import {
   savePatientClinicalDraft,
 } from '@/utils/patientClinicalDraft'
 import { getPatientByRouteId } from '@/utils/patientId'
+import {
+  anamnesisHasContent,
+  stomatologicalExamHasContent,
+} from '../../shared/clinicalRecordGuard.js'
 
 export const EMR_V2_PATIENT_UPDATED = 'emr:v2:patient-updated'
 
@@ -90,16 +94,56 @@ async function v2Fetch(url: string, init?: RequestInit & { timeoutMs?: number })
 
 function clinicalBaseToFormPatch(base: EmrV2ChartResponse['clinicalBase']): Partial<ClinicalRecordFormData> {
   if (!base) return {}
-  return {
-    anamnesis: (base.anamnesis as ClinicalRecordFormData['anamnesis']) || undefined,
-    stomatologicalExam:
-      (base.examen_estomatologico as ClinicalRecordFormData['stomatologicalExam']) || undefined,
-    // Odontograma vive en tabla aparte; se cachea en clinicalBase JSONB.
-    diagnoses: (Array.isArray(base.diagnosticos)
-      ? base.diagnosticos
-      : undefined) as ClinicalRecordFormData['diagnoses'],
-    treatmentPlan: (base.plan_tratamiento as ClinicalRecordFormData['treatmentPlan']) || undefined,
+  const patch: Partial<ClinicalRecordFormData> = {}
+  if (anamnesisHasContent(base.anamnesis)) {
+    patch.anamnesis = base.anamnesis as ClinicalRecordFormData['anamnesis']
   }
+  if (stomatologicalExamHasContent(base.examen_estomatologico)) {
+    patch.stomatologicalExam =
+      base.examen_estomatologico as ClinicalRecordFormData['stomatologicalExam']
+  }
+  // Una base v2 vacía no puede tapar diagnósticos o plan que ya están en el dispositivo.
+  if (Array.isArray(base.diagnosticos) && base.diagnosticos.length > 0) {
+    patch.diagnoses = base.diagnosticos as ClinicalRecordFormData['diagnoses']
+  }
+  if (Array.isArray(base.plan_tratamiento) && base.plan_tratamiento.length > 0) {
+    patch.treatmentPlan = base.plan_tratamiento as ClinicalRecordFormData['treatmentPlan']
+  }
+  return patch
+}
+
+function odontogramPayloadHasMarks(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') return false
+  const data = payload as {
+    edentulismScope?: unknown
+    supplementaryFindings?: Record<string, { present?: boolean; description?: string }>
+    teeth?: Array<{ globalState?: string; faces?: Record<string, string> }>
+  }
+  if (data.edentulismScope) return true
+  const findings = data.supplementaryFindings
+  if (findings && typeof findings === 'object') {
+    const marked = Object.values(findings).some(
+      (item) => item?.present || String(item?.description || '').trim().length > 0,
+    )
+    if (marked) return true
+  }
+  if (!Array.isArray(data.teeth)) return false
+  return data.teeth.some((tooth) => {
+    if (!tooth || typeof tooth !== 'object') return false
+    if (tooth.globalState && tooth.globalState !== 'presente') return true
+    const faces = tooth.faces
+    if (!faces || typeof faces !== 'object') return false
+    return Object.values(faces).some((face) => face && face !== 'sano')
+  })
+}
+
+function sectionPayloadHasContent(section: EmrV2Section, payload: unknown): boolean {
+  if (section === 'anamnesis') return anamnesisHasContent(payload)
+  if (section === 'examen_estomatologico') return stomatologicalExamHasContent(payload)
+  if (section === 'diagnosticos') return Array.isArray(payload) && payload.length > 0
+  if (section === 'plan_tratamiento') return Array.isArray(payload) && payload.length > 0
+  if (section === 'odontograma') return odontogramPayloadHasMarks(payload)
+  return false
 }
 
 export function pickSectionPayload(
@@ -455,7 +499,11 @@ export function dirtyEmrV2Sections(
     'diagnosticos',
     'plan_tratamiento',
   ]
-  if (!previous) return sections
+  if (!previous) {
+    return sections.filter((section) =>
+      sectionPayloadHasContent(section, pickSectionPayload(current, section, options?.odontogram)),
+    )
+  }
   return sections.filter((section) => {
     const a = JSON.stringify(
       pickSectionPayload(current, section, options?.odontogram) ?? null,

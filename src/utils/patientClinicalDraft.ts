@@ -27,6 +27,7 @@ import { normalizeSpecializedAnnexes } from '@/types/specializedAnnexes'
 import {
   clinicalFormHasContent,
   preserveEvolutionWorkflowStatus,
+  preservePopulatedClinicalSections,
   shouldPersistClinicalDraft,
 } from '../../shared/clinicalRecordGuard.js'
 import { preferGeneralBudgetSections } from '../../shared/clinicalBudgetMerge.js'
@@ -538,7 +539,10 @@ export async function savePatientClinicalDraft(
   options?: { source?: ClinicalAuditSource },
 ): Promise<ClinicalDraftSaveResult> {
   const existing = await getPatientClinicalDraft(patientRouteId)
-  const normalized = normalizeClinicalDraft(clinicalDraft)
+  const normalized = preservePopulatedClinicalSections(
+    existing?.clinicalDraft,
+    normalizeClinicalDraft(clinicalDraft),
+  )
   if (!shouldPersistClinicalDraft(existing?.clinicalDraft ?? existing, normalized)) {
     return { ok: false, reason: 'Guard rechazó un borrador vacío sobre historia con contenido' }
   }

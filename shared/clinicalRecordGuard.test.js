@@ -5,6 +5,8 @@ import {
   isBlankClinicalShell,
   mergeSignedEvolutionNotes,
   preserveEvolutionWorkflowStatus,
+  formDropsPopulatedSections,
+  preservePopulatedClinicalSections,
   shouldPersistClinicalDraft,
   shouldReplaceClinicalDocument,
 } from './clinicalRecordGuard.js'
@@ -328,4 +330,41 @@ test('una copia más nueva sin presupuesto no reemplaza la que sí lo tiene', ()
   }
   assert.equal(shouldReplaceClinicalDocument(withBudget, newerWithoutBudget), false)
   assert.equal(shouldReplaceClinicalDocument(newerWithoutBudget, withBudget), true)
+})
+
+test('un refresco a medias no borra diagnósticos ni presupuesto ya guardados', () => {
+  const stored = {
+    anamnesis: { chiefComplaint: 'Apiñamiento' },
+    diagnoses: [{ code: 'K07.3', description: 'Anomalías de la posición del diente' }],
+    treatmentPlan: [{ id: 'p1', procedure: 'Control', unitPrice: 100_000, quantity: 1 }],
+    budgetItems: [{ id: 'b1', procedure: 'Control de ortodoncia', unitPrice: 100_000, quantity: 1 }],
+    findings: 'Clase I',
+  }
+  const shell = {
+    anamnesis: { chiefComplaint: '' },
+    diagnoses: [],
+    treatmentPlan: [],
+    budgetItems: [],
+    findings: '',
+    orthodonticsBudget: {
+      active: true,
+      initialInstallment: { quantity: 1, unitPrice: 1_000_000 },
+    },
+  }
+  assert.equal(formDropsPopulatedSections(stored, shell), true)
+  const kept = preservePopulatedClinicalSections(stored, shell)
+  assert.equal(kept.diagnoses.length, 1)
+  assert.equal(kept.diagnoses[0].code, 'K07.3')
+  assert.equal(kept.budgetItems[0].procedure, 'Control de ortodoncia')
+  assert.equal(kept.treatmentPlan.length, 1)
+  assert.equal(kept.anamnesis.chiefComplaint, 'Apiñamiento')
+  assert.equal(kept.findings, 'Clase I')
+  assert.equal(kept.orthodonticsBudget.initialInstallment.unitPrice, 1_000_000)
+
+  const edited = {
+    ...stored,
+    diagnoses: [{ code: 'K02.1', description: 'Caries de la dentina' }],
+  }
+  const replaced = preservePopulatedClinicalSections(stored, edited)
+  assert.equal(replaced.diagnoses[0].code, 'K02.1')
 })

@@ -131,7 +131,10 @@ import {
   createEmptyTreatmentPlanAuthorization,
   type TreatmentPlanAuthorization,
 } from '@/types/treatmentPlanAuthorization'
-import { clinicalFormHasContent } from '../../../shared/clinicalRecordGuard.js'
+import {
+  clinicalFormHasContent,
+  formDropsPopulatedSections,
+} from '../../../shared/clinicalRecordGuard.js'
 import { AnamnesisForm } from './AnamnesisForm'
 import { StomatologicalExamForm } from './StomatologicalExamForm'
 import { SpecializedAnnexesForm } from './SpecializedAnnexesForm'
@@ -284,9 +287,18 @@ export function ClinicalHistoryForm({
   const disabledRef = useRef(disabled)
   const loadedPatientIdRef = useRef(patientId)
   const formRef = useRef(form)
+  const latestInitialRef = useRef(initialData)
   formRef.current = form
+  latestInitialRef.current = initialData
   onChangeRef.current = onChange
   disabledRef.current = disabled
+
+  const publishFormRef = useRef<(next: ClinicalRecordFormData) => void>(() => {})
+  publishFormRef.current = (next) => {
+    const source = latestInitialRef.current
+    if (source && formDropsPopulatedSections(source, next)) return
+    onChangeRef.current(next)
+  }
 
   useEffect(() => {
     if (!initialData || !patientId) return
@@ -295,7 +307,9 @@ export function ClinicalHistoryForm({
       samePatient &&
       !clinicalFormHasContent(formRef.current) &&
       clinicalFormHasContent(initialData)
-    if (samePatient && !recoverBlankForm) return
+    const adoptRicherChart =
+      samePatient && formDropsPopulatedSections(initialData, formRef.current)
+    if (samePatient && !recoverBlankForm && !adoptRicherChart) return
     loadedPatientIdRef.current = patientId
 
     const emptyForm = createEmptyClinicalForm(professionalLicense)
@@ -321,7 +335,7 @@ export function ClinicalHistoryForm({
         const planHealed =
           (initialData.treatmentPlan ?? []).length !== synced.treatmentPlan.length
         const budgetHealed = loadedIds !== nextIds
-        if (budgetHealed || planHealed) onChangeRef.current(synced)
+        if (budgetHealed || planHealed) publishFormRef.current(synced)
       }
     } catch {
       const healed = healRehabPlanAndGeneralBudget(base)
@@ -331,7 +345,7 @@ export function ClinicalHistoryForm({
         ((initialData.treatmentPlan ?? []).length !== healed.treatmentPlan.length ||
           (initialData.budgetItems ?? []).length !== healed.budgetItems.length)
       ) {
-        onChangeRef.current(healed)
+        publishFormRef.current(healed)
       }
     }
 
@@ -360,7 +374,7 @@ export function ClinicalHistoryForm({
       }
       const next = { ...prev, ...synced }
       if (!livingLocked) {
-        onChangeRef.current(next)
+        publishFormRef.current(next)
       }
       return next
     })
@@ -392,7 +406,7 @@ export function ClinicalHistoryForm({
         budgetItems: projected.budgetItems,
         budget: projected.budget,
       }
-      if (!disabledRef.current) onChangeRef.current(next)
+      if (!disabledRef.current) publishFormRef.current(next)
       return next
     })
   }, [livingLocked, disabled, form.treatmentPlan])
@@ -408,7 +422,7 @@ export function ClinicalHistoryForm({
         const next = changed ? synced : prev
         const nextIds = next.budgetItems.map((item) => item.id).join('\0')
         if (!disabledRef.current && (changed || loadedBudgetIdsRef.current !== nextIds)) {
-          onChangeRef.current(next)
+          publishFormRef.current(next)
         }
         return next
       } catch {
@@ -657,6 +671,7 @@ export function ClinicalHistoryForm({
       <TreatmentPlanForm
         treatmentPlan={form.treatmentPlan}
         treatmentPlanNotes={form.treatmentPlanNotes}
+        budgetItems={form.budgetItems}
         diagnoses={form.diagnoses}
         diagnosticChart={form.diagnosticChart}
         affectedTeeth={affectedTeeth}
@@ -698,6 +713,19 @@ export function ClinicalHistoryForm({
               : annexes,
           })
         }}
+        onBudgetItemsChange={(budgetItems) => {
+          const projected = syncTreatmentPlanIntoGeneralBudget(
+            form.treatmentPlan,
+            budgetItems,
+            form.budget?.discount ?? 0,
+            form.orthodonticsBudget,
+            form.dentalImplantsBudget,
+          )
+          update({
+            budgetItems: projected.budgetItems,
+            budget: projected.budget,
+          })
+        }}
         onMoveToBudget={moveTreatmentPlanItemToBudget}
         onOrthodonticsAnnexChange={(patch) => {
           const annexes = form.specializedAnnexes
@@ -719,6 +747,7 @@ export function ClinicalHistoryForm({
         budget={form.budget}
         treatmentPlan={form.treatmentPlan}
         disabled={livingLocked}
+        unifiedCompanion
         onChange={(patch) => update(patch)}
         onOrthodonticsAnnexChange={(patch) => {
           const annexes = form.specializedAnnexes

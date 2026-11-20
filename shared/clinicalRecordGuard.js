@@ -423,6 +423,76 @@ export function shouldPersistClinicalDraft(existing, incoming) {
   return true
 }
 
+function populatedArray(value) {
+  return Array.isArray(value) && value.length > 0 ? value : null
+}
+
+/**
+ * Un autoguardado a medias (ficha aún no hidratada) no puede vaciar
+ * diagnósticos, plan, presupuesto ni anamnesis que ya estaban guardados.
+ * Borrar un ítem suelto sigue permitido: solo se restaura la sección si
+ * la copia entrante la deja en blanco.
+ */
+/** La copia entrante deja en blanco una sección que la guardada ya tenía. */
+export function formDropsPopulatedSections(kept, incoming) {
+  if (!kept || typeof kept !== 'object') return false
+  if (!incoming || typeof incoming !== 'object') return true
+  for (const key of ['diagnoses', 'treatmentPlan', 'budgetItems', 'evolutionNotes']) {
+    if (populatedArray(kept[key]) && !populatedArray(incoming[key])) return true
+  }
+  if (
+    populatedArray(kept.diagnosticChart?.entries) &&
+    !populatedArray(incoming.diagnosticChart?.entries)
+  ) {
+    return true
+  }
+  if (anamnesisHasContent(kept.anamnesis) && !anamnesisHasContent(incoming.anamnesis)) return true
+  if (
+    stomatologicalExamHasContent(kept.stomatologicalExam) &&
+    !stomatologicalExamHasContent(incoming.stomatologicalExam)
+  ) {
+    return true
+  }
+  if (text(kept.findings) && !text(incoming.findings)) return true
+  if (text(kept.diagnosisNotes) && !text(incoming.diagnosisNotes)) return true
+  if (text(kept.treatmentPlanNotes) && !text(incoming.treatmentPlanNotes)) return true
+  return false
+}
+
+export function preservePopulatedClinicalSections(existing, incoming) {
+  if (!existing || typeof existing !== 'object') return incoming
+  if (!incoming || typeof incoming !== 'object') return existing
+  if (!formDropsPopulatedSections(existing, incoming)) return incoming
+  const next = { ...incoming }
+
+  for (const key of ['diagnoses', 'treatmentPlan', 'budgetItems', 'evolutionNotes']) {
+    const kept = populatedArray(existing[key])
+    if (kept && !populatedArray(next[key])) next[key] = kept
+  }
+
+  const keptEntries = populatedArray(existing.diagnosticChart?.entries)
+  if (keptEntries && !populatedArray(next.diagnosticChart?.entries)) {
+    next.diagnosticChart = existing.diagnosticChart
+  }
+  if (anamnesisHasContent(existing.anamnesis) && !anamnesisHasContent(next.anamnesis)) {
+    next.anamnesis = existing.anamnesis
+  }
+  if (
+    stomatologicalExamHasContent(existing.stomatologicalExam) &&
+    !stomatologicalExamHasContent(next.stomatologicalExam)
+  ) {
+    next.stomatologicalExam = existing.stomatologicalExam
+  }
+  if (text(existing.findings) && !text(next.findings)) next.findings = existing.findings
+  if (text(existing.diagnosisNotes) && !text(next.diagnosisNotes)) {
+    next.diagnosisNotes = existing.diagnosisNotes
+  }
+  if (text(existing.treatmentPlanNotes) && !text(next.treatmentPlanNotes)) {
+    next.treatmentPlanNotes = existing.treatmentPlanNotes
+  }
+  return next
+}
+
 /**
  * Decide si la copia entrante puede sustituir a la guardada.
  * Una historia firmada o con contenido gana siempre sobre una copia en blanco,
