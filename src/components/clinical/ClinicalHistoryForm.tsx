@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef, type ReactNode } from 'react'
 import type {
+  BudgetLineItem,
   ClinicalRecordFormData,
   Cie10Diagnosis,
 } from '@/types/clinicalRecord'
@@ -22,6 +23,7 @@ import {
 import {
   addTreatmentPlanItemToBudget,
   calcClinicalBudgetSummaryWithTax,
+  syncTreatmentPlanIntoGeneralBudget,
 } from '@/utils/budget'
 import { collapseLegacyRehabBudgetVisualLines } from '@/utils/rehabAnnexBudget'
 import { collapseTreatmentPlanByProcedure } from '@/utils/treatmentPlanCollapse'
@@ -33,6 +35,28 @@ import { syncRehabPlanItemsIntoGeneralBudget } from '@/utils/treatmentPlanAnnexI
  *  Rehabilitación estética/aclaramiento solo entra con «Importar desde anexos». */
 function syncClinicalDataFromAnnexes(data: ClinicalRecordFormData): ClinicalRecordFormData {
   return syncClinicalDataFromOrthodonticsAnnex(syncClinicalDataFromEndodonticsAnnex(data))
+}
+
+function budgetLinesSignature(items: BudgetLineItem[]): string {
+  return items
+    .map((item) =>
+      [
+        item.id,
+        item.treatmentPlanItemId ?? '',
+        item.procedure,
+        item.cupsCode ?? '',
+        item.diagnosisCode ?? '',
+        item.diagnosisDescription ?? '',
+        item.anatomicalZone ?? '',
+        item.toothNumber ?? '',
+        item.fdiQuadrant ?? '',
+        item.arch ?? '',
+        item.quantity,
+        item.unitPrice,
+        item.source ?? '',
+      ].join('\u001f'),
+    )
+    .join('\u001e')
 }
 
 /** Plan §7 agrupado + mismas filas en presupuesto §8 (sin diente a diente). */
@@ -341,6 +365,37 @@ export function ClinicalHistoryForm({
       return next
     })
   }, [odontogram, livingLocked])
+
+  // Sección 7 → sección 8: cada fila con diagnóstico, procedimiento o precio
+  // entra al presupuesto. La ortodoncia sigue en su calculadora, sin duplicar la fila.
+  useEffect(() => {
+    if (livingLocked || disabled) return
+
+    setForm((prev) => {
+      const projected = syncTreatmentPlanIntoGeneralBudget(
+        prev.treatmentPlan,
+        prev.budgetItems,
+        prev.budget?.discount ?? 0,
+        prev.orthodonticsBudget,
+        prev.dentalImplantsBudget,
+      )
+      const sameLines =
+        budgetLinesSignature(projected.budgetItems) === budgetLinesSignature(prev.budgetItems)
+      const sameTotals =
+        projected.budget.subtotal === prev.budget?.subtotal &&
+        projected.budget.total === prev.budget?.total &&
+        projected.budget.discount === prev.budget?.discount
+      if (sameLines && sameTotals) return prev
+
+      const next = {
+        ...prev,
+        budgetItems: projected.budgetItems,
+        budget: projected.budget,
+      }
+      if (!disabledRef.current) onChangeRef.current(next)
+      return next
+    })
+  }, [livingLocked, disabled, form.treatmentPlan])
 
   useEffect(() => {
     if (orthodonticsSyncRef.current) return

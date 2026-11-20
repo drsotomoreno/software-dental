@@ -61,6 +61,8 @@ export {
 export {
   calcBudgetSummary,
   buildBudgetFromTreatmentPlan,
+  syncTreatmentPlanIntoGeneralBudget,
+  treatmentPlanBudgetImportNotice,
   addTreatmentPlanItemToBudget,
   calcClinicalBudgetSummaryWithTax,
   syncPaymentPlanWithBudget,

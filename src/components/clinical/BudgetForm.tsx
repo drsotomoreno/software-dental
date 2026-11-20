@@ -44,6 +44,8 @@ import {
 
   formatCurrency,
 
+  treatmentPlanBudgetImportNotice,
+
   normalizeDentalImplantsBudget,
 
   normalizeOrthodonticsBudget,
@@ -327,11 +329,7 @@ export function BudgetForm({
 
   const importFromTreatmentPlan = () => {
 
-    const previousIds = new Set(clinicalBudgetItems.map((item) => item.id))
-
     const lines = buildBudgetFromTreatmentPlan(treatmentPlan, clinicalBudgetItems)
-
-    const added = lines.filter((line) => !previousIds.has(line.id)).length
 
     const subtotal = lines.reduce(
 
@@ -353,15 +351,7 @@ export function BudgetForm({
 
     })
 
-    setImportNotice(
-
-      added > 0
-
-        ? `Se agregaron ${added} procedimiento${added === 1 ? '' : 's'} del plan de tratamiento.`
-
-        : 'Los procedimientos del plan ya están en el presupuesto.',
-
-    )
+    setImportNotice(treatmentPlanBudgetImportNotice(treatmentPlan, clinicalBudgetItems, lines))
 
     window.requestAnimationFrame(() => {
 

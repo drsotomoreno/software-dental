@@ -12,16 +12,21 @@ import { DEFAULT_IVA_RATE } from '@/types/pricing'
 import { generateId } from './crypto'
 import {
   calcBillableLineTotal,
-  getDefaultQuantityForCups,
   normalizeQuantityForCups,
 } from './cupsBillingRules'
 import { resolveTariffUnitPrice } from './tariffLookup'
-import { formatAnatomicalZone } from './treatmentPlanZone'
-import { extractTeethFromZoneText } from './treatmentPlanCollapse'
+import { omitOrthodonticsPackageBudgetLines } from './orthodonticsBudgetLines'
 import {
-  isOrthodonticsAnnexPlanItem,
-  omitOrthodonticsPackageBudgetLines,
-} from './orthodonticsBudgetLines'
+  addTreatmentPlanItemToBudget as addTreatmentPlanItemToBudgetCore,
+  budgetLabelForTreatmentPlanItem,
+  buildBudgetFromTreatmentPlan as buildBudgetFromTreatmentPlanCore,
+  syncTreatmentPlanIntoGeneralBudget as syncTreatmentPlanIntoGeneralBudgetCore,
+  treatmentPlanBudgetImportNotice,
+  treatmentPlanItemToBudgetLine as treatmentPlanItemToBudgetLineCore,
+  type PlanBudgetExportDeps,
+} from './treatmentPlanBudgetExport'
+
+export { budgetLabelForTreatmentPlanItem, treatmentPlanBudgetImportNotice }
 
 export function createEmptyOrthodonticsBudget(): OrthodonticsBudget {
   return {
@@ -124,81 +129,9 @@ export function calcBudgetSummary(
   return { subtotal, discount, total, currency: 'COP' }
 }
 
-function planProcedure(item: Pick<TreatmentPlanItem, 'procedure'>): string {
-  return (item.procedure ?? '').trim()
-}
-
-function sameText(left: string | undefined, right: string | undefined): boolean {
-  return (left ?? '').trim().toLowerCase() === (right ?? '').trim().toLowerCase()
-}
-
-/** Convierte un ítem del plan en línea de presupuesto, conservando zona, CIE y precio. */
-export function treatmentPlanItemToBudgetLine(item: TreatmentPlanItem): BudgetLineItem | null {
-  const procedure = planProcedure(item)
-  if (!procedure) return null
-
-  const catalogPrice = resolveTariffUnitPrice(item.cupsCode)
-  const unitPrice =
-    item.unitPrice != null && Number.isFinite(item.unitPrice)
-      ? Math.max(0, Math.round(item.unitPrice))
-      : catalogPrice
-  const zone = formatAnatomicalZone(item)
-
-  const teethInZone = extractTeethFromZoneText(zone || item.anatomicalZone)
-  // Filas agrupadas del plan (varias piezas): conservar cantidad del plan, no forzar 1 por CUPS.
-  const quantity =
-    teethInZone.length > 1
-      ? Math.max(teethInZone.length, item.quantity ?? 1)
-      : normalizeQuantityForCups(item.cupsCode, item.quantity ?? 1)
-
-  return {
-    id: generateId(),
-    treatmentPlanItemId: item.id,
-    procedure,
-    cupsCode: item.cupsCode,
-    toothNumber: teethInZone.length > 1 ? undefined : item.toothNumber,
-    fdiQuadrant: teethInZone.length > 1 ? undefined : item.fdiQuadrant,
-    arch: item.arch,
-    anatomicalZone: zone || undefined,
-    diagnosisCode: item.diagnosisCode,
-    diagnosisDescription: item.diagnosisDescription,
-    quantity,
-    unitPrice,
-    source: item.source === 'rehabilitation_annex' ? 'rehabilitation_annex' : 'treatment_plan',
-  }
-}
-
-function budgetLineMatchesPlanItem(line: BudgetLineItem, item: TreatmentPlanItem): boolean {
-  if (line.treatmentPlanItemId && line.treatmentPlanItemId === item.id) return true
-  if (line.treatmentPlanItemId && line.treatmentPlanItemId !== item.id) return false
-  if (!sameText(line.procedure, item.procedure)) return false
-
-  const lineCups = (line.cupsCode ?? '').trim()
-  const itemCups = (item.cupsCode ?? '').trim()
-  if (lineCups && itemCups && lineCups !== itemCups) return false
-
-  const lineZone = formatAnatomicalZone(line).trim().toLowerCase()
-  const itemZone = formatAnatomicalZone(item).trim().toLowerCase()
-  if (lineZone && itemZone) return lineZone === itemZone
-  // Una importación anterior podía guardar la fila sin zona. Se reutiliza
-  // para no duplicar el procedimiento al volver a importar.
-  return !lineZone
-}
-
-/** Agrega un procedimiento del plan al presupuesto si aún no está vinculado. */
-export function addTreatmentPlanItemToBudget(
-  planItem: TreatmentPlanItem,
-  existingItems: BudgetLineItem[] = [],
-): BudgetLineItem[] | null {
-  if (isOrthodonticsAnnexPlanItem(planItem)) return null
-  if (existingItems.some((line) => line.treatmentPlanItemId === planItem.id)) {
-    return null
-  }
-
-  const line = treatmentPlanItemToBudgetLine(planItem)
-  if (!line) return null
-
-  return [...existingItems, line]
+const planExportDeps: PlanBudgetExportDeps = {
+  catalogPrice: (code) => resolveTariffUnitPrice(code),
+  normalizeQuantity: normalizeQuantityForCups,
 }
 
 export function calcClinicalBudgetSummaryWithTax(
@@ -220,53 +153,41 @@ export function calcClinicalBudgetSummaryWithTax(
   }
 }
 
-/** Convierte procedimientos del plan clínico en líneas de presupuesto con precio del tarifario. */
+export function treatmentPlanItemToBudgetLine(item: TreatmentPlanItem): BudgetLineItem | null {
+  return treatmentPlanItemToBudgetLineCore(item, planExportDeps)
+}
+
+export function addTreatmentPlanItemToBudget(
+  planItem: TreatmentPlanItem,
+  existingItems: BudgetLineItem[] = [],
+): BudgetLineItem[] | null {
+  return addTreatmentPlanItemToBudgetCore(planItem, existingItems, planExportDeps)
+}
+
 export function buildBudgetFromTreatmentPlan(
   treatmentPlan: TreatmentPlanItem[],
   existingItems: BudgetLineItem[] = [],
 ): BudgetLineItem[] {
-  const next = [...omitOrthodonticsPackageBudgetLines(existingItems, treatmentPlan)]
-  const usedLineIds = new Set<string>()
+  return buildBudgetFromTreatmentPlanCore(treatmentPlan, existingItems, planExportDeps)
+}
 
-  for (const item of treatmentPlan) {
-    if (!planProcedure(item) || isOrthodonticsAnnexPlanItem(item)) continue
-
-    const matchIndex = next.findIndex(
-      (line) => !usedLineIds.has(line.id) && budgetLineMatchesPlanItem(line, item),
-    )
-
-    if (matchIndex >= 0) {
-      const line = next[matchIndex]
-      usedLineIds.add(line.id)
-      const zone = formatAnatomicalZone(item)
-      next[matchIndex] = {
-        ...line,
-        treatmentPlanItemId: line.treatmentPlanItemId || item.id,
-        cupsCode: line.cupsCode || item.cupsCode,
-        toothNumber: line.toothNumber ?? item.toothNumber,
-        fdiQuadrant: line.fdiQuadrant ?? item.fdiQuadrant,
-        arch: line.arch ?? item.arch,
-        anatomicalZone: line.anatomicalZone || zone || undefined,
-        diagnosisCode: line.diagnosisCode || item.diagnosisCode,
-        diagnosisDescription: line.diagnosisDescription || item.diagnosisDescription,
-        source: line.source ?? 'treatment_plan',
-        unitPrice:
-          line.unitPrice > 0
-            ? line.unitPrice
-            : item.unitPrice != null && Number.isFinite(item.unitPrice)
-              ? Math.max(0, Math.round(item.unitPrice))
-              : line.unitPrice,
-      }
-      continue
-    }
-
-    const line = treatmentPlanItemToBudgetLine(item)
-    if (!line) continue
-    usedLineIds.add(line.id)
-    next.push(line)
-  }
-
-  return next
+/** Copia el plan de tratamiento (sección 7) al presupuesto general (sección 8). */
+export function syncTreatmentPlanIntoGeneralBudget(
+  treatmentPlan: TreatmentPlanItem[],
+  budgetItems: BudgetLineItem[],
+  discount = 0,
+  orthodontics?: OrthodonticsBudget,
+  dentalImplants?: DentalImplantsBudget,
+): { budgetItems: BudgetLineItem[]; budget: BudgetSummary } {
+  return syncTreatmentPlanIntoGeneralBudgetCore(
+    treatmentPlan,
+    budgetItems,
+    discount,
+    orthodontics,
+    dentalImplants,
+    planExportDeps,
+    calcClinicalBudgetSummaryWithTax,
+  )
 }
 
 /** Concepto de cada fila del presupuesto de ortodoncia y de su tarjeta de pago. */
@@ -441,17 +362,7 @@ export function migrateLegacyBudget(
     }
   }
 
-  const fromPlan = treatmentPlan
-    .filter((t) => (t.procedure ?? '').trim() && !isOrthodonticsAnnexPlanItem(t))
-    .map((t) => ({
-      id: generateId(),
-      treatmentPlanItemId: t.id,
-      procedure: t.procedure,
-      cupsCode: t.cupsCode,
-      toothNumber: t.toothNumber,
-      quantity: t.quantity,
-      unitPrice: t.unitPrice ?? 0,
-    }))
+  const fromPlan = buildBudgetFromTreatmentPlan(treatmentPlan)
 
   if (fromPlan.length === 0) {
     return { budgetItems: [], orthodonticsBudget: ortho, dentalImplantsBudget: implants, budget }
