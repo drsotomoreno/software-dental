@@ -193,7 +193,8 @@ export async function fetchPatientChartV2(
 
     const patch = clinicalBaseToFormPatch(body.clinicalBase)
     if (Object.keys(patch).length > 0 && syncId) {
-      const existing = await db.patientClinicalDrafts.get(syncId)
+      // syncId ya está trimado y no vacío; evita Invalid key en Dexie.
+      const existing = await db.patientClinicalDrafts.get(String(syncId))
       const { localDraftBlocksRemoteOverwrite } = await import('../../shared/clinicalRevision.js')
       // Network-first: no pisar ediciones locales pendientes / revisión mayor.
       if (existing && localDraftBlocksRemoteOverwrite(existing, { clinicalRevision: body.clinicalBase?.version })) {
@@ -428,7 +429,9 @@ export async function flushEmrV2Outbox(): Promise<{ processed: number; remaining
   let processed = 0
   for (const row of pending) {
     if (row.kind !== 'patch_section' || !row.section) continue
-    const draft = await db.patientClinicalDrafts.get(row.patientSyncId)
+    const rowSyncId = String(row.patientSyncId || '').trim()
+    if (!rowSyncId) continue
+    const draft = await db.patientClinicalDrafts.get(rowSyncId)
     const baseVersion = Number(draft?.clinicalRevision || row.baseVersion || 1)
     const result = await patchClinicalSectionV2(
       row.patientSyncId,

@@ -28,10 +28,12 @@ export function ClinicalRecordAddendumPanel({
   patientId,
   user,
 }: ClinicalRecordAddendumPanelProps) {
-  const recordId = String(record.id ?? '')
+  const recordId = String(record.id ?? '').trim()
   const addendums = useLiveQuery(
     () =>
-      db.clinicalAddendums.where('parentRecordId').equals(recordId).sortBy('signedAt'),
+      recordId
+        ? db.clinicalAddendums.where('parentRecordId').equals(recordId).sortBy('signedAt')
+        : Promise.resolve([]),
     [recordId],
   )
 

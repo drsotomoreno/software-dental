@@ -347,9 +347,10 @@ export function PaymentControlForm({
   const { user } = useAuth()
   useTariffSync(user?.id)
   const tariffMap = useTariffStore((state) => state.tariffMap)
+  const tariffUserId = user?.id != null && String(user.id).trim() ? String(user.id) : ''
   const prices = useLiveQuery(
-    () => (user?.id ? db.prices.where('userId').equals(user.id).toArray() : []),
-    [user?.id],
+    () => (tariffUserId ? db.prices.where('userId').equals(tariffUserId).toArray() : []),
+    [tariffUserId],
   )
   const [openMenu, setOpenMenu] = useState<{ id: string; field: 'cie' | 'cups'; query: string } | null>(
     null,

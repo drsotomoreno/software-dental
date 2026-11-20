@@ -263,7 +263,7 @@ export function EvolutionNoteCard({
         </div>
       )}
 
-      {immutable && allowAddendums && !isAddendum && user && patientId && (
+      {immutable && allowAddendums && !isAddendum && user && patientId && note.id && (
         <EvolutionNoteAddendumPanel
           parentNote={note}
           patientId={patientId}

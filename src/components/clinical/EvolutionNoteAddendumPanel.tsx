@@ -16,6 +16,7 @@ import type { EvolutionNoteAddendum } from '@/types/evolutionNoteAddendum'
 import type { SignatureCaptureResult } from '@/types/signature'
 import { formatDate, generateId } from '@/utils'
 import { collectSignatureContext } from '@/utils/clientContext'
+import { asDexieStringKey } from '@/utils/dexieKey'
 
 interface EvolutionNoteAddendumPanelProps {
   parentNote: EvolutionNote
@@ -33,13 +34,18 @@ export function EvolutionNoteAddendumPanel({
   user,
   hideComposer = false,
 }: EvolutionNoteAddendumPanelProps) {
+  const parentNoteId = asDexieStringKey(parentNote?.id)
   const addendums = useLiveQuery(
     () =>
-      db.evolutionNoteAddendums
-        .where('parentEvolutionNoteId')
-        .equals(parentNote.id)
-        .sortBy('signedAt'),
-    [parentNote.id],
+      parentNoteId
+        ? db.evolutionNoteAddendums
+            .where('parentEvolutionNoteId')
+            .equals(parentNoteId)
+            .sortBy('signedAt')
+        : Promise.resolve([] as Awaited<
+            ReturnType<typeof db.evolutionNoteAddendums.toArray>
+          >),
+    [parentNoteId],
   )
 
   const [expanded, setExpanded] = useState(false)

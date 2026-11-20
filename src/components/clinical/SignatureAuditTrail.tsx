@@ -1,15 +1,20 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/database'
 import { formatDate } from '@/utils'
+import { asDexieStringKey } from '@/utils/dexieKey'
 
 interface SignatureAuditTrailProps {
   recordId: string
 }
 
 export function SignatureAuditTrail({ recordId }: SignatureAuditTrailProps) {
+  const safeRecordId = asDexieStringKey(recordId)
   const signatures = useLiveQuery(
-    () => db.signatures.where('recordId').equals(recordId).toArray(),
-    [recordId],
+    () =>
+      safeRecordId
+        ? db.signatures.where('recordId').equals(safeRecordId).toArray()
+        : Promise.resolve([]),
+    [safeRecordId],
   )
 
   if (!signatures?.length) return null

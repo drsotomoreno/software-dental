@@ -1,5 +1,6 @@
 import type { ClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import type { Cie10Diagnosis } from '@/types/clinicalRecord'
+import type { EvolutionNote } from '@/types/evolutionNote'
 import { keepStoredConsentSignatures } from '../types/consent.ts'
 import type { OdontogramData } from '@/types/odontogram'
 import {
@@ -11,6 +12,7 @@ import {
   treatmentPlanHasContent,
 } from '../../shared/clinicalRecordGuard.js'
 import { preferGeneralBudgetSections } from '../../shared/clinicalBudgetMerge.js'
+import { ensureEvolutionNoteIds } from '../../shared/evolutionNoteIds.js'
 import { mergeClinicalPaymentSections } from '../../shared/paymentControlMerge.js'
 import { isRemoteDraftNewer } from './clinicalDraftMerge.ts'
 
@@ -163,7 +165,9 @@ export function mergeLivingChart<T extends LivingChart>(
     dentalImplantsBudget: draftRecord.dentalImplantsBudget ?? baseRecord.dentalImplantsBudget,
     treatmentPlanAuthorization:
       draftRecord.treatmentPlanAuthorization ?? baseRecord.treatmentPlanAuthorization,
-    evolutionNotes: mergeSignedEvolutionNotes(notesOf(base), notesOf(draft)),
+    evolutionNotes: ensureEvolutionNoteIds(
+      mergeSignedEvolutionNotes(notesOf(base), notesOf(draft)) as EvolutionNote[],
+    ),
     informedConsent: keepStoredConsentSignatures(
       baseRecord.informedConsent,
       informedConsentHasContent(draftRecord.informedConsent)

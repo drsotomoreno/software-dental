@@ -159,9 +159,14 @@ export async function listDiagnosticAids(
   const keys = await patientIdLookupKeys(patientId)
   const byId = new Map<string, DiagnosticAid>()
 
+  const encounterKey = String(encounterId || '').trim()
   for (const key of keys) {
-    const rows = encounterId
-      ? await db.diagnosticAids.where('[patientId+encounterId]').equals([key, encounterId]).toArray()
+    if (key == null || key === '') continue
+    const rows = encounterKey
+      ? await db.diagnosticAids
+          .where('[patientId+encounterId]')
+          .equals([key, encounterKey])
+          .toArray()
       : await db.diagnosticAids.where('patientId').equals(key).toArray()
     for (const row of rows) byId.set(String(row.id), row)
   }
