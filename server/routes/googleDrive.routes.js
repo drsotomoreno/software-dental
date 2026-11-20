@@ -22,9 +22,13 @@ import {
   findClinicDriveCredentials,
   frontendRedirectAfterOAuth,
   getGoogleOAuthConfigStatus,
+  GOOGLE_DRIVE_RECONNECT_REQUIRED,
+  isGoogleDriveAuthFailure,
+  isGoogleDriveReconnectRequiredError,
   oauthReturnPathFromState,
   readGoogleDriveStatusForUser,
   resolveManagedClinicId,
+  rethrowAsGoogleDriveReconnectIfAuthFailure,
 } from '../services/googleDriveOAuth.service.js'
 import { clinicSyncAliasIds } from '../../shared/clinicalSyncScope.js'
 import { upsertDiagnosticAidIndexEntry } from '../services/diagnosticAidIndex.js'
@@ -117,6 +121,16 @@ function earlyClinicIdFrom(req) {
 }
 
 function mapOAuthError(error) {
+  if (isGoogleDriveReconnectRequiredError(error) || isGoogleDriveAuthFailure(error)) {
+    return {
+      status: 401,
+      code: GOOGLE_DRIVE_RECONNECT_REQUIRED,
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Google Drive requiere reconexión. El token de acceso ya no es válido.',
+    }
+  }
   const gaxiosStatus = Number(error?.response?.status) || Number(error?.status) || 0
   const gaxiosBody = error?.response?.data?.error
   const gaxiosMessage =
@@ -138,6 +152,17 @@ function mapOAuthError(error) {
     (error instanceof Error ? error.message : null) ||
     'Error en la integración de Google Drive.'
   return { status: status >= 400 && status < 600 ? status : 500, code, message }
+}
+
+function sendReconnectRequired(res, error, clinicId) {
+  const mapped = mapOAuthError(error)
+  return sendJson(res, 401, {
+    success: false,
+    ok: false,
+    error: mapped.message,
+    code: GOOGLE_DRIVE_RECONNECT_REQUIRED,
+    ...(clinicId ? { clinicId } : {}),
+  })
 }
 
 function parseMulterError(err) {
@@ -308,6 +333,7 @@ router.post('/disconnect', async (req, res) => {
  * GET /api/integrations/google-drive/file/:fileId
  */
 router.get('/file/:fileId', async (req, res) => {
+  let clinicId = earlyClinicIdFrom(req) || null
   try {
     const user = await requireSessionUser(req, res)
     if (!user) return
@@ -323,7 +349,7 @@ router.get('/file/:fileId', async (req, res) => {
     }
 
     const resolved = await findClinicDriveCredentials(req, user)
-    const clinicId = resolved.storageKey || resolved.clinicId
+    clinicId = resolved.storageKey || resolved.clinicId || clinicId
     if (!clinicId) {
       return sendJson(res, 400, {
         success: false,
@@ -370,6 +396,16 @@ router.get('/file/:fileId', async (req, res) => {
     return res.status(200).send(buffer)
   } catch (error) {
     console.error('[google-drive] GET /file:', error)
+    if (isGoogleDriveReconnectRequiredError(error) || isGoogleDriveAuthFailure(error)) {
+      if (clinicId && isGoogleDriveAuthFailure(error) && !isGoogleDriveReconnectRequiredError(error)) {
+        try {
+          await rethrowAsGoogleDriveReconnectIfAuthFailure(clinicId, error)
+        } catch (reconnectError) {
+          return sendReconnectRequired(res, reconnectError, clinicId)
+        }
+      }
+      return sendReconnectRequired(res, error, clinicId)
+    }
     if (isGoogleDriveRequiredError(error) || error instanceof GoogleDriveRequiredError) {
       return sendJson(res, 428, {
         success: false,
@@ -411,6 +447,7 @@ router.post('/upload', (req, res, next) => {
   })
 }, async (req, res) => {
   const tempFile = req.file
+  let clinicId = earlyClinicIdFrom(req) || String(req.driveClinicIdHint || '').trim() || null
   try {
     const user = await requireSessionUser(req, res)
     if (!user) return
@@ -438,7 +475,7 @@ router.post('/upload', (req, res, next) => {
     const existingFileId = String(body.driveFileId || '').trim() || undefined
 
     const resolved = await findClinicDriveCredentials(req, user)
-    const clinicId = resolved.storageKey || resolved.clinicId
+    clinicId = resolved.storageKey || resolved.clinicId || clinicId
 
     if (!clinicId) {
       return sendJson(res, 400, {
@@ -569,6 +606,16 @@ router.post('/upload', (req, res, next) => {
     })
   } catch (error) {
     console.error('[google-drive] POST /upload:', error)
+    if (isGoogleDriveReconnectRequiredError(error) || isGoogleDriveAuthFailure(error)) {
+      if (clinicId && isGoogleDriveAuthFailure(error) && !isGoogleDriveReconnectRequiredError(error)) {
+        try {
+          await rethrowAsGoogleDriveReconnectIfAuthFailure(clinicId, error)
+        } catch (reconnectError) {
+          return sendReconnectRequired(res, reconnectError, clinicId)
+        }
+      }
+      return sendReconnectRequired(res, error, clinicId)
+    }
     if (isGoogleDriveRequiredError(error) || error instanceof GoogleDriveRequiredError) {
       return sendJson(res, 428, {
         success: false,

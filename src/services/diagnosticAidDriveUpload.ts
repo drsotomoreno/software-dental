@@ -10,6 +10,10 @@ import {
   isGoogleDriveRequiredResponse,
   notifyGoogleDriveRequired,
 } from '@/services/globalToast'
+import {
+  isGoogleDriveReconnectRequiredResponse,
+  notifyGoogleDriveReconnectRequired,
+} from '@/services/googleDriveReconnect'
 import { getCurrentClinicId, withClinicalSyncSuppressed } from '@/services/clinicalSyncState'
 import { enqueueDiagnosticAidForSync } from '@/services/syncQueueService'
 import type { DiagnosticAid } from '@/types/diagnosticAid'
@@ -195,6 +199,17 @@ export async function uploadDiagnosticAidToGoogleDrive(
       return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
     }
     const body = await response.json().catch(() => ({}))
+
+    if (isGoogleDriveReconnectRequiredResponse(response, body)) {
+      const message =
+        typeof body?.error === 'string'
+          ? body.error
+          : 'Google Drive requiere reconexión. Reconecte la cuenta e intente de nuevo.'
+      notifyGoogleDriveReconnectRequired(message)
+      const failed = await markUploadError(aidId, message)
+      emit('error', message)
+      return failed ?? { ...entry, driveUploadStatus: 'error', driveUploadError: message }
+    }
 
     if (isGoogleDriveRequiredResponse(response, body)) {
       notifyGoogleDriveRequired()

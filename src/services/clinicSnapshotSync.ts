@@ -11,6 +11,10 @@ import {
   notifyGoogleDriveRequired,
 } from '@/services/globalToast'
 import {
+  isGoogleDriveReconnectRequiredResponse,
+  notifyGoogleDriveReconnectRequired,
+} from '@/services/googleDriveReconnect'
+import {
   enqueueDiagnosticAidForSync,
   listPendingSyncQueue,
   markSyncQueueSynced,
@@ -180,6 +184,14 @@ async function syncFetch(url: string, init?: RequestInit) {
 }
 
 function notifyIfGoogleDriveRequired(response: Response, payload: unknown): boolean {
+  if (isGoogleDriveReconnectRequiredResponse(response, payload)) {
+    const body =
+      payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
+    notifyGoogleDriveReconnectRequired(
+      typeof body.error === 'string' ? body.error : undefined,
+    )
+    return true
+  }
   if (!isGoogleDriveRequiredResponse(response, payload)) return false
   notifyGoogleDriveRequired()
   return true

@@ -1,4 +1,9 @@
 import { driveIdentityHeaders } from '@/services/googleDriveClinicContext'
+import {
+  isGoogleDriveReconnectRequiredResponse,
+  notifyGoogleDriveReconnectRequired,
+} from '@/services/googleDriveReconnect'
+import { isGoogleDriveRequiredResponse, notifyGoogleDriveRequired } from '@/services/globalToast'
 import { isSignatureDriveRef } from '../../shared/signatureDriveRef.js'
 
 const cache = new Map<string, Promise<string | null>>()
@@ -20,9 +25,20 @@ export async function fetchSignatureProxyAsDataUrl(src: string): Promise<string 
       ...driveIdentityHeaders(),
     },
   })
-  if (!response.ok) return null
   const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) return null
+  if (!response.ok || contentType.includes('application/json')) {
+    if (contentType.includes('application/json') || response.status === 401 || response.status === 428) {
+      const body = await response.json().catch(() => ({}))
+      if (isGoogleDriveReconnectRequiredResponse(response, body)) {
+        notifyGoogleDriveReconnectRequired(
+          typeof body?.error === 'string' ? body.error : undefined,
+        )
+      } else if (isGoogleDriveRequiredResponse(response, body)) {
+        notifyGoogleDriveRequired()
+      }
+    }
+    return null
+  }
   const blob = await response.blob()
   if (!blob.size) return null
   const dataUrl = await blobToDataUrl(blob)

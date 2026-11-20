@@ -7,6 +7,10 @@ import {
   isGoogleDriveRequiredError,
   selectExistingAidUpload,
 } from './googleDriveAttachments.service.js'
+import {
+  GOOGLE_DRIVE_RECONNECT_REQUIRED,
+  isGoogleDriveAuthFailure,
+} from './googleDriveOAuth.service.js'
 import { base64ToBuffer, bufferToBase64 } from './clinicAttachmentStore.js'
 
 test('GoogleDriveRequiredError expone code google_drive_required y status 428', () => {
@@ -44,6 +48,17 @@ test('aidId en archivo vacío se actualiza en el mismo fileId', () => {
 
 test('sin coincidencia el upload crea el archivo', () => {
   assert.equal(selectExistingAidUpload([]).action, 'create')
+})
+
+test('fallo OAuth invalid_grant se clasifica para forzar reconexión', () => {
+  assert.equal(
+    isGoogleDriveAuthFailure({
+      code: 400,
+      response: { status: 400, data: { error: 'invalid_grant' } },
+    }),
+    true,
+  )
+  assert.equal(GOOGLE_DRIVE_RECONNECT_REQUIRED, 'GOOGLE_DRIVE_RECONNECT_REQUIRED')
 })
 
 test('findFileByAidId consulta appProperties y no crea otro archivo', async () => {

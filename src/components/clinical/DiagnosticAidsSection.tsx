@@ -1005,7 +1005,7 @@ export function DiagnosticAidsSection({
                 kind: "error",
                 url: null,
                 errorMessage:
-                  "No se pudo descargar el archivo desde el proxy de Google Drive. Compruebe la conexión de la clínica e intente de nuevo.",
+                  "No se pudo descargar el archivo desde el proxy de Google Drive. Si el permiso expiró, use «Reconectar Google Drive» e intente de nuevo.",
               }
             : current,
         );

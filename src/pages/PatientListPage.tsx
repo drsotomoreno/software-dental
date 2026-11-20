@@ -13,6 +13,7 @@ import { forzarSincronizacionLocal } from '@/services/clinicalSyncService'
 import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import { resolveActiveClinicSyncId } from '@/services/clinicalSyncState'
 import { patientMatchesQuery } from '@/utils/patientListSearch'
+import { useDentalEmrDbEpoch } from '@/hooks/useDentalEmrDbEpoch'
 
 export function PatientListPage() {
   const { can, user } = useAuth()
@@ -22,6 +23,7 @@ export function PatientListPage() {
   const [syncMessage, setSyncMessage] = useState('')
   const [query, setQuery] = useState('')
   const clinicId = resolveActiveClinicSyncId(user)
+  const { epoch: dentalDbEpoch, dbName: dentalDbName } = useDentalEmrDbEpoch()
 
   const patients = useLiveQuery(async () => {
     if (!clinicId) return []
@@ -29,7 +31,7 @@ export function PatientListPage() {
     return all.filter(
       (patient) => belongsToCurrentClinic(patient, clinicId) && isActivePatient(patient),
     )
-  }, [clinicId])
+  }, [clinicId, dentalDbEpoch, dentalDbName])
 
   const pendingSyncCount = useLiveQuery(async () => {
     if (!clinicId) return 0
@@ -167,7 +169,7 @@ export function PatientListPage() {
                       <td className="px-4 py-2.5">{p.insurer ?? '—'}</td>
                       <td className="px-4 py-2.5">
                         <Link
-                          to={`/pacientes/${p.id}`}
+                          to={`/pacientes/${encodeURIComponent(String(p.syncId || p.id))}`}
                           state={{ resetHistoryView: true }}
                           className="text-dental-600 hover:underline"
                         >

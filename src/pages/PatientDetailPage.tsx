@@ -5,6 +5,7 @@ import { useParams, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { db } from '@/db/database'
+import { useDentalEmrDbEpoch } from '@/hooks/useDentalEmrDbEpoch'
 
 import {
 
@@ -192,16 +193,18 @@ export function PatientDetailPage() {
   const navigate = useNavigate()
   const draftClinicalData = (location.state as { draftClinicalData?: ClinicalRecordFormData } | null)
     ?.draftClinicalData
+  const { epoch: dentalDbEpoch, dbName: dentalDbName } = useDentalEmrDbEpoch()
+  const { user, can, applySessionUser, isLoading: authLoading } = useAuth()
 
-  const patient = useLiveQuery(async () => {
+  const patientQuery = useLiveQuery(async () => {
 
     if (!id) return null
+    // Evitar resolver contra el cubo boot `unknown-clinic` antes de auth.
+    if (authLoading) return undefined
 
     return getPatientByRouteId(id)
 
-  }, [id])
-
-  const { user, can, applySessionUser } = useAuth()
+  }, [id, dentalDbEpoch, dentalDbName, authLoading])
   const { audit } = useAudit()
   const canViewClinical = can('clinical.read')
 
@@ -232,6 +235,64 @@ export function PatientDetailPage() {
   const [activeSection, setActiveSection] = useState<string>('all')
 
   const [patientForm, setPatientForm] = useState<PatientFormData | null>(null)
+  /** Dexie miss: intenta ficha server-first antes de mostrar «no encontrado». */
+  const [remotePatientLookup, setRemotePatientLookup] = useState<
+    'idle' | 'loading' | 'miss'
+  >('idle')
+  const [recoveredPatient, setRecoveredPatient] = useState<
+    NonNullable<Awaited<ReturnType<typeof getPatientByRouteId>>> | null
+  >(null)
+  const remotePatientLookupRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    setRecoveredPatient(null)
+    remotePatientLookupRef.current = null
+    setRemotePatientLookup('idle')
+  }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    if (patientQuery === undefined) return
+    if (patientQuery) {
+      setRemotePatientLookup('idle')
+      setRecoveredPatient(null)
+      remotePatientLookupRef.current = null
+      return
+    }
+    // patientQuery === null
+    if (remotePatientLookupRef.current === id) return
+    remotePatientLookupRef.current = id
+    setRemotePatientLookup('loading')
+    let alive = true
+    void (async () => {
+      try {
+        const { pullPatientChartOnDemand } = await import('@/services/clinicalSyncService')
+        await pullPatientChartOnDemand(id, { localId: id })
+        const again = await getPatientByRouteId(id)
+        if (!alive) return
+        if (again) {
+          setRecoveredPatient(again)
+          setRemotePatientLookup('idle')
+          if (again.syncId && String(again.syncId) !== id) {
+            navigate(`/pacientes/${encodeURIComponent(String(again.syncId))}`, {
+              replace: true,
+              state: location.state,
+            })
+          }
+          return
+        }
+        setRemotePatientLookup('miss')
+      } catch {
+        if (alive) setRemotePatientLookup('miss')
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [id, patientQuery, navigate, location.state])
+
+  const patient =
+    patientQuery === undefined ? undefined : patientQuery ?? recoveredPatient
 
   useEffect(() => {
     const onApplied = (event: Event) => {
@@ -2096,7 +2157,11 @@ export function PatientDetailPage() {
 
 
 
-  if (patient === undefined) {
+  if (
+    authLoading ||
+    patientQuery === undefined ||
+    (patientQuery === null && remotePatientLookup === 'loading' && !recoveredPatient)
+  ) {
 
     return <p className="text-slate-500">Cargando paciente...</p>
 

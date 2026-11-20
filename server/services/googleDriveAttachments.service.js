@@ -11,7 +11,12 @@
  */
 import { createReadStream } from 'node:fs'
 import { PassThrough, Readable } from 'node:stream'
-import { getAuthorizedDriveClient } from './googleDriveOAuth.service.js'
+import {
+  getAuthorizedDriveClient,
+  isGoogleDriveAuthFailure,
+  isGoogleDriveReconnectRequiredError,
+  rethrowAsGoogleDriveReconnectIfAuthFailure,
+} from './googleDriveOAuth.service.js'
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const CACHE_TTL_MS = 30 * 60 * 1000
@@ -198,15 +203,25 @@ async function ensureFolderPath(drive, rootFolderId, segments) {
 }
 
 async function resolveClinicDrive(canonicalClinicId, candidateIds = []) {
+  let storageKey = String(canonicalClinicId || '').trim()
   try {
     const client = await getAuthorizedDriveClient(canonicalClinicId, candidateIds)
+    storageKey = String(client?.clinicId || storageKey).trim()
     // Fuerza refresh ANTES de abrir streams de archivo (evita reintento que
     // consume el ReadStream y deja el archivo en Drive con 0 bytes).
     if (client?.auth && typeof client.auth.getAccessToken === 'function') {
-      await client.auth.getAccessToken()
+      try {
+        await client.auth.getAccessToken()
+      } catch (tokenError) {
+        await rethrowAsGoogleDriveReconnectIfAuthFailure(storageKey, tokenError)
+      }
     }
     return client
   } catch (error) {
+    if (isGoogleDriveReconnectRequiredError(error)) throw error
+    if (isGoogleDriveAuthFailure(error)) {
+      await rethrowAsGoogleDriveReconnectIfAuthFailure(storageKey, error)
+    }
     if (isGoogleDriveRequiredError(error)) {
       throw new GoogleDriveRequiredError(
         error instanceof Error
@@ -273,7 +288,9 @@ export async function uploadClinicAttachmentToDrive({
       : 0
     : buffer.length
 
-  const { drive, rootFolderId } = await resolveClinicDrive(clinicId, clinicIdCandidates)
+  const resolved = await resolveClinicDrive(clinicId, clinicIdCandidates)
+  const { drive, rootFolderId } = resolved
+  const storageKey = String(resolved?.clinicId || clinicId || '').trim()
   if (!rootFolderId) {
     throw new GoogleDriveRequiredError(
       'La clínica no tiene carpeta raíz en Google Drive. Vuelva a conectar la integración.',
@@ -313,6 +330,9 @@ export async function uploadClinicAttachmentToDrive({
         fileIdToUpdate = String(decision.file.id)
       }
     } catch (error) {
+      if (isGoogleDriveAuthFailure(error) || isGoogleDriveReconnectRequiredError(error)) {
+        await rethrowAsGoogleDriveReconnectIfAuthFailure(storageKey, error)
+      }
       console.warn(
         '[google-drive] búsqueda por aidId omitida:',
         error instanceof Error ? error.message : error,
@@ -371,6 +391,9 @@ export async function uploadClinicAttachmentToDrive({
         const id = updated.data?.id || fileIdToUpdate
         return resultPayload(id, updated.data?.webViewLink, updated.data?.size)
       } catch (error) {
+        if (isGoogleDriveAuthFailure(error) || isGoogleDriveReconnectRequiredError(error)) {
+          await rethrowAsGoogleDriveReconnectIfAuthFailure(storageKey, error)
+        }
         console.warn(
           '[google-drive] update falló; se crea archivo nuevo:',
           error instanceof Error ? error.message : error,
@@ -411,6 +434,12 @@ export async function uploadClinicAttachmentToDrive({
       throw err
     }
     return resultPayload(driveFileId, created.data?.webViewLink, created.data?.size)
+  } catch (error) {
+    if (isGoogleDriveReconnectRequiredError(error)) throw error
+    if (isGoogleDriveAuthFailure(error)) {
+      await rethrowAsGoogleDriveReconnectIfAuthFailure(storageKey, error)
+    }
+    throw error
   } finally {
     try {
       lastBody?.destroy?.()
@@ -432,19 +461,29 @@ export async function downloadClinicAttachmentFromDrive({
   const fileId = String(driveFileId || '').trim()
   if (!fileId) return null
 
-  const { drive } = await resolveClinicDrive(clinicId, clinicIdCandidates)
-  const res = await drive.files.get(
-    { fileId, alt: 'media' },
-    { responseType: 'arraybuffer' },
-  )
+  const resolved = await resolveClinicDrive(clinicId, clinicIdCandidates)
+  const { drive } = resolved
+  const storageKey = String(resolved?.clinicId || clinicId || '').trim()
+  try {
+    const res = await drive.files.get(
+      { fileId, alt: 'media' },
+      { responseType: 'arraybuffer' },
+    )
 
-  if (res.data == null) return null
-  if (Buffer.isBuffer(res.data)) return res.data
-  if (res.data instanceof ArrayBuffer) return Buffer.from(res.data)
-  if (typeof res.data === 'string') return Buffer.from(res.data, 'binary')
-  // Algunos clientes entregan Uint8Array
-  if (ArrayBuffer.isView(res.data)) {
-    return Buffer.from(res.data.buffer, res.data.byteOffset, res.data.byteLength)
+    if (res.data == null) return null
+    if (Buffer.isBuffer(res.data)) return res.data
+    if (res.data instanceof ArrayBuffer) return Buffer.from(res.data)
+    if (typeof res.data === 'string') return Buffer.from(res.data, 'binary')
+    // Algunos clientes entregan Uint8Array
+    if (ArrayBuffer.isView(res.data)) {
+      return Buffer.from(res.data.buffer, res.data.byteOffset, res.data.byteLength)
+    }
+    return null
+  } catch (error) {
+    if (isGoogleDriveReconnectRequiredError(error)) throw error
+    if (isGoogleDriveAuthFailure(error)) {
+      await rethrowAsGoogleDriveReconnectIfAuthFailure(storageKey, error)
+    }
+    throw error
   }
-  return null
 }

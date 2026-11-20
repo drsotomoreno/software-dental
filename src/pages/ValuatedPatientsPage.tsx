@@ -121,7 +121,7 @@ export function ValuatedPatientsPage() {
                   patient.phone,
                   buildValuationFollowUpMessage(resolveAccountHolderTitle(user)),
                 )
-                const valuationPath = `/pacientes/${patient.id}`
+                const valuationPath = `/pacientes/${encodeURIComponent(String(patient.syncId || patient.id))}`
                 const fullName = `${patient.firstName} ${patient.lastName}`.trim()
                 return (
                   <li

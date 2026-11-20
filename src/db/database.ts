@@ -959,6 +959,22 @@ void hydrateLocalEncryptionFromAuth(getStoredApiAuth())
 /** Instancia activa. Se recrea al cambiar user/clínica. */
 export let db: DentalDatabase = new DentalDatabase()
 
+/** Disparado cuando `db` se reapunta a otro IndexedDB (login / cambio de clínica). */
+export const DENTAL_EMR_DB_CHANGED_EVENT = 'doctorseo-dental-db-changed'
+
+function notifyDentalEmrDbChanged(reason: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.dispatchEvent(
+      new CustomEvent(DENTAL_EMR_DB_CHANGED_EVENT, {
+        detail: { name: db.name, reason },
+      }),
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
 export { lockLocalEncryption, hydrateLocalEncryptionFromAuth }
 
 const hookedDatabases = new WeakSet<DentalDatabase>()
@@ -994,6 +1010,9 @@ export async function ensureDentalDatabaseForAuth(
   const nextName = resolveDentalEmrDbName(resolvedUserId || userId, resolvedClinicId || clinicaId)
   if (db.name === nextName) {
     registerDentalDatabaseHooks(db)
+    // Misma BD, pero la llave de cifrado / sesión puede haber cambiado: forzar
+    // re-lectura de useLiveQuery (listado vs detalle).
+    notifyDentalEmrDbChanged('auth-same-db')
     return db
   }
   try {
@@ -1003,6 +1022,7 @@ export async function ensureDentalDatabaseForAuth(
   }
   db = new DentalDatabase(nextName)
   registerDentalDatabaseHooks(db)
+  notifyDentalEmrDbChanged('auth-rebind')
   return db
 }
 
@@ -1030,6 +1050,7 @@ export async function retireOrphanUuidDentalEmrDatabase(
     }
     db = new DentalDatabase(canonicalName)
     registerDentalDatabaseHooks(db)
+    notifyDentalEmrDbChanged('retire-orphan')
   }
 
   try {
@@ -1053,6 +1074,7 @@ export async function deleteAndResetDentalDatabase(): Promise<void> {
   }
   db = new DentalDatabase(resolveDentalEmrDbName('anon', 'none'))
   registerDentalDatabaseHooks(db)
+  notifyDentalEmrDbChanged('reset')
 }
 
 /** Permite vaciar tablas inmutables (FEV / NC / outbox) en restauración o limpieza de prueba. */

@@ -18,24 +18,27 @@ export function toPatientForeignKey(id: string | number): string {
 }
 
 export async function getPatientByRouteId(routeId: string): Promise<Patient | null> {
-  const numericKey = toDexiePrimaryKey(routeId)
+  const needle = String(routeId || '').trim()
+  if (!needle) return null
+
+  const numericKey = toDexiePrimaryKey(needle)
   let patient = await db.patients.get(numericKey)
 
+  // React Router entrega string; IndexedDB distingue 1434 vs "1434".
   if (!patient && typeof numericKey === 'number') {
     patient = await db.patients.get(String(numericKey))
   }
 
-  // Rutas con syncId UUID (u otros ids no numéricos) tras sync multi-dispositivo.
-  if (!patient && typeof numericKey === 'string' && numericKey.trim()) {
+  // Comparación flexible: PK Dexie, syncId UUID, o id serializado.
+  if (!patient) {
     patient =
-      (await db.patients.where('syncId').equals(numericKey).first()) ??
-      (await db.patients.filter((row) => String(row.id) === numericKey).first()) ??
+      (await db.patients.where('syncId').equals(needle).first()) ??
+      (await db.patients.filter((row) => String(row.id) === needle).first()) ??
       undefined
   }
 
-  // Fallback: documento / legacyNumericIds (p. ej. ruta /pacientes/1407).
-  if (!patient && routeId.trim()) {
-    const needle = routeId.trim()
+  // Fallback: documento / legacyNumericIds (p. ej. ruta /pacientes/1407 tras re-key).
+  if (!patient) {
     patient =
       (await db.patients
         .filter((row) => {

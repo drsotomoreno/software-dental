@@ -27,6 +27,101 @@ const SCOPES = [DRIVE_FILE_SCOPE, USERINFO_EMAIL_SCOPE]
 const STATE_TTL_MS = 15 * 60 * 1000
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 
+/** Código HTTP/API cuando el refresh_token de Google ya no es válido. */
+export const GOOGLE_DRIVE_RECONNECT_REQUIRED = 'GOOGLE_DRIVE_RECONNECT_REQUIRED'
+
+/** Parámetros OAuth que fuerzan un refresh_token nuevo en cada consentimiento. */
+export const GOOGLE_DRIVE_AUTH_URL_OPTIONS = Object.freeze({
+  access_type: 'offline',
+  prompt: 'consent',
+  include_granted_scopes: true,
+})
+
+export class GoogleDriveReconnectRequiredError extends Error {
+  constructor(
+    message = 'La integración de Google Drive expiró o fue revocada. Reconecte la cuenta en Perfil.',
+  ) {
+    super(message)
+    this.name = 'GoogleDriveReconnectRequiredError'
+    this.code = GOOGLE_DRIVE_RECONNECT_REQUIRED
+    this.status = 401
+  }
+}
+
+/**
+ * Detecta invalid_grant / 401 Unauthorized de Google OAuth o Drive API.
+ * @param {unknown} error
+ */
+export function isGoogleDriveAuthFailure(error) {
+  if (!error || typeof error !== 'object') return false
+  if (error instanceof GoogleDriveReconnectRequiredError) return true
+  if (error.code === GOOGLE_DRIVE_RECONNECT_REQUIRED) return true
+
+  const status = Number(error?.response?.status || error?.status || 0)
+  const dataError = error?.response?.data?.error
+  const dataErrorCode =
+    typeof dataError === 'object' && dataError
+      ? String(dataError.error || dataError.status || dataError.code || '')
+      : String(dataError || '')
+  const message = String(error?.message || '').toLowerCase()
+  const reason = String(
+    error?.errors?.[0]?.reason ||
+      (typeof dataError === 'object' ? dataError?.errors?.[0]?.reason : '') ||
+      '',
+  ).toLowerCase()
+
+  if (dataErrorCode === 'invalid_grant' || reason === 'invalid_grant') return true
+  if (message.includes('invalid_grant')) return true
+  if (status === 401) return true
+  if (
+    status === 400 &&
+    (dataErrorCode === 'invalid_grant' || message.includes('invalid_grant'))
+  ) {
+    return true
+  }
+  return false
+}
+
+export function isGoogleDriveReconnectRequiredError(error) {
+  return (
+    Boolean(error) &&
+    (error instanceof GoogleDriveReconnectRequiredError ||
+      error?.code === GOOGLE_DRIVE_RECONNECT_REQUIRED)
+  )
+}
+
+/**
+ * Limpia tokens inválidos en Postgres/JSON y marca Drive desconectado.
+ * @param {string} clinicId
+ * @param {unknown} [cause]
+ */
+export async function markClinicGoogleDriveReconnectRequired(clinicId, cause) {
+  const id = String(clinicId || '').trim()
+  if (id) {
+    try {
+      await clearClinicGoogleDriveConnection(id)
+    } catch (clearError) {
+      console.warn(
+        '[google-drive] No se pudo limpiar tokens inválidos:',
+        clearError instanceof Error ? clearError.message : clearError,
+      )
+    }
+  }
+  const detail =
+    cause instanceof Error
+      ? cause.message
+      : typeof cause === 'string'
+        ? cause
+        : ''
+  const err = new GoogleDriveReconnectRequiredError(
+    detail && /invalid_grant|unauthorized|401/i.test(detail)
+      ? 'Google rechazó el token de Drive (invalid_grant/401). Reconecte Google Drive para continuar.'
+      : undefined,
+  )
+  if (cause) err.cause = cause
+  throw err
+}
+
 function normalizeRole(rol) {
   const value = String(rol ?? '')
     .trim()
@@ -371,10 +466,9 @@ export function buildGoogleDriveConnectUrl(user, options = {}) {
     exp: Date.now() + STATE_TTL_MS,
   })
 
+  // access_type=offline + prompt=consent → Google siempre entrega refresh_token nuevo.
   const url = client.generateAuthUrl({
-    access_type: 'offline',
-    prompt: 'consent',
-    include_granted_scopes: true,
+    ...GOOGLE_DRIVE_AUTH_URL_OPTIONS,
     scope: SCOPES,
     state,
   })
@@ -579,7 +673,8 @@ export async function disconnectGoogleDriveForUser(user, options = {}) {
 }
 
 /**
- * Cliente autenticado para la clínica (usa refresh_token cifrado).
+ * Cliente autenticado para la clínica (usa refresh_token cifrado de PostgreSQL).
+ * Escucha 'tokens' para persistir access_token / refresh_token rotados por Google.
  * Acepta una clave o lista de candidatos; prueba variantes clinic:/bare.
  */
 export async function getAuthorizedDriveClient(canonicalClinicId, candidateIds = []) {
@@ -601,22 +696,38 @@ export async function getAuthorizedDriveClient(canonicalClinicId, candidateIds =
     err.status = 409
     throw err
   }
-  const refreshToken = decryptSecret(record.refreshTokenEnc)
+
+  let refreshToken
+  try {
+    refreshToken = decryptSecret(record.refreshTokenEnc)
+  } catch (decryptError) {
+    await markClinicGoogleDriveReconnectRequired(storageKey, decryptError)
+  }
+  if (!refreshToken) {
+    await markClinicGoogleDriveReconnectRequired(storageKey, 'refresh_token vacío')
+  }
+
   const client = createOAuthClient()
   client.setCredentials({
     refresh_token: refreshToken,
     access_token: record.accessTokenEnc ? decryptSecret(record.accessTokenEnc) : undefined,
     expiry_date: record.tokenExpiresAt ? Date.parse(record.tokenExpiresAt) : undefined,
   })
+
+  // Google puede emitir access_token (y a veces refresh_token) al refrescar.
   client.on('tokens', async (tokens) => {
+    if (!tokens || typeof tokens !== 'object') return
     try {
+      const latest = (await getClinicGoogleDriveRecord(storageKey)) || record
       const patch = {}
       if (tokens.access_token) patch.accessTokenEnc = encryptSecret(tokens.access_token)
-      if (tokens.expiry_date) patch.tokenExpiresAt = new Date(Number(tokens.expiry_date)).toISOString()
+      if (tokens.expiry_date) {
+        patch.tokenExpiresAt = new Date(Number(tokens.expiry_date)).toISOString()
+      }
       if (tokens.refresh_token) patch.refreshTokenEnc = encryptSecret(tokens.refresh_token)
       if (Object.keys(patch).length) {
         await saveClinicGoogleDriveConnection(storageKey, {
-          ...record,
+          ...latest,
           ...patch,
           status: 'connected',
         })
@@ -628,6 +739,7 @@ export async function getAuthorizedDriveClient(canonicalClinicId, candidateIds =
       )
     }
   })
+
   return {
     auth: client,
     drive: google.drive({ version: 'v3', auth: client }),
@@ -635,6 +747,16 @@ export async function getAuthorizedDriveClient(canonicalClinicId, candidateIds =
     googleDriveEmail: record.googleDriveEmail,
     clinicId: storageKey,
   }
+}
+
+/**
+ * Si el error es invalid_grant/401, desconecta Drive y lanza RECONNECT_REQUIRED.
+ * Si no es fallo de auth, re-lanza el error original.
+ */
+export async function rethrowAsGoogleDriveReconnectIfAuthFailure(clinicId, error) {
+  if (isGoogleDriveReconnectRequiredError(error)) throw error
+  if (!isGoogleDriveAuthFailure(error)) throw error
+  await markClinicGoogleDriveReconnectRequired(clinicId, error)
 }
 
 /**

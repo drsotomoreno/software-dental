@@ -13,6 +13,10 @@ import {
   isGoogleDriveRequiredResponse,
   notifyGoogleDriveRequired,
 } from '@/services/globalToast'
+import {
+  isGoogleDriveReconnectRequiredResponse,
+  notifyGoogleDriveReconnectRequired,
+} from '@/services/googleDriveReconnect'
 import type { DiagnosticAid, DiagnosticAidBlobRecord } from '@/types/diagnosticAid'
 import { base64ToArrayBuffer } from '@/utils/base64Binary'
 import { mimeTypeForDiagnosticFile } from '@/utils/diagnosticAidWebClassification'
@@ -109,10 +113,16 @@ export async function fetchDiagnosticAidFromGoogleDrive(
         ...identityHeaders(),
       },
     })
-    if (response.status === 404 || response.status === 401) return null
+    if (response.status === 404) return null
     const contentType = response.headers.get('content-type') || ''
-    if (contentType.includes('application/json')) {
+    if (contentType.includes('application/json') || response.status === 401) {
       const body = await response.json().catch(() => ({}))
+      if (isGoogleDriveReconnectRequiredResponse(response, body)) {
+        notifyGoogleDriveReconnectRequired(
+          typeof body?.error === 'string' ? body.error : undefined,
+        )
+        return null
+      }
       if (isGoogleDriveRequiredResponse(response, body)) {
         notifyGoogleDriveRequired()
       }

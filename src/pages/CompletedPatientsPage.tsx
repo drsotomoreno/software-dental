@@ -120,7 +120,7 @@ export function CompletedPatientsPage() {
                   </td>
                   <td className="px-4 py-2.5">
                     <Link
-                      to={`/pacientes/${patient.id}`}
+                      to={`/pacientes/${encodeURIComponent(String(patient.syncId || patient.id))}`}
                       state={{ resetHistoryView: true }}
                       className="text-dental-600 hover:underline"
                     >

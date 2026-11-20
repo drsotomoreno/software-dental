@@ -4,6 +4,11 @@ import { CANONICAL_PRODUCTION_ORIGIN, resolveAppPublicUrl } from '../config.js'
 import {
   canManageClinicGoogleDrive,
   frontendRedirectAfterOAuth,
+  GOOGLE_DRIVE_AUTH_URL_OPTIONS,
+  GOOGLE_DRIVE_RECONNECT_REQUIRED,
+  GoogleDriveReconnectRequiredError,
+  isGoogleDriveAuthFailure,
+  isGoogleDriveReconnectRequiredError,
   isGoogleDriveSuperAdmin,
   resolveManagedClinicId,
 } from './googleDriveOAuth.service.js'
@@ -77,4 +82,35 @@ test('dueño y admin de clínica pueden gestionar Drive', () => {
 test('odontólogo colaborador no puede gestionar Drive', () => {
   const doc = { id: 'u3', clinicId: 'c1', email: 'doc@clinic.com', rol: 'odontologo' }
   assert.equal(canManageClinicGoogleDrive(doc), false)
+})
+
+test('OAuth auth URL fuerza offline + consent para refresh_token', () => {
+  assert.equal(GOOGLE_DRIVE_AUTH_URL_OPTIONS.access_type, 'offline')
+  assert.equal(GOOGLE_DRIVE_AUTH_URL_OPTIONS.prompt, 'consent')
+})
+
+test('isGoogleDriveAuthFailure detecta invalid_grant y 401 de Google', () => {
+  assert.equal(
+    isGoogleDriveAuthFailure({
+      response: { status: 400, data: { error: 'invalid_grant' } },
+    }),
+    true,
+  )
+  assert.equal(
+    isGoogleDriveAuthFailure({
+      response: { status: 401, data: { error: { message: 'Unauthorized' } } },
+      status: 401,
+    }),
+    true,
+  )
+  assert.equal(isGoogleDriveAuthFailure({ message: 'invalid_grant: Token has been expired or revoked' }), true)
+  assert.equal(isGoogleDriveAuthFailure({ status: 404, message: 'Not Found' }), false)
+})
+
+test('GoogleDriveReconnectRequiredError expone código contractual', () => {
+  const err = new GoogleDriveReconnectRequiredError()
+  assert.equal(err.code, GOOGLE_DRIVE_RECONNECT_REQUIRED)
+  assert.equal(err.status, 401)
+  assert.equal(isGoogleDriveReconnectRequiredError(err), true)
+  assert.equal(isGoogleDriveAuthFailure(err), true)
 })

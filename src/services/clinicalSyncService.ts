@@ -290,6 +290,7 @@ async function mergePatients(records: ClinicalSyncRecord[]): Promise<boolean> {
       const apertura = conservarFechaApertura(local.createdAt, next.createdAt)
       if (apertura) next.createdAt = apertura
       else delete next.createdAt
+      next.legacyNumericIds = mergeLegacyNumericIds(local, remote, next)
       await db.patients.update(local.id, next)
       changed = true
       continue
@@ -299,10 +300,32 @@ async function mergePatients(records: ClinicalSyncRecord[]): Promise<boolean> {
     if (!conservarFechaApertura(next.createdAt)) {
       next.createdAt = new Date().toISOString()
     }
+    next.legacyNumericIds = mergeLegacyNumericIds(undefined, remote, next)
     await db.patients.add(next)
     changed = true
   }
   return changed
+}
+
+function mergeLegacyNumericIds(
+  local: Patient | undefined,
+  remote: ClinicalSyncRecord,
+  next: Patient,
+): string[] {
+  const ids = new Set<string>()
+  for (const value of [
+    ...(Array.isArray(local?.legacyNumericIds) ? local!.legacyNumericIds : []),
+    ...(Array.isArray(next.legacyNumericIds) ? next.legacyNumericIds : []),
+  ]) {
+    if (value != null && /^\d+$/.test(String(value))) ids.add(String(value))
+  }
+  if (local?.id != null && /^\d+$/.test(String(local.id))) ids.add(String(local.id))
+  const payload = remote.payload && typeof remote.payload === 'object' ? remote.payload : {}
+  for (const key of ['id', 'localId', 'patientId'] as const) {
+    const raw = payload[key]
+    if (raw != null && /^\d+$/.test(String(raw))) ids.add(String(raw))
+  }
+  return [...ids]
 }
 
 async function mergeAppointments(records: ClinicalSyncRecord[]): Promise<boolean> {
@@ -610,7 +633,94 @@ export async function pullPatientChartOnDemand(
     } as import('@/types/clinicalSync').ClinicalSyncPullResponse,
     { hydrateBlobs: false },
   )
+
+  // Asegura fila en Dexie: el chart puede existir en RDS aunque el listado local
+  // aún no haya rehidratado el paciente (o el id de la URL sea un localId legacy).
+  const resolvedSyncId = String(
+    payload?.patientSyncId || syncId || draft?.syncId || draft?.payload?.patientSyncId || '',
+  ).trim()
+  const resolvedDoc = String(
+    payload?.documentNumber || documentNumber || draft?.payload?.documentNumber || '',
+  ).trim()
+  const resolvedLocalId = String(payload?.localId || localId || '').trim()
+  if (resolvedSyncId || resolvedDoc) {
+    await ensureLocalPatientFromChartIdentity({
+      syncId: resolvedSyncId,
+      documentNumber: resolvedDoc,
+      localId: resolvedLocalId,
+      clinicId: String(payload.clinicId || auth.clinicId || getCurrentClinicId() || ''),
+      draftPayload: draft?.payload && typeof draft.payload === 'object' ? draft.payload : null,
+    })
+  }
   return true
+}
+
+async function ensureLocalPatientFromChartIdentity(input: {
+  syncId: string
+  documentNumber: string
+  localId: string
+  clinicId: string
+  draftPayload: Record<string, unknown> | null
+}): Promise<void> {
+  const syncId = String(input.syncId || '').trim()
+  const documentNumber = String(input.documentNumber || '').trim()
+  const localId = String(input.localId || '').trim()
+  const clinicId = String(input.clinicId || '').trim()
+  const payload = input.draftPayload || {}
+
+  let existing =
+    (syncId ? await db.patients.where('syncId').equals(syncId).first() : undefined) ||
+    (documentNumber
+      ? await db.patients.where('documentNumber').equals(documentNumber).first()
+      : undefined)
+
+  const legacyNumericIds = new Set<string>(
+    Array.isArray(existing?.legacyNumericIds)
+      ? existing!.legacyNumericIds!.map(String)
+      : [],
+  )
+  if (localId && /^\d+$/.test(localId)) legacyNumericIds.add(localId)
+  if (existing?.id != null && /^\d+$/.test(String(existing.id))) {
+    legacyNumericIds.add(String(existing.id))
+  }
+
+  if (existing?.id != null) {
+    await db.patients.update(existing.id, {
+      ...(syncId && !existing.syncId ? { syncId } : {}),
+      ...(clinicId && !existing.clinicId ? { clinicId } : {}),
+      legacyNumericIds: [...legacyNumericIds],
+      pendingSync: false,
+      lastSyncedAt: new Date().toISOString(),
+    })
+    return
+  }
+
+  const firstName = String(payload.firstName || payload.nombre || '').trim() || 'Paciente'
+  const lastName = String(payload.lastName || payload.apellido || '').trim() || syncId.slice(0, 8) || 'Sincronizado'
+  const now = new Date().toISOString()
+  await db.patients.add({
+    documentType: (String(payload.documentType || 'CC').trim() || 'CC') as Patient['documentType'],
+    documentNumber: documentNumber || `SYNC-${syncId || localId || Date.now()}`,
+    firstName,
+    lastName,
+    birthDate: String(payload.birthDate || '2000-01-01'),
+    gender: (String(payload.gender || 'O') as Patient['gender']) || 'O',
+    phone: String(payload.phone || ''),
+    email: payload.email ? String(payload.email) : undefined,
+    address: payload.address ? String(payload.address) : undefined,
+    city: payload.city ? String(payload.city) : undefined,
+    insurer: payload.insurer ? String(payload.insurer) : undefined,
+    createdAt: String(payload.createdAt || now),
+    updatedAt: String(payload.updatedAt || now),
+    syncId: syncId || undefined,
+    clinicId: clinicId || undefined,
+    legacyNumericIds: [...legacyNumericIds],
+    valuationOnly: payload.valuationOnly as Patient['valuationOnly'],
+    treatmentCompleted: payload.treatmentCompleted as Patient['treatmentCompleted'],
+    phase: payload.phase as Patient['phase'],
+    pendingSync: false,
+    lastSyncedAt: now,
+  })
 }
 
 /**
