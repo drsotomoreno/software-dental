@@ -4,6 +4,7 @@ import { createDefaultEvolutionNoteRipsMetadata } from '../types/evolutionNoteRi
 import {
   EvolutionRipsPayloadError,
   armarRipsNotaEvolucion,
+  cupsValidosDeNota,
   validarEnvioRipsNota,
 } from './evolutionRipsPayload.ts'
 
@@ -94,6 +95,40 @@ test('rechaza el envío si la nota no está firmada, sin CIE-10, sin CUPS o sin 
       }),
     }),
   )
+  assert.deepEqual(
+    cupsValidosDeNota(
+      notaFirmada({
+        cupsCode: '232102',
+        procedure: '230101 — Exodoncia de dientes permanentes',
+        catalogServices: [
+          {
+            id: 's1',
+            procedure: '230101 — Exodoncia de dientes permanentes',
+            cupsCode: '230101',
+            requiereCupsRips: true,
+          },
+        ],
+        ripsMetadata: {
+          ...notaFirmada().ripsMetadata,
+          cupsCode: '890203',
+        },
+      }),
+    )[0],
+    '890203',
+    'prioriza ripsMetadata.cupsCode sobre cupsCode y catálogo',
+  )
+  assert.deepEqual(
+    cupsValidosDeNota(
+      notaFirmada({
+        cupsCode: null,
+        procedure: '230101 — Exodoncia de dientes permanentes',
+        catalogServices: [],
+        ripsMetadata: { ...notaFirmada().ripsMetadata, cupsCode: null },
+      }),
+    ),
+    ['230101'],
+    'rescata el CUPS del texto del procedimiento',
+  )
   assert.throws(
     () =>
       validarEnvioRipsNota({
@@ -152,6 +187,8 @@ test('la atención en $0 deja la tarifa en cero y no exige soporte', () => {
     }),
   })
   assert.equal(rips.numFactura, null)
+  assert.equal(rips.tipoNota, 'RS')
+  assert.match(String(rips.numNota), /^NOTA-/)
   assert.equal(rips.usuarios[0].servicios.procedimientos[0].vrServicio, 0)
   assert.equal(rips.usuarios[0].servicios.consultas[0].conceptoRecaudo, '05')
 })
@@ -232,8 +269,31 @@ test('el recibo interno no pide factura aunque el soporte tenga número FV', () 
     }),
   })
   assert.equal(rips.numFactura, null)
+  assert.equal(rips.tipoNota, 'RS')
+  assert.match(String(rips.numNota), /^NOTA-/)
   const procedimiento = rips.usuarios[0].servicios.procedimientos[0]
   assert.equal(procedimiento.numFEVPagoModerador, null)
   assert.equal(procedimiento.vrServicio, 200000)
   assert.equal(JSON.stringify(rips).includes('FV00000002'), false)
+})
+
+test('rechaza envío si la ficha del paciente está incompleta para RIPS', () => {
+  assert.throws(
+    () =>
+      validarEnvioRipsNota({
+        ...base,
+        paciente: { documentType: 'CC', documentNumber: '1', birthDate: '' },
+        note: notaFirmada(),
+      }),
+    (error) =>
+      error instanceof EvolutionRipsPayloadError &&
+      (error.field === 'patient.birthDate' || error.code === 'PATIENT_BIRTHDATE'),
+  )
+})
+
+test('FEV conserva numFactura y no aplica contrato sin factura', () => {
+  const rips = armarRipsNotaEvolucion({ ...base, note: notaFirmada() })
+  assert.equal(rips.numFactura, 'FV0001')
+  assert.equal(rips.tipoNota, null)
+  assert.equal(rips.numNota, null)
 })

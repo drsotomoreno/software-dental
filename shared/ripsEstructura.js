@@ -5,6 +5,8 @@
  * antes de revisar el contenido clínico.
  */
 
+import { applySinFacturaBillingContract } from './canonicalEvolutionRips.js'
+
 const GRUPOS_SERVICIO = [
   'consultas',
   'procedimientos',
@@ -89,10 +91,5 @@ export function normalizarEstructuraRips(rips) {
 
 /** CargarRipsSinFactura: sin estos campos el MUV responde RVG06. numFactura va en null. */
 export function completarRipsSinFactura(rips) {
-  if (!rips || typeof rips !== 'object' || Array.isArray(rips)) return rips
-  const ripsData = { ...rips }
-  ripsData.numFactura = null
-  ripsData.tipoNota = ripsData.tipoNota || 'RS'
-  ripsData.numNota = ripsData.numNota || `NOTA-${Date.now()}`
-  return ripsData
+  return applySinFacturaBillingContract(rips, Date.now())
 }

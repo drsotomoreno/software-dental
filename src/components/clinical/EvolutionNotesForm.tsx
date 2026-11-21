@@ -8,8 +8,13 @@ import {
   isEvolutionNoteImmutable,
 } from '@/types/evolutionNote'
 import { sortEvolutionNotesChronologically } from '@/utils/recordIntegrity'
-import { validateEvolutionNote } from '@/utils/evolutionNoteValidation'
+import {
+  formatEvolutionValidationIssues,
+  validateEvolutionNote,
+  type EvolutionNoteValidationIssue,
+} from '@/utils/evolutionNoteValidation'
 import { focusEvolutionMissingField } from '@/utils/evolutionCupsGate'
+import { EvolutionRipsDiagnosticsPanel } from './EvolutionRipsDiagnosticsPanel'
 import {
   CLINICAL_HISTORY_SECTION_NUMBERS,
   CLINICAL_SECTION_TITLE_CLASS,
@@ -67,6 +72,7 @@ export function EvolutionNotesForm({
 }: EvolutionNotesFormProps) {
   const { user } = useAuth()
   const [blockedMessage, setBlockedMessage] = useState('')
+  const [signValidationIssues, setSignValidationIssues] = useState<EvolutionNoteValidationIssue[]>([])
   const [shieldMismatches, setShieldMismatches] = useState<RipsShieldMismatch[]>([])
 
   const logBlockedMutation = (noteId: string, action: 'UPDATE' | 'DELETE') => {
@@ -80,15 +86,26 @@ export function EvolutionNotesForm({
     })
   }
 
-  const showBlocked = (message: string) => {
+  const showBlocked = (message: string, issues: EvolutionNoteValidationIssue[] = []) => {
     setBlockedMessage(message)
-    window.setTimeout(() => setBlockedMessage(''), 8000)
+    setSignValidationIssues(issues)
+    window.setTimeout(() => {
+      setBlockedMessage('')
+      setSignValidationIssues([])
+    }, 12000)
   }
 
   const canAddNote = allowNewNotes && !disabled
 
   const addNote = () => {
-    if (!canAddNote) return
+    if (!canAddNote) {
+      showBlocked(
+        disabled
+          ? 'La sección de evoluciones está deshabilitada; no se pueden agregar notas.'
+          : 'No está permitido agregar nuevas notas en este contexto.',
+      )
+      return
+    }
     const draft = createEmptyEvolutionNote(
       professionalName,
       professionalLicense,
@@ -133,28 +150,49 @@ export function EvolutionNotesForm({
     }
   }
 
+  const validationContext = {
+    paciente: paciente ?? {},
+    clinicConfig: {
+      documentType: user?.documentType,
+      documentNumber: professionalLicense || user?.documentNumber,
+      providerNit: user?.providerNit,
+      repsCode: user?.repsCode,
+    },
+  }
+
   const signNote = async (id: string) => {
-    if (disabled) return
+    if (disabled) {
+      showBlocked('La sección de evoluciones está deshabilitada; no se puede firmar.')
+      return
+    }
     const note = notes.find((item) => item.id === id)
     if (!note || isEvolutionNoteImmutable(note)) {
       showBlocked(EVOLUTION_NOTE_IMMUTABILITY_MESSAGE)
       return
     }
 
-    const issues = validateEvolutionNote(note)
+    const issues = validateEvolutionNote(note, validationContext)
     if (issues.length > 0) {
       const first = issues[0]
-      showBlocked(first?.message ?? 'Complete la nota antes de firmar.')
-      if (first?.field === 'cupsCode' || first?.field === 'codDiagnosticoPrincipal') {
-        window.setTimeout(() => focusEvolutionMissingField(note.id, first.field!), 40)
+      showBlocked(
+        formatEvolutionValidationIssues(issues) || first?.message || 'Complete la nota antes de firmar.',
+        issues,
+      )
+      if (first?.field) {
+        const field = first.field.includes('.') ? first.field.split('.').pop()! : first.field
+        if (field === 'cupsCode' || field === 'codDiagnosticoPrincipal' || field === 'date') {
+          window.setTimeout(() => focusEvolutionMissingField(note.id, field), 40)
+        }
       }
       return
     }
+    setSignValidationIssues([])
 
     if (user) {
       const mismatches = evaluateEvolutionRipsShield(note, user)
       if (mismatches.length > 0) {
         setShieldMismatches(mismatches)
+        showBlocked('Hay inconsistencias RIPS del profesional. Revise el procedimiento o el perfil ReTHUS.')
         return
       }
     }
@@ -173,9 +211,13 @@ export function EvolutionNotesForm({
         professionalLicense: note.professionalLicense?.trim() || professionalLicense,
         rethusFirma: rethusFirma || note.rethusFirma || undefined,
       }
-      const identityIssues = validateEvolutionNote(readyToSign)
+      const identityIssues = validateEvolutionNote(readyToSign, validationContext)
       if (identityIssues.length > 0) {
-        showBlocked(identityIssues[0]?.message ?? 'Complete la identidad del odontólogo antes de firmar.')
+        showBlocked(
+          formatEvolutionValidationIssues(identityIssues) ||
+            'Complete la identidad del odontólogo antes de firmar.',
+          identityIssues,
+        )
         return
       }
       const signed = await persistSignedEvolutionNoteCreate(patientId, readyToSign)
@@ -189,13 +231,20 @@ export function EvolutionNotesForm({
           user,
         })
       }
-    } catch {
-      showBlocked('No se pudo firmar y grabar la nota de evolución.')
+    } catch (error) {
+      showBlocked(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo firmar y grabar la nota de evolución.',
+      )
     }
   }
 
   const addAddendum = (parentId: string) => {
-    if (disabled) return
+    if (disabled) {
+      showBlocked('La sección de evoluciones está deshabilitada; no se pueden agregar aclaratorias.')
+      return
+    }
     const parent = notes.find((item) => item.id === parentId)
     if (!parent || !isEvolutionNoteImmutable(parent)) {
       showBlocked('Solo puede agregar aclaratorias a evoluciones ya firmadas.')
@@ -270,13 +319,29 @@ export function EvolutionNotesForm({
         )}
       </div>
 
-      {blockedMessage && (
-        <div
-          role="alert"
-          className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-        >
-          {blockedMessage}
+      {signValidationIssues.length > 0 ? (
+        <div className="mb-4">
+          <EvolutionRipsDiagnosticsPanel
+            title="No se puede firmar la evolución"
+            errors={signValidationIssues.map((issue) => ({
+              code: issue.code || 'EVOLUTION_VALIDATION',
+              field: issue.field || 'note',
+              message: issue.message,
+              fix: issue.fix,
+              scope: issue.scope,
+            }))}
+            patientFixHref={patientId ? `/pacientes/${patientId}` : undefined}
+          />
         </div>
+      ) : (
+        blockedMessage && (
+          <div
+            role="alert"
+            className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 whitespace-pre-wrap"
+          >
+            {blockedMessage}
+          </div>
+        )
       )}
 
       {notes.length === 0 ? (

@@ -16,6 +16,7 @@
     "build": "npm install pg@^8.23.0 --no-save && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test": "node --test shared/canonicalEvolutionRips.test.js shared/ripsEstructura.test.js src/utils/evolutionCupsGate.test.js src/utils/evolutionRipsPayload.test.js src/types/evolutionNoteRips.test.js",
     "rips:mensual": "node server/jobs/enviarRipsMensuales.js",
     "rips:mensual:dry": "node server/jobs/enviarRipsMensuales.js --dry-run",
     "analytics:backfill": "node server/scripts/backfillAnalyticsIndexer.js",

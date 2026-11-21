@@ -103,3 +103,23 @@ test('nota firmada sin CUPS permite override administrativo en ripsMetadata', ()
   assert.equal(noteHasValidCupsForRips(assigned), true)
   assert.equal(canEditAdminCupsOnLockedNote(assigned) && !adminCupsAlreadyAssigned(assigned), false)
 })
+
+test('prellena el CUPS visual desde el texto del procedimiento superior', () => {
+  const note = notaBase({
+    cupsCode: null,
+    procedure: '230101 — Exodoncia de dientes permanentes',
+    catalogServices: [
+      {
+        id: 's1',
+        procedure: '230101 — Exodoncia de dientes permanentes',
+        serviceName: '230101 — Exodoncia de dientes permanentes',
+        cupsCode: null,
+        requiereCupsRips: true,
+      },
+    ],
+    ripsMetadata: createDefaultEvolutionNoteRipsMetadata({ cupsCode: null }),
+  })
+  assert.equal(effectiveEvolutionCupsCode(note), '230101')
+  assert.equal(noteHasValidCupsForRips(note), true)
+  assert.equal(canEditAdminCupsOnLockedNote({ ...note, isLocked: true, signedAt: 'x', contentHash: 'y' }), false)
+})

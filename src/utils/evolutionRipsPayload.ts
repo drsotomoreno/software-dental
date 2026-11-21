@@ -6,6 +6,10 @@ import {
   isOdontologyConsultationCups,
 } from '../constants/rips.ts'
 import { documentoObligadoDigits } from '../../shared/nit.js'
+import {
+  applySinFacturaBillingContract,
+  validateCanonicalEvolutionRips,
+} from '../../shared/canonicalEvolutionRips.js'
 import { normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
 import type { DocumentType, RegimeType } from '../types/patient.ts'
 import type { EvolutionNote } from '../types/evolutionNote.ts'
@@ -20,18 +24,24 @@ import {
 } from '../types/evolutionNoteRips.ts'
 import type { RipsConsulta, RipsProcedimiento, RipsTransaction, RipsUsuario } from '../types/rips.ts'
 import { fechaHoraSesionClinica } from './clinicDateTime.ts'
-import { cupsDesdeTexto } from './cupsCodeResolve.ts'
+import {
+  resolveCanonicalCupsCodes,
+  resolveCanonicalCie10Principal,
+  resolveCanonicalEvolutionRips,
+} from './canonicalEvolutionRips.ts'
 
 const CUPS_PATTERN = /^\d{6}$/
 const COD_SERVICIO_ODONTOLOGIA = 344
 
 export class EvolutionRipsPayloadError extends Error {
   field: string
+  code?: string
 
-  constructor(message: string, field: string) {
+  constructor(message: string, field: string, code?: string) {
     super(message)
     this.name = 'EvolutionRipsPayloadError'
     this.field = field
+    this.code = code
   }
 }
 
@@ -72,30 +82,9 @@ function compactCie10(code: string): string {
   return code.replace(/[.\s]/g, '').toUpperCase()
 }
 
-function cupsDeFuente(value: string | null | undefined): string[] {
-  return cupsDesdeTexto(value).filter((cups) => CUPS_PATTERN.test(cups))
-}
-
+/** Fuente única: resolveCanonicalEvolutionRips / resolveCanonicalCupsCodes. */
 export function cupsValidosDeNota(note: EvolutionNote): string[] {
-  const vistos = new Set<string>()
-  const metadata = metadataDe(note)
-  const fuentes = [
-    note.cupsCode,
-    metadata.cupsCode,
-    note.serviceName,
-    ...(note.catalogServices ?? []).flatMap((service) =>
-      service.requiereCupsRips === false
-        ? []
-        : [service.cupsCode, service.procedure, service.serviceName],
-    ),
-    note.procedure,
-  ]
-  for (const fuente of fuentes) {
-    for (const cups of cupsDeFuente(fuente)) {
-      if (!vistos.has(cups)) vistos.add(cups)
-    }
-  }
-  return [...vistos]
+  return resolveCanonicalCupsCodes(note)
 }
 
 function tipoDocumento(tipo: string | null | undefined): string {
@@ -165,10 +154,14 @@ function costosPorCups(note: EvolutionNote, cups: string[], valorCero: boolean):
   const porCodigo = new Map<string, number>()
   for (const service of note.catalogServices ?? []) {
     if (service.requiereCupsRips === false || service.cost == null) continue
-    const code =
-      cupsDeFuente(service.cupsCode)[0] ??
-      cupsDeFuente(service.procedure)[0] ??
-      cupsDeFuente(service.serviceName)[0]
+    const code = resolveCanonicalCupsCodes({
+      ...note,
+      cupsCode: service.cupsCode,
+      procedure: service.procedure,
+      serviceName: service.serviceName,
+      catalogServices: [service],
+      ripsMetadata: undefined,
+    })[0]
     if (!code) continue
     porCodigo.set(code, Math.round(service.cost))
   }
@@ -183,8 +176,7 @@ function costosPorCups(note: EvolutionNote, cups: string[], valorCero: boolean):
 }
 
 /**
- * Validación previa al envío. No llama al MUV.
- * El campo `field` indica qué debe corregir el profesional.
+ * Validación previa al envío. Única fuente: validateCanonicalEvolutionRips.
  */
 export function validarEnvioRipsNota(input: EnvioRipsNotaInput): void {
   const { note, paciente } = input
@@ -193,56 +185,26 @@ export function validarEnvioRipsNota(input: EnvioRipsNotaInput): void {
     throw new EvolutionRipsPayloadError(
       'Firme la nota antes de preparar y enviar el RIPS.',
       'firma',
+      'NOTE_NOT_SIGNED',
     )
   }
 
-  const metadata = metadataDe(note)
-  const tipo = input.tipoVinculacion ?? metadata.tipoVinculacionFinanciera
-  const cie10 = compactCie10(metadata.codDiagnosticoPrincipal)
-  if (!cie10 || !CIE10_RIPS_PATTERN.test(cie10)) {
-    throw new EvolutionRipsPayloadError(
-      'El diagnóstico principal CIE-10 es obligatorio para RIPS.',
-      'codDiagnosticoPrincipal',
-    )
-  }
+  const noteForResolve =
+    input.tipoVinculacion && input.tipoVinculacion !== note.ripsMetadata?.tipoVinculacionFinanciera
+      ? {
+          ...note,
+          ripsMetadata: {
+            ...metadataDe(note),
+            tipoVinculacionFinanciera: input.tipoVinculacion,
+          },
+        }
+      : note
 
-  if (cupsValidosDeNota(note).length === 0) {
-    throw new EvolutionRipsPayloadError(
-      'Asigne un CUPS válido de 6 dígitos antes de enviar el RIPS.',
-      'cupsCode',
-    )
-  }
-
-  if (tipo === 'recibo_interno' && !metadata.idReciboAsociado?.trim()) {
-    throw new EvolutionRipsPayloadError(
-      'Seleccione un recibo de caja válido del paciente.',
-      'idReciboAsociado',
-    )
-  }
-  if (tipo === 'fev' && !metadata.idFacturaElectronica?.trim()) {
-    throw new EvolutionRipsPayloadError(
-      'Seleccione una factura electrónica válida del paciente.',
-      'idFacturaElectronica',
-    )
-  }
-
-  if (!paciente.documentNumber?.trim()) {
-    throw new EvolutionRipsPayloadError(
-      'El número de documento del paciente es obligatorio para el RIPS.',
-      'numDocumentoIdentificacion',
-    )
-  }
-  if (!paciente.birthDate?.trim()) {
-    throw new EvolutionRipsPayloadError(
-      'La fecha de nacimiento del paciente es obligatoria para el RIPS.',
-      'fechaNacimiento',
-    )
-  }
-  if (!input.prestador.documentNumber?.trim()) {
-    throw new EvolutionRipsPayloadError(
-      'El documento del prestador es obligatorio para el RIPS.',
-      'numDocumentoIdentificacionPrestador',
-    )
+  const resolved = resolveCanonicalEvolutionRips(noteForResolve, paciente, input.prestador)
+  const validation = validateCanonicalEvolutionRips(resolved, 'send')
+  if (!validation.valid) {
+    const first = validation.errors[0]!
+    throw new EvolutionRipsPayloadError(first.message, first.field, first.code)
   }
 }
 
@@ -254,6 +216,8 @@ function lineaComun(
   const metadata = metadataDe(input.note)
   const tipo = input.tipoVinculacion ?? metadata.tipoVinculacionFinanciera
   const prestadorDoc = tipoDocumento(input.prestador.documentType)
+  const cie10 =
+    resolveCanonicalCie10Principal(input.note) || compactCie10(metadata.codDiagnosticoPrincipal)
   return {
     codPrestador: codPrestadorDe(input.prestador),
     fechaInicioAtencion: fechaAtencionRips(input.note.date || input.note.signedAt || input.note.createdAt),
@@ -264,7 +228,7 @@ function lineaComun(
     finalidadTecnologiaSalud: metadata.finalidadTecnologia || RIPS_FINALIDAD_TECNOLOGIA_DEFAULT,
     tipoDocumentoIdentificacion: prestadorDoc,
     numDocumentoIdentificacion: String(input.prestador.documentNumber).replace(/[^A-Za-z0-9]/g, ''),
-    codDiagnosticoPrincipal: compactCie10(metadata.codDiagnosticoPrincipal),
+    codDiagnosticoPrincipal: cie10,
     vrServicio,
     conceptoRecaudo:
       tipo === 'valor_cero'
@@ -285,6 +249,13 @@ export function armarRipsNotaEvolucion(input: EnvioRipsNotaInput): RipsTransacti
   const metadata = metadataDe(input.note)
   const tipo = input.tipoVinculacion ?? metadata.tipoVinculacionFinanciera
   const cups = cupsValidosDeNota(input.note)
+  if (cups.length === 0) {
+    throw new EvolutionRipsPayloadError(
+      'Asigne un CUPS válido de 6 dígitos antes de enviar el RIPS.',
+      'cupsCode',
+      'CUPS_REQUIRED',
+    )
+  }
   const costos = costosPorCups(input.note, cups, tipo === 'valor_cero')
   const cie11Vacio = {
     codDiagnosticoPrincipalCIE11: '',
@@ -366,7 +337,7 @@ export function armarRipsNotaEvolucion(input: EnvioRipsNotaInput): RipsTransacti
   }
 
   const numFactura = tipo === 'fev' ? soporteDe(input, tipo) : null
-  return normalizarEstructuraRips({
+  const base = normalizarEstructuraRips({
     numDocumentoIdObligado:
       documentoObligadoDigits(input.prestador.providerNit) ||
       documentoObligadoDigits(input.prestador.documentNumber) ||
@@ -375,7 +346,12 @@ export function armarRipsNotaEvolucion(input: EnvioRipsNotaInput): RipsTransacti
     tipoNota: null,
     numNota: null,
     usuarios: [usuario],
-  }) as RipsTransaction
+  })
+  // CargarRipsSinFactura: numFactura null + tipoNota RS + numNota (RVG06).
+  if (tipo !== 'fev') {
+    return applySinFacturaBillingContract(base, Date.now()) as RipsTransaction
+  }
+  return base as RipsTransaction
 }
 
 export function mensajeCampoRips(error: EvolutionRipsPayloadError): string {

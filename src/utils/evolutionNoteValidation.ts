@@ -1,10 +1,11 @@
 import { isNonRipsEvolutionNote, isEvolutionNoteAddendum, type EvolutionNote } from '@/types/evolutionNote'
 import { noteHasCatalogServices, resolveEvolutionNoteRipsMode } from '@/utils/evolutionCatalogServices'
 import {
-  noteHasValidCupsForRips,
-  noteHasValidPrincipalCie10,
-  noteRequiresCupsAndCie10ForClose,
-} from '@/utils/evolutionCupsGate'
+  formatCanonicalRipsErrors,
+  resolveAndValidateCanonicalEvolutionRips,
+  type CanonicalRipsValidationError,
+} from '@/utils/canonicalEvolutionRips'
+import type { PacienteRipsIdentidad } from '@/utils/evolutionRipsPayload'
 import { collectEvolutionAssociationIssues } from '@/utils/evolutionNoteAssociation'
 import { MIN_SIGNATURE_STROKES } from '@/types/signature'
 
@@ -12,6 +13,14 @@ export interface EvolutionNoteValidationIssue {
   noteId: string
   field?: string
   message: string
+  code?: string
+  fix?: string
+  scope?: CanonicalRipsValidationError['scope']
+}
+
+export interface EvolutionNoteValidationContext {
+  paciente?: PacienteRipsIdentidad | Record<string, unknown>
+  clinicConfig?: Record<string, unknown>
 }
 
 function validarFirmaOdontologo(
@@ -44,10 +53,13 @@ export function isEvolutionNoteExemptFromRips(
 }
 
 /**
- * Cierre de evolución: únicamente firma del odontólogo + ID profesional + ReTHUS.
+ * Cierre de evolución: firma del odontólogo + ID/ReTHUS + contrato RIPS canónico.
  * No exige ni admite firma del paciente (Res. 1995/1999).
  */
-export function validateEvolutionNote(note: EvolutionNote): EvolutionNoteValidationIssue[] {
+export function validateEvolutionNote(
+  note: EvolutionNote,
+  context: EvolutionNoteValidationContext = {},
+): EvolutionNoteValidationIssue[] {
   const issues: EvolutionNoteValidationIssue[] = []
 
   if (isEvolutionNoteAddendum(note)) {
@@ -157,34 +169,52 @@ export function validateEvolutionNote(note: EvolutionNote): EvolutionNoteValidat
     })
   }
 
-  if (noteRequiresCupsAndCie10ForClose(note)) {
-    if (!noteHasValidCupsForRips(note)) {
-      issues.push({
-        noteId: note.id,
-        field: 'cupsCode',
-        message:
-          'El código CUPS (6 dígitos) y el diagnóstico CIE-10 principal son obligatorios para cerrar la evolución. Asigne un CUPS válido antes de firmar.',
-      })
-    }
-    if (!noteHasValidPrincipalCie10(note)) {
-      issues.push({
-        noteId: note.id,
-        field: 'codDiagnosticoPrincipal',
-        message:
-          'El código CUPS (6 dígitos) y el diagnóstico CIE-10 principal son obligatorios para cerrar la evolución. Indique el CIE-10 principal antes de firmar.',
-      })
-    }
+  const { validation } = resolveAndValidateCanonicalEvolutionRips(
+    note,
+    context.paciente ?? {},
+    context.clinicConfig ?? {
+      documentNumber: note.professionalLicense,
+    },
+    'sign',
+  )
+  for (const error of validation.errors) {
+    issues.push({
+      noteId: note.id,
+      field: error.field,
+      message: error.message,
+      code: error.code,
+      fix: error.fix,
+      scope: error.scope,
+    })
   }
 
   return issues
 }
 
-export function validateEvolutionNotes(notes: EvolutionNote[]): EvolutionNoteValidationIssue[] {
-  return notes.flatMap(validateEvolutionNote)
+export function validateEvolutionNotes(
+  notes: EvolutionNote[],
+  context: EvolutionNoteValidationContext = {},
+): EvolutionNoteValidationIssue[] {
+  return notes.flatMap((note) => validateEvolutionNote(note, context))
 }
 
 export function getFirstEvolutionNoteIssue(
   notes: EvolutionNote[],
+  context: EvolutionNoteValidationContext = {},
 ): EvolutionNoteValidationIssue | null {
-  return validateEvolutionNotes(notes)[0] ?? null
+  return validateEvolutionNotes(notes, context)[0] ?? null
+}
+
+export function formatEvolutionValidationIssues(
+  issues: EvolutionNoteValidationIssue[],
+): string {
+  return formatCanonicalRipsErrors(
+    issues.map((issue) => ({
+      code: issue.code || 'EVOLUTION_VALIDATION',
+      field: issue.field || 'note',
+      message: issue.message,
+      fix: issue.fix,
+      scope: issue.scope,
+    })),
+  )
 }

@@ -23,9 +23,27 @@ function identityHeaders() {
 }
 
 async function parseJson<T>(response: Response): Promise<T> {
-  const data = await response.json()
-  if (!response.ok && !('success' in data)) {
-    throw new Error((data as { error?: string }).error ?? `Error HTTP ${response.status}`)
+  let data: unknown
+  try {
+    data = await response.json()
+  } catch {
+    throw new Error(`Error HTTP ${response.status}: el servidor RIPS no devolvió JSON.`)
+  }
+  const body = (data ?? {}) as {
+    success?: boolean
+    ok?: boolean
+    cuv?: string | null
+    error?: string
+    message?: string
+  }
+  if (!response.ok) {
+    // Resultado estructurado (success/ok/cuv): el caller muestra RVG / rechazo MUV.
+    if ('success' in body || 'ok' in body || 'cuv' in body) {
+      return data as T
+    }
+    throw new Error(
+      body.error || body.message || `Error HTTP ${response.status} al contactar /api/rips`,
+    )
   }
   return data as T
 }

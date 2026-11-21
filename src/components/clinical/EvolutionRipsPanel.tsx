@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { CheckCircle2, Download, Rocket, Save } from 'lucide-react'
+import { CheckCircle2, Download, Loader2, Rocket, Save } from 'lucide-react'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/useToast'
@@ -19,9 +19,15 @@ import {
   adminCupsAlreadyAssigned,
   canEditAdminCupsOnLockedNote,
   effectiveEvolutionCupsCode,
+  focusEvolutionMissingField,
   isValidEvolutionCupsCode,
   normalizeEvolutionCupsDigits,
 } from '@/utils/evolutionCupsGate'
+import {
+  resolveAndValidateCanonicalEvolutionRips,
+  type CanonicalRipsValidationError,
+} from '@/utils/canonicalEvolutionRips'
+import { EvolutionRipsDiagnosticsPanel } from './EvolutionRipsDiagnosticsPanel'
 import { evaluarTransmisionAnticipo } from '../../../shared/reciboAnticipoRips.js'
 import type { OrthodonticsPaymentRecord, PaymentRecord } from '@/types/clinicalRecord'
 import {
@@ -92,24 +98,27 @@ function tipoEfectivo(note: EvolutionNote): TipoVinculacionFinanciera {
   return 'recibo_interno'
 }
 
-function documentoRipsDeNota(note: EvolutionNote) {
+function documentoRipsDeNota(note: EvolutionNote, paciente?: PacienteRipsIdentidad) {
   const metadata = metadataDe(note)
+  const resolved = resolveAndValidateCanonicalEvolutionRips(note, paciente ?? {}, {}, 'send').resolved
   return {
-    codDiagnosticoPrincipal: metadata.codDiagnosticoPrincipal,
-    tipoVinculacionFinanciera: metadata.tipoVinculacionFinanciera,
-    idReciboAsociado: metadata.idReciboAsociado,
-    idFacturaElectronica: metadata.idFacturaElectronica,
+    codDiagnosticoPrincipal: resolved.cie10Principal || metadata.codDiagnosticoPrincipal,
+    tipoVinculacionFinanciera: resolved.tipoVinculacion,
+    idReciboAsociado: resolved.idReciboAsociado,
+    idFacturaElectronica: resolved.idFacturaElectronica,
     causaMotivoAtencion: metadata.causaMotivoAtencion,
     finalidadTecnologia: metadata.finalidadTecnologia,
     conceptoRecaudo: metadata.conceptoRecaudo,
-    cups: note.cupsCode ?? null,
+    cups: resolved.primaryCups || null,
+    cupsCodes: resolved.cupsCodes,
     procedimiento: note.procedure,
-    fechaAtencion: note.date,
+    fechaAtencion: resolved.fechaAtencion || note.date,
     vrServicio:
-      metadata.tipoVinculacionFinanciera === 'valor_cero'
+      resolved.billingMode === 'valor_cero'
         ? 0
         : (note.valorProcedimiento ?? note.cost ?? 0),
     cuv: metadata.cuv,
+    billingMode: resolved.billingMode,
   }
 }
 
@@ -186,18 +195,39 @@ export function EvolutionRipsPanel({
   const metadata = metadataDe(note)
   const tipo = tipoEfectivo(note)
   const valorCero = tipo === 'valor_cero'
-  const cupsEfectivo = effectiveEvolutionCupsCode(note)
+  const canonicalPreview = useMemo(
+    () =>
+      resolveAndValidateCanonicalEvolutionRips(
+        { ...note, ripsMetadata: { ...metadataDe(note), tipoVinculacionFinanciera: tipoEfectivo(note) } },
+        paciente ?? {},
+        {},
+        'send',
+      ),
+    [note, paciente],
+  )
+  const cupsEfectivo = canonicalPreview.resolved.primaryCups || effectiveEvolutionCupsCode(note)
   const adminCupsEditable =
     clinicalLocked && canEditAdminCupsOnLockedNote(note) && !adminCupsAlreadyAssigned(note)
   const cupsBloqueado =
     disabled || (clinicalLocked && !adminCupsEditable) || adminCupsAlreadyAssigned(note)
-  const [isLoading, setIsLoading] = useState(false)
+  const [isSendingRips, setIsSendingRips] = useState(false)
   const [verCuv, setVerCuv] = useState(false)
   const [modalAnticipo, setModalAnticipo] = useState(false)
   const [mensajeLocal, setMensajeLocal] = useState('')
+  const [validationErrors, setValidationErrors] = useState<CanonicalRipsValidationError[]>([])
   const [cupsDraft, setCupsDraft] = useState(cupsEfectivo)
   const [guardandoCups, setGuardandoCups] = useState(false)
   const { toastMessage, showToast, clearToast } = useToast(8000)
+
+  const clinicConfig = useMemo(
+    () => ({
+      documentType: user?.documentType,
+      documentNumber: user?.documentNumber || note.professionalLicense,
+      providerNit: user?.providerNit,
+      repsCode: user?.repsCode,
+    }),
+    [user?.documentType, user?.documentNumber, user?.providerNit, user?.repsCode, note.professionalLicense],
+  )
 
   useEffect(() => {
     setCupsDraft(cupsEfectivo)
@@ -292,15 +322,36 @@ export function EvolutionRipsPanel({
   }
 
   const guardarCupsAdministrativo = async () => {
-    if (!adminCupsEditable || guardandoCups) return
+    if (guardandoCups) {
+      reportarFalloEnvio('Ya se está guardando el CUPS administrativo.')
+      return
+    }
+    if (!adminCupsEditable) {
+      reportarFalloEnvio(
+        'Esta evolución no admite CUPS administrativo (ya tiene CUPS válido o no requiere RIPS).',
+        'cupsCode',
+      )
+      return
+    }
     const digits = normalizeEvolutionCupsDigits(cupsDraft)
     if (!isValidEvolutionCupsCode(digits)) {
-      setMensajeLocal(
+      reportarFalloEnvio(
         'Ingrese un código CUPS válido de 6 dígitos para completar la vinculación administrativa.',
+        'cupsCode',
+        [
+          {
+            code: 'CUPS_REQUIRED',
+            field: 'cupsCode',
+            message: 'Ingrese un código CUPS válido de 6 dígitos.',
+            fix: 'Digite el CUPS administrativo y pulse Guardar.',
+            scope: 'clinical',
+          },
+        ],
       )
       return
     }
     setMensajeLocal('')
+    setValidationErrors([])
     setGuardandoCups(true)
     try {
       publicar({ ripsMetadata: { cupsCode: digits } })
@@ -350,8 +401,22 @@ export function EvolutionRipsPanel({
 
   const vincular = (id: string) => {
     const opcion = visibles.find((item) => item.id === id)
-    if (!opcion) return
+    if (!opcion) {
+      setMensajeLocal('No se encontró el comprobante seleccionado. Elija otro recibo o FEV.')
+      setValidationErrors([
+        {
+          code: 'BILLING_LINK_MISSING',
+          field: tipo === 'fev' ? 'idFacturaElectronica' : 'idReciboAsociado',
+          message: 'No se encontró el comprobante seleccionado.',
+          fix: 'Vuelva a elegir un recibo o factura electrónica de la lista.',
+          scope: 'billing',
+        },
+      ])
+      showToast('No se encontró el comprobante seleccionado.')
+      return
+    }
     setMensajeLocal('')
+    setValidationErrors([])
     publicar({
       pagoId: opcion.id,
       numeroSoportePago: opcion.consecutivo,
@@ -381,11 +446,19 @@ export function EvolutionRipsPanel({
   })
 
   const descargarJson = () => {
-    let doc: object = documentoRipsDeNota(note)
+    let doc: object = documentoRipsDeNota(note, paciente)
     try {
       doc = armarRipsNotaEvolucion(entradaRips())
-    } catch {
-      doc = documentoRipsDeNota(note)
+    } catch (error) {
+      const detalle =
+        error instanceof EvolutionRipsPayloadError
+          ? mensajeCampoRips(error)
+          : error instanceof Error
+            ? error.message
+            : 'El JSON aún está incompleto; se descarga el borrador canónico.'
+      setMensajeLocal(detalle)
+      showToast(detalle)
+      doc = documentoRipsDeNota(note, paciente)
     }
     descargarTexto(
       `RIPS_nota_${note.id.slice(0, 8)}.json`,
@@ -395,7 +468,11 @@ export function EvolutionRipsPanel({
   }
 
   const descargarCuv = () => {
-    if (!metadata.cuv) return
+    if (!metadata.cuv) {
+      setMensajeLocal('No hay CUV para descargar. Envíe primero el RIPS al MUV.')
+      showToast('No hay CUV para descargar. Envíe primero el RIPS al MUV.')
+      return
+    }
     descargarTexto(`CUV_${metadata.cuv}.txt`, metadata.cuv, 'text/plain;charset=utf-8')
   }
 
@@ -403,23 +480,74 @@ export function EvolutionRipsPanel({
     field?: string | null
     error?: string
     message?: string
+    code?: string
     estadoMuv?: string
     localIssues?: Array<{ level: string; field?: string; message: string }>
-    ministryErrors?: Array<{ message: string }>
+    ministryErrors?: Array<{ code?: string; message: string }>
+    errors?: Array<{ code?: string; message?: string; path?: string }>
   }) => {
     const issue = resultado.localIssues?.find((item) => item.level !== 'warning' && item.message)
-    const field = resultado.field || issue?.field || null
+    const ministry = resultado.ministryErrors?.find((item) => item.message)
+    const rvg = resultado.errors?.find((item) => item.message || item.code)
+    const field = resultado.field || issue?.field || rvg?.path || null
+    const code = resultado.code || ministry?.code || rvg?.code || null
     const message =
       issue?.message ||
-      resultado.ministryErrors?.find((item) => item.message)?.message ||
+      ministry?.message ||
+      rvg?.message ||
       resultado.error ||
       resultado.message ||
       (resultado.estadoMuv === 'RECHAZADO' ? 'El MUV rechazó el RIPS.' : 'El MUV no devolvió un CUV.')
-    return field ? `${field}: ${message}` : message
+    const withCode = code ? `${code}: ${message}` : message
+    return field ? `${field}: ${withCode}` : withCode
+  }
+
+  const reportarFalloEnvio = (
+    detalle: string,
+    field?: string | null,
+    errors?: CanonicalRipsValidationError[],
+  ) => {
+    const texto = detalle.trim() || 'No se pudo enviar el RIPS al MUV.'
+    setMensajeLocal(texto)
+    setValidationErrors(
+      errors?.length
+        ? errors
+        : [
+            {
+              code: 'RIPS_SEND_FAILED',
+              field: field || 'rips',
+              message: texto,
+              scope: field?.startsWith('patient.')
+                ? 'patient'
+                : field === 'cupsCode' || field === 'codDiagnosticoPrincipal' || field === 'date'
+                  ? 'clinical'
+                  : field?.includes('Factura') || field?.includes('Recibo') || field === 'idFacturaElectronica' || field === 'idReciboAsociado'
+                    ? 'billing'
+                    : 'clinical',
+            },
+          ],
+    )
+    showToast(texto)
+    const focusField =
+      field === 'cupsCode' || field === 'codDiagnosticoPrincipal'
+        ? field
+        : errors?.find((item) => item.field === 'cupsCode' || item.field === 'codDiagnosticoPrincipal')
+            ?.field
+    if (focusField === 'cupsCode' || focusField === 'codDiagnosticoPrincipal') {
+      window.setTimeout(() => focusEvolutionMissingField(note.id, focusField), 40)
+    }
   }
 
   const enviar = async () => {
-    if (isLoading) return
+    if (isSendingRips) {
+      reportarFalloEnvio('Ya hay un envío RIPS en curso. Espere a que termine.')
+      return
+    }
+    if (disabled) {
+      reportarFalloEnvio('La sección RIPS está deshabilitada; no se puede enviar.')
+      return
+    }
+
     if (esRecibo) {
       const ahora = evaluarTransmisionAnticipo({
         evoluciones: notasDelRecibo.map(notaAEvolucionRips),
@@ -428,46 +556,113 @@ export function EvolutionRipsPanel({
       })
       if (!ahora.puedeTransmitir) {
         setModalAnticipo(true)
-        setMensajeLocal(ahora.message)
+        reportarFalloEnvio(ahora.message || 'El paquete de anticipo aún no puede transmitirse.')
         return
       }
     }
+
     setMensajeLocal('')
-    setIsLoading(true)
+    setValidationErrors([])
+    setIsSendingRips(true)
     try {
+      const noteForResolve = {
+        ...note,
+        ripsMetadata: {
+          ...metadata,
+          tipoVinculacionFinanciera: tipo,
+        },
+      }
+      const { resolved, validation } = resolveAndValidateCanonicalEvolutionRips(
+        noteForResolve,
+        paciente ?? {},
+        clinicConfig,
+        'send',
+      )
+      if (!validation.valid) {
+        reportarFalloEnvio(
+          validation.errors.map((item) => `${item.field}: ${item.message}`).join('\n'),
+          validation.errors[0]?.field,
+          validation.errors,
+        )
+        return
+      }
+
       const entrada = entradaRips()
       try {
         armarRipsNotaEvolucion(entrada)
       } catch (error) {
         if (error instanceof EvolutionRipsPayloadError) {
-          setMensajeLocal(mensajeCampoRips(error))
+          reportarFalloEnvio(mensajeCampoRips(error), error.field)
           return
         }
         throw error
       }
 
-      const preparado = applyEvolutionNoteRipsMetadata(note, {
-        ...metadata,
-        tipoVinculacionFinanciera: tipo,
-        ripsEstado: 'preparado',
-      })
-      const lista = preparado.ripsMetadata
-      if (!lista) return
-      const rips = armarRipsNotaEvolucion({ ...entrada, note: { ...note, ripsMetadata: lista } })
-      const resultado = await routeDictatedEvolutionByFiscalProfile({
-        rips,
-        cie10: [lista.codDiagnosticoPrincipal],
-        cups: rips.usuarios.flatMap((usuario) => [
-          ...(usuario.servicios.consultas ?? []).map((consulta) => consulta.codConsulta),
-          ...(usuario.servicios.procedimientos ?? []).map((procedimiento) => procedimiento.codProcedimiento),
-        ]),
-        metadatos: {
-          patientUuid: patientId || undefined,
-          patientDocument: paciente?.documentNumber,
+      let lista
+      try {
+        const preparado = applyEvolutionNoteRipsMetadata(note, {
+          ...metadata,
           tipoVinculacionFinanciera: tipo,
-          canal: tipo === 'fev' ? 'fev' : 'sin_factura',
-        },
-      })
+          // Sidecar: sincroniza CIE-10 / CUPS canónicos sin tocar el hash clínico.
+          codDiagnosticoPrincipal:
+            resolved.cie10Principal || metadata.codDiagnosticoPrincipal || '',
+          cupsCode: metadata.cupsCode || resolved.primaryCups || null,
+          ripsEstado: 'preparado',
+        })
+        lista = preparado.ripsMetadata
+      } catch (error) {
+        const detalle =
+          error instanceof EvolutionNoteRipsMetadataError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : 'No se pudo preparar la metadata RIPS.'
+        reportarFalloEnvio(detalle)
+        return
+      }
+
+      if (!lista) {
+        reportarFalloEnvio('No se pudo preparar la metadata RIPS de la nota.')
+        return
+      }
+
+      const rips = armarRipsNotaEvolucion({ ...entrada, note: { ...note, ripsMetadata: lista } })
+      let resultado
+      try {
+        resultado = await routeDictatedEvolutionByFiscalProfile({
+          rips,
+          cie10: [lista.codDiagnosticoPrincipal],
+          cups: rips.usuarios.flatMap((usuario) => [
+            ...(usuario.servicios.consultas ?? []).map((consulta) => consulta.codConsulta),
+            ...(usuario.servicios.procedimientos ?? []).map(
+              (procedimiento) => procedimiento.codProcedimiento,
+            ),
+          ]),
+          metadatos: {
+            patientUuid: patientId || undefined,
+            patientDocument: paciente?.documentNumber,
+            tipoVinculacionFinanciera: tipo,
+            canal: tipo === 'fev' ? 'fev' : 'sin_factura',
+          },
+        })
+      } catch (error) {
+        const detalle =
+          error instanceof Error
+            ? error.message
+            : 'Error HTTP al contactar /api/rips (revise red o sesión).'
+        reportarFalloEnvio(detalle)
+        publicar({
+          ripsMetadata: {
+            ...lista,
+            ripsEstado: 'error',
+            ripsErrorLog: detalle,
+            cuv: null,
+            ripsFechaTransmision: null,
+          },
+        })
+        return
+      }
+
       const cuv = resultado.cuv?.trim()
       if (cuv) {
         const fechaTx = new Date().toISOString()
@@ -488,9 +683,12 @@ export function EvolutionRipsPanel({
           fecha_radicacion: fechaTx,
         })
         setVerCuv(true)
+        setMensajeLocal('')
+        setValidationErrors([])
         showToast(`RIPS transmitido. CUV: ${cuv}`)
         return
       }
+
       if (resultado.ok && resultado.route === 'guardarRIPS_Pendiente') {
         publicar({
           ripsMetadata: {
@@ -504,7 +702,9 @@ export function EvolutionRipsPanel({
         showToast(resultado.message || 'El RIPS quedó preparado. El MUV aún no devolvió un CUV.')
         return
       }
+
       const detalle = rechazoMuv(resultado)
+      reportarFalloEnvio(detalle, resultado.field)
       publicar({
         ripsMetadata: {
           ...lista,
@@ -515,6 +715,7 @@ export function EvolutionRipsPanel({
         },
       })
     } catch (error) {
+      const field = error instanceof EvolutionRipsPayloadError ? error.field : null
       const detalle =
         error instanceof EvolutionRipsPayloadError
           ? mensajeCampoRips(error)
@@ -523,10 +724,7 @@ export function EvolutionRipsPanel({
             : error instanceof Error
               ? error.message
               : 'No se pudo enviar el RIPS.'
-      if (error instanceof EvolutionRipsPayloadError || error instanceof EvolutionNoteRipsMetadataError) {
-        setMensajeLocal(detalle)
-        return
-      }
+      reportarFalloEnvio(detalle, field)
       publicar({
         ripsMetadata: {
           ripsEstado: 'error',
@@ -534,7 +732,7 @@ export function EvolutionRipsPanel({
         },
       })
     } finally {
-      setIsLoading(false)
+      setIsSendingRips(false)
     }
   }
 
@@ -557,7 +755,7 @@ export function EvolutionRipsPanel({
         data-evo-field="cupsCode"
       >
         <label className="label-field" htmlFor={`cups-rips-${note.id}`}>
-          Código CUPS <span className="text-red-500">*</span>
+          Código de servicio (6 dígitos) <span className="text-red-500">*</span>
         </label>
         <div className="flex flex-wrap items-end gap-2">
           <input
@@ -568,7 +766,7 @@ export function EvolutionRipsPanel({
             className="input-field max-w-[12rem] font-mono disabled:bg-slate-100"
             disabled={cupsBloqueado}
             value={cupsDraft}
-            placeholder="6 dígitos"
+            placeholder="Ej. 230101"
             onChange={(event) => aplicarCupsBorrador(event.target.value)}
             aria-invalid={cupsDraft.length > 0 && !isValidEvolutionCupsCode(cupsDraft)}
           />
@@ -589,9 +787,11 @@ export function EvolutionRipsPanel({
             ? 'Evolución cerrada sin CUPS válido: puede completar solo este campo administrativo para enviar el RIPS. El texto clínico no se modifica.'
             : adminCupsAlreadyAssigned(note)
               ? `CUPS administrativo ${metadata.cupsCode} registrado. El campo quedó bloqueado.`
-              : clinicalLocked
-                ? 'CUPS de la atención firmada (solo lectura).'
-                : 'Se autocompleta al elegir un procedimiento del catálogo; puede ajustarlo antes de firmar.'}
+              : cupsEfectivo
+                ? `CUPS ${cupsEfectivo} tomado del procedimiento de la evolución.`
+                : clinicalLocked
+                  ? 'CUPS de la atención firmada (solo lectura).'
+                  : 'Se autocompleta al elegir un procedimiento del catálogo; puede ajustarlo antes de firmar.'}
         </p>
       </div>
 
@@ -716,6 +916,38 @@ export function EvolutionRipsPanel({
         </p>
       )}
 
+      <EvolutionRipsDiagnosticsPanel
+        title="Diagnóstico RIPS / MUV"
+        errors={
+          validationErrors.length > 0
+            ? validationErrors
+            : metadata.ripsEstado === 'error' && metadata.ripsErrorLog
+              ? [
+                  {
+                    code: 'RIPS_PREVIOUS_ERROR',
+                    field: 'rips',
+                    message: metadata.ripsErrorLog,
+                    scope: 'billing',
+                  },
+                ]
+              : mensajeLocal
+                ? [
+                    {
+                      code: 'RIPS_LOCAL_MESSAGE',
+                      field: 'rips',
+                      message: mensajeLocal,
+                      scope: 'clinical',
+                    },
+                  ]
+                : []
+        }
+        onRetry={transmitido ? undefined : () => void enviar()}
+        retryLabel="Reintentar envío al MUV"
+        disabled={disabled}
+        isSubmitting={isSendingRips}
+        patientFixHref={patientId ? `/pacientes/${patientId}` : undefined}
+      />
+
       <div className="mt-4 flex flex-col gap-2 border-t border-dental-100 pt-3 sm:flex-row sm:flex-wrap sm:items-center">
         {transmitido ? (
           <button
@@ -732,11 +964,19 @@ export function EvolutionRipsPanel({
             type="button"
             className="btn-primary"
             onClick={() => void enviar()}
-            disabled={disabled || isLoading}
-            aria-busy={isLoading}
+            disabled={disabled || isSendingRips}
+            aria-busy={isSendingRips}
           >
-            <Rocket className="mr-2 h-4 w-4" aria-hidden />
-            {isLoading ? 'Enviando RIPS…' : esRecibo ? 'Enviar RIPS al MUV' : 'Preparar y enviar RIPS'}
+            {isSendingRips ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <Rocket className="mr-2 h-4 w-4" aria-hidden />
+            )}
+            {isSendingRips
+              ? 'Enviando al MUV…'
+              : esRecibo
+                ? 'Enviar RIPS al MUV'
+                : 'Preparar y enviar RIPS'}
           </button>
         )}
         <button type="button" className="btn-secondary text-xs" onClick={descargarJson} disabled={disabled}>
@@ -755,16 +995,6 @@ export function EvolutionRipsPanel({
         <p className="mt-3 rounded-lg border border-emerald-200 bg-white px-3 py-2 font-mono text-xs text-emerald-900">
           CUV: {metadata.cuv}
           {metadata.ripsFechaTransmision ? ` · ${metadata.ripsFechaTransmision}` : ''}
-        </p>
-      )}
-      {mensajeLocal && (
-        <p role="alert" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {mensajeLocal}
-        </p>
-      )}
-      {metadata.ripsEstado === 'error' && metadata.ripsErrorLog && (
-        <p role="alert" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {metadata.ripsErrorLog}
         </p>
       )}
       <Toast message={toastMessage} onDismiss={clearToast} />
