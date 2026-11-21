@@ -82,6 +82,8 @@ import {
   esMenorDeEdad,
   guardianAuthorizationComplete,
 } from '@/utils/patientMinorAge'
+import { getNormalizedConsents } from '@/utils/consentHelpers'
+import type { SignedConsentRecord } from '@/types/consent'
 import { sortEvolutionNotesChronologically, verifyClinicalRecordIntegrity } from '@/utils/recordIntegrity'
 import {
   ensureEvolutionNoteOutboxCreate,
@@ -152,7 +154,7 @@ import { fetchPatientChartV2, subscribeEmrV2PatientUpdated } from '@/services/em
 import { localDraftBlocksRemoteOverwrite } from '../../shared/clinicalRevision.js'
 import { VoiceClinicalAssistant, type ClinicalVoiceContext } from '@/components/voice'
 import { confirmUserPassword } from '@/services/authService'
-import { createDigitalSignature, validateSignatureCapture } from '@/services/signatureService'
+import { createDigitalSignature } from '@/services/signatureService'
 import { registerTreatingDentistSignature } from '@/services/treatingDentistSignatureService'
 import type { SignatureCaptureResult } from '@/types/signature'
 import { ensureProfessionalDocument } from '@/services/professionalDocumentMemory'
@@ -358,8 +360,34 @@ export function PatientDetailPage() {
         return
       }
 
+      // CONSENT: preferir el borrador individual activo (documentId …:consentId).
       setClinicalData((prev) => {
         if (!prev) return prev
+        const documentId = String(detail.documentId || '')
+        const consentId = documentId.includes(':')
+          ? documentId.slice(documentId.indexOf(':') + 1)
+          : ''
+        const list = Array.isArray(prev.informedConsents) ? [...prev.informedConsents] : []
+        const index = list.findIndex(
+          (item) =>
+            item.id === consentId && item.status === 'draft' && !item.isLegacyUnified,
+        )
+        if (index >= 0) {
+          const current = list[index]
+          list[index] = {
+            ...current,
+            patientSignatureDataUrl: detail.signatureBase64,
+            textAccepted: true,
+            signerRole: detail.signerIsGuardian ? 'guardian' : current.signerRole,
+            ...(detail.signerIsGuardian
+              ? {
+                  guardianName: detail.signerName || current.guardianName,
+                  guardianDocument: detail.signerDocument || current.guardianDocument,
+                }
+              : {}),
+          }
+          return { ...prev, informedConsents: list }
+        }
         return {
           ...prev,
           informedConsent: {
@@ -557,6 +585,7 @@ export function PatientDetailPage() {
     serverVersion: clinicalServerVersion,
     markHydratedHash,
     seedServerVersion,
+    flushNowAndWait,
   } = useClinicalAutoSave({
     patientRouteId: patient?.syncId || id,
     clinicalData,
@@ -1538,69 +1567,26 @@ export function PatientDetailPage() {
     }
 
     const menor = esMenorDeEdad(patient.birthDate)
-    const consent = clinicalData.informedConsent
     const planAuth = clinicalData.treatmentPlanAuthorization
-
-    if (!consent.selectedConsentIds?.length) {
-      setMessage('Debe seleccionar al menos un consentimiento informado según el procedimiento.')
-      return false
-    }
-
-    if (!consent.textAccepted) {
-      setMessage(
-        menor
-          ? 'El representante legal debe aceptar el consentimiento informado.'
-          : 'El paciente debe aceptar el consentimiento informado.',
-      )
-      return false
-    }
-
-    if (
-      !guardianAuthorizationComplete(menor, consent.guardianName, consent.guardianDocument)
-    ) {
-      setMessage(
-        'El paciente es menor de edad: indique nombre y documento del acudiente / representante legal en el consentimiento.',
-      )
-      return false
-    }
-
-    if (!consent.patientSignatureDataUrl) {
-      setMessage(
-        menor
-          ? 'La firma del representante legal es obligatoria en el consentimiento.'
-          : 'La firma del paciente es obligatoria.',
-      )
-      return false
-    }
-
-    if (!consent.professionalSignatureDataUrl) {
-      setMessage('La firma del profesional es obligatoria.')
-      return false
-    }
-
-    const patientSigError = validateSignatureCapture(
-      consent.patientSignatureDataUrl && consent.patientSignatureMeta
-        ? {
-            dataUrl: consent.patientSignatureDataUrl,
-            metadata: consent.patientSignatureMeta,
-          }
-        : null,
+    const normalizedConsents = getNormalizedConsents(clinicalData)
+    const sealedConsents = normalizedConsents.filter(
+      (item) => item.status === 'signed' || item.isLegacyUnified === true,
     )
-    if (patientSigError) {
-      setMessage(patientSigError)
+    const openDrafts = normalizedConsents.filter(
+      (item) => item.status === 'draft' && !item.isLegacyUnified,
+    )
+
+    if (sealedConsents.length === 0) {
+      setMessage(
+        'Debe firmar al menos un consentimiento informado por procedimiento antes de cerrar la historia.',
+      )
       return false
     }
 
-    const professionalSigError = validateSignatureCapture(
-      consent.professionalSignatureDataUrl && consent.professionalSignatureMeta
-        ? {
-            dataUrl: consent.professionalSignatureDataUrl,
-            metadata: consent.professionalSignatureMeta,
-          }
-        : null,
-    )
-    if (professionalSigError) {
-      setMessage(professionalSigError)
+    if (openDrafts.length > 0) {
+      setMessage(
+        `Hay ${openDrafts.length} consentimiento(s) en borrador. Séllalos o descártalos antes de cerrar la historia.`,
+      )
       return false
     }
 
@@ -2608,6 +2594,18 @@ export function PatientDetailPage() {
           savedSignature={savedSignature}
           onSaveProfileSignature={handleSaveProfileSignature}
           onRegisterMainHistorySignature={registerMainHistorySignature}
+          onConsentImmediatePersist={async (informedConsents: SignedConsentRecord[]) => {
+            if (!id) return
+            const nextForm = clinicalData
+              ? { ...clinicalData, informedConsents }
+              : null
+            if (!nextForm) return
+            setClinicalData(nextForm)
+            await savePatientClinicalDraft(id, nextForm, odontogram, {
+              source: 'manual_flush',
+            })
+            await flushNowAndWait()
+          }}
 
         />
 

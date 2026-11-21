@@ -8,6 +8,7 @@ export function preserveEvolutionWorkflowStatus(existing: unknown, incoming: unk
 export function anamnesisHasContent(anamnesis: unknown): boolean
 export function stomatologicalExamHasContent(exam: unknown): boolean
 export function informedConsentHasContent(consent: unknown): boolean
+export function informedConsentsHaveContent(form: unknown): boolean
 export function treatmentPlanHasContent(plan: unknown): boolean
 export function specializedAnnexesHaveContent(annexes: unknown): boolean
 export function clinicalFormHasContent(form: unknown): boolean

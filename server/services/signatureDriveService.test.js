@@ -63,6 +63,47 @@ test('extrae data:image/png;base64 y lo sustituye por /api/drive/file', async ()
   assert.equal(payload.patients[0].payload.clinicalDraft.informedConsent.patientSignatureDataUrl, png)
 })
 
+test('informedConsents[] individual: offload + patientSignatureDriveId sin romper sello', async () => {
+  const patientPng = pngDataUrl('firma-consent-paciente'.repeat(200))
+  const proPng = pngDataUrl('firma-consent-odonto'.repeat(200))
+  const payload = {
+    clinicalDraft: {
+      informedConsents: [
+        {
+          id: 'c-orto',
+          templateId: 'ortodoncia_brackets',
+          status: 'signed',
+          signedAt: '2026-11-21T12:00:00.000Z',
+          contentHash: 'a'.repeat(64),
+          patientSignatureDataUrl: patientPng,
+          professionalSignatureDataUrl: proPng,
+        },
+      ],
+      informedConsent: {
+        selectedConsentIds: ['ortodoncia_brackets'],
+        patientSignatureDataUrl: pngDataUrl('legacy-unificado'.repeat(100)),
+      },
+    },
+  }
+  const result = await offloadSignaturesInPayload(payload, {
+    clinicId: 'clinic:demo',
+    isDriveConnected: async () => true,
+    uploadSignature: async () => ({ driveFileId: `drive-${Math.random().toString(16).slice(2, 8)}` }),
+  })
+  const row = result.payload.clinicalDraft.informedConsents[0]
+  assert.match(row.patientSignatureDataUrl, /^\/api\/drive\/file\//)
+  assert.match(row.professionalSignatureDataUrl, /^\/api\/drive\/file\//)
+  assert.equal(typeof row.patientSignatureDriveId, 'string')
+  assert.ok(row.patientSignatureDriveId.length > 0)
+  assert.equal(typeof row.professionalSignatureDriveId, 'string')
+  assert.equal(row.signedAt, '2026-11-21T12:00:00.000Z')
+  assert.equal(row.contentHash, 'a'.repeat(64))
+  assert.equal(row.patientSignatureDataUrl.includes('base64'), false)
+  const legacy = result.payload.clinicalDraft.informedConsent
+  assert.match(legacy.patientSignatureDataUrl, /^\/api\/drive\/file\//)
+  assert.ok(result.migrated >= 3)
+})
+
 test('sin Drive conectado conserva el base64 y lo marca para reintento', async () => {
   const png = pngDataUrl('firma-sin-drive')
   let uploads = 0

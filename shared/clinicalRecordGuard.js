@@ -13,6 +13,7 @@ import {
   mergeEvolutionAdminSidecar,
   recordHasSignedAt,
 } from './clinicalSeal.js'
+import { mergeConsentRecords } from './consentRecords.js'
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : ''
@@ -258,6 +259,24 @@ export function informedConsentHasContent(consent) {
   )
 }
 
+/** Consentimientos individuales (arreglo nuevo) o legado unificado. */
+export function informedConsentsHaveContent(form) {
+  if (!form || typeof form !== 'object') return false
+  if (Array.isArray(form.informedConsents) && form.informedConsents.length > 0) {
+    return form.informedConsents.some(
+      (item) =>
+        item &&
+        typeof item === 'object' &&
+        (text(item.status) === 'signed' ||
+          text(item.status) === 'revoked' ||
+          text(item.renderedTextSnapshot) ||
+          text(item.patientSignatureDataUrl) ||
+          text(item.professionalSignatureDataUrl)),
+    )
+  }
+  return informedConsentHasContent(form.informedConsent)
+}
+
 export function treatmentPlanHasContent(plan) {
   return (
     Array.isArray(plan) &&
@@ -341,7 +360,7 @@ export function clinicalFormHasContent(form) {
   if (text(form.findings) || text(form.diagnosisNotes) || text(form.treatmentPlanNotes)) return true
   if (treatmentPlanHasContent(form.treatmentPlan)) return true
   if (evolutionNotesHaveContent(form.evolutionNotes)) return true
-  if (informedConsentHasContent(form.informedConsent)) return true
+  if (informedConsentsHaveContent(form)) return true
   if (form.valuationConsent?.consentimientoValoracionAceptado) return true
   if (Array.isArray(form.budgetItems) && form.budgetItems.some((item) => text(item?.procedure))) {
     return true
@@ -365,7 +384,7 @@ export function clinicalDocumentRichness(record) {
     if (Array.isArray(form.diagnoses) && form.diagnoses.length > 0) score += 3
     if (text(form.findings) || text(form.diagnosisNotes)) score += 1
     if (treatmentPlanHasContent(form.treatmentPlan)) score += 2
-    if (informedConsentHasContent(form.informedConsent)) score += 2
+    if (informedConsentsHaveContent(form)) score += 2
     if (evolutionNotesHaveContent(form.evolutionNotes)) score += 4
     if (specializedAnnexesHaveContent(form.specializedAnnexes)) score += 2
     if (
@@ -520,7 +539,7 @@ const CLINICAL_SECTION_CHECKS = [
   (form) => specialtyBudgetHasContent(form.orthodonticsBudget),
   (form) => specialtyBudgetHasContent(form.dentalImplantsBudget),
   (form) => paymentControlHasContent(form),
-  (form) => informedConsentHasContent(form.informedConsent),
+  (form) => informedConsentsHaveContent(form),
 ]
 
 /** Una copia más nueva no puede dejar atrás secciones que la guardada sí tiene. */
@@ -602,6 +621,7 @@ export function mergeAdministrativeClinicalFields(sealedPrev, incoming) {
       findings: base.findings,
       treatmentPlan: base.treatmentPlan,
       informedConsent: base.informedConsent,
+      informedConsents: mergeConsentRecords(base.informedConsents, inc.informedConsents),
       treatingDentistSignature: base.treatingDentistSignature,
       signedAt: base.signedAt,
       contentHash: base.contentHash,

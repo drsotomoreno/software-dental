@@ -52,13 +52,24 @@ export function KioskRemoteTrigger({
       patientId,
       title: dataToSign.title || '',
       contentText: dataToSign.contentText || '',
+      consentQueue: dataToSign.consentQueue,
       formData: {
         ...(dataToSign.formData || {}),
         documentId,
         patientId,
+        ...(Array.isArray(dataToSign.consentQueue)
+          ? { consentQueue: dataToSign.consentQueue }
+          : {}),
       },
     }),
-    [dataToSign.contentText, dataToSign.formData, dataToSign.title, documentId, patientId],
+    [
+      dataToSign.consentQueue,
+      dataToSign.contentText,
+      dataToSign.formData,
+      dataToSign.title,
+      documentId,
+      patientId,
+    ],
   )
 
   useEffect(() => {

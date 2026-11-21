@@ -3,7 +3,9 @@
  * Google Drive (scope drive.file, misma cuenta OAuth de la clínica).
  *
  * Campos auditados (el walker es por nombre, no por una lista cerrada):
- * - informedConsent.patientSignatureDataUrl / professionalSignatureDataUrl
+ * - informedConsent.patientSignatureDataUrl / professionalSignatureDataUrl (legacy)
+ * - informedConsents[].patientSignatureDataUrl / professionalSignatureDataUrl (FASE 3)
+ *   → además escribe patientSignatureDriveId / professionalSignatureDriveId
  * - treatmentPlanAuthorization.patientSignatureDataUrl / professionalSignatureDataUrl
  * - treatingDentistSignature.signatureDataUrl
  * - evolutionNotes[].professionalSignatureDataUrl (y adendas)
@@ -234,6 +236,13 @@ export async function offloadSignaturesInPayload(payload, options = {}) {
         pendingRetry: false,
         pendingReason: null,
       }
+      // SignedConsentRecord (FASE 1+): IDs planos además del meta *Drive.
+      if (/patientSignatureDataUrl/i.test(hit.key)) {
+        hit.parent.patientSignatureDriveId = stored.driveFileId
+      }
+      if (/professionalSignatureDataUrl/i.test(hit.key)) {
+        hit.parent.professionalSignatureDriveId = stored.driveFileId
+      }
       migrated += 1
     } catch (error) {
       const reason = driveFailureReason(error)
@@ -247,6 +256,9 @@ export async function offloadSignaturesInPayload(payload, options = {}) {
     }
   }
 
+  // Alinea IDs planos en informedConsents[] si solo quedó el meta *Drive (rehidratación parcial).
+  syncConsentDriveIds(clone)
+
   const bytesAfter = jsonUtf8Bytes(clone)
   return {
     payload: clone,
@@ -256,5 +268,42 @@ export async function offloadSignaturesInPayload(payload, options = {}) {
     bytesBefore,
     bytesAfter,
     bytesSaved: Math.max(0, bytesBefore - bytesAfter),
+  }
+}
+
+/**
+ * Copia `*SignatureDrive.driveFileId` → `*SignatureDriveId` en cada SignedConsentRecord.
+ * No toca contentHash ni signedAt.
+ * @param {unknown} node
+ */
+export function syncConsentDriveIds(node, depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 12) return
+  if (Array.isArray(node)) {
+    for (const item of node) syncConsentDriveIds(item, depth + 1)
+    return
+  }
+  const record = /** @type {Record<string, unknown>} */ (node)
+  if (Array.isArray(record.informedConsents)) {
+    for (const consent of record.informedConsents) {
+      if (!consent || typeof consent !== 'object') continue
+      const row = /** @type {Record<string, unknown>} */ (consent)
+      const patientMeta =
+        row.patientSignatureDrive && typeof row.patientSignatureDrive === 'object'
+          ? /** @type {Record<string, unknown>} */ (row.patientSignatureDrive)
+          : null
+      const professionalMeta =
+        row.professionalSignatureDrive && typeof row.professionalSignatureDrive === 'object'
+          ? /** @type {Record<string, unknown>} */ (row.professionalSignatureDrive)
+          : null
+      if (!row.patientSignatureDriveId && patientMeta?.driveFileId) {
+        row.patientSignatureDriveId = String(patientMeta.driveFileId)
+      }
+      if (!row.professionalSignatureDriveId && professionalMeta?.driveFileId) {
+        row.professionalSignatureDriveId = String(professionalMeta.driveFileId)
+      }
+    }
+  }
+  for (const value of Object.values(record)) {
+    if (value && typeof value === 'object') syncConsentDriveIds(value, depth + 1)
   }
 }

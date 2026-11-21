@@ -124,10 +124,9 @@ import {
   corregirFechasSesionClinica,
   type EvolutionNote,
 } from '@/types/evolutionNote'
-import type { InformedConsent } from '@/types/consent'
 import type { UserProfile } from '@/types/user'
 import type { SignatureCaptureResult } from '@/types/signature'
-import { createEmptyConsent } from '@/types/consent'
+import { createEmptyConsent, type SignedConsentRecord } from '@/types/consent'
 import {
   createEmptyTreatmentPlanAuthorization,
   type TreatmentPlanAuthorization,
@@ -187,6 +186,10 @@ interface ClinicalHistoryFormProps {
     capture: SignatureCaptureResult,
     password: string,
   ) => Promise<{ ok: true } | { ok: false; error: string }>
+  /** Persistencia inmediata tras sellar/revocar un consentimiento individual. */
+  onConsentImmediatePersist?: (
+    consents: SignedConsentRecord[],
+  ) => void | Promise<void>
 }
 
 function showClinicalSection(activeSection: string, section: string): boolean {
@@ -218,6 +221,7 @@ export function createEmptyClinicalForm(
     orthodonticsPaymentControl: [],
     evolutionNotes: [],
     informedConsent: createEmptyConsent(professionalLicense, professionalRegistry),
+    informedConsents: [],
     treatmentPlanAuthorization: createEmptyTreatmentPlanAuthorization(professionalLicense),
   }
 }
@@ -252,6 +256,7 @@ export function ClinicalHistoryForm({
   savedSignature = null,
   onSaveProfileSignature,
   onRegisterMainHistorySignature,
+  onConsentImmediatePersist,
 }: ClinicalHistoryFormProps) {
   const snapshotLocked = disabled
   const livingLocked = lockLivingChart
@@ -833,13 +838,26 @@ export function ClinicalHistoryForm({
 
       {showClinicalSection(activeSection, 'consentimiento') && (
         <div id="clinical-section-consentimiento">
-      <InformedConsentForm
-        data={form.informedConsent}
-        onChange={(informedConsent: InformedConsent) => update({ informedConsent })}
-        disabled={snapshotLocked}
-        patientId={patientId}
-        patientBirthDate={patientBirthDate}
-      />
+          <InformedConsentForm
+            informedConsent={form.informedConsent}
+            informedConsents={form.informedConsents ?? []}
+            onConsentsChange={(informedConsents) => update({ informedConsents })}
+            onImmediatePersist={onConsentImmediatePersist}
+            disabled={snapshotLocked}
+            patientId={patientId}
+            patientBirthDate={patientBirthDate}
+            patientName={patientName}
+            patientDocument={patientDocument}
+            professionalId={authorUserId || clinicalUser?.id || ''}
+            professionalName={professionalName}
+            professionalDocument={
+              professionalLicense || clinicalUser?.documentNumber || ''
+            }
+            professionalRethus={
+              rethusFirma || clinicalUser?.rethusNumber || ''
+            }
+            savedSignature={savedSignature}
+          />
         </div>
       )}
 

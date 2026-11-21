@@ -6,7 +6,9 @@ import {
   clinicalPrintSectionLabel,
   type ClinicalHistoryPrintSectionId,
 } from '@/constants/clinicalHistorySections'
-import { CONSENT_TEMPLATES } from '@/constants/consentTemplates'
+import { CONSENT_TEMPLATES, getConsentLabel } from '@/constants/consentTemplates'
+import { getNormalizedConsents } from '@/utils/consentHelpers'
+import type { SignedConsentRecord } from '@/types/consent'
 import {
   DIAGNOSIS_CERTAINTY_LABELS,
   PAYMENT_METHOD_LABELS,
@@ -920,46 +922,112 @@ function buildTreatingDentistSignatureSection(
     </section>`
 }
 
-function buildConsentSection(data: ClinicalRecordFormData, patient: Patient): string {
-  const consent = data.informedConsent
-  const selectedConsents = consent.selectedConsentIds
-    .map((id) => CONSENT_TEMPLATES.find((template) => template.id === id)?.label ?? id)
-    .join(', ')
-  const guardianSigns = Boolean(consent.guardianName?.trim() && consent.guardianDocument?.trim())
+function buildSignedConsentRecordBlock(
+  record: SignedConsentRecord,
+  patient: Patient,
+): string {
+  const guardianSigns =
+    record.signerRole === 'guardian' ||
+    Boolean(record.guardianName?.trim() && record.guardianDocument?.trim())
   const signerName = guardianSigns
-    ? consent.guardianName || ''
+    ? record.guardianName || ''
     : `${patient.firstName} ${patient.lastName}`
   const signerDocument = guardianSigns
-    ? consent.guardianDocument || ''
+    ? record.guardianDocument || ''
     : `${patient.documentType} ${patient.documentNumber}`
+  const title = record.title || getConsentLabel(record.templateId)
+  const revoked = record.status === 'revoked'
+  const legacy = record.isLegacyUnified === true
+  const statusBanner = revoked
+    ? `<div class="consent-revoked-banner">REVOCADO / DESISTIMIENTO REGISTRADO · ${escapeHtml(
+        record.revokedAt ? formatDate(record.revokedAt) : '—',
+      )} · Motivo: ${escapeHtml(record.revokedReason || '—')} · Por: ${escapeHtml(
+        record.revokedByUserId || '—',
+      )}</div>`
+    : legacy
+      ? `<div class="consent-legacy-banner">Registro Histórico Unificado (solo lectura)</div>`
+      : ''
 
   return `
-    <section class="print-section">
-      <h2>${printSectionHeading('consentimiento')}</h2>
+    <article class="procedure-box consent-document${revoked ? ' consent-document-revoked' : ''}">
+      <h3>${escapeHtml(title)}</h3>
+      ${statusBanner}
       <table>
-        ${fieldRow('Consentimientos seleccionados', selectedConsents || '—')}
-        ${fieldRow('Texto aceptado', consent.textAccepted ? 'Sí' : 'No')}
-        ${fieldRow('Número de documento (Cédula / ReTHUS)', consent.professionalLicense || consent.professionalRegistry)}
-        ${fieldRow('Fecha de firma', consent.signedAt ? formatDate(consent.signedAt) : '—')}
+        ${fieldRow('Estado', revoked ? 'Revocado' : legacy ? 'Histórico unificado' : record.status)}
+        ${fieldRow('Fecha y hora de firma', record.signedAt ? formatDate(record.signedAt) : '—')}
+        ${fieldRow('Odontólogo', record.professionalName || '—')}
+        ${fieldRow('Documento / ReTHUS', `${record.professionalDocument || '—'}${record.professionalRethus ? ` · ReTHUS ${record.professionalRethus}` : ''}`)}
+        ${
+          guardianSigns
+            ? fieldRow(
+                'Acudiente',
+                [record.guardianName, record.guardianDocument, record.guardianRelationship]
+                  .filter(Boolean)
+                  .join(' · ') || '—',
+              )
+            : ''
+        }
+        ${fieldRow('Integridad SHA-256', record.contentHash || '—')}
       </table>
+      <div class="consent-snapshot">${escapeHtml(record.renderedTextSnapshot || '')}</div>
       <div class="signatures">
         ${renderKioskSignatureBlock({
           heading: guardianSigns
             ? 'Firma del acudiente / representante legal'
             : 'Firma del paciente',
-          signatureDataUrl: consent.patientSignatureDataUrl,
+          signatureDataUrl: record.patientSignatureDataUrl,
           signerName,
           signerDocument,
-          signedAtLabel: consent.signedAt ? formatDate(consent.signedAt) : '',
-          ipAddress: consent.signatureIp,
-          kioskDeviceId: consent.kioskDeviceId,
+          signedAtLabel: record.signedAt ? formatDate(record.signedAt) : '',
         })}
         ${
-          consent.professionalSignatureDataUrl
-            ? `<div class="signature-box"><p>Firma del profesional</p><img src="${consent.professionalSignatureDataUrl}" alt="Firma del profesional" /></div>`
+          record.professionalSignatureDataUrl
+            ? `<div class="signature-box"><p>Firma del odontólogo (ReTHUS)</p><img src="${record.professionalSignatureDataUrl}" alt="Firma del odontólogo" /><p class="sig-meta">${escapeHtml(record.professionalName || '')} · ${escapeHtml(record.professionalDocument || '')}${record.professionalRethus ? ` · ReTHUS ${escapeHtml(record.professionalRethus)}` : ''}</p></div>`
             : '<div class="signature-box"><p>Firma del odontólogo</p><p><strong>Pendiente de firma digital</strong></p></div>'
         }
       </div>
+    </article>`
+}
+
+function buildConsentSection(data: ClinicalRecordFormData, patient: Patient): string {
+  const normalized = getNormalizedConsents({
+    informedConsent: data.informedConsent,
+    informedConsents: data.informedConsents,
+  })
+  const printable = normalized.filter(
+    (item) =>
+      item.status === 'signed' ||
+      item.status === 'revoked' ||
+      item.isLegacyUnified === true,
+  )
+
+  if (printable.length === 0) {
+    // Compatibilidad: bloque legado vacío si no hay sellos.
+    const consent = data.informedConsent
+    const selectedConsents = (consent?.selectedConsentIds || [])
+      .map((id) => CONSENT_TEMPLATES.find((template) => template.id === id)?.label ?? id)
+      .join(', ')
+    return `
+    <section class="print-section">
+      <h2>${printSectionHeading('consentimiento')}</h2>
+      <p>Sin consentimientos firmados. ${selectedConsents ? `Seleccionados (borrador): ${escapeHtml(selectedConsents)}.` : ''}</p>
+    </section>`
+  }
+
+  const modern = printable.filter((item) => !item.isLegacyUnified)
+  const legacy = printable.filter((item) => item.isLegacyUnified === true)
+
+  return `
+    <section class="print-section">
+      <h2>${printSectionHeading('consentimiento')}</h2>
+      <p>Cada consentimiento firmado es un documento medicolegal independiente (Res. 1995/1999 · Ley 527).</p>
+      ${modern.map((item) => buildSignedConsentRecordBlock(item, patient)).join('\n')}
+      ${
+        legacy.length
+          ? `<h3 class="consent-legacy-heading">Registros históricos unificados</h3>
+      ${legacy.map((item) => buildSignedConsentRecordBlock(item, patient)).join('\n')}`
+          : ''
+      }
     </section>`
 }
 
@@ -1025,6 +1093,14 @@ export function buildClinicalHistoryPrintHtml(input: ClinicalHistoryPrintInput):
     .print-section { page-break-inside: avoid; margin-bottom: 1.25rem; }
     .procedure-box { border: 1px solid #94a3b8; border-radius: 10px; padding: 0.7rem 0.85rem 0.85rem; margin: 0.75rem 0; page-break-inside: avoid; }
     .procedure-box h3 { margin: 0 0 0.35rem; }
+    .consent-document { page-break-before: always; }
+    .consent-document:first-of-type { page-break-before: auto; }
+    .consent-document-revoked { position: relative; border-color: #be123c; background: #fff1f2; }
+    .consent-revoked-banner { margin: 0.35rem 0 0.6rem; padding: 0.45rem 0.6rem; border: 2px solid #be123c; color: #9f1239; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+    .consent-legacy-banner { margin: 0.35rem 0 0.6rem; padding: 0.4rem 0.6rem; border: 1px solid #64748b; background: #f1f5f9; color: #334155; font-weight: 600; }
+    .consent-legacy-heading { margin-top: 1.25rem; }
+    .consent-snapshot { white-space: pre-wrap; font-size: 0.85rem; line-height: 1.45; margin: 0.6rem 0 0.8rem; padding: 0.6rem; border: 1px solid #e2e8f0; background: #f8fafc; }
+    .sig-meta { font-size: 0.75rem; color: #475569; margin-top: 0.25rem; }
     table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.5rem; }
     th, td { border: 1px solid #e2e8f0; padding: 0.4rem 0.55rem; text-align: left; vertical-align: top; }
     th { background: #f8fafc; width: 32%; font-weight: 600; }

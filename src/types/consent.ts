@@ -3,6 +3,53 @@ import type { SignatureCaptureMetadata, SignatureDriveMeta } from './signature'
 /** Consentimiento informado — procedimientos odontológicos Colombia */
 import type { ConsentTemplateId } from '@/constants/consentTemplates'
 
+/** Estado medicolegal de un consentimiento individual (Res. 1995/1999). */
+export type ConsentStatus = 'draft' | 'signed' | 'revoked'
+
+/**
+ * Registro autónomo e inmutable de consentimiento informado por procedimiento.
+ * Un documento `signed` o `revoked` no se edita ni se borra: solo se revoca con trazabilidad.
+ */
+export interface SignedConsentRecord {
+  /** UUID único por instancia de consentimiento. */
+  id: string
+  templateId: ConsentTemplateId
+  title: string
+  /** Texto congelado con datos del paciente/procedimiento al crear o firmar. */
+  renderedTextSnapshot: string
+  status: ConsentStatus
+  textAccepted: boolean
+  /** Firmante del lado paciente. */
+  signerRole: 'patient' | 'guardian'
+  guardianName?: string
+  guardianDocument?: string
+  guardianRelationship?: string
+  /** Firmas (base64 local y/o referencia Drive / SHA-256). */
+  patientSignatureDataUrl?: string
+  patientSignatureDriveId?: string
+  professionalSignatureDataUrl?: string
+  professionalSignatureDriveId?: string
+  /** Datos medicolegales del odontólogo tratante. */
+  professionalId: string
+  professionalName: string
+  professionalDocument: string
+  professionalRethus: string
+  createdAt: string
+  signedAt?: string
+  /** SHA-256 del sello al firmar. */
+  contentHash?: string
+  /** Revocatoria con trazabilidad (nunca borrado físico). */
+  revokedAt?: string
+  revokedReason?: string
+  revokedByUserId?: string
+  /** Proyección virtual de `informedConsent` unificado legado (solo lectura). */
+  isLegacyUnified?: boolean
+}
+
+/**
+ * @deprecated Esquema unificado (varios textos, una sola firma).
+ * Conservado solo para historias ya firmadas. Nuevos consentimientos usan `SignedConsentRecord`.
+ */
 export interface InformedConsent {
   selectedConsentIds: ConsentTemplateId[]
   textAccepted: boolean

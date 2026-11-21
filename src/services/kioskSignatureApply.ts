@@ -24,6 +24,8 @@ export const KIOSK_SIGNATURE_APPLIED_EVENT = 'mhd:kiosk-signature-applied'
 export interface KioskSignatureAppliedDetail {
   documentType: 'INTAKE' | 'CONSENT' | 'PLAN'
   patientId: string
+  /** Identificador enviado al kiosco (`patientId:consentId` para consentimientos individuales). */
+  documentId?: string
   signatureBase64: string
   signedAt: string
   ipAddress: string
@@ -124,6 +126,7 @@ export async function applyKioskSignature(
   const detail: KioskSignatureAppliedDetail = {
     documentType,
     patientId: routeId,
+    documentId: text(event.documentId) || undefined,
     signatureBase64: signature,
     signedAt,
     ipAddress: text(event.ipAddress),
@@ -213,9 +216,38 @@ export async function applyKioskSignature(
     ...guardianPatch,
   }
 
+  const formData = asRecord(event.formData)
+  const consentIdFromForm = text(formData.activeConsentId)
+  const documentId = text(detail.documentId)
+  const consentIdFromDoc = documentId.includes(':')
+    ? documentId.slice(documentId.indexOf(':') + 1)
+    : ''
+  const targetConsentId = consentIdFromForm || consentIdFromDoc
+  const existingConsents = Array.isArray(draft?.clinicalDraft?.informedConsents)
+    ? draft!.clinicalDraft!.informedConsents!
+    : Array.isArray(record?.informedConsents)
+      ? record!.informedConsents!
+      : []
+  const nextConsents = existingConsents.map((item) => {
+    if (!targetConsentId || item.id !== targetConsentId || item.status !== 'draft') return item
+    return {
+      ...item,
+      patientSignatureDataUrl: signature,
+      textAccepted: true,
+      signerRole: detail.signerIsGuardian ? 'guardian' : item.signerRole,
+      ...(detail.signerIsGuardian
+        ? {
+            guardianName: detail.signerName || item.guardianName,
+            guardianDocument: detail.signerDocument || item.guardianDocument,
+          }
+        : {}),
+    }
+  })
+
   if (record?.id != null) {
     await db.clinicalRecords.update(record.id, {
       informedConsent: nextConsent,
+      informedConsents: nextConsents,
       updatedAt: signedAt,
     })
     await rememberKioskLedger(String(record.id), signature, detail, 'consent')
@@ -224,7 +256,11 @@ export async function applyKioskSignature(
   if (draft?.clinicalDraft) {
     await savePatientClinicalDraft(
       routeId,
-      { ...draft.clinicalDraft, informedConsent: nextConsent },
+      {
+        ...draft.clinicalDraft,
+        informedConsent: nextConsent,
+        informedConsents: nextConsents,
+      },
       draft.odontogramDraft,
     )
   }

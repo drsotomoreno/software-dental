@@ -89,6 +89,7 @@ export function normalizeClinicalRecordForExport(record: ClinicalRecord): Clinic
       Array.isArray(record.evolutionNotes) ? record.evolutionNotes : [],
     ),
     informedConsent: normalizeConsent(record.informedConsent),
+    informedConsents: Array.isArray(record.informedConsents) ? record.informedConsents : [],
     treatmentPlanAuthorization: normalizeTreatmentPlanAuthorization(
       record.treatmentPlanAuthorization,
     ),
@@ -137,6 +138,7 @@ export function clinicalRecordToFormData(
       professionalLicense,
       professionalLicense,
     ),
+    informedConsents: Array.isArray(record.informedConsents) ? record.informedConsents : [],
     treatmentPlanAuthorization: normalizeTreatmentPlanAuthorization(
       record.treatmentPlanAuthorization,
       professionalLicense,

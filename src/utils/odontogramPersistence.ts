@@ -11,6 +11,8 @@ import {
   stomatologicalExamHasContent,
   treatmentPlanHasContent,
 } from '../../shared/clinicalRecordGuard.js'
+import { mergeConsentRecords } from '../../shared/consentRecords.js'
+import type { SignedConsentRecord } from '@/types/consent'
 import { preferGeneralBudgetSections } from '../../shared/clinicalBudgetMerge.js'
 import { ensureEvolutionNoteIds } from '../../shared/evolutionNoteIds.js'
 import { mergeClinicalPaymentSections } from '../../shared/paymentControlMerge.js'
@@ -126,6 +128,7 @@ export function mergeLivingChart<T extends LivingChart>(
     specializedAnnexes?: unknown
     treatmentPlan?: unknown
     informedConsent?: unknown
+    informedConsents?: unknown
     treatmentPlanAuthorization?: unknown
     orthodonticsBudget?: unknown
     dentalImplantsBudget?: unknown
@@ -136,6 +139,7 @@ export function mergeLivingChart<T extends LivingChart>(
     specializedAnnexes?: unknown
     treatmentPlan?: unknown
     informedConsent?: unknown
+    informedConsents?: unknown
     treatmentPlanAuthorization?: unknown
     orthodonticsBudget?: unknown
     dentalImplantsBudget?: unknown
@@ -174,6 +178,10 @@ export function mergeLivingChart<T extends LivingChart>(
         ? draftRecord.informedConsent
         : (baseRecord.informedConsent ?? draftRecord.informedConsent),
     ),
+    informedConsents: mergeConsentRecords(
+      Array.isArray(baseRecord.informedConsents) ? baseRecord.informedConsents : [],
+      Array.isArray(draftRecord.informedConsents) ? draftRecord.informedConsents : [],
+    ) as SignedConsentRecord[],
   } as T
 }
 

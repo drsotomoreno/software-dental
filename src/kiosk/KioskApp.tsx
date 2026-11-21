@@ -14,6 +14,7 @@ import {
   type KioskSocket,
 } from './kioskSocketClient'
 import type {
+  KioskConsentQueueItem,
   KioskScreenState,
   KioskTriggerEvent,
   KioskTriggerPayload,
@@ -198,6 +199,16 @@ function EvolutionReadScreen({
   )
 }
 
+function readConsentQueue(event: KioskTriggerEvent | null): KioskConsentQueueItem[] {
+  if (!event) return []
+  const fromPayload = Array.isArray(event.payload?.consentQueue)
+    ? event.payload!.consentQueue!
+    : []
+  if (fromPayload.length > 0) return fromPayload
+  const form = (event.payload?.formData || {}) as Record<string, unknown>
+  return Array.isArray(form.consentQueue) ? (form.consentQueue as KioskConsentQueueItem[]) : []
+}
+
 function DocumentSignScreen({
   title,
   contentText,
@@ -205,6 +216,10 @@ function DocumentSignScreen({
   signerIsGuardian,
   guardianName,
   guardianDocument,
+  guardianRelationship = '',
+  onGuardianChange,
+  progressLabel,
+  signatureResetKey,
   busy,
   error,
   onActivity,
@@ -219,6 +234,16 @@ function DocumentSignScreen({
   signerIsGuardian: boolean
   guardianName: string
   guardianDocument: string
+  guardianRelationship?: string
+  onGuardianChange?: (patch: {
+    guardianName?: string
+    guardianDocument?: string
+    guardianRelationship?: string
+  }) => void
+  /** Ej. "Documento 1 de 3: Ortodoncia" */
+  progressLabel?: string
+  /** Cambia al avanzar en la cola: fuerza trazo nuevo (no reutilizar firma). */
+  signatureResetKey?: string
   busy: boolean
   error: string | null
   onActivity: () => void
@@ -241,8 +266,20 @@ function DocumentSignScreen({
   const [accepted, setAccepted] = useState<boolean[]>(() => acceptLabels.map(() => false))
   const [localError, setLocalError] = useState<string | null>(null)
 
+  useEffect(() => {
+    setAccepted(acceptLabels.map(() => false))
+    setLocalError(null)
+    signatureRef.current?.clear?.()
+  }, [signatureResetKey, acceptLabels.length])
+
   const canSign = acceptLabels.length === 0 || accepted.every(Boolean)
-  const guardianReady = !signerIsGuardian || (guardianName.trim() && guardianDocument.trim())
+  const guardianReady =
+    !signerIsGuardian ||
+    Boolean(
+      guardianName.trim() &&
+        guardianDocument.trim() &&
+        (!onGuardianChange || guardianRelationship.trim()),
+    )
   const signatureHeading = signerIsGuardian
     ? 'Firma del acudiente / representante legal'
     : 'Firma del paciente'
@@ -257,6 +294,9 @@ function DocumentSignScreen({
         <p className="text-sm font-semibold uppercase tracking-wide text-teal-700">
           Mi Historia Dental
         </p>
+        {progressLabel ? (
+          <p className="mt-2 text-base font-medium text-teal-800">{progressLabel}</p>
+        ) : null}
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
           {title || 'Documento para firmar'}
         </h1>
@@ -292,12 +332,46 @@ function DocumentSignScreen({
       ) : null}
 
       {signerIsGuardian ? (
-        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-base text-amber-950">
-          <p className="font-semibold">El paciente es menor de 18 años.</p>
-          <p className="mt-1">Debe firmar el acudiente o representante legal.</p>
-          {guardianReady ? (
+        <div className="mb-4 space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-base text-amber-950">
+          <p className="font-semibold">Firma del acudiente / representante legal</p>
+          <p className="text-sm">
+            Si el paciente es menor de edad o actúa un representante, complete los datos. Puede
+            reutilizarlos en el siguiente documento; la firma debe trazarse de nuevo en cada uno.
+          </p>
+          {onGuardianChange ? (
+            <div className="grid gap-2 sm:grid-cols-3">
+              <input
+                className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm"
+                placeholder="Nombre completo *"
+                value={guardianName}
+                onChange={(event) => {
+                  onActivity()
+                  onGuardianChange({ guardianName: event.target.value })
+                }}
+              />
+              <input
+                className="rounded-lg border border-amber-300 bg-white px-3 py-2 font-mono text-sm"
+                placeholder="Cédula *"
+                value={guardianDocument}
+                onChange={(event) => {
+                  onActivity()
+                  onGuardianChange({ guardianDocument: event.target.value })
+                }}
+              />
+              <input
+                className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm"
+                placeholder="Parentesco *"
+                value={guardianRelationship}
+                onChange={(event) => {
+                  onActivity()
+                  onGuardianChange({ guardianRelationship: event.target.value })
+                }}
+              />
+            </div>
+          ) : guardianReady ? (
             <p className="mt-2">
               {guardianName} · C.C. {guardianDocument}
+              {guardianRelationship ? ` · ${guardianRelationship}` : ''}
             </p>
           ) : (
             <p className="mt-2">
@@ -394,6 +468,12 @@ export default function KioskApp() {
   const [busy, setBusy] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [stillThereOpen, setStillThereOpen] = useState(false)
+  const [consentQueueIndex, setConsentQueueIndex] = useState(0)
+  const [queueGuardian, setQueueGuardian] = useState({
+    guardianName: '',
+    guardianDocument: '',
+    guardianRelationship: '',
+  })
   const socketRef = useRef<KioskSocket | null>(null)
   const screenRef = useRef<KioskScreenState>('IDLE')
   const activeRef = useRef<KioskTriggerEvent | null>(null)
@@ -454,6 +534,8 @@ export default function KioskApp() {
     setActive(null)
     setBusy(false)
     setSubmitError(null)
+    setConsentQueueIndex(0)
+    setQueueGuardian({ guardianName: '', guardianDocument: '', guardianRelationship: '' })
   }, [clearInactivityTimers])
 
   const cancelForInactivity = useCallback(() => {
@@ -549,6 +631,17 @@ export default function KioskApp() {
       signatureMemoryRef.current = null
       setSubmitError(null)
       setStillThereOpen(false)
+      setConsentQueueIndex(0)
+      const queue = readConsentQueue(event)
+      const first = queue[0]
+      const form = (event.payload?.formData || {}) as Record<string, unknown>
+      setQueueGuardian({
+        guardianName: String(first?.guardianName || form.guardianName || ''),
+        guardianDocument: String(first?.guardianDocument || form.guardianDocument || ''),
+        guardianRelationship: String(
+          first?.guardianRelationship || form.guardianRelationship || '',
+        ),
+      })
       setActive(event)
       setScreen(screenForAction(event.actionType))
     })
@@ -595,12 +688,13 @@ export default function KioskApp() {
       throw new Error('La tableta no está conectada. Espere un momento e intente de nuevo.')
     }
     const payload: KioskTriggerPayload = action.payload || {}
+    const form = (input.formData || {}) as Record<string, unknown>
     const result = await submitKioskSignature(socket, {
       documentType: action.actionType,
-      documentId: payload.documentId,
+      documentId: String(form.documentId || payload.documentId || ''),
       patientId: payload.patientId,
-      title: payload.title,
-      contentText: payload.contentText,
+      title: String(form.title || payload.title || ''),
+      contentText: String(form.contentText || payload.contentText || ''),
       signatureBase64: input.signatureBase64,
       formData: input.formData,
     })
@@ -714,7 +808,13 @@ export default function KioskApp() {
 
   if (screen === 'SHOW_CONSENT' || screen === 'SHOW_PLAN') {
     const form = (active?.payload?.formData || {}) as Record<string, unknown>
-    const signerIsGuardian = form.esMenorDeEdad === true
+    const queue = readConsentQueue(active)
+    const queueActive = screen === 'SHOW_CONSENT' && queue.length > 0
+    const currentItem = queueActive ? queue[Math.min(consentQueueIndex, queue.length - 1)] : null
+    const signerIsGuardian =
+      currentItem?.signerRole === 'guardian' ||
+      form.esMenorDeEdad === true ||
+      form.signerRole === 'guardian'
     const isPlan = screen === 'SHOW_PLAN'
     const acceptLabels = isPlan
       ? [
@@ -728,24 +828,51 @@ export default function KioskApp() {
             : 'He leído y acepto el texto del consentimiento informado.',
           'Autorizo el tratamiento de mis datos personales con fines clínicos.',
         ]
+    const documentTitle =
+      currentItem?.title ||
+      active?.payload?.title ||
+      (isPlan ? 'Plan de tratamiento y presupuesto' : 'Consentimiento informado')
+    const documentText =
+      currentItem?.renderedTextSnapshot || active?.payload?.contentText || ''
+    const documentId = currentItem
+      ? `${String(active?.payload?.patientId || form.patientId || 'patient')}:${currentItem.id}`
+      : active?.payload?.documentId
+    const progressLabel =
+      queueActive && queue.length > 1
+        ? `Documento ${consentQueueIndex + 1} de ${queue.length}: ${documentTitle}`
+        : undefined
+
     return (
       <div className="relative" onPointerDown={bumpActivity} onKeyDown={bumpActivity} onInput={bumpActivity}>
         {connectionBadge}
         {stillThereOverlay}
         <DocumentSignScreen
-          key={`${active?.actionType || screen}:${active?.payload?.documentId || ''}`}
-          title={
-            active?.payload?.title ||
-            (isPlan ? 'Plan de tratamiento y presupuesto' : 'Consentimiento informado')
-          }
-          contentText={active?.payload?.contentText || ''}
+          key={`${active?.actionType || screen}:${documentId || ''}:${consentQueueIndex}`}
+          title={documentTitle}
+          contentText={documentText}
+          progressLabel={progressLabel}
+          signatureResetKey={`${documentId || 'doc'}:${consentQueueIndex}`}
           acceptLabels={acceptLabels}
           signerIsGuardian={signerIsGuardian}
-          guardianName={String(form.guardianName || '')}
-          guardianDocument={String(form.guardianDocument || '')}
+          guardianName={
+            queueActive ? queueGuardian.guardianName : String(form.guardianName || '')
+          }
+          guardianDocument={
+            queueActive ? queueGuardian.guardianDocument : String(form.guardianDocument || '')
+          }
+          guardianRelationship={
+            queueActive
+              ? queueGuardian.guardianRelationship
+              : String(form.guardianRelationship || '')
+          }
+          onGuardianChange={
+            signerIsGuardian
+              ? (patch) => setQueueGuardian((prev) => ({ ...prev, ...patch }))
+              : undefined
+          }
           busy={busy}
           error={submitError}
-          signatureDataUrl={signatureMemoryRef.current}
+          signatureDataUrl={null}
           onSignatureSnapshot={(dataUrl) => {
             signatureMemoryRef.current = dataUrl
           }}
@@ -753,15 +880,77 @@ export default function KioskApp() {
           onSubmit={({ signatureBase64, accepted, signatureMeta }) => {
             setBusy(true)
             setSubmitError(null)
+            const guardianPayload = signerIsGuardian
+              ? {
+                  guardianName: queueActive
+                    ? queueGuardian.guardianName
+                    : String(form.guardianName || ''),
+                  guardianDocument: queueActive
+                    ? queueGuardian.guardianDocument
+                    : String(form.guardianDocument || ''),
+                  guardianRelationship: queueActive
+                    ? queueGuardian.guardianRelationship
+                    : String(form.guardianRelationship || ''),
+                  signerRole: 'guardian' as const,
+                  esMenorDeEdad: true,
+                }
+              : {
+                  signerRole: (currentItem?.signerRole || form.signerRole || 'patient') as string,
+                }
             void persistSignature({
               signatureBase64,
               formData: {
                 ...(active?.payload?.formData || {}),
+                ...guardianPayload,
                 accepted,
                 signatureMeta,
+                activeConsentId: currentItem?.id || form.activeConsentId,
+                documentId,
+                queueIndex: consentQueueIndex,
+                queueTotal: queueActive ? queue.length : 1,
               },
             })
-              .then(() => markSuccessThenIdle())
+              .then(() => {
+                signatureMemoryRef.current = null
+                if (queueActive && consentQueueIndex + 1 < queue.length) {
+                  const nextIndex = consentQueueIndex + 1
+                  const next = queue[nextIndex]
+                  setConsentQueueIndex(nextIndex)
+                  setBusy(false)
+                  setActive((prev) => {
+                    if (!prev) return prev
+                    const patientId = String(prev.payload?.patientId || form.patientId || '')
+                    return {
+                      ...prev,
+                      payload: {
+                        ...prev.payload,
+                        documentId: `${patientId}:${next.id}`,
+                        title: next.title,
+                        contentText: next.renderedTextSnapshot,
+                        formData: {
+                          ...(prev.payload?.formData || {}),
+                          activeConsentId: next.id,
+                          templateId: next.templateId,
+                          signerRole: next.signerRole,
+                          guardianName:
+                            queueGuardian.guardianName || next.guardianName || '',
+                          guardianDocument:
+                            queueGuardian.guardianDocument || next.guardianDocument || '',
+                          guardianRelationship:
+                            queueGuardian.guardianRelationship ||
+                            next.guardianRelationship ||
+                            '',
+                          queueIndex: nextIndex,
+                          queueTotal: queue.length,
+                        },
+                      },
+                    }
+                  })
+                  bumpActivity()
+                  return
+                }
+                markSuccessThenIdle()
+              })
               .catch((error: unknown) => {
                 setBusy(false)
                 setSubmitError(

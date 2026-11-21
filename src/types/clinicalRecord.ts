@@ -2,7 +2,7 @@ import type { Anamnesis } from './anamnesis'
 import type { StomatologicalExam } from './stomatologicalExam'
 import type { SpecializedAnnexes } from './specializedAnnexes'
 import type { EvolutionNote } from './evolutionNote'
-import type { InformedConsent } from './consent'
+import type { InformedConsent, SignedConsentRecord } from './consent'
 import type { TreatmentPlanAuthorization } from './treatmentPlanAuthorization'
 import type { ValuationConsentMetadata } from './valuationConsent'
 import type { OdontogramData } from './odontogram'
@@ -358,8 +358,16 @@ export interface ClinicalRecord {
   orthodonticsPaymentControl: OrthodonticsPaymentRecord[]
   /** Sección 9: Notas de evolución */
   evolutionNotes: EvolutionNote[]
-  /** Sección 10: Consentimiento informado */
+  /**
+   * @deprecated Consentimiento unificado legado (varios textos, una firma).
+   * Conservado para historias ya firmadas; no usar para nuevos documentos.
+   */
   informedConsent: InformedConsent
+  /**
+   * Consentimientos informados individuales e inmutables (Sección 9).
+   * Cada elemento firmado es un acto medicolegal autónomo.
+   */
+  informedConsents?: SignedConsentRecord[]
   /**
    * Autorización conjunta del plan de tratamiento / presupuesto
    * (paciente o representante legal + odontólogo).
@@ -427,7 +435,12 @@ export interface ClinicalRecordFormData {
   paymentControlLines: PaymentControlLine[]
   orthodonticsPaymentControl: OrthodonticsPaymentRecord[]
   evolutionNotes: EvolutionNote[]
+  /**
+   * @deprecated Consentimiento unificado legado. Preferir `informedConsents`.
+   */
   informedConsent: InformedConsent
+  /** Consentimientos individuales e inmutables (Sección 9). */
+  informedConsents?: SignedConsentRecord[]
   /**
    * Autorización conjunta del plan de tratamiento / presupuesto
    * (paciente o representante legal + odontólogo).

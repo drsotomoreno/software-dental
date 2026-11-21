@@ -23,6 +23,8 @@ import type {
 import { normalizeAnamnesis } from '@/types/anamnesis'
 import { normalizeClinicalDiagnosticChart } from '@/types/clinicalDiagnosticChart'
 import { keepStoredConsentSignatures } from '@/types/consent'
+import { mergeConsentRecords } from '../../shared/consentRecords.js'
+import type { SignedConsentRecord } from '@/types/consent'
 import { normalizeSpecializedAnnexes } from '@/types/specializedAnnexes'
 import {
   clinicalFormHasContent,
@@ -327,7 +329,11 @@ function mergeClinicalForms(
       [...(left.evolutionNotes ?? []), ...(right.evolutionNotes ?? [])],
     ),
     informedConsent: keepStoredConsentSignatures(left.informedConsent, right.informedConsent),
-  }
+    informedConsents: mergeConsentRecords(
+      left.informedConsents ?? [],
+      right.informedConsents ?? [],
+    ) as SignedConsentRecord[],
+  } as ClinicalRecordFormData
 }
 
 function mergeDraftPair(left: PatientClinicalDraft, right: PatientClinicalDraft): PatientClinicalDraft {
@@ -574,7 +580,11 @@ export async function savePatientValuationDraft(
           existing?.valuationDraft?.informedConsent,
           normalizedValuation.informedConsent,
         ),
-      },
+        informedConsents: mergeConsentRecords(
+          existing?.valuationDraft?.informedConsents ?? [],
+          normalizedValuation.informedConsents ?? [],
+        ) as SignedConsentRecord[],
+      } as ClinicalRecordFormData,
       clinicalDraft: existing?.clinicalDraft ?? null,
       odontogramDraft: existing?.odontogramDraft ?? null,
       evolutionNotes: existing?.evolutionNotes ?? [],
@@ -610,11 +620,15 @@ export async function savePatientClinicalDraft(
           existing?.clinicalDraft?.informedConsent,
           normalized.informedConsent,
         ),
+        informedConsents: mergeConsentRecords(
+          existing?.clinicalDraft?.informedConsents ?? [],
+          normalized.informedConsents ?? [],
+        ) as SignedConsentRecord[],
         evolutionNotes: preserveImmutableEvolutionNotes(
           normalized.evolutionNotes ?? [],
           existing?.clinicalDraft?.evolutionNotes,
         ),
-      },
+      } as ClinicalRecordFormData,
       valuationDraft: existing?.valuationDraft ?? null,
       odontogramDraft: odontogramDraft ?? existing?.odontogramDraft ?? null,
       evolutionNotes: mergeDraftEvolutionNotes(

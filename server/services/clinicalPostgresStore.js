@@ -11,6 +11,7 @@ import { withPgClient } from './durableStore.js'
 import { splitSqlStatements } from './consultasRepository.js'
 import { computeClinicalFormHash } from '../../shared/clinicalFormHash.js'
 import { ensureEvolutionNoteIds } from '../../shared/evolutionNoteIds.js'
+import { mergeConsentRecords } from '../../shared/consentRecords.js'
 import { persistExtractedClinicalMedia, rehydrateClinicalMedia } from './clinicalMediaStore.js'
 
 /**
@@ -28,6 +29,95 @@ function repairEvolutionNoteIdsInForm(form) {
   )
   if (!repaired) return form
   return { ...form, evolutionNotes: nextNotes }
+}
+
+/**
+ * Une `informedConsents` por id sin pisar firmados (sync entre equipos / upsert RDS).
+ * @param {Record<string, unknown>|null|undefined} form
+ * @param {Record<string, unknown>|null|undefined} previousForm
+ */
+function mergeInformedConsentsInForm(form, previousForm) {
+  if (!form || typeof form !== 'object') return form
+  const existing = Array.isArray(previousForm?.informedConsents)
+    ? previousForm.informedConsents
+    : []
+  const incoming = Array.isArray(form.informedConsents) ? form.informedConsents : []
+  if (existing.length === 0 && incoming.length === 0) return form
+  const merged = mergeConsentRecords(existing, incoming)
+  const same =
+    Array.isArray(form.informedConsents) &&
+    form.informedConsents.length === merged.length &&
+    form.informedConsents.every((item, index) => item === merged[index])
+  if (same) return form
+  return { ...form, informedConsents: merged }
+}
+
+/**
+ * Aplica merge no destructivo de consentimientos sobre draft / clinicalRecords del chart.
+ * @param {object} chart
+ * @param {object|null} previousChart
+ */
+function mergeChartConsentRecords(chart, previousChart) {
+  if (!chart || typeof chart !== 'object') return chart
+  const prevPayload =
+    previousChart && typeof previousChart === 'object' ? chartPayload(previousChart) : {}
+  let changed = false
+  const next = { ...chart }
+
+  if (next.draft && typeof next.draft === 'object') {
+    const draft = { ...next.draft }
+    if (draft.payload && typeof draft.payload === 'object' && !Array.isArray(draft.payload)) {
+      const payload = { ...draft.payload }
+      let payloadChanged = false
+      const prevClinical = prevPayload.clinicalDraft
+      const prevValuation = prevPayload.valuationDraft
+      const clinicalDraft = mergeInformedConsentsInForm(payload.clinicalDraft, prevClinical)
+      const valuationDraft = mergeInformedConsentsInForm(payload.valuationDraft, prevValuation)
+      const topLevel = mergeInformedConsentsInForm(payload, prevPayload)
+      if (clinicalDraft !== payload.clinicalDraft) {
+        payload.clinicalDraft = clinicalDraft
+        payloadChanged = true
+      }
+      if (valuationDraft !== payload.valuationDraft) {
+        payload.valuationDraft = valuationDraft
+        payloadChanged = true
+      }
+      if (topLevel !== payload && Array.isArray(topLevel.informedConsents)) {
+        payload.informedConsents = topLevel.informedConsents
+        payloadChanged = true
+      }
+      if (payloadChanged) {
+        draft.payload = payload
+        next.draft = draft
+        changed = true
+      }
+    } else {
+      const repaired = mergeInformedConsentsInForm(draft, prevPayload)
+      if (repaired !== draft) {
+        next.draft = repaired
+        changed = true
+      }
+    }
+  }
+
+  if (Array.isArray(next.clinicalRecords)) {
+    const prevRecords = Array.isArray(previousChart?.clinicalRecords)
+      ? previousChart.clinicalRecords
+      : []
+    let recordsChanged = false
+    const records = next.clinicalRecords.map((record, index) => {
+      const prev = prevRecords[index] || prevRecords.find((item) => item?.syncId && item.syncId === record?.syncId)
+      const merged = mergeInformedConsentsInForm(record, prev)
+      if (merged !== record) recordsChanged = true
+      return merged
+    })
+    if (recordsChanged) {
+      next.clinicalRecords = records
+      changed = true
+    }
+  }
+
+  return changed ? next : chart
 }
 
 function repairChartEvolutionNoteIds(chart) {
@@ -192,7 +282,6 @@ export async function upsertPatientClinicalChart(input) {
     odontograms: Array.isArray(input?.odontograms) ? input.odontograms : [],
     diagnosticAids: Array.isArray(input?.diagnosticAids) ? input.diagnosticAids : [],
   })
-  const stored = await persistExtractedClinicalMedia(repairedInput)
 
   await ensureSchema()
   return withPgClient(async (client) => {
@@ -218,6 +307,12 @@ export async function upsertPatientClinicalChart(input) {
           code: 'VERSION_CONFLICT',
         }
       }
+
+      // Blindaje medicolegal: no pisar consentimientos firmados ya persistidos en RDS.
+      const prevChart =
+        prevRow?.chart_data && typeof prevRow.chart_data === 'object' ? prevRow.chart_data : null
+      const consentSafeInput = mergeChartConsentRecords(repairedInput, prevChart)
+      const stored = await persistExtractedClinicalMedia(consentSafeInput)
 
       const result = await client.query(UPSERT_SQL, [
         clinicaId,

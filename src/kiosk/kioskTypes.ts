@@ -17,12 +17,29 @@ export type KioskScreenState =
   | 'SHOW_PLAN'
   | 'SUCCESS'
 
+/** Ítem de cola secuencial de consentimientos en la tableta (FASE 3). */
+export interface KioskConsentQueueItem {
+  id: string
+  title: string
+  renderedTextSnapshot: string
+  signerRole: 'patient' | 'guardian'
+  guardianName?: string
+  guardianDocument?: string
+  guardianRelationship?: string
+  templateId?: string
+}
+
 export interface KioskTriggerPayload {
   documentId?: string
   patientId?: string
   title?: string
   contentText?: string
   formData?: Record<string, unknown>
+  /**
+   * Cola opcional de consentimientos pendientes.
+   * Si viene poblada, la tableta firma en secuencia (1 de N, 2 de N…).
+   */
+  consentQueue?: KioskConsentQueueItem[]
 }
 
 export interface KioskTriggerEvent {
