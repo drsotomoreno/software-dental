@@ -1,5 +1,10 @@
 import { isNonRipsEvolutionNote, isEvolutionNoteAddendum, type EvolutionNote } from '@/types/evolutionNote'
 import { noteHasCatalogServices, resolveEvolutionNoteRipsMode } from '@/utils/evolutionCatalogServices'
+import {
+  noteHasValidCupsForRips,
+  noteHasValidPrincipalCie10,
+  noteRequiresCupsAndCie10ForClose,
+} from '@/utils/evolutionCupsGate'
 import { collectEvolutionAssociationIssues } from '@/utils/evolutionNoteAssociation'
 import { MIN_SIGNATURE_STROKES } from '@/types/signature'
 
@@ -150,6 +155,25 @@ export function validateEvolutionNote(note: EvolutionNote): EvolutionNoteValidat
       field: 'procedure',
       message: 'Indique el procedimiento realizado (CUPS o descripción).',
     })
+  }
+
+  if (noteRequiresCupsAndCie10ForClose(note)) {
+    if (!noteHasValidCupsForRips(note)) {
+      issues.push({
+        noteId: note.id,
+        field: 'cupsCode',
+        message:
+          'El código CUPS (6 dígitos) y el diagnóstico CIE-10 principal son obligatorios para cerrar la evolución. Asigne un CUPS válido antes de firmar.',
+      })
+    }
+    if (!noteHasValidPrincipalCie10(note)) {
+      issues.push({
+        noteId: note.id,
+        field: 'codDiagnosticoPrincipal',
+        message:
+          'El código CUPS (6 dígitos) y el diagnóstico CIE-10 principal son obligatorios para cerrar la evolución. Indique el CIE-10 principal antes de firmar.',
+      })
+    }
   }
 
   return issues

@@ -57,6 +57,16 @@ export const evolutionNoteRipsMetadataSchema = z
       if (value == null) return ''
       return String(value).replace(/[.\s]/g, '').toUpperCase()
     }, z.string().max(7)),
+    /**
+     * CUPS administrativo (Res. 2275). Sidecar fuera del hash clínico:
+     * permite completar un CUPS faltante en notas ya firmadas sin reescribir
+     * el folio (Res. 1995/1999). Null si no aplica o aún no se asignó.
+     */
+    cupsCode: z.preprocess((value) => {
+      if (value == null || value === '') return null
+      const digits = String(value).replace(/\D/g, '').slice(0, 6)
+      return digits.length > 0 ? digits : null
+    }, z.string().regex(/^\d{1,6}$/).nullable()),
     tipoVinculacionFinanciera: z.preprocess(
       (value) => (value == null || value === '' ? 'valor_cero' : value),
       z.enum(TIPO_VINCULACION_FINANCIERA, {
@@ -179,6 +189,7 @@ export function createDefaultEvolutionNoteRipsMetadata(
 ): EvolutionNoteRipsMetadata {
   return parseEvolutionNoteRipsMetadata({
     codDiagnosticoPrincipal: '',
+    cupsCode: null,
     tipoVinculacionFinanciera: 'valor_cero',
     idReciboAsociado: null,
     idFacturaElectronica: null,

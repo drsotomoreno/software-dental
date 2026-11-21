@@ -36,6 +36,7 @@ export type AuditAction =
   | 'CREATE_EVOLUTION_NOTE'
   | 'CREATE_EVOLUTION_ADDENDUM'
   | 'BLOCK_EVOLUTION_MUTATION'
+  | 'ASSIGN_EVOLUTION_CUPS_ADMIN'
   | 'REQUEST_RDA_OTP'
   | 'IMPORT_EXTERNAL_RDA'
 
@@ -111,6 +112,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   CREATE_EVOLUTION_NOTE: 'Creación nota de evolución clínica',
   CREATE_EVOLUTION_ADDENDUM: 'Creación nota aclaratoria de evolución',
   BLOCK_EVOLUTION_MUTATION: 'Bloqueo edición/eliminación evolución (Res. 1995/1999)',
+  ASSIGN_EVOLUTION_CUPS_ADMIN:
+    'Asignación administrativa de CUPS en evolución firmada (RIPS)',
   REQUEST_RDA_OTP: 'Solicitud OTP historial externo (RDA)',
   IMPORT_EXTERNAL_RDA: 'Importación de historial externo (RDA)',
 }

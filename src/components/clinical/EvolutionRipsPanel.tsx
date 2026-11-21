@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { CheckCircle2, Download, Rocket } from 'lucide-react'
+import { CheckCircle2, Download, Rocket, Save } from 'lucide-react'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/useToast'
+import { logAuditEvent } from '@/services/auditService'
 import { listPatientElectronicInvoices } from '@/services/invoiceService'
 import { guardarHistorialRadicacionRips } from '@/db/ripsSubmissionsStore'
 import { routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
@@ -14,6 +15,13 @@ import {
   type EvolutionNote,
   type EvolutionNotePatch,
 } from '@/types/evolutionNote'
+import {
+  adminCupsAlreadyAssigned,
+  canEditAdminCupsOnLockedNote,
+  effectiveEvolutionCupsCode,
+  isValidEvolutionCupsCode,
+  normalizeEvolutionCupsDigits,
+} from '@/utils/evolutionCupsGate'
 import { evaluarTransmisionAnticipo } from '../../../shared/reciboAnticipoRips.js'
 import type { OrthodonticsPaymentRecord, PaymentRecord } from '@/types/clinicalRecord'
 import {
@@ -178,11 +186,22 @@ export function EvolutionRipsPanel({
   const metadata = metadataDe(note)
   const tipo = tipoEfectivo(note)
   const valorCero = tipo === 'valor_cero'
+  const cupsEfectivo = effectiveEvolutionCupsCode(note)
+  const adminCupsEditable =
+    clinicalLocked && canEditAdminCupsOnLockedNote(note) && !adminCupsAlreadyAssigned(note)
+  const cupsBloqueado =
+    disabled || (clinicalLocked && !adminCupsEditable) || adminCupsAlreadyAssigned(note)
   const [isLoading, setIsLoading] = useState(false)
   const [verCuv, setVerCuv] = useState(false)
   const [modalAnticipo, setModalAnticipo] = useState(false)
   const [mensajeLocal, setMensajeLocal] = useState('')
+  const [cupsDraft, setCupsDraft] = useState(cupsEfectivo)
+  const [guardandoCups, setGuardandoCups] = useState(false)
   const { toastMessage, showToast, clearToast } = useToast(8000)
+
+  useEffect(() => {
+    setCupsDraft(cupsEfectivo)
+  }, [cupsEfectivo, note.id])
   const pagosKey = pagosActuales
     .map((pago) => `${pago.id}:${pago.amount}:${pago.paymentDate}`)
     .join('|')
@@ -263,6 +282,41 @@ export function EvolutionRipsPanel({
     if (patch.valorProcedimiento !== undefined) sidecar.valorProcedimiento = patch.valorProcedimiento
     if (patch.estadoRips !== undefined) sidecar.estadoRips = patch.estadoRips
     onChange(sidecar)
+  }
+
+  const aplicarCupsBorrador = (raw: string) => {
+    const digits = normalizeEvolutionCupsDigits(raw)
+    setCupsDraft(digits)
+    if (clinicalLocked) return
+    onChange({ cupsCode: digits.length > 0 ? digits : null })
+  }
+
+  const guardarCupsAdministrativo = async () => {
+    if (!adminCupsEditable || guardandoCups) return
+    const digits = normalizeEvolutionCupsDigits(cupsDraft)
+    if (!isValidEvolutionCupsCode(digits)) {
+      setMensajeLocal(
+        'Ingrese un código CUPS válido de 6 dígitos para completar la vinculación administrativa.',
+      )
+      return
+    }
+    setMensajeLocal('')
+    setGuardandoCups(true)
+    try {
+      publicar({ ripsMetadata: { cupsCode: digits } })
+      if (user) {
+        await logAuditEvent({
+          action: 'ASSIGN_EVOLUTION_CUPS_ADMIN',
+          resourceType: 'clinical_record',
+          resourceId: note.id,
+          details: `CUPS ${digits} asignado administrativamente a evolución firmada (RIPS / Res. 2275)`,
+          user,
+        })
+      }
+      showToast(`CUPS ${digits} guardado. El campo queda bloqueado.`)
+    } finally {
+      setGuardandoCups(false)
+    }
   }
 
   const elegirTipo = (siguiente: TipoVinculacionFinanciera) => {
@@ -486,19 +540,68 @@ export function EvolutionRipsPanel({
 
   return (
     <section className="rounded-lg border border-dental-200 bg-dental-50/60 p-3">
-      <h5 className="mb-3 text-sm font-semibold text-dental-900">Vinculación financiera y RIPS</h5>
+      <h5 className="mb-3 text-sm font-semibold text-dental-900">
+        Vinculación Administrativa y RIPS
+      </h5>
       {clinicalLocked && (
         <p className="mb-3 text-xs text-slate-600">
-          La nota firmada no se reescribe. El diagnóstico de radicación, el recibo y el CUV sí se
-          pueden actualizar.
+          Los campos clínicos de la nota firmada permanecen inmutables (Res. 1995/1999). El
+          diagnóstico de radicación, el recibo, el CUV y un CUPS administrativo faltante sí se
+          pueden completar para RIPS (Res. 2275).
         </p>
       )}
+
+      <div
+        className="mb-3"
+        data-evo-note={note.id}
+        data-evo-field="cupsCode"
+      >
+        <label className="label-field" htmlFor={`cups-rips-${note.id}`}>
+          Código CUPS <span className="text-red-500">*</span>
+        </label>
+        <div className="flex flex-wrap items-end gap-2">
+          <input
+            id={`cups-rips-${note.id}`}
+            inputMode="numeric"
+            maxLength={6}
+            pattern="\d{6}"
+            className="input-field max-w-[12rem] font-mono disabled:bg-slate-100"
+            disabled={cupsBloqueado}
+            value={cupsDraft}
+            placeholder="6 dígitos"
+            onChange={(event) => aplicarCupsBorrador(event.target.value)}
+            aria-invalid={cupsDraft.length > 0 && !isValidEvolutionCupsCode(cupsDraft)}
+          />
+          {adminCupsEditable && (
+            <button
+              type="button"
+              className="btn-secondary text-xs"
+              disabled={disabled || guardandoCups || !isValidEvolutionCupsCode(cupsDraft)}
+              onClick={() => void guardarCupsAdministrativo()}
+            >
+              <Save className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              {guardandoCups ? 'Guardando…' : 'Guardar CUPS administrativo'}
+            </button>
+          )}
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          {adminCupsEditable
+            ? 'Evolución cerrada sin CUPS válido: puede completar solo este campo administrativo para enviar el RIPS. El texto clínico no se modifica.'
+            : adminCupsAlreadyAssigned(note)
+              ? `CUPS administrativo ${metadata.cupsCode} registrado. El campo quedó bloqueado.`
+              : clinicalLocked
+                ? 'CUPS de la atención firmada (solo lectura).'
+                : 'Se autocompleta al elegir un procedimiento del catálogo; puede ajustarlo antes de firmar.'}
+        </p>
+      </div>
 
       {showDiagnosis && (
         <div className="mb-3">
           <Cie10PrincipalCombobox
             value={metadata.codDiagnosticoPrincipal}
             disabled={disabled}
+            noteId={note.id}
+            fieldKey="codDiagnosticoPrincipal"
             onChange={(codDiagnosticoPrincipal) =>
               publicar({ ripsMetadata: { codDiagnosticoPrincipal } })
             }

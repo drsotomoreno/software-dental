@@ -203,6 +203,8 @@ export function EvolutionCatalogServicesField({
                   disabled={disabled}
                   required={service.requiereCupsRips !== false}
                   label="Diagnóstico (CIE-10)"
+                  noteId={note.id}
+                  fieldKey="codDiagnosticoPrincipal"
                   onChange={(code, description) =>
                     editService(service.id, {
                       cie10Code: code,

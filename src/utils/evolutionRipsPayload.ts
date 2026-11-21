@@ -78,8 +78,10 @@ function cupsDeFuente(value: string | null | undefined): string[] {
 
 export function cupsValidosDeNota(note: EvolutionNote): string[] {
   const vistos = new Set<string>()
+  const metadata = metadataDe(note)
   const fuentes = [
     note.cupsCode,
+    metadata.cupsCode,
     note.serviceName,
     ...(note.catalogServices ?? []).flatMap((service) =>
       service.requiereCupsRips === false

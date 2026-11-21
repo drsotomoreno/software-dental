@@ -188,14 +188,20 @@ export function EvolutionNoteCard({
     >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-slate-700">
-            {isAddendum ? 'Aclaratoria' : `Nota #${index + 1}`}
-            {note.date && (
-              <span className="ml-2 font-normal text-slate-500">
-                — {etiquetaFechaHoraSesion(note.date)}
+          <div className="flex flex-wrap items-center gap-3">
+            {isAddendum ? (
+              <span className="text-sm font-medium text-slate-700">Aclaratoria</span>
+            ) : (
+              <span className="inline-flex items-center rounded-lg border-2 border-sky-400 bg-sky-100 px-3.5 py-1.5 text-xl font-black tracking-tight text-sky-950 shadow-xs sm:text-2xl">
+                Nota #{index + 1}
               </span>
             )}
-          </span>
+            {note.date && (
+              <span className="text-sm font-medium text-slate-600 sm:text-base">
+                {etiquetaFechaHoraSesion(note.date)}
+              </span>
+            )}
+          </div>
           {isAddendum && (
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
               Addendum
@@ -544,7 +550,7 @@ export function EvolutionNoteCard({
             notasPaquete={notasPaquete}
             disabled={disabled}
             clinicalLocked={clinicalLocked}
-            showDiagnosis={clinicalLocked}
+            showDiagnosis
             onChange={onChange}
           />
         </div>

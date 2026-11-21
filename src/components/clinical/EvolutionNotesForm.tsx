@@ -9,6 +9,7 @@ import {
 } from '@/types/evolutionNote'
 import { sortEvolutionNotesChronologically } from '@/utils/recordIntegrity'
 import { validateEvolutionNote } from '@/utils/evolutionNoteValidation'
+import { focusEvolutionMissingField } from '@/utils/evolutionCupsGate'
 import {
   CLINICAL_HISTORY_SECTION_NUMBERS,
   CLINICAL_SECTION_TITLE_CLASS,
@@ -142,7 +143,11 @@ export function EvolutionNotesForm({
 
     const issues = validateEvolutionNote(note)
     if (issues.length > 0) {
-      showBlocked(issues[0]?.message ?? 'Complete la nota antes de firmar.')
+      const first = issues[0]
+      showBlocked(first?.message ?? 'Complete la nota antes de firmar.')
+      if (first?.field === 'cupsCode' || first?.field === 'codDiagnosticoPrincipal') {
+        window.setTimeout(() => focusEvolutionMissingField(note.id, first.field!), 40)
+      }
       return
     }
 

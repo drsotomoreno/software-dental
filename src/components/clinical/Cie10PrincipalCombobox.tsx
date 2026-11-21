@@ -7,6 +7,9 @@ interface Cie10PrincipalComboboxProps {
   disabled?: boolean
   label?: string
   required?: boolean
+  /** Ancla para scroll/resaltado del bloqueo pre-firma. */
+  noteId?: string
+  fieldKey?: string
   onChange: (code: string, description?: string) => void
 }
 
@@ -29,6 +32,8 @@ export function Cie10PrincipalCombobox({
   disabled = false,
   label = 'Diagnóstico principal (CIE-10)',
   required = true,
+  noteId,
+  fieldKey = 'codDiagnosticoPrincipal',
   onChange,
 }: Cie10PrincipalComboboxProps) {
   const listId = useId()
@@ -66,7 +71,11 @@ export function Cie10PrincipalCombobox({
   }
 
   return (
-    <div>
+    <div
+      data-evo-note={noteId || undefined}
+      data-evo-field={noteId ? fieldKey : undefined}
+      className="rounded-md transition-[box-shadow]"
+    >
       <label className="label-field" htmlFor={inputId}>
         {label}
         {required && <span className="text-red-500"> *</span>}

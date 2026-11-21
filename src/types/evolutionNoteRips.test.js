@@ -34,6 +34,7 @@ function notaFirmada(extra = {}) {
 test('la metadata nueva trae los defaults de Res. 2275 y queda sin preparar', () => {
   const metadata = createDefaultEvolutionNoteRipsMetadata()
   assert.equal(metadata.codDiagnosticoPrincipal, '')
+  assert.equal(metadata.cupsCode, null)
   assert.equal(metadata.tipoVinculacionFinanciera, 'valor_cero')
   assert.equal(metadata.idReciboAsociado, null)
   assert.equal(metadata.idFacturaElectronica, null)
@@ -44,6 +45,25 @@ test('la metadata nueva trae los defaults de Res. 2275 y queda sin preparar', ()
   assert.equal(metadata.cuv, null)
   assert.equal(metadata.ripsFechaTransmision, null)
   assert.equal(metadata.ripsErrorLog, null)
+})
+
+test('el CUPS administrativo en metadata no reescribe el cuerpo clínico firmado', () => {
+  const original = notaFirmada({ cupsCode: null })
+  const patched = applyEvolutionNotePatch(
+    original,
+    { ripsMetadata: { cupsCode: '890203', codDiagnosticoPrincipal: 'K021' } },
+    {
+      immutable: true,
+      rejectClinicalEdit: () => {
+        throw new Error('inmutables')
+      },
+    },
+  )
+  assert.equal(patched.cupsCode, null)
+  assert.equal(patched.contentHash, 'hash-clinico')
+  assert.equal(patched.clinicalNote, 'Se obtura 16 oclusal.')
+  assert.equal(patched.ripsMetadata.cupsCode, '890203')
+  assert.equal(patched.ripsMetadata.codDiagnosticoPrincipal, 'K021')
 })
 
 test('normaliza el CIE-10 y acepta un RIPS preparado con recibo interno', () => {

@@ -80,6 +80,20 @@ test('rechaza el envío si la nota no está firmada, sin CIE-10, sin CUPS o sin 
       }),
     (error) => error instanceof EvolutionRipsPayloadError && error.field === 'cupsCode',
   )
+  assert.doesNotThrow(() =>
+    validarEnvioRipsNota({
+      ...base,
+      note: notaFirmada({
+        cupsCode: null,
+        procedure: 'sin código',
+        catalogServices: [],
+        ripsMetadata: {
+          ...notaFirmada().ripsMetadata,
+          cupsCode: '890203',
+        },
+      }),
+    }),
+  )
   assert.throws(
     () =>
       validarEnvioRipsNota({
