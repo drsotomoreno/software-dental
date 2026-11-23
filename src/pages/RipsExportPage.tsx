@@ -4,10 +4,6 @@ import { Link } from 'react-router-dom'
 import { db } from '@/db/database'
 import { RequirePermission } from '@/components/auth/RequirePermission'
 import { RipsExportForm, RipsSubmissionsHistory } from '@/components/rips'
-import {
-  contarAtencionesEnviadas,
-  guardarHistorialRadicacionRips,
-} from '@/db/ripsSubmissionsStore'
 import { getCurrentClinicId } from '@/services/clinicalSyncState'
 import { belongsToCurrentClinic, ensureClinicLocalIsolation } from '@/services/clinicLocalIsolation'
 import { useAuth } from '@/contexts/AuthContext'
@@ -16,8 +12,7 @@ import type { Patient } from '@/types/patient'
 import type { RipsValidationIssue } from '@/types/rips'
 import type { RipsSourceRecord } from '@/utils/rips'
 import { getBillingModalitySettings } from '@/services/billingModalityService'
-import { radicarRipsAnteMinisterio } from '@/services/ripsApiService'
-import { guardarCuvEnNotas } from '@/services/ripsCuvNotaStore'
+import { radicarPaqueteRipsUnificado } from '@/services/ripsRadicacionUnificada'
 import { saveTemporaryRips } from '@/services/ripsTemporalService'
 import { idsNotaDeFuentes } from '@/utils/ripsCuvNota'
 import {
@@ -40,7 +35,6 @@ import {
   formatRipsIssuePatientLabel,
   hasRipsBlockingErrors,
   pickInvoiceNumberForRips,
-  ripsParaRadicar,
   textoRadicacionExitosa,
   vinculosDeAtenciones,
 } from '@/utils'
@@ -235,34 +229,20 @@ export function RipsExportPage() {
         return
       }
 
-      const rips = ripsParaRadicar(result.rips, clasificacion.canal)
-      let response
-      try {
-        response = await radicarRipsAnteMinisterio({
-          rips,
-          cufe: clasificacion.canal === 'fev' ? cufe : '',
-          evolutionId: evolucionIdDeAtencion(attention.record),
-          patientId: String(patient.id ?? ''),
-        })
-      } catch (error) {
-        guardarHistorialRadicacionRips({
-          cantidad_historias: 1,
-          estado: 'error',
-          payload_json: rips,
-        })
-        setExportFailed(true)
-        setExportMessage(
-          error instanceof Error ? error.message : 'No se pudo contactar el Ministerio de Salud.',
-        )
-        return
-      }
+      const noteIds = [
+        String(attention.record.ripsAtencionNotaId ?? ''),
+        evolucionIdDeAtencion(attention.record),
+        ...idsNotaDeFuentes([{ record: attention.record }]),
+      ]
+      const response = await radicarPaqueteRipsUnificado({
+        rips: result.rips,
+        canal: clasificacion.canal,
+        cufe: clasificacion.canal === 'fev' ? cufe : '',
+        evolutionIds: noteIds,
+        patientId: String(patient.id ?? ''),
+        clinicId: getCurrentClinicId(),
+      })
       if (!response.success || !response.cuv) {
-        guardarHistorialRadicacionRips({
-          cuv: response.cuv,
-          cantidad_historias: 1,
-          estado: 'rechazado',
-          payload_json: rips,
-        })
         setExportIssues(
           (response.errors ?? []).map((item) => ({
             level: 'error' as const,
@@ -277,24 +257,16 @@ export function RipsExportPage() {
         return
       }
 
-      const contadas = contarAtencionesEnviadas(rips)
-      guardarHistorialRadicacionRips({
-        cuv: response.cuv,
-        cantidad_historias: contadas > 0 ? contadas : 1,
-        estado: 'radicado',
-        payload_json: rips,
-        clinicId: getCurrentClinicId(),
-      })
       void saveTemporaryRips({
         clinicId: getCurrentClinicId() || user.clinicId || user.id,
         patientId: String(patient.id ?? ''),
         professionalId: user.id,
         clinicalRecordId: String(attention.record.id ?? ''),
-        numDocumentoIdObligado: rips.numDocumentoIdObligado,
-        numFactura: normalizeRipsNumFactura(rips.numFactura),
+        numDocumentoIdObligado: response.ripsEnviado.numDocumentoIdObligado,
+        numFactura: normalizeRipsNumFactura(response.ripsEnviado.numFactura),
         perfilFiscal,
         status: 'submitted',
-        ripsJson: { ...rips, cuv: response.cuv },
+        ripsJson: { ...response.ripsEnviado, cuv: response.cuv },
       })
       audit({
         action: 'EXPORT_RIPS',
@@ -302,7 +274,6 @@ export function RipsExportPage() {
         details: `Radicación ${clasificacion.canal} de ${patient.firstName} ${patient.lastName} (${patient.documentType} ${patient.documentNumber}). CUV ${response.cuv}`,
       })
       setExportFailed(false)
-      void guardarCuvEnNotas([String(attention.record.ripsAtencionNotaId ?? evolucionIdDeAtencion(attention.record) ?? '')], response.cuv)
       setExportMessage(
         `${textoRadicacionExitosa({
           source: response.source,
@@ -452,7 +423,7 @@ export function RipsExportPage() {
           formReset={formReset}
           onUserAction={limpiarAvisoExportacion}
           onExported={(info) => {
-            void guardarCuvEnNotas(idsNotaDeFuentes(sources), info.cuv)
+            // El CUV ya quedó sellado en Dexie por radicarPaqueteRipsUnificado.
             audit({
               action: 'EXPORT_RIPS',
               resourceType: 'rips',

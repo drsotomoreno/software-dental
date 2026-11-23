@@ -20,7 +20,6 @@ import {
   createCatalogLookupFromServices,
   isRipsPackageReadyForExport,
   pickInvoiceNumberForRips,
-  ripsParaRadicar,
   textoRadicacionExitosa,
   vinculosDeAtenciones,
 } from '@/utils'
@@ -30,15 +29,12 @@ import { buildRipsMetadataFromInvoice } from '@/services/invoiceService'
 import {
   downloadDianXml,
   fetchRipsApiStatus,
-  radicarRipsAnteMinisterio,
   validateRipsWithMinistry,
 } from '@/services/ripsApiService'
+import { radicarPaqueteRipsUnificado } from '@/services/ripsRadicacionUnificada'
 import { saveTemporaryRips } from '@/services/ripsTemporalService'
-import {
-  contarAtencionesEnviadas,
-  guardarHistorialRadicacionRips,
-} from '@/db/ripsSubmissionsStore'
 import { getCurrentClinicId } from '@/services/clinicalSyncState'
+import { idsNotaDeFuentes } from '@/utils/ripsCuvNota'
 import { getBillingModalitySettings } from '@/services/billingModalityService'
 import {
   isNoObligadoFev,
@@ -280,7 +276,6 @@ export function RipsExportForm({
     if (!canExport || radicando) return
     onUserAction?.()
     const first = sources[0]
-    const rips = ripsParaRadicar(result.rips, clasificacion.canal)
     const cufe = clasificacion.canal === 'fev' ? cufePaquete : ''
     const patientIds = [...new Set(sources.map(({ patient }) => String(patient.id ?? '')).filter(Boolean))]
     setRadicando(true)
@@ -288,35 +283,20 @@ export function RipsExportForm({
     setRadicacionCuv('')
     setExported(false)
 
-    let response
-    try {
-      response = await radicarRipsAnteMinisterio({
-        rips,
-        cufe,
-        evolutionId: sources.length === 1 && first ? evolucionIdDeAtencion(first.record) : null,
-        patientId: patientIds.length === 1 ? patientIds[0] : null,
-      })
-    } catch (error) {
-      guardarHistorialRadicacionRips({
-        cantidad_historias: sources.length,
-        estado: 'error',
-        payload_json: rips,
-      })
-      setRadicando(false)
-      setRadicacionMensaje(
-        error instanceof Error ? error.message : 'No se pudo contactar el Ministerio de Salud.',
-      )
-      return
-    }
+    const response = await radicarPaqueteRipsUnificado({
+      rips: result.rips,
+      canal: clasificacion.canal,
+      cufe,
+      evolutionIds: [
+        ...idsNotaDeFuentes(sources),
+        ...sources.map(({ record }) => evolucionIdDeAtencion(record)),
+      ],
+      patientId: patientIds.length === 1 ? patientIds[0] : null,
+      clinicId: getCurrentClinicId(),
+    })
     setRadicando(false)
 
     if (!response.success || !response.cuv) {
-      guardarHistorialRadicacionRips({
-        cuv: response.cuv,
-        cantidad_historias: sources.length,
-        estado: 'rechazado',
-        payload_json: rips,
-      })
       const detalle =
         response.errors?.map((item) => item.message).filter(Boolean).join(' ') ||
         response.error ||
@@ -332,25 +312,16 @@ export function RipsExportForm({
       return
     }
 
-    const contadasEnJson = contarAtencionesEnviadas(rips)
-    const contadas = contadasEnJson > 0 ? contadasEnJson : sources.length
-    guardarHistorialRadicacionRips({
-      cuv: response.cuv,
-      cantidad_historias: contadas,
-      estado: 'radicado',
-      payload_json: rips,
-      clinicId: getCurrentClinicId(),
-    })
     void saveTemporaryRips({
       clinicId: getCurrentClinicId() || professional.clinicId || professional.id,
       patientId: first ? String(first.patient.id) : null,
       professionalId: professional.id,
       clinicalRecordId: first ? String(first.record.id ?? '') : null,
-      numDocumentoIdObligado: rips.numDocumentoIdObligado,
-      numFactura: normalizeRipsNumFactura(rips.numFactura),
+      numDocumentoIdObligado: response.ripsEnviado.numDocumentoIdObligado,
+      numFactura: normalizeRipsNumFactura(response.ripsEnviado.numFactura),
       perfilFiscal,
       status: 'submitted',
-      ripsJson: { ...rips, cuv: response.cuv },
+      ripsJson: { ...response.ripsEnviado, cuv: response.cuv },
     })
     setRadicacionCuv(response.cuv)
     setRadicacionMensaje(textoRadicacionExitosa({ source: response.source, canal: response.canal }))

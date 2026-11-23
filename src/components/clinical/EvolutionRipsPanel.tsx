@@ -6,8 +6,8 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/useToast'
 import { logAuditEvent } from '@/services/auditService'
 import { listPatientElectronicInvoices } from '@/services/invoiceService'
-import { guardarHistorialRadicacionRips } from '@/db/ripsSubmissionsStore'
-import { routeDictatedEvolutionByFiscalProfile } from '@/services/ripsApiService'
+import { buscarCuvNotaEnDexie } from '@/services/ripsCuvDexieLookup'
+import { radicarPaqueteRipsUnificado } from '@/services/ripsRadicacionUnificada'
 import { Toast } from '@/components/ui/Toast'
 import {
   isEvolutionNoteAddendum,
@@ -55,6 +55,8 @@ import {
   type PacienteRipsIdentidad,
 } from '@/utils/evolutionRipsPayload'
 import { prepararRipsParaSalida } from '../../../shared/ripsEstructura.js'
+import { ripsParaRadicar, type CanalRadicacionRips } from '@/utils/ripsRadicacion'
+import { getCurrentClinicId } from '@/services/clinicalSyncState'
 
 const OPCIONES_VINCULO: Array<{ value: TipoVinculacionFinanciera; label: string }> = [
   { value: 'recibo_interno', label: 'Recibo de caja interno' },
@@ -235,18 +237,49 @@ export function EvolutionRipsPanel({
   onChange,
 }: EvolutionRipsPanelProps) {
   const { user } = useAuth()
-  const metadata = metadataDe(note)
+  /** CUV sellado desde Exportación RIPS (Dexie) aunque el React state aún no lo tenga. */
+  const cuvDexie = useLiveQuery(() => buscarCuvNotaEnDexie(note.id), [note.id])
+  const metadata = useMemo(() => {
+    const base = metadataDe(note)
+    if (!cuvDexie?.cuv) return base
+    if (base.ripsEstado === 'enviado_ok' && base.cuv === cuvDexie.cuv) return base
+    return {
+      ...base,
+      ripsEstado: 'enviado_ok' as const,
+      cuv: cuvDexie.cuv,
+      ripsFechaTransmision: cuvDexie.ripsFechaTransmision || base.ripsFechaTransmision,
+      ripsErrorLog: null,
+    }
+  }, [note, cuvDexie])
   const tipo = tipoEfectivo(note)
   const valorCero = tipo === 'valor_cero'
+
+  useEffect(() => {
+    if (!cuvDexie?.cuv) return
+    const actual = note.ripsMetadata
+    if (actual?.ripsEstado === 'enviado_ok' && actual.cuv === cuvDexie.cuv) return
+    onChange({
+      ripsMetadata: {
+        ...metadataDe(note),
+        ripsEstado: 'enviado_ok',
+        cuv: cuvDexie.cuv,
+        ripsFechaTransmision: cuvDexie.ripsFechaTransmision || new Date().toISOString(),
+        ripsErrorLog: null,
+      },
+    })
+    // Solo reacciona al CUV sellado en Dexie (p. ej. desde Exportación RIPS).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- evita bucles con onChange inestable
+  }, [cuvDexie?.cuv, cuvDexie?.ripsFechaTransmision, note.id])
+
   const canonicalPreview = useMemo(
     () =>
       resolveAndValidateCanonicalEvolutionRips(
-        { ...note, ripsMetadata: { ...metadataDe(note), tipoVinculacionFinanciera: tipoEfectivo(note) } },
+        { ...note, ripsMetadata: { ...metadata, tipoVinculacionFinanciera: tipoEfectivo(note) } },
         paciente ?? {},
         {},
         'send',
       ),
-    [note, paciente],
+    [note, paciente, metadata],
   )
   const cupsEfectivo = canonicalPreview.resolved.primaryCups || effectiveEvolutionCupsCode(note)
   const adminCupsEditable =
@@ -488,7 +521,10 @@ export function EvolutionRipsPanel({
     tipoVinculacion: tipo,
   })
 
+  const canalRadicacion = (): CanalRadicacionRips => (tipo === 'fev' ? 'fev' : 'sin_factura')
+
   const descargarJson = () => {
+    const canal = canalRadicacion()
     let doc: object = documentoRipsDeNota(note, paciente)
     try {
       doc = armarRipsNotaEvolucion(entradaRips())
@@ -503,7 +539,9 @@ export function EvolutionRipsPanel({
       showToast(detalle)
       doc = documentoRipsDeNota(note, paciente)
     }
-    const salida = prepararRipsParaSalida(doc, { sinFactura: tipo !== 'fev' }) ?? doc
+    // Mismo pipeline de salida que Exportación RIPS: preparar + ripsParaRadicar.
+    const preparado = prepararRipsParaSalida(doc, { sinFactura: canal === 'sin_factura' }) ?? doc
+    const salida = ripsParaRadicar(preparado as { numFactura?: string | null }, canal)
     descargarTexto(
       `RIPS_nota_${note.id.slice(0, 8)}.json`,
       JSON.stringify(salida, null, 2),
@@ -756,46 +794,39 @@ export function EvolutionRipsPanel({
       }
 
       const rips = armarRipsNotaEvolucion({ ...entrada, note: { ...note, ripsMetadata: lista } })
-      let resultado
-      try {
-        resultado = await routeDictatedEvolutionByFiscalProfile({
-          rips,
-          cie10: [lista.codDiagnosticoPrincipal],
-          cups: rips.usuarios.flatMap((usuario) => [
-            ...(usuario.servicios.consultas ?? []).map((consulta) => consulta.codConsulta),
-            ...(usuario.servicios.procedimientos ?? []).map(
-              (procedimiento) => procedimiento.codProcedimiento,
-            ),
-          ]),
-          metadatos: {
-            patientUuid: patientId || undefined,
-            patientDocument: paciente?.documentNumber,
-            tipoVinculacionFinanciera: tipo,
-            canal: tipo === 'fev' ? 'fev' : 'sin_factura',
-          },
-        })
-      } catch (error) {
-        const detalle =
-          error instanceof Error
-            ? error.message
-            : 'Error HTTP al contactar /api/rips (revise red o sesión).'
-        reportarFalloEnvio(detalle)
-        publicar({
-          ripsMetadata: {
-            ...lista,
-            ripsEstado: 'error',
-            ripsErrorLog: detalle,
-            cuv: null,
-            ripsFechaTransmision: null,
-          },
-        })
-        return
+      const canal = canalRadicacion()
+      let cufe = ''
+      if (canal === 'fev') {
+        const facturaId = String(lista.idFacturaElectronica ?? '').trim()
+        if (facturaId && patientId) {
+          const facturas = await listPatientElectronicInvoices(
+            String(toPatientForeignKey(patientId)),
+          ).catch(() => [])
+          const match = facturas.find((item) => String(item.id) === facturaId)
+          cufe = String(match?.cufe ?? '').trim()
+        }
+        if (!cufe) {
+          reportarFalloEnvio(
+            'La factura electrónica aún no tiene CUFE. Complete la FEV antes de radicar.',
+            'idFacturaElectronica',
+          )
+          return
+        }
       }
 
+      // Mismo pipeline que Exportación RIPS: ripsParaRadicar + /api/rips/send-single + sello CUV.
+      const resultado = await radicarPaqueteRipsUnificado({
+        rips,
+        canal,
+        cufe,
+        evolutionIds: [note.id, ...notasDelRecibo.map((item) => item.id)],
+        patientId: patientId || null,
+        clinicId: getCurrentClinicId() || user?.clinicId || null,
+      })
+
       const cuv = resultado.cuv?.trim()
-      if (cuv) {
+      if (resultado.success && cuv) {
         const fechaTx = new Date().toISOString()
-        // Sidecar inmediato en React + Dexie (autosave) + sync Postgres vía clinical-sync.
         publicar({
           ripsMetadata: {
             ...lista,
@@ -805,13 +836,6 @@ export function EvolutionRipsPanel({
             ripsErrorLog: null,
           },
         })
-        guardarHistorialRadicacionRips({
-          cuv,
-          cantidad_historias: 1,
-          estado: 'radicado',
-          payload_json: rips,
-          fecha_radicacion: fechaTx,
-        })
         setMensajeLocal('')
         setValidationErrors([])
         setCuvCopiado(false)
@@ -819,27 +843,15 @@ export function EvolutionRipsPanel({
         return
       }
 
-      if (
-        resultado.ok &&
-        resultado.route === 'guardarRIPS_Pendiente' &&
-        resultado.estadoMuv !== 'RECHAZADO'
-      ) {
-        publicar({
-          ripsMetadata: {
-            ...lista,
-            ripsEstado: 'preparado',
-            cuv: null,
-            ripsFechaTransmision: null,
-            ripsErrorLog: null,
-          },
-        })
-        showToast(resultado.message || 'El RIPS quedó preparado. El MUV aún no devolvió un CUV.')
-        return
-      }
-
-      const errores = erroresDesdeResultadoMuv(resultado)
-      const detalle = errores.map((item) => item.message).join('\n') || rechazoMuv(resultado)
-      reportarFalloEnvio(detalle, resultado.field || errores[0]?.field, errores)
+      const errores = erroresDesdeResultadoMuv({
+        error: resultado.error,
+        errors: resultado.errors,
+      })
+      const detalle = errores.map((item) => item.message).join('\n') || rechazoMuv({
+        error: resultado.error,
+        errors: resultado.errors,
+      })
+      reportarFalloEnvio(detalle, errores[0]?.field, errores)
       publicar({
         ripsMetadata: {
           ...lista,

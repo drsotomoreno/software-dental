@@ -27,6 +27,23 @@ test('sin coincidencias no reescribe el arreglo', () => {
   assert.equal(notasConCuv(notes, new Set(['nota-nicolas']), 'CUV', '2026-10-27T16:00:00.000Z'), notes)
 })
 
+test('sella CUV aunque la metadata antigua no pase el schema estricto (sin CIE)', () => {
+  const notes = [
+    {
+      id: 'nota-legacy',
+      ripsMetadata: {
+        codDiagnosticoPrincipal: '',
+        tipoVinculacionFinanciera: 'recibo_interno',
+        ripsEstado: 'preparado',
+      },
+    },
+  ]
+  const next = notasConCuv(notes, new Set(['nota-legacy']), 'CUV-OFICIAL', '2026-11-22T20:00:00.000Z')
+  assert.notEqual(next, notes)
+  assert.equal(next[0].ripsMetadata.ripsEstado, 'enviado_ok')
+  assert.equal(next[0].ripsMetadata.cuv, 'CUV-OFICIAL')
+})
+
 test('la atención de nota usa su id y no las notas de otra historia', () => {
   const ids = idsNotaDeFuentes([
     {

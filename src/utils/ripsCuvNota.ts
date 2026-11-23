@@ -1,20 +1,45 @@
-import { applyEvolutionNoteRipsMetadata } from '../types/evolutionNoteRips.ts'
+import {
+  applyEvolutionNoteRipsMetadata,
+  createDefaultEvolutionNoteRipsMetadata,
+} from '../types/evolutionNoteRips.ts'
 
 type Nota = {
   id?: string | number | null
-  ripsMetadata?: object | null
+  ripsMetadata?: Record<string, unknown> | object | null
   cost?: number | null
   isBillable?: boolean
   estadoRips?: string | null
 }
 
+/**
+ * Sella CUV + enviado_ok. Si el schema estricto rechaza (p. ej. CIE vacío en
+ * metadata antigua), escribe el sello de todos modos: el Ministerio ya aceptó.
+ */
 function conCuv(note: Nota, cuv: string, when: string): Nota {
-  return applyEvolutionNoteRipsMetadata(note, {
-    ripsEstado: 'enviado_ok',
-    cuv,
-    ripsFechaTransmision: when,
-    ripsErrorLog: null,
-  })
+  try {
+    return applyEvolutionNoteRipsMetadata(note, {
+      ripsEstado: 'enviado_ok',
+      cuv,
+      ripsFechaTransmision: when,
+      ripsErrorLog: null,
+    })
+  } catch {
+    const prev =
+      note.ripsMetadata && typeof note.ripsMetadata === 'object'
+        ? (note.ripsMetadata as Record<string, unknown>)
+        : {}
+    return {
+      ...note,
+      ripsMetadata: {
+        ...createDefaultEvolutionNoteRipsMetadata(),
+        ...prev,
+        ripsEstado: 'enviado_ok',
+        cuv,
+        ripsFechaTransmision: when,
+        ripsErrorLog: null,
+      },
+    }
+  }
 }
 
 /** Devuelve el mismo arreglo si ninguna nota coincide, para no reescribir la historia. */
