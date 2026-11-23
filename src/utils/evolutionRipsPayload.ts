@@ -6,11 +6,8 @@ import {
   isOdontologyConsultationCups,
 } from '../constants/rips.ts'
 import { documentoObligadoDigits } from '../../shared/nit.js'
-import {
-  applySinFacturaBillingContract,
-  validateCanonicalEvolutionRips,
-} from '../../shared/canonicalEvolutionRips.js'
-import { normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
+import { validateCanonicalEvolutionRips } from '../../shared/canonicalEvolutionRips.js'
+import { prepararRipsParaSalida } from '../../shared/ripsEstructura.js'
 import type { DocumentType, RegimeType } from '../types/patient.ts'
 import type { EvolutionNote } from '../types/evolutionNote.ts'
 import {
@@ -337,21 +334,20 @@ export function armarRipsNotaEvolucion(input: EnvioRipsNotaInput): RipsTransacti
   }
 
   const numFactura = tipo === 'fev' ? soporteDe(input, tipo) : null
-  const base = normalizarEstructuraRips({
-    numDocumentoIdObligado:
-      documentoObligadoDigits(input.prestador.providerNit) ||
-      documentoObligadoDigits(input.prestador.documentNumber) ||
-      '',
-    numFactura,
-    tipoNota: null,
-    numNota: null,
-    usuarios: [usuario],
-  })
-  // CargarRipsSinFactura: numFactura null + tipoNota RS + numNota (RVG06).
-  if (tipo !== 'fev') {
-    return applySinFacturaBillingContract(base, Date.now()) as RipsTransaction
-  }
-  return base as RipsTransaction
+  // Capa de salida única (Descargar JSON + Enviar/Reintentar MUV): RVG01 + numNota legado.
+  return prepararRipsParaSalida(
+    {
+      numDocumentoIdObligado:
+        documentoObligadoDigits(input.prestador.providerNit) ||
+        documentoObligadoDigits(input.prestador.documentNumber) ||
+        '',
+      numFactura,
+      tipoNota: null,
+      numNota: null,
+      usuarios: [usuario],
+    },
+    { sinFactura: tipo !== 'fev' },
+  ) as RipsTransaction
 }
 
 export function mensajeCampoRips(error: EvolutionRipsPayloadError): string {

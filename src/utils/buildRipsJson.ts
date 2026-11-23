@@ -2,7 +2,7 @@ import type { InvoiceItem } from '@/types/invoice'
 import type { RipsProcedimiento, RipsTransaction } from '@/types/rips'
 import type { BuildRipsJsonOptions, BuildRipsJsonResult } from '@/types/invoice'
 import { buildRipsFromRecords } from '@/utils/rips'
-import { normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
+import { prepararRipsParaSalida } from '../../shared/ripsEstructura.js'
 import { validateRipsExport } from '@/utils/ripsValidation'
 import { normalizeRipsNumFactura } from '@/utils/fiscalProfile'
 import {
@@ -105,7 +105,7 @@ export function buildRipsJson(options: BuildRipsJsonOptions): BuildRipsJsonResul
     }
   })
 
-  const rips = normalizarEstructuraRips({
+  const rips = prepararRipsParaSalida({
     ...exportResult.rips,
     numFactura: normalizeRipsNumFactura(metadata.numFactura ?? invoice.invoiceNumber),
     usuarios: filteredUsuarios,

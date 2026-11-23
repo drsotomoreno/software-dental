@@ -53,6 +53,7 @@ import {
   mensajeCampoRips,
   type PacienteRipsIdentidad,
 } from '@/utils/evolutionRipsPayload'
+import { prepararRipsParaSalida } from '../../../shared/ripsEstructura.js'
 
 const OPCIONES_VINCULO: Array<{ value: TipoVinculacionFinanciera; label: string }> = [
   { value: 'recibo_interno', label: 'Recibo de caja interno' },
@@ -460,9 +461,10 @@ export function EvolutionRipsPanel({
       showToast(detalle)
       doc = documentoRipsDeNota(note, paciente)
     }
+    const salida = prepararRipsParaSalida(doc, { sinFactura: tipo !== 'fev' }) ?? doc
     descargarTexto(
       `RIPS_nota_${note.id.slice(0, 8)}.json`,
-      JSON.stringify(doc, null, 2),
+      JSON.stringify(salida, null, 2),
       'application/json;charset=utf-8',
     )
   }
@@ -521,7 +523,14 @@ export function EvolutionRipsPanel({
                 ? 'patient'
                 : field === 'cupsCode' || field === 'codDiagnosticoPrincipal' || field === 'date'
                   ? 'clinical'
-                  : field?.includes('Factura') || field?.includes('Recibo') || field === 'idFacturaElectronica' || field === 'idReciboAsociado'
+                  : field === 'numNota' ||
+                      field === 'tipoNota' ||
+                      field === 'numFactura' ||
+                      field?.includes('Factura') ||
+                      field?.includes('Recibo') ||
+                      field === 'idFacturaElectronica' ||
+                      field === 'idReciboAsociado' ||
+                      /^numNota\b/i.test(texto)
                     ? 'billing'
                     : 'clinical',
             },

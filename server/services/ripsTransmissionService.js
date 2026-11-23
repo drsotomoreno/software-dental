@@ -5,7 +5,7 @@
  */
 import { config } from '../config.js'
 import { normalizeRipsNumFactura } from '../../shared/fiscalProfile.js'
-import { completarRipsSinFactura, normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
+import { prepararRipsParaSalida } from '../../shared/ripsEstructura.js'
 import { submitRipsToMinsalud } from './minsaludRipsClient.js'
 import { MuvInfrastructureError, SisproMuvService, canalDeEnvio } from './sisproMuvService.js'
 import { actualizarAtencionRips, registrarRipsLog } from './ripsLogRepository.js'
@@ -166,14 +166,16 @@ async function guardarLog(entry, registrar) {
  * @param {{ service?: { enviar: Function }, registrar?: Function, actualizarAtencion?: Function }} [deps]
  */
 export async function transmitirRips(envelope, context = {}, deps = {}) {
-  // CargarRipsSinFactura exige SI/NO, grupos vacíos en null y CIE-11/codigoVIDA en "".
-  if (envelope?.rips) {
-    envelope = { ...envelope, rips: normalizarEstructuraRips(envelope.rips) }
-  }
+  // Capa de salida: RVG01 + numNota legado + contrato sin factura cuando aplica.
   const canalPrevisto = canalDeEnvio(envelope)
   const esSandbox = config.minsalud.sandbox && deps.service == null
-  if (!esSandbox && canalPrevisto === 'sin_factura' && envelope?.rips) {
-    envelope = { ...envelope, rips: completarRipsSinFactura(envelope.rips) }
+  if (envelope?.rips) {
+    envelope = {
+      ...envelope,
+      rips: prepararRipsParaSalida(envelope.rips, {
+        sinFactura: !esSandbox && canalPrevisto === 'sin_factura',
+      }),
+    }
   }
   const user = context.user ?? {}
   const prestador = usuarioPrestadorDeSesion(user)

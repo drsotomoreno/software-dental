@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { completarRipsSinFactura, incapacidadMuv, normalizarEstructuraRips } from './ripsEstructura.js'
+import {
+  completarRipsSinFactura,
+  incapacidadMuv,
+  normalizarEstructuraRips,
+  prepararRipsParaSalida,
+  sanitizarNumNotaLegado,
+} from './ripsEstructura.js'
 
 test('la incapacidad del MUV es SI o NO', () => {
   assert.equal(incapacidadMuv('02'), 'NO')
@@ -95,9 +101,72 @@ test('el RIPS sin factura lleva tipoNota RS y numNota', () => {
   const rips = completarRipsSinFactura({ numFactura: null, tipoNota: null, numNota: null, usuarios: [] })
   assert.equal(rips.numFactura, null)
   assert.equal(rips.tipoNota, 'RS')
-  assert.match(rips.numNota, /^NOTA-\d+$/)
+  assert.match(rips.numNota, /^RS\d+$/)
+  assert.match(rips.numNota, /^[A-Za-z][A-Za-z0-9]{0,3}\d{1,20}$/)
   const conFactura = completarRipsSinFactura({ numFactura: 'FV-1', tipoNota: 'NC', numNota: 'NC1' })
   assert.equal(conFactura.numFactura, null)
   assert.equal(conFactura.tipoNota, 'NC')
   assert.equal(conFactura.numNota, 'NC1')
+})
+
+test('sanitizarNumNotaLegado reescribe NOTA-… a RS+dígitos', () => {
+  const fixed = sanitizarNumNotaLegado({
+    tipoNota: 'RS',
+    numNota: 'NOTA-1795395067449',
+    usuarios: [],
+  })
+  assert.equal(fixed.numNota, 'RS1795395067449')
+  const intacto = sanitizarNumNotaLegado({ tipoNota: 'RS', numNota: 'RS1795395067449', usuarios: [] })
+  assert.equal(intacto.numNota, 'RS1795395067449')
+  const nc = sanitizarNumNotaLegado({ tipoNota: 'NC', numNota: 'NOTA-1', usuarios: [] })
+  assert.equal(nc.numNota, 'NOTA-1')
+})
+
+test('prepararRipsParaSalida corrige numNota legado y mantiene CIE11/codigoVIDA en string vacío', () => {
+  const rips = prepararRipsParaSalida(
+    {
+      numDocumentoIdObligado: '79904620',
+      numFactura: null,
+      tipoNota: 'RS',
+      numNota: 'NOTA-1795395067449',
+      usuarios: [
+        {
+          tipoDocumentoIdentificacion: 'CC',
+          numDocumentoIdentificacion: '37861325',
+          incapacidad: '02',
+          servicios: {
+            consultas: [],
+            procedimientos: [
+              {
+                codProcedimiento: '230103',
+                codDiagnosticoPrincipal: 'K020',
+                codDiagnosticoPrincipalCIE11: '',
+                codDiagnosticoRelacionadoCIE11: '',
+                codComplicacionCIE11: '',
+                codigoVIDA: '',
+                campoOpcionalVacio: '',
+              },
+            ],
+            medicamentos: [],
+            otrosServicios: [],
+            urgencias: [],
+            hospitalizacion: [],
+            recienNacidos: [],
+          },
+        },
+      ],
+    },
+    { sinFactura: true },
+  )
+  assert.equal(rips.numNota, 'RS1795395067449')
+  assert.equal(rips.tipoNota, 'RS')
+  assert.equal(rips.numFactura, null)
+  const proc = rips.usuarios[0].servicios.procedimientos[0]
+  assert.equal(proc.codDiagnosticoPrincipalCIE11, '')
+  assert.equal(proc.codDiagnosticoRelacionadoCIE11, '')
+  assert.equal(proc.codComplicacionCIE11, '')
+  assert.equal(proc.codigoVIDA, '')
+  assert.equal(proc.campoOpcionalVacio, null)
+  assert.equal(rips.usuarios[0].incapacidad, 'NO')
+  assert.equal(rips.usuarios[0].servicios.consultas, null)
 })

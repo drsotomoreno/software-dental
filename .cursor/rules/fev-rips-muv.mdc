@@ -5,7 +5,7 @@ alwaysApply: true
 
 # FEV-RIPS MinSalud (Colombia)
 
-Aplica al transmitir RIPS, serializar el JSON del MUV o consultar `atenciones`. El saneamiento vive en `shared/ripsEstructura.js` (`normalizarEstructuraRips`, `completarRipsSinFactura`) y corre antes de `JSON.stringify` en `sisproMuvService.js`, `fevRipsService.js` y `ripsTransmissionService.js`.
+Aplica al transmitir RIPS, serializar el JSON del MUV o consultar `atenciones`. El saneamiento de salida vive en `shared/ripsEstructura.js` (`prepararRipsParaSalida` → `normalizarEstructuraRips` + `completarRipsSinFactura` + `sanitizarNumNotaLegado`) y corre antes de `JSON.stringify` / HTTP en `sisproMuvService.js`, `fevRipsService.js`, `ripsTransmissionService.js`, descarga JSON del panel de evolución y `downloadRipsJson`.
 
 ## Estructura (RVG01)
 
@@ -13,7 +13,8 @@ Antes de serializar:
 
 - `consultas`, `urgencias`, `hospitalizacion`, `recienNacidos`, `medicamentos`, `otrosServicios` y `procedimientos` con longitud 0 pasan a `null`. Nunca `[]`.
 - `incapacidad` es `"SI"` o `"NO"`. `"02"` y cualquier otro código pasan a `"NO"`. `"01"` pasa a `"SI"`.
-- En cada procedimiento, `codigoVIDA`, `codDiagnosticoRelacionadoCIE11` y `codComplicacionCIE11` nulos o ausentes van en `""`.
+- En cada procedimiento, `codigoVIDA`, `codDiagnosticoPrincipalCIE11`, `codDiagnosticoRelacionadoCIE11` y `codComplicacionCIE11` nulos o ausentes van en `""`. **Prohibido** enviarlos como `null` (el MUV RVG01 los exige como string vacío).
+- Otras cadenas `""` en ítems de `consultas` / `procedimientos` / `medicamentos` / `otrosServicios` pueden normalizarse a `null`.
 - Borrar `nomComplicacionCIE11`, `nomCodDiagnosticoPrincipalCIE11` y `nomCodDiagnosticoRelacionadoCIE11`. El MUV rechaza esas llaves.
 
 ## RIPS sin factura (RVG06)
@@ -22,7 +23,8 @@ Solo en `CargarRipsSinFactura` (`canal === 'sin_factura'`):
 
 - `numFactura` es `null`. Prohibido `"SINFEV"` y `""`.
 - `tipoNota` es `"RS"` si venía vacío.
-- `numNota` es un identificador único `NOTA-${Date.now()}` si venía vacío.
+- `numNota` es un identificador único `RS` + dígitos (ej. `RS1732280000001`) si venía vacío o inválido.
+  Si `tipoNota === "RS"` y `numNota` tiene guiones/espacios o empieza por `NOTA-` (ej. `NOTA-1795395067449`), reescribir a `RS` + alfanumérico sin el prefijo NOTA → `RS1795395067449`.
 - No aplicar esto a un FEV con CUFE o XML.
 
 ## Postgres y memoria

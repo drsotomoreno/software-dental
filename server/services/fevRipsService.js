@@ -5,7 +5,7 @@
 
 import http from 'node:http'
 import https from 'node:https'
-import { completarRipsSinFactura, normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
+import { prepararRipsParaSalida } from '../../shared/ripsEstructura.js'
 
 const SANDBOX_BASE_URL = 'https://stage-fevrips.sispropreprod.gov.co/fevrips-api'
 const PRODUCTION_BASE_URL = 'https://fevrips.sispro.gov.co/fevrips-api'
@@ -140,7 +140,7 @@ export function readFevRipsSettings(source = process.env, overrides = {}) {
 function cuerpoParaCargarRips(url, body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return body
   if (!/CargarRipsSinFactura/i.test(String(url)) || body.rips == null) return body
-  return { ...body, rips: completarRipsSinFactura(normalizarEstructuraRips(body.rips)) }
+  return { ...body, rips: prepararRipsParaSalida(body.rips, { sinFactura: true }) }
 }
 
 function requestJson(url, { method = 'POST', headers = {}, body } = {}) {
@@ -305,7 +305,7 @@ export class FevRipsService {
    */
   async enviarRipsSinFactura(payloadJSON) {
     const auth = await this._authenticate()
-    const rips = completarRipsSinFactura(normalizarEstructuraRips(payloadJSON))
+    const rips = prepararRipsParaSalida(payloadJSON, { sinFactura: true })
     const { response, data } = await this._request(this.settings.cargarSinFacturaUrl, {
       headers: {
         'Content-Type': 'application/json',

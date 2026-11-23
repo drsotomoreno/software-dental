@@ -20,7 +20,7 @@ import {
   RIPS_DEFAULTS,
 } from '@/constants/rips'
 import { documentoObligadoDigits } from '@/utils/nit'
-import { normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
+import { normalizarEstructuraRips, prepararRipsParaSalida } from '../../shared/ripsEstructura.js'
 import { extractRepsDigits, parseRepsCode } from '@/utils/repsCode'
 import { RIPS_FEV_NUMERO_PATTERN } from './ripsStructureValidation'
 import { normalizePerfilFiscal, normalizeRipsNumFactura } from './fiscalProfile'
@@ -428,7 +428,8 @@ export function buildDefaultRipsMetadata(user: UserProfile): RipsExportMetadata 
 }
 
 export function downloadRipsJson(rips: RipsTransaction, filename: string): void {
-  const json = JSON.stringify(rips, null, 2)
+  const salida = (prepararRipsParaSalida(rips) ?? rips) as RipsTransaction
+  const json = JSON.stringify(salida, null, 2)
   const blob = new Blob([json], { type: 'application/json;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')

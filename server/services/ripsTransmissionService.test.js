@@ -64,7 +64,7 @@ test('el envío al MUV convierte arreglos vacíos e incapacidad 02', async () =>
   assert.equal(usuario.servicios.procedimientos[0].codigoVIDA, '')
   assert.equal(recibido.rips.numFactura, null)
   assert.equal(recibido.rips.tipoNota, 'RS')
-  assert.match(recibido.rips.numNota, /^NOTA-\d+$/)
+  assert.match(recibido.rips.numNota, /^RS\d+$/)
 })
 
 test('un CUV actualiza la atención y queda en el log', async () => {

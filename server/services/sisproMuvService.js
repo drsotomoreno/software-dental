@@ -9,7 +9,7 @@ import dns from 'node:dns'
 import http from 'node:http'
 import https from 'node:https'
 import net from 'node:net'
-import { completarRipsSinFactura, normalizarEstructuraRips } from '../../shared/ripsEstructura.js'
+import { prepararRipsParaSalida } from '../../shared/ripsEstructura.js'
 import { resolveMinsaludSettings } from './minsaludService.js'
 
 const CARGAR_FEV_PATH = '/api/PaquetesFevRips/CargarFevRips'
@@ -677,10 +677,10 @@ export class SisproMuvService {
    */
   async enviar(envelope = {}) {
     const canal = canalDeEnvio(envelope)
-    let rips = normalizarEstructuraRips(
+    const rips = prepararRipsParaSalida(
       ripsParaMinisterio(envelope.rips && typeof envelope.rips === 'object' ? envelope.rips : envelope),
+      { sinFactura: canal === 'sin_factura' },
     )
-    if (canal === 'sin_factura') rips = completarRipsSinFactura(rips)
     const xml = canal === 'fev' ? codificarXmlFev(leerXmlFev(envelope)) : ''
     const url = canal === 'fev' ? this.cargarFevUrl : this.cargarSinFacturaUrl
     const started = Date.now()

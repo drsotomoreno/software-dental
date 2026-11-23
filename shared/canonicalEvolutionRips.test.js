@@ -181,7 +181,16 @@ test('envío sin factura (recibo) exige idReciboAsociado y applySinFactura fija 
   )
   assert.equal(contract.numFactura, null)
   assert.equal(contract.tipoNota, 'RS')
-  assert.equal(contract.numNota, 'NOTA-seed-1')
+  assert.equal(contract.numNota, 'RS1')
+})
+
+test('numNota sin factura reescribe legado NOTA-… conservando dígitos', () => {
+  const contract = applySinFacturaBillingContract(
+    { numFactura: null, tipoNota: 'RS', numNota: 'NOTA-1795395067449', usuarios: [] },
+    1732280000123,
+  )
+  assert.equal(contract.numNota, 'RS1795395067449')
+  assert.match(contract.numNota, /^[A-Za-z][A-Za-z0-9]{0,3}\d{1,20}$/)
 })
 
 test('atención valor_cero no exige recibo ni FEV', () => {

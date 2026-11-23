@@ -424,15 +424,61 @@ export function resolveAndValidateCanonicalEvolutionRips(
 }
 
 /**
+ * Prefijo+consecutivo sin guiones ni espacios (RIPS_FEV_NUMERO_PATTERN / Res. 2275).
+ * Alineado con server/services/ripsMapper.js → numNotaOf.
+ */
+const RIPS_NUM_NOTA_PATTERN = /^[A-Za-z][A-Za-z0-9]{0,3}\d{1,20}$/
+
+/**
+ * @param {string | number | null | undefined} seed
+ * @returns {string}
+ */
+export function buildSinFacturaNumNota(seed) {
+  const digits = String(seed ?? Date.now()).replace(/\D/g, '') || String(Date.now())
+  return `RS${digits.slice(-13)}`
+}
+
+/**
+ * Corrige numNota legado tipo "NOTA-1795395067449" → "RS1795395067449".
+ * @param {string} raw
+ * @returns {string}
+ */
+export function rewriteLegacyNumNota(raw) {
+  return `RS${String(raw).replace(/[^a-zA-Z0-9]/g, '').replace(/^NOTA/i, '')}`
+}
+
+/**
+ * @param {string} raw
+ * @returns {boolean}
+ */
+export function isLegacyNumNota(raw) {
+  const value = String(raw ?? '')
+  return /[\s-]/.test(value) || /^NOTA-/i.test(value.trim())
+}
+
+/**
  * Política de envío sin factura (RVG06): numFactura null, tipoNota RS, numNota.
  * Los arreglos vacíos de servicios se normalizan aparte con normalizarEstructuraRips.
+ * numNota NUNCA lleva guiones (p. ej. NOTA-…): el MUV y validateRipsFevNumero lo rechazan.
  */
 export function applySinFacturaBillingContract(rips, numNotaSeed) {
   if (!rips || typeof rips !== 'object' || Array.isArray(rips)) return rips
+  const tipoNota = rips.tipoNota || 'RS'
+  const explicit = String(rips.numNota ?? '').trim()
+  let numNota
+  if (!explicit) {
+    numNota = buildSinFacturaNumNota(numNotaSeed)
+  } else if (tipoNota === 'RS' && isLegacyNumNota(explicit)) {
+    numNota = rewriteLegacyNumNota(explicit)
+  } else if (RIPS_NUM_NOTA_PATTERN.test(explicit)) {
+    numNota = explicit
+  } else {
+    numNota = buildSinFacturaNumNota(numNotaSeed)
+  }
   return {
     ...rips,
     numFactura: null,
-    tipoNota: rips.tipoNota || 'RS',
-    numNota: rips.numNota || `NOTA-${numNotaSeed || Date.now()}`,
+    tipoNota,
+    numNota,
   }
 }

@@ -1,6 +1,5 @@
 import {
-  completarRipsSinFactura,
-  normalizarEstructuraRips,
+  prepararRipsParaSalida,
 } from '../../../shared/ripsEstructura.js'
 import {
   DEMO_PRESTADOR_NIT,
@@ -105,7 +104,7 @@ export function buildDemoRipsJson(form: DemoFormData): object {
     numDocumentoIdObligado: DEMO_PRESTADOR_NIT,
     numFactura: null,
     tipoNota: 'RS',
-    numNota: `NOTA-DEMO-${Date.now()}`,
+    numNota: `RS${String(Date.now()).slice(-13)}`,
     usuarios: [
       {
         tipoDocumentoIdentificacion: 'CC',
@@ -182,7 +181,7 @@ export function buildDemoRipsJson(form: DemoFormData): object {
     },
   }
 
-  return completarRipsSinFactura(normalizarEstructuraRips(raw))
+  return prepararRipsParaSalida(raw, { sinFactura: true })
 }
 
 export function stringifyDemoRips(form: DemoFormData): string {

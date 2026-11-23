@@ -77,6 +77,12 @@ export function resolveAndValidateCanonicalEvolutionRips(
   resolved: CanonicalEvolutionRipsResolved
   validation: CanonicalRipsValidationResult
 }
+export function buildSinFacturaNumNota(seed?: string | number | null): string
+
+export function rewriteLegacyNumNota(raw: string): string
+
+export function isLegacyNumNota(raw: string): boolean
+
 export function applySinFacturaBillingContract(
   rips: object | null | undefined,
   numNotaSeed?: string | number,
