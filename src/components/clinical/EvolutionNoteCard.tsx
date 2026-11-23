@@ -1,5 +1,8 @@
 import type { EvolutionNote, EvolutionNotePatch } from '@/types/evolutionNote'
 import {
+  ANESTHESIA_TYPE_OTRO,
+  ANESTHESIA_TYPE_PRESETS,
+  isAnesthesiaTypePreset,
   isEvolutionNoteAddendum,
   isEvolutionNoteImmutable,
 } from '@/types/evolutionNote'
@@ -419,20 +422,59 @@ export function EvolutionNoteCard({
 
                 <div>
                   <h5 className="mb-2 text-xs font-semibold uppercase text-slate-500">Anestesia</h5>
-                  <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <div>
                       <label className="label-field">Tipo</label>
-                      <input
+                      <select
                         disabled={clinicalLocked}
-                        value={note.anesthesia.type}
-                        onChange={(event) =>
-                          onChange({
-                            anesthesia: { ...note.anesthesia, type: event.target.value },
-                          })
+                        value={
+                          isAnesthesiaTypePreset(note.anesthesia.type)
+                            ? note.anesthesia.type
+                            : note.anesthesia.type
+                              ? ANESTHESIA_TYPE_OTRO
+                              : ''
                         }
-                        placeholder="Lidocaína 2%..."
+                        onChange={(event) => {
+                          const next = event.target.value
+                          onChange({
+                            anesthesia: {
+                              ...note.anesthesia,
+                              type: next === ANESTHESIA_TYPE_OTRO ? ANESTHESIA_TYPE_OTRO : next,
+                            },
+                          })
+                        }}
                         className="input-field"
-                      />
+                      >
+                        <option value="">Seleccionar…</option>
+                        {ANESTHESIA_TYPE_PRESETS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                        <option value={ANESTHESIA_TYPE_OTRO}>{ANESTHESIA_TYPE_OTRO}</option>
+                      </select>
+                      {!isAnesthesiaTypePreset(note.anesthesia.type) && note.anesthesia.type ? (
+                        <input
+                          disabled={clinicalLocked}
+                          value={
+                            note.anesthesia.type === ANESTHESIA_TYPE_OTRO
+                              ? ''
+                              : note.anesthesia.type
+                          }
+                          onChange={(event) =>
+                            onChange({
+                              anesthesia: {
+                                ...note.anesthesia,
+                                type: event.target.value.trim()
+                                  ? event.target.value
+                                  : ANESTHESIA_TYPE_OTRO,
+                              },
+                            })
+                          }
+                          placeholder="Especifique el tipo de anestesia"
+                          className="input-field mt-2"
+                        />
+                      ) : null}
                     </div>
                     <div>
                       <label className="label-field">Carpules</label>
@@ -449,23 +491,6 @@ export function EvolutionNoteCard({
                             },
                           })
                         }
-                        className="input-field"
-                      />
-                    </div>
-                    <div>
-                      <label className="label-field">Vasoconstrictor</label>
-                      <input
-                        disabled={clinicalLocked}
-                        value={note.anesthesia.vasoconstrictor}
-                        onChange={(event) =>
-                          onChange({
-                            anesthesia: {
-                              ...note.anesthesia,
-                              vasoconstrictor: event.target.value,
-                            },
-                          })
-                        }
-                        placeholder="Epinefrina 1:100.000..."
                         className="input-field"
                       />
                     </div>

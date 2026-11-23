@@ -27,6 +27,23 @@ export interface AnesthesiaRecord {
   vasoconstrictor: string
 }
 
+/** Opciones de tipo de anestesia local en notas de evolución. */
+export const ANESTHESIA_TYPE_PRESETS = [
+  'Lidocaína al 2% con epinefrina',
+  'Lidocaína al 2% sin epinefrina',
+  'Articaína al 4% con epinefrina',
+  'Mepivacaína al 2% con epinefrina',
+  'Mepivacaína al 2% sin epinefrina',
+] as const
+
+export const ANESTHESIA_TYPE_OTRO = 'Otro'
+
+export type AnesthesiaTypePreset = (typeof ANESTHESIA_TYPE_PRESETS)[number]
+
+export function isAnesthesiaTypePreset(value: string): value is AnesthesiaTypePreset {
+  return (ANESTHESIA_TYPE_PRESETS as readonly string[]).includes(value)
+}
+
 /** Servicio del catálogo vinculado a una nota de evolución (puede haber varios por sesión). */
 export interface EvolutionCatalogService {
   id: string

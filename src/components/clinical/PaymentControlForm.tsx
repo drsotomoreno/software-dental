@@ -1490,7 +1490,7 @@ export function PaymentControlForm({
       </div>
       {pendingAgreements.length > 0 && (
         <div className="mt-4 space-y-3">
-          <h4 className="text-sm font-semibold text-slate-800">Acuerdos pendientes de registro clínico</h4>
+          <h4 className="text-sm font-semibold text-slate-800">Procedimientos pendientes</h4>
           <p className="text-xs text-slate-500">
             Procedimientos acordados que todavía no tienen zona, diagnóstico ni abonos. Páselos a su
             propia ficha para registrar el pago y la factura.
