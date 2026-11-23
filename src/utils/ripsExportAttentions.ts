@@ -25,6 +25,26 @@ export interface RipsExportAttention {
   record: ClinicalRecord
 }
 
+/** Normaliza fechas de atención a YYYY-MM-DD para comparar con inputs type="date". */
+export function diaAtencionIso(value: string | null | undefined): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+  const latam = raw.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/)
+  if (latam) {
+    return `${latam[3]}-${latam[2].padStart(2, '0')}-${latam[1].padStart(2, '0')}`
+  }
+  const parsed = new Date(raw)
+  if (!Number.isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear()
+    const m = String(parsed.getMonth() + 1).padStart(2, '0')
+    const d = String(parsed.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+  return ''
+}
+
 export interface RipsExportDraftSource {
   patientId: string
   updatedAt?: string
@@ -47,8 +67,41 @@ interface NoteHit {
   prefer: number
 }
 
+/**
+ * Estado RIPS exportable: sidecar `ripsMetadata.ripsEstado`, alias legados
+ * (`listo_para_enviar`) y notas firmadas con CUPS+CIE-10+vínculo financiero.
+ */
+export function estadoRipsExportable(note: EvolutionNote): string {
+  const meta = note.ripsMetadata
+  const raw = String(meta?.ripsEstado ?? '').trim().toLowerCase()
+  if (raw === 'enviado_ok' || raw === 'radicado') return 'enviado_ok'
+  if (raw === 'error' || raw === 'rechazado') return 'error'
+  if (raw === 'preparado' || raw === 'listo_para_enviar' || raw === 'listo') return 'preparado'
+
+  if (!meta) return ''
+  const firmada = Boolean(
+    (note.signedAt && note.contentHash) || note.isLocked === true,
+  )
+  const cie = String(meta.codDiagnosticoPrincipal ?? '').replace(/[.\s]/g, '')
+  const cupsMeta = String(meta.cupsCode ?? '')
+    .replace(/\D/g, '')
+    .slice(0, 6)
+  const cupsNota = String(note.cupsCode ?? '')
+    .replace(/\D/g, '')
+    .slice(0, 6)
+  const cups = cupsMeta.length === 6 ? cupsMeta : cupsNota
+  const vinculo = meta.tipoVinculacionFinanciera
+  // Solo promover si hay vínculo administrativo real (recibo/FEV) o CUPS en el sidecar RIPS.
+  const listoAdmin =
+    (vinculo === 'recibo_interno' && Boolean(meta.idReciboAsociado || note.pagoId)) ||
+    (vinculo === 'fev' && Boolean(meta.idFacturaElectronica)) ||
+    (vinculo === 'valor_cero' && cupsMeta.length === 6)
+  if (firmada && cie && cups.length === 6 && listoAdmin) return 'preparado'
+  return ''
+}
+
 function estadoDe(note: EvolutionNote): string {
-  return String(note.ripsMetadata?.ripsEstado ?? '').trim()
+  return estadoRipsExportable(note)
 }
 
 function rangoEstado(estado: string): number {
@@ -270,9 +323,18 @@ export function etiquetaAtencionRips(
   return 'Listo para exportar'
 }
 
+/**
+ * Si `Desde`/`Hasta` están vacíos, no restringe (todas las pendientes).
+ * Compara por día calendario normalizado, no por lexicografía cruda del timestamp.
+ */
 export function atencionEnPeriodo(occurredAt: string, dateFrom: string, dateTo: string): boolean {
-  if (dateFrom && occurredAt < dateFrom) return false
-  if (dateTo && occurredAt > `${dateTo}T23:59:59`) return false
+  const from = String(dateFrom ?? '').trim()
+  const to = String(dateTo ?? '').trim()
+  if (!from && !to) return true
+  const day = diaAtencionIso(occurredAt)
+  if (!day) return true
+  if (from && day < from) return false
+  if (to && day > to) return false
   return true
 }
 

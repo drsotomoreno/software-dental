@@ -520,6 +520,28 @@ export function EvolutionRipsPanel({
     descargarTexto(`CUV_${metadata.cuv}.txt`, metadata.cuv, 'text/plain;charset=utf-8')
   }
 
+  const scopeDeCampo = (field: string | null | undefined, texto = ''): CanonicalRipsValidationError['scope'] => {
+    if (field?.startsWith('patient.')) return 'patient'
+    if (field === 'cupsCode' || field === 'codDiagnosticoPrincipal' || field === 'date') return 'clinical'
+    if (
+      field === 'numNota' ||
+      field === 'tipoNota' ||
+      field === 'numFactura' ||
+      field?.includes('Factura') ||
+      field?.includes('Recibo') ||
+      field === 'idFacturaElectronica' ||
+      field === 'idReciboAsociado' ||
+      /^numNota\b/i.test(texto) ||
+      /\b(RVG|RVC)\d+/i.test(texto)
+    ) {
+      return 'billing'
+    }
+    if (field?.includes('prestador') || field?.includes('Obligado') || field === 'codPrestador') {
+      return 'professional'
+    }
+    return 'billing'
+  }
+
   const rechazoMuv = (resultado: {
     field?: string | null
     error?: string
@@ -527,13 +549,14 @@ export function EvolutionRipsPanel({
     code?: string
     estadoMuv?: string
     localIssues?: Array<{ level: string; field?: string; message: string }>
-    ministryErrors?: Array<{ code?: string; message: string }>
+    ministryErrors?: Array<{ code?: string; message: string; path?: string }>
     errors?: Array<{ code?: string; message?: string; path?: string }>
+    resultadoValidacion?: unknown
   }) => {
     const issue = resultado.localIssues?.find((item) => item.level !== 'warning' && item.message)
     const ministry = resultado.ministryErrors?.find((item) => item.message)
     const rvg = resultado.errors?.find((item) => item.message || item.code)
-    const field = resultado.field || issue?.field || rvg?.path || null
+    const field = resultado.field || issue?.field || rvg?.path || ministry?.path || null
     const code = resultado.code || ministry?.code || rvg?.code || null
     const message =
       issue?.message ||
@@ -546,14 +569,76 @@ export function EvolutionRipsPanel({
     return field ? `${field}: ${withCode}` : withCode
   }
 
+  const erroresDesdeResultadoMuv = (resultado: {
+    field?: string | null
+    error?: string
+    message?: string
+    code?: string
+    estadoMuv?: string
+    localIssues?: Array<{ level: string; field?: string; message: string }>
+    ministryErrors?: Array<{ code?: string; message: string; path?: string }>
+    errors?: Array<{ code?: string; message?: string; path?: string }>
+    resultadoValidacion?: unknown
+  }): CanonicalRipsValidationError[] => {
+    const out: CanonicalRipsValidationError[] = []
+    const push = (code: string, field: string, message: string) => {
+      const texto = String(message ?? '').trim()
+      if (!texto) return
+      out.push({
+        code,
+        field: field || 'rips',
+        message: texto,
+        scope: scopeDeCampo(field, texto),
+      })
+    }
+
+    for (const issue of resultado.localIssues ?? []) {
+      if (issue.level === 'warning' || !issue.message) continue
+      push('RIPS_LOCAL_ISSUE', issue.field || 'rips', issue.message)
+    }
+    for (const item of resultado.ministryErrors ?? []) {
+      if (!item.message) continue
+      const code = String(item.code || 'MUV').trim() || 'MUV'
+      push(code, item.path || resultado.field || 'rips', `${code}: ${item.message}`)
+    }
+    for (const item of resultado.errors ?? []) {
+      if (!item.message && !item.code) continue
+      const code = String(item.code || 'MUV').trim() || 'MUV'
+      const message = item.message ? (item.code ? `${code}: ${item.message}` : item.message) : code
+      push(code, item.path || resultado.field || 'rips', message)
+    }
+
+    const validacion = resultado.resultadoValidacion
+    const listaValidacion = Array.isArray(validacion)
+      ? validacion
+      : validacion && typeof validacion === 'object' && Array.isArray((validacion as { ResultadosValidacion?: unknown }).ResultadosValidacion)
+        ? ((validacion as { ResultadosValidacion: unknown[] }).ResultadosValidacion)
+        : validacion && typeof validacion === 'object' && Array.isArray((validacion as { resultadosValidacion?: unknown }).resultadosValidacion)
+          ? ((validacion as { resultadosValidacion: unknown[] }).resultadosValidacion)
+          : []
+    for (const item of listaValidacion) {
+      if (!item || typeof item !== 'object') continue
+      const row = item as { Codigo?: string; codigo?: string; code?: string; Descripcion?: string; descripcion?: string; message?: string; path?: string }
+      const code = String(row.Codigo || row.codigo || row.code || 'MUV').trim() || 'MUV'
+      const message = String(row.Descripcion || row.descripcion || row.message || '').trim()
+      if (!message) continue
+      push(code, row.path || resultado.field || 'rips', `${code}: ${message}`)
+    }
+
+    if (out.length === 0) {
+      const detalle = rechazoMuv(resultado)
+      push(String(resultado.code || 'RIPS_SEND_FAILED'), resultado.field || 'rips', detalle)
+    }
+    return out
+  }
+
   const reportarFalloEnvio = (
     detalle: string,
     field?: string | null,
     errors?: CanonicalRipsValidationError[],
   ) => {
     const texto = detalle.trim() || 'No se pudo enviar el RIPS al MUV.'
-    setMensajeLocal(texto)
-    setValidationErrors(
+    const lista =
       errors?.length
         ? errors
         : [
@@ -561,28 +646,21 @@ export function EvolutionRipsPanel({
               code: 'RIPS_SEND_FAILED',
               field: field || 'rips',
               message: texto,
-              scope: field?.startsWith('patient.')
-                ? 'patient'
-                : field === 'cupsCode' || field === 'codDiagnosticoPrincipal' || field === 'date'
-                  ? 'clinical'
-                  : field === 'numNota' ||
-                      field === 'tipoNota' ||
-                      field === 'numFactura' ||
-                      field?.includes('Factura') ||
-                      field?.includes('Recibo') ||
-                      field === 'idFacturaElectronica' ||
-                      field === 'idReciboAsociado' ||
-                      /^numNota\b/i.test(texto)
-                    ? 'billing'
-                    : 'clinical',
+              scope: scopeDeCampo(field, texto),
             },
-          ],
-    )
+          ]
+    setMensajeLocal(texto)
+    setValidationErrors(lista)
     showToast(texto)
+    window.setTimeout(() => {
+      document
+        .querySelector(`[data-rips-diagnostics="${note.id}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }, 40)
     const focusField =
       field === 'cupsCode' || field === 'codDiagnosticoPrincipal'
         ? field
-        : errors?.find((item) => item.field === 'cupsCode' || item.field === 'codDiagnosticoPrincipal')
+        : lista.find((item) => item.field === 'cupsCode' || item.field === 'codDiagnosticoPrincipal')
             ?.field
     if (focusField === 'cupsCode' || focusField === 'codDiagnosticoPrincipal') {
       window.setTimeout(() => focusEvolutionMissingField(note.id, focusField), 40)
@@ -741,7 +819,11 @@ export function EvolutionRipsPanel({
         return
       }
 
-      if (resultado.ok && resultado.route === 'guardarRIPS_Pendiente') {
+      if (
+        resultado.ok &&
+        resultado.route === 'guardarRIPS_Pendiente' &&
+        resultado.estadoMuv !== 'RECHAZADO'
+      ) {
         publicar({
           ripsMetadata: {
             ...lista,
@@ -755,8 +837,9 @@ export function EvolutionRipsPanel({
         return
       }
 
-      const detalle = rechazoMuv(resultado)
-      reportarFalloEnvio(detalle, resultado.field)
+      const errores = erroresDesdeResultadoMuv(resultado)
+      const detalle = errores.map((item) => item.message).join('\n') || rechazoMuv(resultado)
+      reportarFalloEnvio(detalle, resultado.field || errores[0]?.field, errores)
       publicar({
         ripsMetadata: {
           ...lista,
@@ -779,8 +862,12 @@ export function EvolutionRipsPanel({
       reportarFalloEnvio(detalle, field)
       publicar({
         ripsMetadata: {
+          ...metadata,
+          tipoVinculacionFinanciera: tipo,
           ripsEstado: 'error',
           ripsErrorLog: detalle,
+          cuv: null,
+          ripsFechaTransmision: null,
         },
       })
     } finally {
@@ -969,37 +1056,41 @@ export function EvolutionRipsPanel({
       )}
 
       {!transmitido && (
-        <EvolutionRipsDiagnosticsPanel
-          title="Diagnóstico RIPS / MUV"
-          errors={
-            validationErrors.length > 0
-              ? validationErrors
-              : metadata.ripsEstado === 'error' && metadata.ripsErrorLog
-                ? [
-                    {
-                      code: 'RIPS_PREVIOUS_ERROR',
-                      field: 'rips',
-                      message: metadata.ripsErrorLog,
-                      scope: 'billing',
-                    },
-                  ]
-                : mensajeLocal
-                  ? [
-                      {
-                        code: 'RIPS_LOCAL_MESSAGE',
+        <div data-rips-diagnostics={note.id}>
+          <EvolutionRipsDiagnosticsPanel
+            title="Diagnóstico RIPS / MUV"
+            errors={
+              validationErrors.length > 0
+                ? validationErrors
+                : metadata.ripsEstado === 'error' && metadata.ripsErrorLog
+                  ? metadata.ripsErrorLog
+                      .split('\n')
+                      .map((line) => line.trim())
+                      .filter(Boolean)
+                      .map((line) => ({
+                        code: 'RIPS_PREVIOUS_ERROR',
                         field: 'rips',
-                        message: mensajeLocal,
-                        scope: 'clinical',
-                      },
-                    ]
-                  : []
-          }
-          onRetry={() => void enviar()}
-          retryLabel="Reintentar envío al MUV"
-          disabled={disabled}
-          isSubmitting={isSendingRips}
-          patientFixHref={patientId ? `/pacientes/${patientId}` : undefined}
-        />
+                        message: line,
+                        scope: scopeDeCampo('rips', line),
+                      }))
+                  : mensajeLocal
+                    ? [
+                        {
+                          code: 'RIPS_LOCAL_MESSAGE',
+                          field: 'rips',
+                          message: mensajeLocal,
+                          scope: scopeDeCampo('rips', mensajeLocal),
+                        },
+                      ]
+                    : []
+            }
+            onRetry={() => void enviar()}
+            retryLabel="Reintentar envío al MUV"
+            disabled={disabled}
+            isSubmitting={isSendingRips}
+            patientFixHref={patientId ? `/pacientes/${patientId}` : undefined}
+          />
+        </div>
       )}
 
       {transmitido && metadata.cuv && (

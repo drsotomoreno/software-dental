@@ -27,6 +27,7 @@ import {
   listRipsExportAttentions,
   type RipsExportAttention,
 } from '@/utils/ripsExportAttentions'
+import { patientIdentityKeys } from '@/utils/patientId'
 import { isNoObligadoFev, normalizePerfilFiscal, normalizeRipsNumFactura } from '@/utils/fiscalProfile'
 import {
   buildDefaultRipsMetadata,
@@ -52,17 +53,27 @@ export function RipsExportPage() {
     return all.filter((patient) => belongsToCurrentClinic(patient))
   })
   const records = useLiveQuery(async () => {
+    const clinicPatients = (await db.patients.toArray()).filter((patient) =>
+      belongsToCurrentClinic(patient),
+    )
+    const allowed = new Set(clinicPatients.flatMap((patient) => patientIdentityKeys(patient)))
     const all = await db.clinicalRecords.toArray()
-    return all.filter((record) => belongsToCurrentClinic(record))
+    return all.filter(
+      (record) =>
+        belongsToCurrentClinic(record) || allowed.has(String(record.patientId ?? '')),
+    )
   })
   const drafts = useLiveQuery(async () => {
-    const allowed = new Set(
-      (await db.patients.toArray())
-        .filter((patient) => belongsToCurrentClinic(patient))
-        .map((patient) => String(patient.id ?? '')),
+    const clinicPatients = (await db.patients.toArray()).filter((patient) =>
+      belongsToCurrentClinic(patient),
     )
+    const allowed = new Set(clinicPatients.flatMap((patient) => patientIdentityKeys(patient)))
     const all = await db.patientClinicalDrafts.toArray()
-    return all.filter((draft) => allowed.has(String(draft.patientId ?? '')))
+    return all.filter(
+      (draft) =>
+        allowed.has(String(draft.patientId ?? '')) ||
+        allowed.has(String(draft.patientSyncId ?? '')),
+    )
   })
 
   const [dateFrom, setDateFrom] = useState('')
@@ -78,25 +89,36 @@ export function RipsExportPage() {
     void ensureClinicLocalIsolation()
   }, [user?.clinicId, user?.id])
 
+  /** Mapa por id Dexie, syncId UUID, documento y legacy — drafts usan syncId canónico. */
   const patientMap = useMemo(() => {
     const map = new Map<string, Patient>()
     for (const patient of patients ?? []) {
-      if (patient.id != null) {
-        map.set(String(patient.id), patient)
+      for (const key of patientIdentityKeys(patient)) {
+        map.set(key, patient)
       }
     }
     return map
   }, [patients])
 
   const attentions = useMemo(() => {
-    const allowed = new Set([...patientMap.keys()])
     const scopedRecords = (records ?? []).filter((record) =>
-      allowed.has(String(record.patientId ?? '')),
+      patientMap.has(String(record.patientId ?? '')),
     )
-    const scopedDrafts = (drafts ?? []).filter((draft) =>
-      allowed.has(String(draft.patientId ?? '')),
+    const scopedDrafts = (drafts ?? []).filter(
+      (draft) =>
+        patientMap.has(String(draft.patientId ?? '')) ||
+        patientMap.has(String(draft.patientSyncId ?? '')),
     )
-    return listRipsExportAttentions({ records: scopedRecords, drafts: scopedDrafts })
+    return listRipsExportAttentions({ records: scopedRecords, drafts: scopedDrafts }).map(
+      (attention) => {
+        const patient = patientMap.get(attention.patientId)
+        if (!patient) return attention
+        const canonical = String(patient.syncId || patient.id || attention.patientId)
+        return canonical === attention.patientId
+          ? attention
+          : { ...attention, patientId: canonical }
+      },
+    )
   }, [records, drafts, patientMap])
 
   const filteredAttentions = useMemo(
@@ -342,6 +364,18 @@ export function RipsExportPage() {
               className="input-field"
             />
           </div>
+          {(dateFrom || dateTo) && (
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              onClick={() => {
+                setDateFrom('')
+                setDateTo('')
+              }}
+            >
+              Ver todas (sin filtro de fechas)
+            </button>
+          )}
           <button type="button" onClick={selectAll} className="btn-secondary text-sm">
             Seleccionar todas
           </button>
@@ -349,13 +383,18 @@ export function RipsExportPage() {
             Limpiar selección
           </button>
         </div>
+        <p className="text-xs text-slate-500">
+          Sin fechas en Desde/Hasta se listan todas las atenciones pendientes de radicar de la
+          clínica ({attentions.length} en total
+          {dateFrom || dateTo ? `; ${filteredAttentions.length} en el período` : ''}).
+        </p>
 
         {!records || !drafts ? (
           <p className="text-sm text-slate-500">Cargando atenciones...</p>
         ) : filteredAttentions.length === 0 ? (
           <p className="text-sm text-slate-500">
             No hay historias clínicas firmadas ni notas de evolución con RIPS listo para exportar
-            en el período seleccionado.{' '}
+            {dateFrom || dateTo ? ' en el período seleccionado' : ''}.{' '}
             <Link to="/pacientes" className="text-dental-600 hover:underline">
               Ir a pacientes
             </Link>

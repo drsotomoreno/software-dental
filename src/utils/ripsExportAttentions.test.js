@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  atencionEnPeriodo,
   atencionRipsYaRadicada,
+  diaAtencionIso,
+  estadoRipsExportable,
   etiquetaAtencionRips,
   listRipsExportAttentions,
 } from './ripsExportAttentions.ts'
@@ -193,4 +196,42 @@ test('la nota se exporta sola y la historia conservada no la vuelve a incluir', 
     false,
   )
   assert.equal(record.evolutionNotes[0].id, 'nota-resina')
+})
+
+test('sin fechas Desde/Hasta no se excluye ninguna atención', () => {
+  assert.equal(atencionEnPeriodo('2026-10-06T11:47:00.000Z', '', ''), true)
+  assert.equal(atencionEnPeriodo('6/10/2026, 11:47 a. m.', '', ''), true)
+  assert.equal(diaAtencionIso('2026-10-06T11:47:00.000Z'), '2026-10-06')
+  assert.equal(diaAtencionIso('06/10/2026'), '2026-10-06')
+  assert.equal(atencionEnPeriodo('2026-10-06T11:47:00.000Z', '2026-10-01', '2026-10-31'), true)
+  assert.equal(atencionEnPeriodo('2026-09-30T11:47:00.000Z', '2026-10-01', '2026-10-31'), false)
+})
+
+test('nota firmada con CUPS+CIE-10+recibo cuenta como listo_para_enviar aunque ripsEstado sea sin_preparar', () => {
+  const firmada = nota('nota-isabel', 'sin_preparar', {
+    date: '2026-10-06T11:47',
+    cupsCode: '230103',
+    procedure: 'Exodoncia de dientes permanentes',
+    ripsMetadata: {
+      codDiagnosticoPrincipal: 'K020',
+      cupsCode: '230103',
+      tipoVinculacionFinanciera: 'recibo_interno',
+      idReciboAsociado: 'pago-2',
+      ripsEstado: 'sin_preparar',
+    },
+  })
+  assert.equal(estadoRipsExportable(firmada), 'preparado')
+  const lista = listRipsExportAttentions({
+    records: [],
+    drafts: [
+      {
+        patientId: '4a08b227-da3d-45f6-8325-a0ec906a45c9',
+        patientSyncId: '4a08b227-da3d-45f6-8325-a0ec906a45c9',
+        clinicalDraft: { evolutionNotes: [firmada] },
+      },
+    ],
+  })
+  assert.equal(lista.length, 1)
+  assert.equal(lista[0].ripsEstado, 'preparado')
+  assert.equal(lista[0].procedureLabel, 'Exodoncia de dientes permanentes')
 })

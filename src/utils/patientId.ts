@@ -17,6 +17,30 @@ export function toPatientForeignKey(id: string | number): string {
   return String(id)
 }
 
+/**
+ * Claves con las que drafts / clinicalRecords / rutas pueden referir al mismo paciente
+ * (id Dexie, syncId UUID, documento, legacyNumericIds).
+ */
+export function patientIdentityKeys(patient: {
+  id?: string | number | null
+  syncId?: string | null
+  documentNumber?: string | null
+  legacyNumericIds?: Array<string | number> | null
+} | null | undefined): string[] {
+  if (!patient) return []
+  const keys: string[] = []
+  if (patient.id != null && String(patient.id).trim()) keys.push(String(patient.id).trim())
+  const syncId = String(patient.syncId ?? '').trim()
+  if (syncId) keys.push(syncId)
+  const documentNumber = String(patient.documentNumber ?? '').trim()
+  if (documentNumber) keys.push(documentNumber)
+  for (const legacy of patient.legacyNumericIds ?? []) {
+    const value = String(legacy ?? '').trim()
+    if (value) keys.push(value)
+  }
+  return [...new Set(keys)]
+}
+
 export async function getPatientByRouteId(routeId: string): Promise<Patient | null> {
   const needle = String(routeId || '').trim()
   if (!needle) return null
