@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { CheckCircle2, Download, Loader2, Rocket, Save } from 'lucide-react'
+import { CheckCircle2, Copy, Download, Loader2, Rocket, Save } from 'lucide-react'
 import { db } from '@/db/database'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/useToast'
@@ -40,6 +40,7 @@ import {
   type TipoVinculacionFinanciera,
 } from '@/types/evolutionNoteRips'
 import { formatCurrency } from '@/utils/crypto'
+import { ZONA_CLINICA } from '@/utils/clinicDateTime'
 import {
   armarOpcionesPago,
   etiquetaOpcionPago,
@@ -135,16 +136,57 @@ function descargarTexto(filename: string, contenido: string, type: string) {
   URL.revokeObjectURL(url)
 }
 
+async function copiarCuvAlPortapapeles(cuv: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(cuv)
+  } catch {
+    const area = document.createElement('textarea')
+    area.value = cuv
+    area.setAttribute('readonly', '')
+    area.style.position = 'fixed'
+    area.style.left = '-9999px'
+    document.body.appendChild(area)
+    area.select()
+    document.execCommand('copy')
+    area.remove()
+  }
+}
+
+function formatearFechaRadicacion(iso: string | null | undefined): string {
+  const raw = String(iso ?? '').trim()
+  if (!raw) return '—'
+  const fecha = new Date(raw)
+  if (Number.isNaN(fecha.getTime())) return raw
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: ZONA_CLINICA,
+    dateStyle: 'short',
+    timeStyle: 'medium',
+  }).format(fecha)
+}
+
+function modalidadRips(tipo: TipoVinculacionFinanciera): string {
+  return tipo === 'fev' ? 'Con FEV' : 'Sin FEV - RS'
+}
+
 export function EvolutionRipsEstadoBadge({ note }: { note: EvolutionNote }) {
   const metadata = metadataDe(note)
   const estado: RipsEstadoTransmision = metadata.ripsEstado
+  if (estado === 'enviado_ok' && metadata.cuv) {
+    return (
+      <span
+        className="inline-flex max-w-xs items-center gap-1.5 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800"
+        title={`CUV: ${metadata.cuv}`}
+      >
+        <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
+        <span className="truncate">RIPS-ENVIADO · CUV</span>
+      </span>
+    )
+  }
   if (estado === 'enviado_ok') {
     return (
       <span className="inline-flex max-w-xs items-center gap-1.5 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
         <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
-        <span className="truncate">
-          RIPS transmitido{metadata.cuv ? ` (CUV: ${metadata.cuv})` : ''}
-        </span>
+        <span className="truncate">RIPS-ENVIADO</span>
       </span>
     )
   }
@@ -155,7 +197,7 @@ export function EvolutionRipsEstadoBadge({ note }: { note: EvolutionNote }) {
         title={estado === 'error' ? metadata.ripsErrorLog ?? undefined : undefined}
       >
         <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400" aria-hidden />
-        {estado === 'error' ? 'RIPS: error previo' : 'RIPS: listo para enviar'}
+        {estado === 'error' ? 'RIPS: error previo' : 'RIPS-LISTO PARA ENVIAR'}
       </span>
     )
   }
@@ -212,7 +254,7 @@ export function EvolutionRipsPanel({
   const cupsBloqueado =
     disabled || (clinicalLocked && !adminCupsEditable) || adminCupsAlreadyAssigned(note)
   const [isSendingRips, setIsSendingRips] = useState(false)
-  const [verCuv, setVerCuv] = useState(false)
+  const [cuvCopiado, setCuvCopiado] = useState(false)
   const [modalAnticipo, setModalAnticipo] = useState(false)
   const [mensajeLocal, setMensajeLocal] = useState('')
   const [validationErrors, setValidationErrors] = useState<CanonicalRipsValidationError[]>([])
@@ -675,6 +717,7 @@ export function EvolutionRipsPanel({
       const cuv = resultado.cuv?.trim()
       if (cuv) {
         const fechaTx = new Date().toISOString()
+        // Sidecar inmediato en React + Dexie (autosave) + sync Postgres vía clinical-sync.
         publicar({
           ripsMetadata: {
             ...lista,
@@ -691,10 +734,10 @@ export function EvolutionRipsPanel({
           payload_json: rips,
           fecha_radicacion: fechaTx,
         })
-        setVerCuv(true)
         setMensajeLocal('')
         setValidationErrors([])
-        showToast(`RIPS transmitido. CUV: ${cuv}`)
+        setCuvCopiado(false)
+        showToast(`RIPS enviado al MUV. CUV: ${cuv}`)
         return
       }
 
@@ -925,48 +968,87 @@ export function EvolutionRipsPanel({
         </p>
       )}
 
-      <EvolutionRipsDiagnosticsPanel
-        title="Diagnóstico RIPS / MUV"
-        errors={
-          validationErrors.length > 0
-            ? validationErrors
-            : metadata.ripsEstado === 'error' && metadata.ripsErrorLog
-              ? [
-                  {
-                    code: 'RIPS_PREVIOUS_ERROR',
-                    field: 'rips',
-                    message: metadata.ripsErrorLog,
-                    scope: 'billing',
-                  },
-                ]
-              : mensajeLocal
+      {!transmitido && (
+        <EvolutionRipsDiagnosticsPanel
+          title="Diagnóstico RIPS / MUV"
+          errors={
+            validationErrors.length > 0
+              ? validationErrors
+              : metadata.ripsEstado === 'error' && metadata.ripsErrorLog
                 ? [
                     {
-                      code: 'RIPS_LOCAL_MESSAGE',
+                      code: 'RIPS_PREVIOUS_ERROR',
                       field: 'rips',
-                      message: mensajeLocal,
-                      scope: 'clinical',
+                      message: metadata.ripsErrorLog,
+                      scope: 'billing',
                     },
                   ]
-                : []
-        }
-        onRetry={transmitido ? undefined : () => void enviar()}
-        retryLabel="Reintentar envío al MUV"
-        disabled={disabled}
-        isSubmitting={isSendingRips}
-        patientFixHref={patientId ? `/pacientes/${patientId}` : undefined}
-      />
+                : mensajeLocal
+                  ? [
+                      {
+                        code: 'RIPS_LOCAL_MESSAGE',
+                        field: 'rips',
+                        message: mensajeLocal,
+                        scope: 'clinical',
+                      },
+                    ]
+                  : []
+          }
+          onRetry={() => void enviar()}
+          retryLabel="Reintentar envío al MUV"
+          disabled={disabled}
+          isSubmitting={isSendingRips}
+          patientFixHref={patientId ? `/pacientes/${patientId}` : undefined}
+        />
+      )}
+
+      {transmitido && metadata.cuv && (
+        <div
+          role="status"
+          className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-900"
+        >
+          <p className="font-semibold">
+            RIPS radicado exitosamente ante el Ministerio de Salud (MUV)
+          </p>
+          <div className="mt-2 flex flex-wrap items-start gap-2">
+            <p className="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed">
+              <span className="font-sans font-medium text-emerald-800">CUV: </span>
+              {metadata.cuv}
+            </p>
+            <button
+              type="button"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-300 bg-white px-2 py-1 text-[11px] font-medium text-emerald-900 hover:bg-emerald-100"
+              aria-label="Copiar CUV al portapapeles"
+              onClick={() => {
+                void copiarCuvAlPortapapeles(metadata.cuv!).then(() => {
+                  setCuvCopiado(true)
+                  showToast('CUV copiado al portapapeles')
+                  window.setTimeout(() => setCuvCopiado(false), 1600)
+                })
+              }}
+            >
+              <Copy className="h-3 w-3" aria-hidden />
+              {cuvCopiado ? 'Copiado' : 'Copiar'}
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-emerald-800">
+            Radicación: {formatearFechaRadicacion(metadata.ripsFechaTransmision)} · Modalidad:{' '}
+            {modalidadRips(tipo)}
+          </p>
+        </div>
+      )}
 
       <div className="mt-4 flex flex-col gap-2 border-t border-dental-100 pt-3 sm:flex-row sm:flex-wrap sm:items-center">
         {transmitido ? (
           <button
             type="button"
-            className="btn-secondary border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
-            onClick={() => setVerCuv((actual) => !actual)}
-            disabled={disabled}
+            className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-100"
+            disabled
+            aria-disabled="true"
+            title="Este RIPS ya fue radicado ante el MUV. No se puede reenviar."
           >
             <CheckCircle2 className="mr-2 h-4 w-4" aria-hidden />
-            RIPS enviado — ver CUV
+            RIPS enviado al MUV
           </button>
         ) : (
           <button
@@ -999,13 +1081,6 @@ export function EvolutionRipsPanel({
           </button>
         )}
       </div>
-
-      {verCuv && metadata.cuv && (
-        <p className="mt-3 rounded-lg border border-emerald-200 bg-white px-3 py-2 font-mono text-xs text-emerald-900">
-          CUV: {metadata.cuv}
-          {metadata.ripsFechaTransmision ? ` · ${metadata.ripsFechaTransmision}` : ''}
-        </p>
-      )}
       <Toast message={toastMessage} onDismiss={clearToast} />
       {modalAnticipo && paqueteIncompleto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
