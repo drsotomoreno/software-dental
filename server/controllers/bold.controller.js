@@ -9,6 +9,8 @@ import {
 } from '../../shared/subscriptionPlans.js'
 import {
   activateSubscriptionFromBoldPayment,
+  getTitularBillingSnapshot,
+  nextInstallmentToPay,
   resolveSubscriptionSession,
   sessionHintFromRequest,
 } from '../services/subscriptionAuthStore.js'
@@ -66,14 +68,15 @@ function integrityHash(orderId, amountStr, secretKey) {
 }
 
 /** Descripción corta alfanumérica (Bold BTN-001 rechaza paréntesis y símbolos). */
-function boldDescription(planName) {
+function boldDescription(planName, installmentNumber = 1) {
   const safeName = String(planName || 'Plan')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9 ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  return `Suscripcion Anual Mi Historia Dental Plan ${safeName} Cuota 1 de 12 Excluido IVA`
+  const cuota = Math.max(1, Math.min(12, Number(installmentNumber) || 1))
+  return `Suscripcion Anual Mi Historia Dental Plan ${safeName} Cuota ${cuota} de 12 Excluido IVA`
 }
 
 function pickStatus(body) {
@@ -177,10 +180,19 @@ export async function createBoldIntegrity(req, res) {
       })
     }
     const titularUserId = clinicIdOf(session.user)
+    const billing = await getTitularBillingSnapshot(titularUserId)
+    // Cuota dinámica: (installment actual || 0) + 1; tras 12 reinicia en 1.
+    const samePlanContinuing =
+      billing &&
+      String(billing.plan ?? '').toLowerCase() === planId &&
+      Number(billing.installmentNumber) >= 1
+    const installmentNumber = samePlanContinuing
+      ? nextInstallmentToPay(billing)
+      : 1
     // orderId alfanumérico limpio (Bold BTN-001 con guiones/UUID largos).
     const orderId = `MHD${Date.now()}`
     const integritySignature = integrityHash(orderId, amountStr, secretKey)
-    const description = boldDescription(plan.name)
+    const description = boldDescription(plan.name, installmentNumber)
     const now = new Date().toISOString()
 
     const store = await loadOrders()
@@ -193,7 +205,7 @@ export async function createBoldIntegrity(req, res) {
       taxExcluded: true,
       billingCycle: 'monthly',
       commitmentMonths: 12,
-      installmentNumber: 1,
+      installmentNumber,
       userId: titularUserId,
       email: String(session.user.email || '').trim().toLowerCase(),
       actorUserId: String(session.user.id),
@@ -216,7 +228,7 @@ export async function createBoldIntegrity(req, res) {
       apiKey,
       description,
       commitmentMonths: 12,
-      installmentNumber: 1,
+      installmentNumber,
       billingCycle: 'monthly',
     })
   } catch (error) {

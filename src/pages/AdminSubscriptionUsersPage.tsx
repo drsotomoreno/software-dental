@@ -18,6 +18,7 @@ import {
 const STATUS_LABELS: Record<string, string> = {
   exento: 'Exento',
   activo: 'Activo',
+  pendiente_renovacion: 'Pendiente de renovación',
   prueba: 'Prueba',
   pendiente: 'Pendiente',
   vencido: 'Vencido',
@@ -27,6 +28,7 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_COLORS: Record<string, string> = {
   exento: 'bg-violet-100 text-violet-800',
   activo: 'bg-emerald-100 text-emerald-800',
+  pendiente_renovacion: 'bg-amber-100 text-amber-900',
   prueba: 'bg-amber-100 text-amber-800',
   pendiente: 'bg-slate-100 text-slate-700',
   vencido: 'bg-red-100 text-red-700',
@@ -61,15 +63,27 @@ function planDetail(products: TitularProducts) {
       ? `Prueba gratuita del titular, vigente hasta el ${until}.`
       : 'Prueba gratuita del titular.'
   }
-  if (plan.estado_pago === 'activo') {
+  if (plan.estado_pago === 'activo' || plan.estado_pago === 'pendiente_renovacion') {
     const name = planTitle(plan.id, plan.estado_pago)
+    const installment = Number(plan.installmentNumber) || 0
+    const commitment = Number(plan.commitmentMonths) || 12
+    const progress =
+      installment >= 1
+        ? ` Cuota ${installment} de ${commitment} del compromiso anual.`
+        : ''
+    const nextBilling = plan.nextBillingDate
+      ? ` Próxima cuota: ${formatDate(plan.nextBillingDate)}.`
+      : ''
+    if (plan.estado_pago === 'pendiente_renovacion') {
+      return `${name}: cuota pendiente de pago con Bold.${progress}${nextBilling}`
+    }
     return plan.fecha_vencimiento
-      ? `${name} adquirido por el titular. Vence el ${until}.`
-      : `${name} adquirido por el titular.`
+      ? `${name} adquirido por el titular. Vence el ${until}.${progress}${nextBilling}`
+      : `${name} adquirido por el titular.${progress}`
   }
   if (plan.estado_pago === 'vencido') {
     return plan.fecha_vencimiento
-      ? `El plan del titular venció el ${until}.`
+      ? `El plan del titular venció el ${until}. Puede renovar la siguiente cuota con Bold.`
       : 'El plan del titular está vencido.'
   }
   return 'El titular todavía no tiene un plan adquirido.'
@@ -101,9 +115,10 @@ export function AdminSubscriptionUsersPage() {
 
   useEffect(() => {
     const pago = searchParams.get('pago')
+    const renovar = searchParams.get('renovar')
     if (pago === 'procesando') {
       setInfo(
-        'Pago en proceso. Cuando Bold confirme (APPROVED), su plan se activará automáticamente. Puede refrescar en unos segundos.',
+        'Pago en proceso. Cuando Bold confirme (APPROVED), su cuota se registrará automáticamente. Puede refrescar en unos segundos.',
       )
       const next = new URLSearchParams(searchParams)
       next.delete('pago')
@@ -117,13 +132,32 @@ export function AdminSubscriptionUsersPage() {
               packages: result.packages,
               canPurchase: result.canPurchase,
             })
-            if (result.plan.estado_pago === 'activo') {
-              setInfo('Suscripción activa. El pago fue confirmado.')
+            if (
+              result.plan.estado_pago === 'activo' ||
+              result.plan.estado_pago === 'pendiente_renovacion'
+            ) {
+              const n = Number(result.plan.installmentNumber) || 0
+              setInfo(
+                n >= 1
+                  ? `Pago confirmado. Compromiso anual: cuota ${n} de ${result.plan.commitmentMonths || 12}.`
+                  : 'Suscripción activa. El pago fue confirmado.',
+              )
             }
           }
         })
       }, 2500)
       return () => window.clearTimeout(timer)
+    }
+    if (renovar === '1') {
+      setInfo(
+        'Renueve su cuota mensual con Bold (autorización directa del suscriptor). Seleccione su plan actual más abajo.',
+      )
+      const next = new URLSearchParams(searchParams)
+      next.delete('renovar')
+      setSearchParams(next, { replace: true })
+      window.requestAnimationFrame(() => {
+        document.getElementById('comprar')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
     }
     return undefined
   }, [searchParams, setSearchParams])
@@ -165,7 +199,20 @@ export function AdminSubscriptionUsersPage() {
   }
 
   const estado = products?.plan.estado_pago ?? 'pendiente'
-  const currentPlanId = estado === 'activo' ? products?.plan.id : null
+  const paidInstallment = Number(products?.plan.installmentNumber) || 0
+  const commitmentMonths = Number(products?.plan.commitmentMonths) || 12
+  const currentPlanId =
+    estado === 'activo' ||
+    estado === 'pendiente_renovacion' ||
+    (estado === 'vencido' && paidInstallment >= 1)
+      ? products?.plan.id
+      : null
+  // Compromiso anual: el titular puede autorizar la siguiente cuota (2–12) o reiniciar ciclo.
+  const needsInstallmentPayment =
+    Boolean(currentPlanId) &&
+    (paidInstallment >= 1 ||
+      estado === 'pendiente_renovacion' ||
+      estado === 'vencido')
   const activePackages = packages.filter((item) => item.status === 'activo').length
   const canPurchase = products?.canPurchase !== false
   const exempt = estado === 'exento'
@@ -220,6 +267,15 @@ export function AdminSubscriptionUsersPage() {
               </span>
             </div>
             <p className="mt-4 text-sm text-slate-600">{planDetail(products)}</p>
+            {paidInstallment >= 1 && paidInstallment <= commitmentMonths ? (
+              <p className="mt-3 rounded-lg border border-dental-200 bg-dental-50 px-3 py-2 text-sm text-dental-900">
+                Compromiso anual: <strong>Cuota {paidInstallment} de {commitmentMonths}</strong>
+                {products?.plan.nextBillingDate
+                  ? ` · Próximo pago: ${formatDate(products.plan.nextBillingDate)}`
+                  : ''}
+                . Cada cuota se autoriza con Botón de Pagos Bold.
+              </p>
+            ) : null}
           </article>
 
           <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-3">
@@ -307,10 +363,25 @@ export function AdminSubscriptionUsersPage() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {PAID_PLANS.map((plan) => {
             const isCurrent = currentPlanId === plan.id
+            const renewingCurrent = isCurrent && needsInstallmentPayment
             const purchaseLocked = !SUBSCRIPTION_PURCHASES_ENABLED
             const boldReady = !purchaseLocked && isBoldCheckoutPlan(plan.id)
             const checkoutDisabled =
-              purchaseLocked || !canPurchase || exempt || isCurrent || Boolean(submitting)
+              purchaseLocked ||
+              !canPurchase ||
+              exempt ||
+              (isCurrent && !renewingCurrent) ||
+              Boolean(submitting)
+            const nextCuota =
+              renewingCurrent && paidInstallment >= 1
+                ? paidInstallment >= commitmentMonths
+                  ? 1
+                  : paidInstallment + 1
+                : 1
+            const renewLabel =
+              renewingCurrent && paidInstallment >= 1
+                ? `Pagar Cuota ${nextCuota}/12 con Bold (${plan.priceLabel} COP)`
+                : `Pagar ${plan.name}`
             return (
               <article
                 key={plan.id}
@@ -331,15 +402,21 @@ export function AdminSubscriptionUsersPage() {
                     <p className="font-semibold text-slate-800">
                       {plan.priceLabel} COP / mes ({plan.taxLabel})
                     </p>
-                    <p>
-                      Suscripción anual con débito mensual automático (compromiso mínimo de 12
-                      meses).
-                    </p>
+                    {renewingCurrent && paidInstallment >= 1 ? (
+                      <p className="font-medium text-dental-800">
+                        Cuota {nextCuota} de 12 del compromiso anual
+                      </p>
+                    ) : (
+                      <p>
+                        Suscripción anual con pago mensual vía Bold (compromiso mínimo de 12 meses;
+                        cada cuota requiere su autorización).
+                      </p>
+                    )}
                   </div>
                 ) : null}
                 <p className="mt-2 flex items-center gap-1.5 text-sm text-slate-600">
                   <CalendarDays className="h-4 w-4 text-dental-600" />
-                  Débito mensual · compromiso 12 meses
+                  Pago mensual Bold · compromiso 12 meses
                 </p>
                 <ul className="mt-4 flex-1 space-y-2 text-sm text-slate-600">
                   {plan.features.map((feature) => (
@@ -358,15 +435,16 @@ export function AdminSubscriptionUsersPage() {
                           ? 'Solo el titular'
                           : exempt
                             ? 'Cuenta exenta'
-                            : isCurrent
-                              ? 'Plan actual'
+                            : isCurrent && !renewingCurrent
+                              ? 'Plan actual al día'
                               : 'Compra no disponible'}
                       </button>
                     ) : (
                       <BoldCheckoutButton
                         planId={plan.id}
                         planName={plan.name}
-                        label={`Pagar ${plan.name}`}
+                        label={renewLabel}
+                        paidInstallmentNumber={isCurrent ? paidInstallment : null}
                         className={
                           isCurrent || plan.featured ? 'btn-primary w-full' : 'btn-secondary w-full'
                         }

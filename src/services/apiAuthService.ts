@@ -19,12 +19,26 @@ export interface ApiSubscriptionUser {
   nombre: string
   email: string
   rol: 'superadmin' | 'admin' | 'odontologo' | 'recepcion'
-  estado_pago: 'pendiente' | 'activo' | 'vencido' | 'exento' | 'prueba'
+  estado_pago:
+    | 'pendiente'
+    | 'activo'
+    | 'pendiente_renovacion'
+    | 'vencido'
+    | 'exento'
+    | 'prueba'
   fecha_vencimiento: string | null
   plan?: string | null
   /** Sello de pago confirmado por el superadmin (o pasarela). Sin esto no hay suscripción activa. */
   subscriptionPaidAt?: string | null
   subscriptionPaidBy?: string | null
+  commitmentMonths?: number | null
+  installmentNumber?: number | null
+  contractStartDate?: string | null
+  contractEndDate?: string | null
+  nextBillingDate?: string | null
+  autoRenewMonthly?: boolean
+  hasBoldPaymentMethod?: boolean
+  renewalReminderPending?: boolean
   /** Tope manual de auxiliares. Solo lo aplica el plan corporativo. */
   customMaxAssistants?: number | null
   custom_max_assistants?: number | null

@@ -36,6 +36,11 @@ export interface TitularProducts {
     id: string | null
     estado_pago: ApiSubscriptionUser['estado_pago']
     fecha_vencimiento: string | null
+    installmentNumber?: number | null
+    commitmentMonths?: number | null
+    nextBillingDate?: string | null
+    contractEndDate?: string | null
+    autoRenewMonthly?: boolean
   }
   packages: NonNullable<ApiSubscriptionUser['messagePackages']>
   canPurchase: boolean

@@ -45,8 +45,9 @@ export function clinicalAccessTier(user) {
   const estado = String(user.estado_pago ?? '').trim().toLowerCase()
   if (!expiryInFuture(user.fecha_vencimiento)) return 'none'
   if (estado === 'prueba') return 'trial'
+  // activo o gracia de renovación (pendiente_renovacion): acceso clínico completo.
   if (
-    estado === 'activo' &&
+    (estado === 'activo' || estado === 'pendiente_renovacion') &&
     PAID_PLAN_SET.has(String(user.plan ?? '').trim().toLowerCase()) &&
     hasSubscriptionPaymentProof(user)
   ) {
@@ -83,10 +84,11 @@ export function applyStoredAccessPolicy(user) {
   let fecha = user?.fecha_vencimiento ?? null
   let subscriptionPaidAt = hasSubscriptionPaymentProof(user) ? user.subscriptionPaidAt : null
   const planId = String(plan ?? '').trim().toLowerCase()
+  const paidStates = new Set(['activo', 'pendiente_renovacion'])
   const paid =
-    estado === 'activo' && PAID_PLAN_SET.has(planId) && Boolean(subscriptionPaidAt)
+    paidStates.has(estado) && PAID_PLAN_SET.has(planId) && Boolean(subscriptionPaidAt)
 
-  if (estado === 'exento' || (estado === 'activo' && !paid)) {
+  if (estado === 'exento' || (paidStates.has(estado) && !paid)) {
     estado = 'pendiente'
     plan = null
     fecha = null

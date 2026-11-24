@@ -3,6 +3,7 @@ import { APP_NAME } from '@/constants/branding'
 import { TopNavbar } from './TopNavbar'
 import { AppBreadcrumbs } from './AppBreadcrumbs'
 import { BackupReminderBanner } from './BackupReminderBanner'
+import { SubscriptionRenewalBanner } from '@/components/SubscriptionRenewalBanner'
 import { GlobalToastHost } from '@/components/ui/GlobalToastHost'
 import { useAutoBackup } from '@/hooks/useAutoBackup'
 import { useAuth } from '@/contexts/AuthContext'
@@ -23,6 +24,7 @@ export function MainLayout() {
             </Link>
           </div>
         )}
+        <SubscriptionRenewalBanner />
         <BackupReminderBanner />
       </div>
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 print:max-w-none print:p-0">

@@ -97,10 +97,15 @@ export interface BoldCheckoutButtonProps {
   label?: string
   /** Texto auxiliar claro/oscuro en tarjetas featured. */
   mutedClassName?: string
+  /**
+   * Cuota ya pagada del compromiso anual (0 = primera compra).
+   * El botón muestra "Pagar Cuota (N+1)/12" cuando 1 ≤ N < 12.
+   */
+  paidInstallmentNumber?: number | null
 }
 
 /**
- * Botón de Pagos Bold: suscripción anual, débito mensual, IVA excluido.
+ * Botón de Pagos Bold: suscripción anual, cuota mensual con autorización del suscriptor, IVA excluido.
  * No envía `tax` al SDK (Bold trata el cobro sin IVA / 0 % al omitirlo).
  */
 export function BoldCheckoutButton({
@@ -110,6 +115,7 @@ export function BoldCheckoutButton({
   className = '',
   label,
   mutedClassName = 'text-slate-500',
+  paidInstallmentNumber = null,
 }: BoldCheckoutButtonProps) {
   const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
@@ -119,6 +125,14 @@ export function BoldCheckoutButton({
   const plan = useMemo(() => getPaidPlanById(planId), [planId])
   const amountCOP = typeof plan?.amountCOP === 'number' ? plan.amountCOP : 0
   const amountLabel = amountCOP > 0 ? `$${formatCop(amountCOP)}` : plan?.priceLabel || ''
+  const paidInstallments = Number(paidInstallmentNumber) || 0
+  const nextInstallment =
+    paidInstallments >= 1 && paidInstallments < 12
+      ? paidInstallments + 1
+      : paidInstallments >= 12
+        ? 1
+        : 1
+  const inAnnualCommitment = paidInstallments >= 1 && paidInstallments < 12
 
   const handleClick = useCallback(async () => {
     setError('')
@@ -190,9 +204,12 @@ export function BoldCheckoutButton({
     }
   }, [acceptedTerms, navigate, planId])
 
-  const buttonLabel =
-    label ||
-    (busy ? 'Abriendo Bold…' : planName ? `Pagar ${planName}` : 'Pagar con Bold')
+  const defaultLabel = inAnnualCommitment
+    ? `Pagar Cuota ${nextInstallment}/12 con Bold (${amountLabel} COP)`
+    : planName
+      ? `Pagar ${planName}`
+      : 'Pagar con Bold'
+  const buttonLabel = label || (busy ? 'Abriendo Bold…' : defaultLabel)
 
   const consentId = `bold-consent-${planId}`
 
@@ -203,9 +220,16 @@ export function BoldCheckoutButton({
           <p className="font-semibold">
             {amountLabel} COP / mes ({plan?.taxLabel || 'Excluido de IVA - Art. 476 ET'})
           </p>
-          <p>
-            Suscripción anual con débito mensual automático (compromiso mínimo de 12 meses).
-          </p>
+          {inAnnualCommitment ? (
+            <p className="font-medium text-dental-800">
+              Cuota {nextInstallment} de 12 del compromiso anual
+            </p>
+          ) : (
+            <p>
+              Suscripción anual con pago mensual vía Bold (compromiso mínimo de 12 meses; cada
+              cuota requiere su autorización).
+            </p>
+          )}
         </div>
       ) : null}
 
@@ -237,10 +261,11 @@ export function BoldCheckoutButton({
           >
             Términos del Servicio
           </a>{' '}
-          (cláusula de suscripción anual, compromiso mínimo de 12 meses y débito automático —
-          Excluido de IVA, Art. 476 ET) y autorizo el débito mensual recurrente de{' '}
-          <strong>{amountLabel} COP</strong> en mi tarjeta a favor de DOCTORSEOLABS S.A.S. (NIT
-          902127432).
+          (cláusula de suscripción anual, compromiso mínimo de 12 meses y pago mensual con Bold —
+          Excluido de IVA, Art. 476 ET) y autorizo el cobro de{' '}
+          <strong>{amountLabel} COP</strong>
+          {inAnnualCommitment ? ` (Cuota ${nextInstallment}/12)` : ''} con Botón de Pagos Bold a
+          favor de DOCTORSEOLABS S.A.S. (NIT 902127432).
         </span>
       </label>
 

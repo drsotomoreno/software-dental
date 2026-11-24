@@ -394,7 +394,8 @@ function isSubscriptionActive(user) {
     return new Date(user.fecha_vencimiento).getTime() > Date.now()
   }
 
-  if (user.estado_pago !== 'activo') return false
+  // Gracia de renovación: sigue con acceso clínico hasta renewalGraceUntil / fecha_vencimiento.
+  if (user.estado_pago !== 'activo' && user.estado_pago !== 'pendiente_renovacion') return false
   if (!hasSubscriptionPaymentProof(user)) return false
   if (!user.fecha_vencimiento) return false
 
@@ -408,18 +409,60 @@ function refreshPaymentStatus(user) {
 
   if (isPaymentExempt(user)) return user
 
-  if ((user.estado_pago === 'activo' || user.estado_pago === 'prueba') && user.fecha_vencimiento) {
-
+  if (user.estado_pago === 'prueba' && user.fecha_vencimiento) {
     if (new Date(user.fecha_vencimiento).getTime() <= Date.now()) {
-
       return { ...user, estado_pago: 'vencido' }
-
     }
+    return user
+  }
 
+  // Compromiso anual Bold: el cron marca pendiente_renovacion / vencido (no saltar gracia aquí).
+  if (user.autoRenewMonthly === true) {
+    if (user.estado_pago === 'pendiente_renovacion') {
+      const graceEnd = user.renewalGraceUntil || user.fecha_vencimiento
+      if (graceEnd && new Date(graceEnd).getTime() <= Date.now()) {
+        return { ...user, estado_pago: 'vencido' }
+      }
+    }
+    return user
+  }
+
+  if (user.estado_pago === 'activo' && user.fecha_vencimiento) {
+    if (new Date(user.fecha_vencimiento).getTime() <= Date.now()) {
+      return { ...user, estado_pago: 'vencido' }
+    }
   }
 
   return user
 
+}
+
+/** Próxima cuota a pagar con Botón de Pagos (1–12; reinicia tras completar el ciclo). */
+export function nextInstallmentToPay(user) {
+  const current = Number(user?.installmentNumber) || 0
+  if (current >= ANNUAL_COMMITMENT_MONTHS) return 1
+  return current + 1
+}
+
+/** Snapshot de facturación del titular (para integrity Bold / cron). */
+export async function getTitularBillingSnapshot(userId) {
+  const store = await loadStore()
+  const user = store.users.find((item) => String(item.id) === String(userId)) ?? null
+  if (!user) return null
+  return {
+    id: user.id,
+    email: user.email,
+    plan: user.plan ?? null,
+    estado_pago: user.estado_pago,
+    installmentNumber: Number(user.installmentNumber) || 0,
+    commitmentMonths: Number(user.commitmentMonths) || ANNUAL_COMMITMENT_MONTHS,
+    nextBillingDate: user.nextBillingDate ?? null,
+    fecha_vencimiento: user.fecha_vencimiento ?? null,
+    contractEndDate: user.contractEndDate ?? null,
+    autoRenewMonthly: user.autoRenewMonthly === true,
+    renewalReminderPending: user.renewalReminderPending === true,
+    renewalGraceUntil: user.renewalGraceUntil ?? null,
+  }
 }
 
 
@@ -938,38 +981,56 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
 
 
 /**
- * Contrato anual con débito mensual (compromiso mínimo 12 meses).
- * Si ya hay contrato activo del mismo plan, incrementa installmentNumber.
+ * Contrato anual con pago mensual vía Botón de Pagos Bold (cuotas 2–12 = autorización del suscriptor).
+ * Continúa el ciclo si hay compromiso del mismo plan; tras la cuota 12 reinicia el año.
  */
 function buildAnnualContractFields(user, planId, paidAtIso, tokenHints = {}) {
   const paidAt = new Date(paidAtIso)
   const nextBillingDate = addDays(paidAt, PAID_PLAN_DAYS)
-  const samePlanActive =
-    user.autoRenewMonthly === true &&
-    String(user.plan ?? '').toLowerCase() === String(planId).toLowerCase() &&
-    user.contractEndDate &&
-    new Date(user.contractEndDate).getTime() > Date.now() &&
-    user.estado_pago === 'activo'
-
+  const samePlan =
+    String(user.plan ?? '').toLowerCase() === String(planId).toLowerCase()
   const previousInstallment = Number(user.installmentNumber) || 0
-  const installmentNumber = samePlanActive
-    ? Math.min(ANNUAL_COMMITMENT_MONTHS, previousInstallment + 1)
+  const estado = String(user.estado_pago ?? '').toLowerCase()
+  const continuingCommitment =
+    user.autoRenewMonthly === true &&
+    samePlan &&
+    previousInstallment >= 1 &&
+    previousInstallment < ANNUAL_COMMITMENT_MONTHS &&
+    (estado === 'activo' ||
+      estado === 'pendiente_renovacion' ||
+      estado === 'vencido' ||
+      (user.contractEndDate && new Date(user.contractEndDate).getTime() > Date.now()))
+
+  const restartCycle =
+    user.autoRenewMonthly === true &&
+    samePlan &&
+    previousInstallment >= ANNUAL_COMMITMENT_MONTHS
+
+  const installmentNumber = continuingCommitment
+    ? previousInstallment + 1
     : 1
+
+  const keepContractDates = continuingCommitment && !restartCycle
 
   return {
     commitmentMonths: ANNUAL_COMMITMENT_MONTHS,
     installmentNumber,
-    contractStartDate: samePlanActive && user.contractStartDate ? user.contractStartDate : paidAtIso,
+    contractStartDate:
+      keepContractDates && user.contractStartDate ? user.contractStartDate : paidAtIso,
     contractEndDate:
-      samePlanActive && user.contractEndDate
+      keepContractDates && user.contractEndDate
         ? user.contractEndDate
         : addDays(paidAt, ANNUAL_CONTRACT_DAYS),
     nextBillingDate,
     autoRenewMonthly: true,
-    boldCustomerToken:
-      tokenHints.boldCustomerToken ?? user.boldCustomerToken ?? null,
-    boldPaymentMethodId:
-      tokenHints.boldPaymentMethodId ?? user.boldPaymentMethodId ?? null,
+    // Sin tokenización automática: cada cuota se autoriza en Bold Checkout.
+    boldCustomerToken: null,
+    boldPaymentMethodId: null,
+    renewalReminderPending: false,
+    renewalReminderSentAt: null,
+    renewalDueNotifiedAt: null,
+    renewalGraceUntil: null,
+    overdueReminderSentAt: null,
   }
 }
 
@@ -1092,39 +1153,121 @@ export async function activateSubscriptionFromBoldPayment({
   })
 }
 
-/** Listado interno para el cron de cobro recurrente mensual. */
-export async function listRecurringBillingCandidates(now = new Date()) {
+const RENEWAL_GRACE_DAYS = 3
+const RENEWAL_REMINDER_DAYS_BEFORE = 3
+
+/** Candidatos del cron diario: recordatorio preventivo, vencimiento o fin de gracia. */
+export async function listSubscriptionRenewalCandidates(now = new Date()) {
   const store = await loadStore()
   const ts = now.getTime()
   return store.users
     .filter((user) => {
       if (isPaymentExempt(user) || isMasterAccountEmail(user.email)) return false
       if (user.autoRenewMonthly !== true) return false
-      if (user.estado_pago !== 'activo') return false
       if (!user.nextBillingDate) return false
-      if (new Date(user.nextBillingDate).getTime() > ts) return false
       const installment = Number(user.installmentNumber) || 0
-      const withinCommitment = installment < ANNUAL_COMMITMENT_MONTHS
-      const renewBeyond =
-        user.autoRenewMonthly === true &&
-        (!user.contractEndDate || new Date(user.contractEndDate).getTime() >= ts)
-      return withinCommitment || renewBeyond
+      if (installment < 1) return false
+      const estado = String(user.estado_pago ?? '')
+      return (
+        estado === 'activo' ||
+        estado === 'pendiente_renovacion' ||
+        estado === 'vencido'
+      )
     })
     .map((user) => ({
       id: user.id,
       email: user.email,
+      nombre: user.nombre || '',
       plan: user.plan,
+      estado_pago: user.estado_pago,
       installmentNumber: Number(user.installmentNumber) || 0,
+      nextInstallment: nextInstallmentToPay(user),
       commitmentMonths: Number(user.commitmentMonths) || ANNUAL_COMMITMENT_MONTHS,
       nextBillingDate: user.nextBillingDate,
+      fecha_vencimiento: user.fecha_vencimiento || null,
       contractEndDate: user.contractEndDate || null,
-      boldCustomerToken: user.boldCustomerToken || null,
-      boldPaymentMethodId: user.boldPaymentMethodId || null,
+      renewalReminderPending: user.renewalReminderPending === true,
+      renewalReminderSentAt: user.renewalReminderSentAt || null,
+      renewalDueNotifiedAt: user.renewalDueNotifiedAt || null,
+      renewalGraceUntil: user.renewalGraceUntil || null,
+      overdueReminderSentAt: user.overdueReminderSentAt || null,
+      nowTs: ts,
     }))
 }
 
+/** @deprecated Usar listSubscriptionRenewalCandidates (sin tokenización Bold). */
+export async function listRecurringBillingCandidates(now = new Date()) {
+  return listSubscriptionRenewalCandidates(now)
+}
+
+export async function markRenewalReminderPending({ userId, note = null }) {
+  const store = await loadStore()
+  const index = store.users.findIndex((item) => String(item.id) === String(userId))
+  if (index === -1) return { ok: false, error: 'Usuario no encontrado.' }
+  const user = store.users[index]
+  const paidAt = new Date().toISOString()
+  store.users[index] = {
+    ...user,
+    renewalReminderPending: true,
+    renewalReminderSentAt: paidAt,
+    lastRecurringBillingAt: paidAt,
+    lastRecurringBillingStatus: 'reminder_sent',
+    lastRecurringBillingNote: note || 'Recordatorio preventivo de cuota enviado.',
+    updatedAt: paidAt,
+  }
+  await saveStore(store)
+  return { ok: true, user: sanitizeUser(store.users[index]) }
+}
+
+export async function markRenewalDuePending({ userId, note = null }) {
+  const store = await loadStore()
+  const index = store.users.findIndex((item) => String(item.id) === String(userId))
+  if (index === -1) return { ok: false, error: 'Usuario no encontrado.' }
+  const user = store.users[index]
+  const paidAt = new Date()
+  const graceUntil = addDays(paidAt, RENEWAL_GRACE_DAYS)
+  store.users[index] = {
+    ...user,
+    estado_pago: 'pendiente_renovacion',
+    renewalReminderPending: true,
+    renewalDueNotifiedAt: paidAt.toISOString(),
+    renewalGraceUntil: graceUntil,
+    fecha_vencimiento: graceUntil,
+    lastRecurringBillingAt: paidAt.toISOString(),
+    lastRecurringBillingStatus: 'pending_subscriber_authorization',
+    lastRecurringBillingNote:
+      note ||
+      'Cuota vencida: pendiente autorización Bold del suscriptor (gracia 3 días).',
+    updatedAt: paidAt.toISOString(),
+  }
+  await saveStore(store)
+  return { ok: true, user: sanitizeUser(store.users[index]), graceUntil }
+}
+
+export async function markRenewalOverdue({ userId, note = null }) {
+  const store = await loadStore()
+  const index = store.users.findIndex((item) => String(item.id) === String(userId))
+  if (index === -1) return { ok: false, error: 'Usuario no encontrado.' }
+  const user = store.users[index]
+  const paidAt = new Date().toISOString()
+  store.users[index] = {
+    ...user,
+    estado_pago: 'vencido',
+    renewalReminderPending: false,
+    overdueReminderSentAt: paidAt,
+    lastRecurringBillingAt: paidAt,
+    lastRecurringBillingStatus: 'overdue',
+    lastRecurringBillingNote:
+      note ||
+      'Gracia agotada: suspensión administrativa (datos clínicos conservados).',
+    updatedAt: paidAt,
+  }
+  await saveStore(store)
+  return { ok: true, user: sanitizeUser(store.users[index]) }
+}
+
 /**
- * Avanza una cuota tras cobro recurrente exitoso (o deja pendiente si no hay token).
+ * @deprecated El cobro ya no usa token; las cuotas se pagan con Botón de Pagos.
  */
 export async function recordRecurringBillingAttempt({
   userId,
@@ -1132,45 +1275,17 @@ export async function recordRecurringBillingAttempt({
   boldPaymentId = null,
   note = null,
 }) {
-  const store = await loadStore()
-  const index = store.users.findIndex((item) => String(item.id) === String(userId))
-  if (index === -1) return { ok: false, error: 'Usuario no encontrado.' }
-  const user = store.users[index]
-  const now = new Date()
-  const paidAt = now.toISOString()
-  if (!success) {
-    store.users[index] = {
-      ...user,
-      lastRecurringBillingAt: paidAt,
-      lastRecurringBillingStatus: 'pending_token_or_failed',
-      lastRecurringBillingNote: note || 'Cobro recurrente no ejecutado.',
-      updatedAt: paidAt,
-    }
-    await saveStore(store)
-    return { ok: true, user: sanitizeUser(store.users[index]) }
+  void boldPaymentId
+  if (success) {
+    return { ok: false, error: 'Use activateSubscriptionFromBoldPayment tras APPROVED.' }
   }
-
-  const nextInstallment = Math.min(
-    ANNUAL_COMMITMENT_MONTHS,
-    (Number(user.installmentNumber) || 0) + 1,
-  )
-  const nextBillingDate = addDays(now, PAID_PLAN_DAYS)
-  store.users[index] = {
-    ...user,
-    installmentNumber: nextInstallment,
-    nextBillingDate,
-    fecha_vencimiento: nextBillingDate,
-    subscriptionPaidAt: paidAt,
-    lastRecurringBillingAt: paidAt,
-    lastRecurringBillingStatus: 'charged',
-    lastRecurringBillingNote: note || null,
-    ...(boldPaymentId ? { boldPaymentId: String(boldPaymentId) } : {}),
-    updatedAt: paidAt,
-  }
-  await saveStore(store)
-  return { ok: true, user: sanitizeUser(store.users[index]) }
+  return markRenewalDuePending({
+    userId,
+    note: note || 'Cuota pendiente de autorización Bold del suscriptor.',
+  })
 }
 
+export { RENEWAL_GRACE_DAYS, RENEWAL_REMINDER_DAYS_BEFORE }
 
 
 function findSuperAdminUser(store) {
@@ -3109,6 +3224,11 @@ function titularProductSnapshot(owner, actorId) {
       id: safe.plan ?? null,
       estado_pago: safe.estado_pago,
       fecha_vencimiento: safe.fecha_vencimiento ?? null,
+      installmentNumber: safe.installmentNumber ?? null,
+      commitmentMonths: safe.commitmentMonths ?? null,
+      nextBillingDate: safe.nextBillingDate ?? null,
+      contractEndDate: safe.contractEndDate ?? null,
+      autoRenewMonthly: safe.autoRenewMonthly === true,
     },
     packages: safe.messagePackages ?? [],
     user: String(safe.id) === String(actorId) ? safe : undefined,

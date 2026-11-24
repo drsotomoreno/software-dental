@@ -313,3 +313,51 @@ export async function sendVerificationCodeEmail({ to, email, code }) {
     `,
   })
 }
+
+/**
+ * Recordatorio de cuota mensual Bold (cuotas 2–12: autorización directa del suscriptor).
+ * Si no hay SMTP/Resend, el caller debe capturar MAIL_NOT_CONFIGURED y dejar log.
+ */
+export async function sendSubscriptionRenewalEmail({
+  to,
+  planName,
+  amountLabel,
+  installmentNumber,
+  commitmentMonths = 12,
+  dueLabel,
+  renewUrl,
+  kind = 'reminder',
+}) {
+  const recipient = requireRecipientEmail(to)
+  const cuota = `Cuota ${installmentNumber}/${commitmentMonths}`
+  const subject =
+    kind === 'due'
+      ? `Cuota pendiente — ${cuota} MiHistoriaDental`
+      : `Recordatorio de pago — ${cuota} MiHistoriaDental`
+  const intro =
+    kind === 'due'
+      ? `Su ${cuota} de la suscripción anual (${planName}) está pendiente de pago.`
+      : `Le recordamos que su ${cuota} de la suscripción anual (${planName}) vence pronto.`
+  const text = [
+    intro,
+    '',
+    `Monto: ${amountLabel} COP — Excluido de IVA (Art. 476 ET).`,
+    dueLabel ? `Fecha de vencimiento: ${dueLabel}.` : '',
+    '',
+    'Cada cuota mensual requiere su autorización directa en Bold (Botón de Pagos).',
+    `Pague aquí: ${renewUrl}`,
+    '',
+    'Si ya pagó, ignore este mensaje.',
+  ]
+    .filter(Boolean)
+    .join('\n')
+  const html = `
+    <p>${intro}</p>
+    <p><strong>Monto:</strong> ${amountLabel} COP — Excluido de IVA (Art. 476 ET).</p>
+    ${dueLabel ? `<p><strong>Vence:</strong> ${dueLabel}</p>` : ''}
+    <p>Cada cuota mensual requiere su autorización directa en Bold (Botón de Pagos).</p>
+    <p><a href="${renewUrl}" style="display:inline-block;padding:12px 20px;background:#0f766e;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">Pagar cuota ahora</a></p>
+    <p style="font-size:12px;color:#64748b">Si el botón no funciona, abra: ${renewUrl}</p>
+  `
+  return sendTransactionalEmail({ to: recipient, subject, html, text })
+}
