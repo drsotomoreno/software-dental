@@ -56,9 +56,24 @@ function canPurchasePlans(user) {
   return String(user.id) === clinicIdOf(user)
 }
 
-function integrityHash(orderId, amount, secretKey) {
-  const payload = `${orderId}${amount}COP${secretKey}`
-  return createHash('sha256').update(payload, 'utf8').digest('hex')
+/** Monto entero COP como string limpio (sin decimales ni espacios). */
+function amountToBoldString(amountCOP) {
+  return String(Math.round(Number(amountCOP) || 0)).replace(/\D/g, '')
+}
+
+function integrityHash(orderId, amountStr, secretKey) {
+  return createHash('sha256').update(`${orderId}${amountStr}COP${secretKey}`, 'utf8').digest('hex')
+}
+
+/** Descripción corta alfanumérica (Bold BTN-001 rechaza paréntesis y símbolos). */
+function boldDescription(planName) {
+  const safeName = String(planName || 'Plan')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return `Suscripcion Anual Mi Historia Dental Plan ${safeName} Cuota 1 de 12 Excluido IVA`
 }
 
 function pickStatus(body) {
@@ -153,20 +168,29 @@ export async function createBoldIntegrity(req, res) {
     }
 
     const plan = getPaidPlanById(planId)
-    const amount = Number(plan.amountCOP)
+    const amountStr = amountToBoldString(plan.amountCOP)
+    if (!amountStr || amountStr === '0') {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error: 'El plan no tiene un monto válido para Bold.',
+      })
+    }
     const titularUserId = clinicIdOf(session.user)
-    const orderId = `MHD-${planId.toUpperCase()}-${titularUserId}-${Date.now()}`
-    const integritySignature = integrityHash(orderId, amount, secretKey)
-    const description = `Suscripción Anual Mi Historia Dental - Plan ${plan.name} (Cuota 1/12 - Débito mensual - Excluido de IVA)`
+    // orderId alfanumérico limpio (Bold BTN-001 con guiones/UUID largos).
+    const orderId = `MHD${Date.now()}`
+    const integritySignature = integrityHash(orderId, amountStr, secretKey)
+    const description = boldDescription(plan.name)
     const now = new Date().toISOString()
 
     const store = await loadOrders()
     store.orders.push({
       orderId,
       planId,
-      amount,
+      amount: amountStr,
       currency: 'COP',
-      tax: '0',
+      // IVA excluido: no se envía tax al SDK; se documenta en la orden.
+      taxExcluded: true,
       billingCycle: 'monthly',
       commitmentMonths: 12,
       installmentNumber: 1,
@@ -186,9 +210,8 @@ export async function createBoldIntegrity(req, res) {
       success: true,
       ok: true,
       orderId,
-      amount,
+      amount: amountStr,
       currency: 'COP',
-      tax: '0',
       integritySignature,
       apiKey,
       description,

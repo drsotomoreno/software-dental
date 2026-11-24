@@ -10,9 +10,9 @@ type BoldIntegrityResponse = {
   ok?: boolean
   error?: string
   orderId: string
-  amount: number
+  /** String entero firmado en el backend (mismo valor que va a BoldCheckout). */
+  amount: string | number
   currency: string
-  tax: string
   integritySignature: string
   apiKey: string
   description: string
@@ -101,7 +101,7 @@ export interface BoldCheckoutButtonProps {
 
 /**
  * Botón de Pagos Bold: suscripción anual, débito mensual, IVA excluido.
- * Requiere casilla de aceptación contractual antes de abrir el checkout.
+ * No envía `tax` al SDK (Bold trata el cobro sin IVA / 0 % al omitirlo).
  */
 export function BoldCheckoutButton({
   planId,
@@ -148,19 +148,40 @@ export function BoldCheckoutButton({
       }
 
       const integrity = await requestIntegrity(planId)
-      const amount = String(Math.round(Number(integrity.amount)))
+      // Exactamente el mismo string firmado en el backend (sin recalcular).
+      const amount = String(integrity.amount ?? '')
+        .trim()
+        .replace(/\D/g, '')
+      if (!amount) {
+        throw new Error('Monto Bold inválido.')
+      }
+      const currency = 'COP'
       const redirectionUrl = `${window.location.origin}/suscripcion?pago=procesando`
 
-      const checkout = new window.BoldCheckout({
-        apiKey: integrity.apiKey,
-        orderId: integrity.orderId,
+      const boldConfig = {
+        orderId: String(integrity.orderId),
+        currency,
         amount,
-        currency: integrity.currency || 'COP',
-        tax: '0',
-        integritySignature: integrity.integritySignature,
-        description: integrity.description,
+        apiKey: String(integrity.apiKey),
+        integritySignature: String(integrity.integritySignature),
+        description: String(integrity.description || ''),
         redirectionUrl,
-      })
+      }
+
+      if (import.meta.env.DEV) {
+        console.log('[BoldCheckout] params', {
+          orderId: boldConfig.orderId,
+          currency: boldConfig.currency,
+          amount: boldConfig.amount,
+          apiKeyPrefix: boldConfig.apiKey.slice(0, 6) + '…',
+          description: boldConfig.description,
+          redirectionUrl: boldConfig.redirectionUrl,
+          integritySignatureLen: boldConfig.integritySignature.length,
+        })
+      }
+
+      // Sin `tax`: Bold procesa sin IVA (equivalente a Excluido / 0 % Art. 476 ET).
+      const checkout = new window.BoldCheckout(boldConfig)
       checkout.open()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo abrir el pago Bold.')
