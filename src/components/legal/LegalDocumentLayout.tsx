@@ -39,9 +39,17 @@ export function LegalDocumentLayout({ title, updated, children }: LegalDocumentL
   )
 }
 
-export function LegalSection({ title, children }: { title: string; children: ReactNode }) {
+export function LegalSection({
+  title,
+  children,
+  id,
+}: {
+  title: string
+  children: ReactNode
+  id?: string
+}) {
   return (
-    <section className="space-y-3">
+    <section id={id} className="scroll-mt-24 space-y-3">
       <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
       <div className="space-y-3 text-sm leading-relaxed text-slate-700">{children}</div>
     </section>

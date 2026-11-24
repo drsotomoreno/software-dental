@@ -10,7 +10,7 @@ export function TermsOfServicePage() {
   return (
     <LegalDocumentLayout
       title="Condiciones del Servicio — mihistoriadental.com"
-      updated="15 de noviembre de 2026"
+      updated="23 de noviembre de 2026"
     >
       <LegalSection title="1. Quién presta el servicio">
         <p>
@@ -122,7 +122,55 @@ export function TermsOfServicePage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="7. Disponibilidad">
+      <LegalSection
+        id="suscripcion-anual"
+        title="7. Suscripción anual, compromiso de permanencia mínima (12 meses) y autorización de débito automático mensual"
+      >
+        <p>
+          Los planes de pago self-serve de <strong>mihistoriadental.com</strong> (incluidos Plan
+          Pioneros, Smart y BioniC) se contratan como{' '}
+          <strong>suscripción anual con facturación y débito mensual</strong>. El prestador del
+          servicio es <strong>DOCTORSEOLABS S.A.S.</strong>, NIT <strong>902127432</strong>,
+          operador de la plataforma.
+        </p>
+        <p>
+          <strong>Compromiso de permanencia mínima.</strong> Al adquirir un plan, el titular
+          acepta un compromiso mínimo de <strong>doce (12) meses</strong> contados desde la
+          activación del pago. Durante ese periodo la suscripción permanece vigente y se
+          facturan doce (12) cuotas mensuales sucesivas, salvo acuerdo escrito distinto con
+          DOCTORSEOLABS S.A.S.
+        </p>
+        <p>
+          <strong>Autorización de débito automático mensual.</strong> El titular autoriza de forma
+          expresa e irrevocable (durante el compromiso mínimo) el cobro recurrente mensual del
+          valor del plan contratado a la tarjeta u otro medio de pago registrado ante la pasarela
+          Bold Pagos en Línea u otra pasarela habilitada por DOCTORSEOLABS S.A.S. Cada cuota
+          corresponde a un mes de servicio; la primera cuota se cobra al contratar y las
+          siguientes en la fecha de facturación mensual asociada a la cuenta.
+        </p>
+        <p>
+          <strong>Tratamiento tributario — Excluido de IVA.</strong> Las tarifas publicadas de los
+          planes SaaS de mihistoriadental.com se ofrecen como{' '}
+          <strong>Excluidas de IVA (0 %)</strong> conforme al{' '}
+          <strong>Artículo 476 del Estatuto Tributario</strong> de la República de Colombia, en la
+          medida en que aplique a los servicios prestados por DOCTORSEOLABS S.A.S. El monto
+          mostrado en el checkout es el valor a debitar sin IVA adicional por este concepto.
+        </p>
+        <p>
+          <strong>Incumplimiento de pago.</strong> La falta de pago de una o más cuotas, el
+          rechazo del débito o la revocatoria injustificada del medio de pago durante el
+          compromiso mínimo puede generar suspensión del acceso, cargos pendientes y las acciones
+          de cobro permitidas por la ley colombiana, sin perjuicio del derecho del titular a
+          ejercer los recursos que le asistan.
+        </p>
+        <p>
+          Al marcar la casilla de aceptación en el botón de pagos y completar la transacción, el
+          titular declara haber leído esta cláusula, aceptar el compromiso anual de doce (12)
+          meses y autorizar el débito mensual automático del plan elegido.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="8. Disponibilidad">
         <p>
           El servicio se ofrece de forma continua, con ventanas de mantenimiento y la dependencia
           de redes, de la cuenta de Google Drive del usuario y de proveedores de infraestructura.
@@ -131,7 +179,7 @@ export function TermsOfServicePage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="8. Ley aplicable">
+      <LegalSection title="9. Ley aplicable">
         <p>
           Estas condiciones se rigen por las leyes de la República de Colombia. Las controversias
           se someterán a los jueces competentes de Bucaramanga, Santander, sin perjuicio de las
@@ -139,9 +187,10 @@ export function TermsOfServicePage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="9. Contacto">
+      <LegalSection title="10. Contacto">
         <p>
-          Doctor SEO Labs S.A.S. — mihistoriadental.com — Bucaramanga, Santander, Colombia.
+          DOCTORSEOLABS S.A.S. (NIT 902127432) — mihistoriadental.com — Bucaramanga, Santander,
+          Colombia.
         </p>
         <p>
           Correo:{' '}

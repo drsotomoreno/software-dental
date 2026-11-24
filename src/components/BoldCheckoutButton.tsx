@@ -206,9 +206,20 @@ export function BoldCheckoutButton({
           }}
         />
         <span>
-          Acepto los Términos del Servicio y autorizo el débito mensual recurrente de{' '}
-          <strong>{amountLabel} COP</strong> en mi tarjeta durante el compromiso mínimo de
-          suscripción anual (12 meses).
+          Acepto los{' '}
+          <a
+            href="/terminos#suscripcion-anual"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-dental-700 underline underline-offset-2 hover:text-dental-800"
+            onClick={(event) => event.stopPropagation()}
+          >
+            Términos del Servicio
+          </a>{' '}
+          (cláusula de suscripción anual, compromiso mínimo de 12 meses y débito automático —
+          Excluido de IVA, Art. 476 ET) y autorizo el débito mensual recurrente de{' '}
+          <strong>{amountLabel} COP</strong> en mi tarjeta a favor de DOCTORSEOLABS S.A.S. (NIT
+          902127432).
         </span>
       </label>
 
