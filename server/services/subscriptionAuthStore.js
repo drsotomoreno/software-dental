@@ -8,6 +8,8 @@ import { releasePrestadorLinksForUser, verifyAndClaimPrestador } from './prestad
 import {
   PAID_PLAN_IDS,
   PAID_PLAN_DAYS,
+  ANNUAL_COMMITMENT_MONTHS,
+  ANNUAL_CONTRACT_DAYS,
   TRIAL_DAYS,
   TTC_MESSAGE_PACKAGES,
   SUBSCRIPTION_PURCHASES_ENABLED,
@@ -935,6 +937,119 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
 
 
 
+/**
+ * Contrato anual con débito mensual (compromiso mínimo 12 meses).
+ * Si ya hay contrato activo del mismo plan, incrementa installmentNumber.
+ */
+function buildAnnualContractFields(user, planId, paidAtIso, tokenHints = {}) {
+  const paidAt = new Date(paidAtIso)
+  const nextBillingDate = addDays(paidAt, PAID_PLAN_DAYS)
+  const samePlanActive =
+    user.autoRenewMonthly === true &&
+    String(user.plan ?? '').toLowerCase() === String(planId).toLowerCase() &&
+    user.contractEndDate &&
+    new Date(user.contractEndDate).getTime() > Date.now() &&
+    user.estado_pago === 'activo'
+
+  const previousInstallment = Number(user.installmentNumber) || 0
+  const installmentNumber = samePlanActive
+    ? Math.min(ANNUAL_COMMITMENT_MONTHS, previousInstallment + 1)
+    : 1
+
+  return {
+    commitmentMonths: ANNUAL_COMMITMENT_MONTHS,
+    installmentNumber,
+    contractStartDate: samePlanActive && user.contractStartDate ? user.contractStartDate : paidAtIso,
+    contractEndDate:
+      samePlanActive && user.contractEndDate
+        ? user.contractEndDate
+        : addDays(paidAt, ANNUAL_CONTRACT_DAYS),
+    nextBillingDate,
+    autoRenewMonthly: true,
+    boldCustomerToken:
+      tokenHints.boldCustomerToken ?? user.boldCustomerToken ?? null,
+    boldPaymentMethodId:
+      tokenHints.boldPaymentMethodId ?? user.boldPaymentMethodId ?? null,
+  }
+}
+
+/**
+ * Efecto canónico de suscripción pagada (cuota mensual + contrato anual 12 meses).
+ * Usado por Superadmin (/confirmar-pago) y por el webhook de Bold.
+ */
+async function applyPaidSubscriptionActivation({
+  email,
+  userId,
+  planId,
+  paidBy,
+  boldOrderId = null,
+  boldPaymentId = null,
+  boldCustomerToken = null,
+  boldPaymentMethodId = null,
+}) {
+  const plan = String(planId ?? '')
+    .trim()
+    .toLowerCase()
+  if (!PAID_PLAN_IDS.includes(plan)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Indique el plan pagado: nomad, smart, bionic o corporativo.',
+    }
+  }
+
+  const store = await loadStore()
+  let user = null
+  if (userId) {
+    user = store.users.find((item) => String(item.id) === String(userId)) ?? null
+  }
+  if (!user && email) {
+    user = store.users.find((item) => item.email === normalizeEmail(email)) ?? null
+  }
+  if (!user) {
+    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
+  }
+
+  if (isPaymentExempt(user) || isMasterAccountEmail(user.email)) {
+    return { ok: false, status: 400, error: 'Este usuario no requiere pago de suscripción.' }
+  }
+
+  const paidAt = new Date().toISOString()
+  const contract = buildAnnualContractFields(user, plan, paidAt, {
+    boldCustomerToken,
+    boldPaymentMethodId,
+  })
+  const updatedUser = {
+    ...user,
+    plan,
+    estado_pago: 'activo',
+    fecha_vencimiento: contract.nextBillingDate,
+    subscriptionPaidAt: paidAt,
+    subscriptionPaidBy: paidBy,
+    updatedAt: paidAt,
+    ...contract,
+    ...(boldOrderId ? { boldOrderId: String(boldOrderId) } : {}),
+    ...(boldPaymentId ? { boldPaymentId: String(boldPaymentId) } : {}),
+  }
+
+  store.users = store.users.map((item) => (item.id === user.id ? updatedUser : item))
+  await saveStore(store)
+
+  const { token: authToken, session } = createSessionForUser(updatedUser)
+  store.sessions = store.sessions.filter((item) => item.userId !== updatedUser.id)
+  store.sessions.push(session)
+  await saveStore(store)
+
+  return {
+    ok: true,
+    token: authToken,
+    user: sanitizeUser(updatedUser),
+    expiresAt: updatedUser.fecha_vencimiento,
+    installmentNumber: updatedUser.installmentNumber,
+    contractEndDate: updatedUser.contractEndDate,
+  }
+}
+
 export async function confirmSubscriptionPayment({ email, token, planId, hint }) {
   const actor = await resolveSubscriptionSession(token, hint || {})
   if (!actor?.user || !isMasterAccountEmail(actor.user.email)) {
@@ -945,85 +1060,115 @@ export async function confirmSubscriptionPayment({ email, token, planId, hint })
     }
   }
 
-  const plan = String(planId ?? '').trim().toLowerCase()
-  if (!PAID_PLAN_IDS.includes(plan)) {
-    return {
-      ok: false,
-      status: 400,
-      error: 'Indique el plan pagado: nomad, smart, bionic o corporativo.',
-    }
-  }
+  return applyPaidSubscriptionActivation({
+    email,
+    planId,
+    paidBy: MASTER_EMAIL,
+  })
+}
 
+/**
+ * Activación automática tras webhook Bold APPROVED / SALE_APPROVED.
+ * Registra contrato anual + cuota mensual (débito recurrente).
+ */
+export async function activateSubscriptionFromBoldPayment({
+  email,
+  userId,
+  planId,
+  boldOrderId,
+  boldPaymentId,
+  boldCustomerToken = null,
+  boldPaymentMethodId = null,
+}) {
+  return applyPaidSubscriptionActivation({
+    email,
+    userId,
+    planId,
+    paidBy: 'bold',
+    boldOrderId,
+    boldPaymentId,
+    boldCustomerToken,
+    boldPaymentMethodId,
+  })
+}
+
+/** Listado interno para el cron de cobro recurrente mensual. */
+export async function listRecurringBillingCandidates(now = new Date()) {
   const store = await loadStore()
-  const user = store.users.find((item) => item.email === normalizeEmail(email)) ?? null
+  const ts = now.getTime()
+  return store.users
+    .filter((user) => {
+      if (isPaymentExempt(user) || isMasterAccountEmail(user.email)) return false
+      if (user.autoRenewMonthly !== true) return false
+      if (user.estado_pago !== 'activo') return false
+      if (!user.nextBillingDate) return false
+      if (new Date(user.nextBillingDate).getTime() > ts) return false
+      const installment = Number(user.installmentNumber) || 0
+      const withinCommitment = installment < ANNUAL_COMMITMENT_MONTHS
+      const renewBeyond =
+        user.autoRenewMonthly === true &&
+        (!user.contractEndDate || new Date(user.contractEndDate).getTime() >= ts)
+      return withinCommitment || renewBeyond
+    })
+    .map((user) => ({
+      id: user.id,
+      email: user.email,
+      plan: user.plan,
+      installmentNumber: Number(user.installmentNumber) || 0,
+      commitmentMonths: Number(user.commitmentMonths) || ANNUAL_COMMITMENT_MONTHS,
+      nextBillingDate: user.nextBillingDate,
+      contractEndDate: user.contractEndDate || null,
+      boldCustomerToken: user.boldCustomerToken || null,
+      boldPaymentMethodId: user.boldPaymentMethodId || null,
+    }))
+}
 
-  if (!user) {
-
-    return { ok: false, status: 404, error: 'Usuario no encontrado.' }
-
+/**
+ * Avanza una cuota tras cobro recurrente exitoso (o deja pendiente si no hay token).
+ */
+export async function recordRecurringBillingAttempt({
+  userId,
+  success,
+  boldPaymentId = null,
+  note = null,
+}) {
+  const store = await loadStore()
+  const index = store.users.findIndex((item) => String(item.id) === String(userId))
+  if (index === -1) return { ok: false, error: 'Usuario no encontrado.' }
+  const user = store.users[index]
+  const now = new Date()
+  const paidAt = now.toISOString()
+  if (!success) {
+    store.users[index] = {
+      ...user,
+      lastRecurringBillingAt: paidAt,
+      lastRecurringBillingStatus: 'pending_token_or_failed',
+      lastRecurringBillingNote: note || 'Cobro recurrente no ejecutado.',
+      updatedAt: paidAt,
+    }
+    await saveStore(store)
+    return { ok: true, user: sanitizeUser(store.users[index]) }
   }
 
-
-
-  if (isPaymentExempt(user) || isMasterAccountEmail(user.email)) {
-
-    return { ok: false, status: 400, error: 'Este usuario no requiere pago de suscripción.' }
-
-  }
-
-
-
-  const paidAt = new Date().toISOString()
-  const updatedUser = {
-
+  const nextInstallment = Math.min(
+    ANNUAL_COMMITMENT_MONTHS,
+    (Number(user.installmentNumber) || 0) + 1,
+  )
+  const nextBillingDate = addDays(now, PAID_PLAN_DAYS)
+  store.users[index] = {
     ...user,
-
-    plan,
-
-    estado_pago: 'activo',
-
-    fecha_vencimiento: addDays(new Date(), PAID_PLAN_DAYS),
-
+    installmentNumber: nextInstallment,
+    nextBillingDate,
+    fecha_vencimiento: nextBillingDate,
     subscriptionPaidAt: paidAt,
-
-    subscriptionPaidBy: MASTER_EMAIL,
-
+    lastRecurringBillingAt: paidAt,
+    lastRecurringBillingStatus: 'charged',
+    lastRecurringBillingNote: note || null,
+    ...(boldPaymentId ? { boldPaymentId: String(boldPaymentId) } : {}),
     updatedAt: paidAt,
-
   }
-
-
-
-  store.users = store.users.map((item) => (item.id === user.id ? updatedUser : item))
-
   await saveStore(store)
-
-
-
-  const { token: authToken, session } = createSessionForUser(updatedUser)
-
-
-
-  store.sessions = store.sessions.filter((item) => item.userId !== updatedUser.id)
-
-  store.sessions.push(session)
-
-  await saveStore(store)
-
-
-
-  return {
-
-    ok: true,
-
-    token: authToken,
-
-    user: sanitizeUser(updatedUser),
-
-    expiresAt: updatedUser.fecha_vencimiento,
-
-  }
-
+  return { ok: true, user: sanitizeUser(store.users[index]) }
 }
 
 
@@ -1788,6 +1933,13 @@ function sanitizeUser(user) {
     plan: isSuperAdminUser(user) ? 'exento' : user.plan ?? null,
     subscriptionPaidAt: isSuperAdminUser(user) ? null : user.subscriptionPaidAt ?? null,
     subscriptionPaidBy: isSuperAdminUser(user) ? null : user.subscriptionPaidBy ?? null,
+    commitmentMonths: isSuperAdminUser(user) ? null : user.commitmentMonths ?? null,
+    installmentNumber: isSuperAdminUser(user) ? null : user.installmentNumber ?? null,
+    contractStartDate: isSuperAdminUser(user) ? null : user.contractStartDate ?? null,
+    contractEndDate: isSuperAdminUser(user) ? null : user.contractEndDate ?? null,
+    nextBillingDate: isSuperAdminUser(user) ? null : user.nextBillingDate ?? null,
+    autoRenewMonthly: isSuperAdminUser(user) ? false : user.autoRenewMonthly === true,
+    hasBoldPaymentMethod: Boolean(user.boldCustomerToken || user.boldPaymentMethodId),
     customMaxAssistants: normalizeCustomMaxAssistants(
       user.customMaxAssistants ?? user.custom_max_assistants,
     ),

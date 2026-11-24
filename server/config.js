@@ -199,6 +199,14 @@ export const config = {
       )}/api/integrations/google-drive/callback`
     ).trim(),
   },
+  /**
+   * Bold Pagos en Línea.
+   * secretKey = Llave Secreta (hash de integridad / webhooks). Nunca exponer al frontend.
+   * La Llave de Identidad va solo como VITE_BOLD_API_KEY (bundle Vite); no se lee aquí.
+   */
+  bold: {
+    secretKey: process.env.BOLD_SECRET_KEY || '',
+  },
 }
 
 /** Credenciales completas para modo producción contra el API del ministerio. */

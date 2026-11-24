@@ -7,9 +7,21 @@ import {
   SUPERADMIN_EMAIL,
   type ApiSubscriptionUser,
 } from '@/services/apiAuthService'
-import { PAID_PLANS, TRIAL_DAYS, TTC_MESSAGE_PACKAGES } from '../../shared/subscriptionPlans.js'
+import {
+  getPaidPlanById,
+  isBoldCheckoutPlan,
+  PAID_PLANS,
+  TRIAL_DAYS,
+  TTC_MESSAGE_PACKAGES,
+} from '../../shared/subscriptionPlans.js'
 
-export { PAID_PLANS, TRIAL_DAYS, TTC_MESSAGE_PACKAGES }
+export {
+  getPaidPlanById,
+  isBoldCheckoutPlan,
+  PAID_PLANS,
+  TRIAL_DAYS,
+  TTC_MESSAGE_PACKAGES,
+}
 
 export interface TitularProducts {
   titular: {

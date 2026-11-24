@@ -1,11 +1,23 @@
+/** Compromiso mínimo de suscripción anual (débito mensual). */
+export const ANNUAL_COMMITMENT_MONTHS = 12
+export const ANNUAL_CONTRACT_DAYS = 365
+export const DEFAULT_COMMITMENT_LABEL =
+  'Facturación mensual · Suscripción anual (compromiso mínimo 12 meses)'
+export const DEFAULT_TAX_LABEL = 'Excluido de IVA (0 % - Art. 476 ET)'
+
 export const PAID_PLANS = [
   {
     id: 'nomad',
     name: 'Plan Pioneros',
     priceLabel: '$50.000',
+    amountCOP: 50000,
     period: 'COP/mes',
+    billingCycle: 'monthly',
+    minimumCommitmentMonths: ANNUAL_COMMITMENT_MONTHS,
+    commitmentLabel: DEFAULT_COMMITMENT_LABEL,
+    taxLabel: DEFAULT_TAX_LABEL,
     blurb:
-      'Da el salto a mihistoriadental por solo $50.000 al mes. Asegura tu tarifa de Pionero: beneficio exclusivo para los primeros 100 colegas que se suscriban a mihistoriadental.',
+      'Da el salto a mihistoriadental por solo $50.000 al mes. Asegura tu tarifa de Pionero: beneficio exclusivo para los primeros 100 colegas que se suscriban a mihistoriadental. Suscripción anual con débito mensual automático.',
     featured: false,
     cta: 'Comenzar',
     features: [
@@ -14,6 +26,7 @@ export const PAID_PLANS = [
       'Dictado por voz IA (2 horas/mes)',
       'WhatsApp manual ilimitado',
       'Compra de paquetes extra',
+      'Débito mensual · compromiso 12 meses',
     ],
     maxSeats: 2,
     maxRethus: 1,
@@ -23,8 +36,14 @@ export const PAID_PLANS = [
     id: 'smart',
     name: 'Smart',
     priceLabel: '$100.000',
+    amountCOP: 100000,
     period: 'COP/mes',
-    blurb: 'El equilibrio ideal para consultas en crecimiento.',
+    billingCycle: 'monthly',
+    minimumCommitmentMonths: ANNUAL_COMMITMENT_MONTHS,
+    commitmentLabel: DEFAULT_COMMITMENT_LABEL,
+    taxLabel: DEFAULT_TAX_LABEL,
+    blurb:
+      'El equilibrio ideal para consultas en crecimiento. Facturación mensual con suscripción anual (compromiso mínimo 12 meses) y débito automático a tarjeta.',
     featured: true,
     cta: 'Elegir Smart',
     features: [
@@ -34,6 +53,7 @@ export const PAID_PLANS = [
       'WhatsApp manual ilimitado + 150 automáticos',
       'Facturación DIAN (50 facturas/mes)',
       'Compra de paquetes extra',
+      'Débito mensual · compromiso 12 meses',
     ],
     maxSeats: 4,
     maxRethus: 4,
@@ -43,8 +63,14 @@ export const PAID_PLANS = [
     id: 'bionic',
     name: 'BioniC',
     priceLabel: '$150.000',
+    amountCOP: 150000,
     period: 'COP/mes',
-    blurb: 'La suite definitiva.',
+    billingCycle: 'monthly',
+    minimumCommitmentMonths: ANNUAL_COMMITMENT_MONTHS,
+    commitmentLabel: DEFAULT_COMMITMENT_LABEL,
+    taxLabel: DEFAULT_TAX_LABEL,
+    blurb:
+      'La suite definitiva. Suscripción anual con débito mensual automático (compromiso mínimo de 12 meses). Excluido de IVA (Art. 476 ET).',
     featured: false,
     cta: 'Comenzar',
     features: [
@@ -54,6 +80,7 @@ export const PAID_PLANS = [
       'WhatsApp manual ilimitado + 500 automáticos',
       'Facturación DIAN (100 facturas/mes)',
       'Compra de paquetes extra',
+      'Débito mensual · compromiso 12 meses',
     ],
     maxSeats: 6,
     maxRethus: 6,
@@ -63,7 +90,12 @@ export const PAID_PLANS = [
     id: 'corporativo',
     name: 'Corporativo',
     priceLabel: 'Hablemos',
+    amountCOP: null,
     period: '',
+    billingCycle: null,
+    minimumCommitmentMonths: null,
+    commitmentLabel: null,
+    taxLabel: DEFAULT_TAX_LABEL,
     blurb: 'Para clínicas de alto volumen o múltiples sedes.',
     featured: false,
     cta: 'Hablemos',
@@ -82,11 +114,23 @@ export const PAID_PLANS = [
 
 export const PAID_PLAN_IDS = PAID_PLANS.map((plan) => plan.id)
 
-/** Mientras no exista pasarela de pago, la compra de planes queda bloqueada. */
-export const SUBSCRIPTION_PURCHASES_ENABLED = false
+/** Compra self-serve vía Bold (Botón de Pagos). Corporativo sigue siendo manual. */
+export const SUBSCRIPTION_PURCHASES_ENABLED = true
 export const SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE =
   'La compra de planes estará disponible cuando se active el medio de pago. Por ahora puede revisar tarifas; la adquisición permanece inactiva.'
 
+/** Planes con monto fijo en COP para checkout Bold (IVA excluido). */
+export function getPaidPlanById(planId) {
+  const id = String(planId ?? '')
+    .trim()
+    .toLowerCase()
+  return PAID_PLANS.find((plan) => plan.id === id) || null
+}
+
+export function isBoldCheckoutPlan(planId) {
+  const plan = getPaidPlanById(planId)
+  return Boolean(plan && typeof plan.amountCOP === 'number' && plan.amountCOP > 0)
+}
 export const TRIAL_DAYS = 7
 export const PAID_PLAN_DAYS = 30
 export const TRIAL_SEAT_LIMIT = 2

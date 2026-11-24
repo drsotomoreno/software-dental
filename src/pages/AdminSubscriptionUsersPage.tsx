@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CalendarDays, MessageSquare, ShoppingBag } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { BoldCheckoutButton } from '@/components/BoldCheckoutButton'
 import {
+  isBoldCheckoutPlan,
   PAID_PLANS,
   TTC_MESSAGE_PACKAGES,
   fetchTitularProducts,
   purchaseTitularMessagePackage,
-  purchaseTitularPlan,
   type TitularProducts,
 } from '@/services/subscriptionService'
 import {
@@ -74,6 +76,7 @@ function planDetail(products: TitularProducts) {
 }
 
 export function AdminSubscriptionUsersPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [products, setProducts] = useState<TitularProducts | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -96,6 +99,35 @@ export function AdminSubscriptionUsersPage() {
     })
   }, [])
 
+  useEffect(() => {
+    const pago = searchParams.get('pago')
+    if (pago === 'procesando') {
+      setInfo(
+        'Pago en proceso. Cuando Bold confirme (APPROVED), su plan se activará automáticamente. Puede refrescar en unos segundos.',
+      )
+      const next = new URLSearchParams(searchParams)
+      next.delete('pago')
+      setSearchParams(next, { replace: true })
+      const timer = window.setTimeout(() => {
+        void fetchTitularProducts().then((result) => {
+          if (result.ok) {
+            setProducts({
+              titular: result.titular,
+              plan: result.plan,
+              packages: result.packages,
+              canPurchase: result.canPurchase,
+            })
+            if (result.plan.estado_pago === 'activo') {
+              setInfo('Suscripción activa. El pago fue confirmado.')
+            }
+          }
+        })
+      }, 2500)
+      return () => window.clearTimeout(timer)
+    }
+    return undefined
+  }, [searchParams, setSearchParams])
+
   const packages = useMemo(() => {
     const list = products?.packages ?? []
     return [...list].sort((a, b) => {
@@ -109,31 +141,6 @@ export function AdminSubscriptionUsersPage() {
     setProducts(next)
     setError('')
     if (message) setInfo(message)
-  }
-
-  const handlePlan = async (planId: string) => {
-    if (!SUBSCRIPTION_PURCHASES_ENABLED) {
-      setError(SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE)
-      return
-    }
-    setSubmitting(planId)
-    setError('')
-    setInfo('')
-    const result = await purchaseTitularPlan(planId)
-    setSubmitting(null)
-    if (!result.ok) {
-      setError(result.error)
-      return
-    }
-    applySnapshot(
-      {
-        titular: result.titular,
-        plan: result.plan,
-        packages: result.packages,
-        canPurchase: result.canPurchase,
-      },
-      result.message,
-    )
   }
 
   const handlePackage = async (packageId: string) => {
@@ -301,6 +308,9 @@ export function AdminSubscriptionUsersPage() {
           {PAID_PLANS.map((plan) => {
             const isCurrent = currentPlanId === plan.id
             const purchaseLocked = !SUBSCRIPTION_PURCHASES_ENABLED
+            const boldReady = !purchaseLocked && isBoldCheckoutPlan(plan.id)
+            const checkoutDisabled =
+              purchaseLocked || !canPurchase || exempt || isCurrent || Boolean(submitting)
             return (
               <article
                 key={plan.id}
@@ -316,41 +326,61 @@ export function AdminSubscriptionUsersPage() {
                     <span className="text-sm font-normal text-slate-500"> {plan.period}</span>
                   ) : null}
                 </p>
+                {plan.amountCOP != null ? (
+                  <div className="mt-2 space-y-1 text-xs leading-relaxed text-slate-600">
+                    <p className="font-semibold text-slate-800">
+                      {plan.priceLabel} COP / mes ({plan.taxLabel})
+                    </p>
+                    <p>
+                      Suscripción anual con débito mensual automático (compromiso mínimo de 12
+                      meses).
+                    </p>
+                  </div>
+                ) : null}
                 <p className="mt-2 flex items-center gap-1.5 text-sm text-slate-600">
                   <CalendarDays className="h-4 w-4 text-dental-600" />
-                  Vence a los 30 días
+                  Débito mensual · compromiso 12 meses
                 </p>
                 <ul className="mt-4 flex-1 space-y-2 text-sm text-slate-600">
                   {plan.features.map((feature) => (
                     <li key={feature}>✓ {feature}</li>
                   ))}
                 </ul>
-                <button
-                  type="button"
-                  disabled={
-                    purchaseLocked || !canPurchase || exempt || isCurrent || Boolean(submitting)
-                  }
-                  onClick={() => void handlePlan(plan.id)}
-                  className={`mt-6 w-full ${
-                    purchaseLocked
-                      ? 'cursor-not-allowed opacity-70 btn-secondary'
-                      : isCurrent || plan.featured
-                        ? 'btn-primary'
-                        : 'btn-secondary'
-                  }`}
-                >
-                  {purchaseLocked
-                    ? 'Compra próximamente'
-                    : !canPurchase
-                      ? 'Solo el titular'
-                      : exempt
-                        ? 'Cuenta exenta'
-                        : isCurrent
-                          ? 'Plan actual'
-                          : submitting === plan.id
-                            ? 'Comprando…'
-                            : 'Comprar plan'}
-                </button>
+                <div className="mt-6">
+                  {boldReady ? (
+                    checkoutDisabled ? (
+                      <button
+                        type="button"
+                        disabled
+                        className="btn-secondary w-full cursor-not-allowed opacity-70"
+                      >
+                        {!canPurchase
+                          ? 'Solo el titular'
+                          : exempt
+                            ? 'Cuenta exenta'
+                            : isCurrent
+                              ? 'Plan actual'
+                              : 'Compra no disponible'}
+                      </button>
+                    ) : (
+                      <BoldCheckoutButton
+                        planId={plan.id}
+                        planName={plan.name}
+                        label={`Pagar ${plan.name}`}
+                        className={
+                          isCurrent || plan.featured ? 'btn-primary w-full' : 'btn-secondary w-full'
+                        }
+                      />
+                    )
+                  ) : (
+                    <a
+                      href="mailto:doctormauriciosoto@gmail.com?subject=Plan%20Corporativo%20Mi%20Historia%20Dental"
+                      className="btn-secondary inline-flex w-full items-center justify-center"
+                    >
+                      {purchaseLocked ? 'Compra próximamente' : plan.cta}
+                    </a>
+                  )}
+                </div>
               </article>
             )
           })}

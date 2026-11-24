@@ -21,6 +21,7 @@ import {
   getTitularProducts,
   requestRethusTrial,
 } from '../controllers/subscription.controller.js'
+import { boldPaymentsWebhook, createBoldIntegrity } from '../controllers/bold.controller.js'
 import {
   changeOwnPassword,
   confirmOwnPassword,
@@ -216,6 +217,7 @@ router.get('/auth/register/status/:pendingId', registerStatus)
 router.post('/auth/register/resend-email', resendRegisterEmail)
 router.post('/auth/register/complete', completeRegister)
 router.post('/webhooks/evolution/whatsapp', evolutionWhatsAppWebhook)
+router.post('/webhooks/bold/payments', boldPaymentsWebhook)
 router.post('/auth/register/verify', verifyRegisterCode)
 router.post('/auth/register/whatsapp/verify', verifyWhatsAppRegistration)
 router.post('/auth/register/whatsapp/confirm', confirmWhatsAppClickToChat)
@@ -227,6 +229,7 @@ router.post('/subscription/account/plan', buyTitularPlan)
 router.post('/subscription/account/package', buyTitularMessagePackage)
 router.post('/subscription/trial', requestRethusTrial)
 router.post('/subscription/plan', choosePaidPlan)
+router.post('/payments/bold/integrity', createBoldIntegrity)
 
 router.get('/admin/users', verificarToken, soloSuperAdmin, async (req, res) => {
   try {

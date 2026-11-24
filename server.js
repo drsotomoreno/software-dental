@@ -28,6 +28,7 @@ import { mailTransportLabel } from './server/services/mailer.js'
 import { ensureSuperAdmin } from './server/services/subscriptionAuthStore.js'
 import { startMonthlyRipsCron } from './server/jobs/monthlyRipsCron.js'
 import { startClinicalDataIndexer } from './server/services/clinicalDataIndexer.service.js'
+import { startRecurringBillingCron } from './server/services/recurringBilling.service.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -225,6 +226,12 @@ async function bootAfterListen() {
   void startMonthlyRipsCron().catch((error) => {
     console.error(
       '[RIPS mensual] No se pudo armar el cron:',
+      error instanceof Error ? error.message : error,
+    )
+  })
+  void startRecurringBillingCron().catch((error) => {
+    console.error(
+      '[RecurringBilling] No se pudo armar el cron diario:',
       error instanceof Error ? error.message : error,
     )
   })
