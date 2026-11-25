@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { Home } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -36,14 +36,17 @@ export function TopNavbar() {
   const displayName = user ? `Dr(a). ${user.firstName} ${user.lastName}` : 'Usuario'
   const initials = accountInitials(user?.firstName, user?.lastName)
 
-  const handleLogout = async () => {
+  const handleLogout = async (e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
     setMenuOpen(false)
-    const result = await logout()
-    if (result && typeof result === 'object' && 'ok' in result && result.ok === false) {
-      window.alert(result.error)
-      return
+    try {
+      await logout()
+    } catch (error) {
+      console.error('[TopNavbar] logout falló (se redirige de todos modos):', error)
+    } finally {
+      navigate('/login', { replace: true })
     }
-    navigate('/login')
   }
 
   return (
@@ -130,7 +133,9 @@ export function TopNavbar() {
 
                 <button
                   type="button"
-                  onClick={handleLogout}
+                  onClick={(e) => {
+                    void handleLogout(e)
+                  }}
                   className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
                 >
                   Cerrar Sesión

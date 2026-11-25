@@ -7,18 +7,31 @@ import { dirname, join } from 'node:path'
 const dir = dirname(fileURLToPath(import.meta.url))
 
 describe('clinical logout guard', () => {
-  it('bloquea el cierre de sesión con mensaje médico-legal explícito', () => {
+  it('hace sync best-effort con timeout y no bloquea el cierre', () => {
     const src = readFileSync(join(dir, 'clinicalLogoutGuard.ts'), 'utf8')
-    assert.match(src, /No se puede cerrar sesión todavía/)
     assert.match(src, /guardClinicalLogout/)
+    assert.match(src, /LOGOUT_SYNC_TIMEOUT_MS = 2000/)
     assert.match(src, /flushEmrV2Outbox/)
     assert.match(src, /forzarSincronizacionLocal/)
+    assert.match(src, /ok: true/)
+    assert.match(src, /timedOut/)
   })
 
-  it('AuthContext usa la guardia antes de limpiar tokens', () => {
+  it('AuthContext usa la guardia con finally que limpia sesión', () => {
     const auth = readFileSync(join(dir, '../contexts/AuthContext.tsx'), 'utf8')
     assert.match(auth, /guardClinicalLogout/)
-    assert.match(auth, /ok: false/)
+    assert.match(auth, /finally/)
+    assert.match(auth, /clearStoredApiAuth/)
+    assert.match(auth, /setUser\(null\)/)
+    assert.match(auth, /Promise\.race/)
+  })
+
+  it('TopNavbar cierra sesión con preventDefault y redirect replace', () => {
+    const nav = readFileSync(join(dir, '../components/layout/TopNavbar.tsx'), 'utf8')
+    assert.match(nav, /preventDefault/)
+    assert.match(nav, /stopPropagation/)
+    assert.match(nav, /replace:\s*true/)
+    assert.match(nav, /type="button"/)
   })
 
   it('autosave usa debounce 1\.5s e indicador de nube', () => {

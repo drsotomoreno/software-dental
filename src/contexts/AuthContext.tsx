@@ -45,7 +45,7 @@ interface AuthContextValue {
     incoming: ApiSubscriptionUser,
     password: string,
   ) => Promise<{ ok: true; requiresSubscription?: boolean } | { ok: false; error: string }>
-  /** Cierra sesión solo si no hay cambios clínicos pendientes sin respaldar. */
+  /** Cierra sesión: sync best-effort (≤2s) y siempre limpia token/estado. */
   logout: () => Promise<{ ok: true } | { ok: false; error: string }>
   refreshSessionUser: () => Promise<void>
   applySessionUser: (apiUser: ApiSubscriptionUser) => void
@@ -360,35 +360,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const logout = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
-    // Guardia médico-legal: flush + sync; bloquear si quedan pendientes.
-    const { guardClinicalLogout, invalidateClinicPullCacheOnLogout, LOGOUT_BLOCKED_MESSAGE } =
-      await import('@/services/clinicalLogoutGuard')
-    const guard = await guardClinicalLogout()
-    if (!guard.ok) {
-      return { ok: false, error: guard.reason || LOGOUT_BLOCKED_MESSAGE }
-    }
+    const sessionId = user?.sessionId ?? (await getStoredSessionToken())
+    const apiToken =
+      typeof localStorage !== 'undefined'
+        ? localStorage.getItem('doctorSEO_token') || localStorage.getItem('doctorseolabs_api_token')
+        : null
 
-    if (user) {
-      await logAuditEvent({
-        action: 'LOGOUT',
-        resourceType: 'session',
-        resourceId: user.sessionId,
-        user,
-      })
-    }
-
-    clearStoredApiAuth()
-    clearExpressRegisterFlag()
     try {
-      const { lockLocalEncryption } = await import('@/db/localEncryptionKey')
-      lockLocalEncryption()
+      // Sync previo best-effort: tope 2s dentro de guardClinicalLogout; nunca bloquea.
+      const { guardClinicalLogout } = await import('@/services/clinicalLogoutGuard')
+      await Promise.race([
+        guardClinicalLogout().catch((error) => {
+          console.error('[auth] sync previo al logout falló:', error)
+        }),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 2000)),
+      ])
+
+      if (user) {
+        await logAuditEvent({
+          action: 'LOGOUT',
+          resourceType: 'session',
+          resourceId: user.sessionId,
+          user,
+        }).catch((error) => {
+          console.error('[auth] auditoría de logout falló:', error)
+        })
+      }
     } catch (error) {
-      console.error('[auth] No se pudo cerrar el vault de cifrado local:', error)
+      console.error('[auth] logout pre-clean falló (se continúa el cierre):', error)
+    } finally {
+      // Endpoint de logout del backend (si existe): no bloquear el cierre.
+      try {
+        void fetch('/api/logout', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
+          },
+        }).catch(() => undefined)
+      } catch {
+        /* sin red / endpoint ausente */
+      }
+
+      // Siempre limpiar sesión activa, aunque sync/API fallen.
+      clearStoredApiAuth()
+      clearExpressRegisterFlag()
+      try {
+        const { lockLocalEncryption } = await import('@/db/localEncryptionKey')
+        lockLocalEncryption()
+      } catch (error) {
+        console.error('[auth] No se pudo cerrar el vault de cifrado local:', error)
+      }
+
+      void logoutSession(sessionId).catch((error) => {
+        console.error('[auth] logoutSession falló:', error)
+      })
+
+      try {
+        const { invalidateClinicPullCacheOnLogout } = await import('@/services/clinicalLogoutGuard')
+        void invalidateClinicPullCacheOnLogout()
+      } catch {
+        /* no bloquear */
+      }
+
+      setUser(null)
     }
-    await logoutSession(user?.sessionId ?? (await getStoredSessionToken()))
-    // No borra Dexie clínico (evidencia). Solo invalida marcas de pull para network-first.
-    await invalidateClinicPullCacheOnLogout()
-    setUser(null)
+
     return { ok: true }
   }, [user])
 

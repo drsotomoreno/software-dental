@@ -1,16 +1,19 @@
 /**
- * Guardia de cierre de sesión: no permite logout si hay borradores clínicos
- * o outbox EMR v2 sin respaldar en el servidor.
+ * Cierre de sesión: intenta flush + sync best-effort (máx. 2s) sin bloquear el logout.
+ * Los borradores/outbox pendientes permanecen en Dexie para el próximo login.
  */
 import { db } from '@/db/database'
 import { isBrowserOnline } from '@/hooks/useOnlineStatus'
 import { flushPendingClinicalDraft } from '@/services/clinicalSyncState'
 
+export const LOGOUT_SYNC_TIMEOUT_MS = 2000
+
+/** @deprecated Conservado por compatibilidad con tests/mensajes legacy; el logout ya no se bloquea. */
 export const LOGOUT_BLOCKED_MESSAGE =
   'No se puede cerrar sesión todavía: hay cambios clínicos/presupuestales sin respaldar en la nube. Verifica tu conexión para evitar pérdida de datos.'
 
 export type ClinicalLogoutGuardResult =
-  | { ok: true; flushed: boolean; remaining: number }
+  | { ok: true; flushed: boolean; remaining: number; timedOut?: boolean }
   | { ok: false; reason: string; remaining: number }
 
 async function countPendingClinicalWork(): Promise<number> {
@@ -24,7 +27,6 @@ async function countPendingClinicalWork(): Promise<number> {
       .count()
     pending += drafts
   } catch {
-    /* Dexie puede estar bloqueado; asumir pendientes para no perder datos */
     pending += 1
   }
   try {
@@ -39,50 +41,71 @@ async function countPendingClinicalWork(): Promise<number> {
   return pending
 }
 
-/**
- * Intenta flush + sync forzado. Bloquea el logout si queda trabajo pendiente
- * o si no hay red y hay cola local.
- */
-export async function guardClinicalLogout(): Promise<ClinicalLogoutGuardResult> {
-  const online = isBrowserOnline()
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<{ value?: T; timedOut: boolean }> {
+  return new Promise((resolve) => {
+    let settled = false
+    const timer = window.setTimeout(() => {
+      if (settled) return
+      settled = true
+      resolve({ timedOut: true })
+    }, ms)
+    promise
+      .then((value) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timer)
+        resolve({ value, timedOut: false })
+      })
+      .catch(() => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timer)
+        resolve({ timedOut: false })
+      })
+  })
+}
 
+async function attemptLogoutSync(): Promise<void> {
   try {
     await flushPendingClinicalDraft()
   } catch (error) {
     console.error('[logout-guard] flush borrador falló:', error)
   }
 
-  if (online) {
-    try {
-      const { flushEmrV2Outbox } = await import('@/services/emrV2Client')
-      await flushEmrV2Outbox()
-    } catch (error) {
-      console.error('[logout-guard] flush outbox v2 falló:', error)
-    }
-    try {
-      const { forzarSincronizacionLocal } = await import('@/services/clinicalSyncService')
-      const sync = await forzarSincronizacionLocal()
-      if (!sync.ok) {
-        const remaining = await countPendingClinicalWork()
-        if (remaining > 0) {
-          return { ok: false, reason: LOGOUT_BLOCKED_MESSAGE, remaining }
-        }
-      }
-    } catch (error) {
-      console.error('[logout-guard] sync forzado falló:', error)
-      const remaining = await countPendingClinicalWork()
-      if (remaining > 0) {
-        return { ok: false, reason: LOGOUT_BLOCKED_MESSAGE, remaining }
-      }
-    }
+  if (!isBrowserOnline()) return
+
+  try {
+    const { flushEmrV2Outbox } = await import('@/services/emrV2Client')
+    await flushEmrV2Outbox()
+  } catch (error) {
+    console.error('[logout-guard] flush outbox v2 falló:', error)
   }
 
-  const remaining = await countPendingClinicalWork()
-  if (remaining > 0) {
-    return { ok: false, reason: LOGOUT_BLOCKED_MESSAGE, remaining }
+  try {
+    const { forzarSincronizacionLocal } = await import('@/services/clinicalSyncService')
+    await forzarSincronizacionLocal()
+  } catch (error) {
+    console.error('[logout-guard] sync forzado falló:', error)
+  }
+}
+
+/**
+ * Intenta flush + sync forzado con tope de 2s. Nunca bloquea el cierre de sesión.
+ */
+export async function guardClinicalLogout(): Promise<ClinicalLogoutGuardResult> {
+  const raced = await withTimeout(attemptLogoutSync(), LOGOUT_SYNC_TIMEOUT_MS)
+  if (raced.timedOut) {
+    console.warn('[logout-guard] sync previo al logout superó el timeout; se continúa el cierre')
   }
 
-  return { ok: true, flushed: true, remaining: 0 }
+  let remaining = 0
+  try {
+    remaining = await countPendingClinicalWork()
+  } catch {
+    remaining = 0
+  }
+
+  return { ok: true, flushed: !raced.timedOut, remaining, timedOut: raced.timedOut }
 }
 
 /** Invalida marcas de pull para forzar network-first en el próximo login (sin borrar Dexie clínico). */
