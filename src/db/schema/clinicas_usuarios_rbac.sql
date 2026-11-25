@@ -17,7 +17,15 @@ CREATE TABLE IF NOT EXISTS clinicas (
     google_drive_root_folder_id VARCHAR(128),
     google_drive_connected_at TIMESTAMP WITH TIME ZONE,
     google_drive_status VARCHAR(32) NOT NULL DEFAULT 'disconnected',
-    clinic_canonical_id VARCHAR(255)
+    clinic_canonical_id VARCHAR(255),
+    -- WhatsApp / Chatbot (20261124180000_whatsapp_chatbot_module.sql)
+    whatsapp_phone_number_id VARCHAR(64),
+    whatsapp_waba_id VARCHAR(64),
+    whatsapp_access_token TEXT,
+    whatsapp_connected BOOLEAN NOT NULL DEFAULT FALSE,
+    reminders_balance INTEGER NOT NULL DEFAULT 0,
+    chatbot_sessions_balance INTEGER NOT NULL DEFAULT 0,
+    chatbot_enabled BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- Fuente operativa indexada por clinicId canónico (clinic:{tenantId})

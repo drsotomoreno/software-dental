@@ -21,6 +21,7 @@ import {
   CompletedPatientsPage,
   PatientDetailPage,
   AgendaPage,
+  WhatsAppChatbotPage,
   ProfilePage,
   PricingPage,
   SubscriptionPage,
@@ -107,6 +108,7 @@ export default function ClinicalApp() {
             <Route element={<PermissionRoute permission="agenda.read" />}>
               <Route path="agenda" element={<AgendaPage />} />
             </Route>
+            <Route path="whatsapp-chatbot" element={<WhatsAppChatbotPage />} />
             <Route path="perfil" element={<ProfilePage />} />
             <Route element={<PermissionRoute permission="prices.manage" />}>
               <Route path="precios" element={<PricingPage />} />

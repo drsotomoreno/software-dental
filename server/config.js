@@ -160,12 +160,14 @@ export const config = {
    * el registro usa Click-to-Chat (whatsappClickToChat).
    */
   metaWhatsapp: {
-    graphVersion: process.env.META_GRAPH_API_VERSION || 'v22.0',
+    graphVersion: process.env.META_GRAPH_API_VERSION || 'v21.0',
     phoneNumberId: process.env.META_WHATSAPP_PHONE_NUMBER_ID || '',
     accessToken: process.env.META_WHATSAPP_TOKEN || '',
     templateName: process.env.META_WHATSAPP_OTP_TEMPLATE || 'otp_registro',
     templateLanguage: process.env.META_WHATSAPP_OTP_LANGUAGE || 'es',
     includeButton: process.env.META_WHATSAPP_OTP_BUTTON !== 'false',
+    /** Verificación del webhook GET /api/webhooks/whatsapp */
+    webhookVerifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN || '',
   },
   /**
    * Click-to-Chat: el usuario abre wa.me hacia este número corporativo

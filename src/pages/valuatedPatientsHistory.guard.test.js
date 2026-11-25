@@ -74,6 +74,7 @@ test('clinicalSyncService prefetch de valorados sin draft local', async () => {
 test('nginx no cachea index.html ni rutas SPA (UI vieja de valorados)', async () => {
   const src = await readSrc('scripts/configure-nginx-spa-static.sh')
   assert.match(src, /location = \/index\.html/)
+  assert.match(src, /location = \/sw\.js/)
   assert.match(src, /@mhd_spa/)
   assert.match(src, /no-store, no-cache, must-revalidate/)
 })

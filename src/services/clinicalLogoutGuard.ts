@@ -1,6 +1,6 @@
 /**
  * Cierre de sesión: intenta flush + sync best-effort (máx. 2s) sin bloquear el logout.
- * Los borradores/outbox pendientes permanecen en Dexie para el próximo login.
+ * Tras el sync, AuthContext purga Dexie/IndexedDB + storage (PC de recepción multi-usuario).
  */
 import { db } from '@/db/database'
 import { isBrowserOnline } from '@/hooks/useOnlineStatus'

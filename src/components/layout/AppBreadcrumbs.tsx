@@ -43,6 +43,7 @@ const ROUTE_CRUMBS: RouteCrumbDef[] = [
     crumbs: [{ label: 'Pacientes Activos' }],
   },
   { pattern: '/agenda', crumbs: [{ label: 'Agenda' }] },
+  { pattern: '/whatsapp-chatbot', crumbs: [{ label: 'WhatsApp y Chatbot' }] },
   { pattern: '/portabilidad', crumbs: [{ label: 'Historia Clínica' }] },
   { pattern: '/precios', crumbs: [{ label: 'Mis Precios y Procedimientos' }] },
   { pattern: '/cuentas-facturas', crumbs: [{ label: 'Mis Cuentas y Facturas' }] },

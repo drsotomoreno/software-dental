@@ -5,6 +5,7 @@
 
 export type ClinicalSyncHealthStatus =
   | 'unknown'
+  | 'syncing'
   | 'ok'
   | 'failed'
   | 'empty_ok'
@@ -71,6 +72,13 @@ export function setClinicalSyncHealth(update: Omit<ClinicalSyncHealth, 'at'> & {
   emit()
 }
 
+export function markInitialClinicPullStarted(clinicId?: string) {
+  setClinicalSyncHealth({
+    status: 'syncing',
+    clinicId,
+  })
+}
+
 export function recordPullSuccess(clinicId: string, patientCount: number) {
   setClinicalSyncHealth({
     status: patientCount > 0 ? 'ok' : 'empty_ok',
@@ -87,6 +95,11 @@ export function recordPullFailure(clinicId: string, error?: string, code?: strin
     error: error || 'No se pudo sincronizar la clínica',
     code,
   })
+}
+
+/** Primera hidratación tras login / restore aún en curso. */
+export function isClinicInitialHydrating(health = current): boolean {
+  return health.status === 'syncing'
 }
 
 /** ¿La lista vacía puede ser un fallo de sync y no una clínica sin pacientes? */

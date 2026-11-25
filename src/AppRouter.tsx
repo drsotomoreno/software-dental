@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { GlobalErrorBoundary } from '@/components/common/GlobalErrorBoundary'
 
 const ClinicalApp = lazy(() => import('./ClinicalApp'))
 const KioskLayout = lazy(() => import('./kiosk/KioskLayout'))
@@ -20,15 +21,17 @@ function RouteFallback() {
  */
 export function AppRouter() {
   return (
-    <BrowserRouter>
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/kiosco/:clinicId/:token" element={<KioskLayout />}>
-            <Route index element={<KioskApp />} />
-          </Route>
-          <Route path="/*" element={<ClinicalApp />} />
-        </Routes>
-      </Suspense>
-    </BrowserRouter>
+    <GlobalErrorBoundary>
+      <BrowserRouter>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/kiosco/:clinicId/:token" element={<KioskLayout />}>
+              <Route index element={<KioskApp />} />
+            </Route>
+            <Route path="/*" element={<ClinicalApp />} />
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
+    </GlobalErrorBoundary>
   )
 }

@@ -1,27 +1,34 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Archive,
+  BellRing,
   BookOpen,
+  Bot,
   CalendarDays,
   CircleDollarSign,
   ClipboardList,
   FileText,
   HardDrive,
   LayoutDashboard,
+  MessageSquare,
+  Package,
   Receipt,
   ShieldCheck,
   Stethoscope,
   UserPlus,
+  UserX,
   Users,
   type LucideIcon,
 } from 'lucide-react'
 import { APP_NAME } from '@/constants/branding'
 import { EditableHomeTitle } from '@/components/home/EditableHomeTitle'
 import { useAuth } from '@/contexts/AuthContext'
+import { fetchWhatsappStatus } from '@/services/whatsappApiService'
 import type { Permission } from '@/utils/permissions'
 import { sessionIsSuperAdmin } from '@/utils/superadminAccess'
 
-type DashAccent = 'patients' | 'clinical' | 'billing' | 'admin'
+type DashAccent = 'patients' | 'clinical' | 'billing' | 'admin' | 'whatsapp'
 
 type DashAction = {
   label: string
@@ -31,12 +38,15 @@ type DashAction = {
   superAdminOnly?: boolean
   icon: LucideIcon
   primary?: boolean
+  /** Badge numérico a la derecha (p. ej. inasistencias pendientes). */
+  badgeCount?: number
 }
 
 type DashCard = {
   title: string
   description: string
   accent: DashAccent
+  titleClassName?: string
   actions: DashAction[]
 }
 
@@ -154,6 +164,34 @@ const DASHBOARD_CARDS: DashCard[] = [
       },
     ],
   },
+  {
+    title: 'WhatsApp y Chatbot',
+    description: 'Recordatorios automáticos, atención 24/7 y lista de inasistencias',
+    accent: 'whatsapp',
+    titleClassName: 'text-emerald-600',
+    actions: [
+      {
+        label: 'Chatbot 24/7',
+        to: '/whatsapp-chatbot?section=chatbot',
+        icon: Bot,
+      },
+      {
+        label: 'Recordatorios Citas',
+        to: '/whatsapp-chatbot?section=reminders',
+        icon: BellRing,
+      },
+      {
+        label: 'Lista Inasistencias',
+        to: '/whatsapp-chatbot?section=no-shows',
+        icon: UserX,
+      },
+      {
+        label: 'Paquetes y Saldo',
+        to: '/whatsapp-chatbot?section=packages',
+        icon: Package,
+      },
+    ],
+  },
 ]
 
 function actionVisible(
@@ -170,6 +208,8 @@ function actionVisible(
 
 function DashActionButton({ action }: { action: DashAction }) {
   const Icon = action.icon
+  const badge =
+    typeof action.badgeCount === 'number' && action.badgeCount > 0 ? action.badgeCount : null
 
   if (action.primary) {
     return (
@@ -191,7 +231,15 @@ function DashActionButton({ action }: { action: DashAction }) {
       <span className="dash-action-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
         <Icon className="h-4 w-4" strokeWidth={2.25} aria-hidden />
       </span>
-      <span className="min-w-0 leading-snug">{action.label}</span>
+      <span className="min-w-0 flex-1 leading-snug">{action.label}</span>
+      {badge != null ? (
+        <span
+          className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white"
+          aria-label={`${badge} pendientes`}
+        >
+          {badge > 99 ? '99+' : badge}
+        </span>
+      ) : null}
     </Link>
   )
 }
@@ -200,10 +248,31 @@ export function HomePage() {
   const { can, user, hasRole } = useAuth()
   const isSuperAdmin = hasRole('superadmin')
   const showControlPanel = sessionIsSuperAdmin(user)
+  const [pendingNoShows, setPendingNoShows] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchWhatsappStatus()
+      .then((status) => {
+        if (!cancelled) setPendingNoShows(Number(status.pending_manual_call) || 0)
+      })
+      .catch(() => {
+        if (!cancelled) setPendingNoShows(0)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const visibleCards = DASHBOARD_CARDS.map((card) => ({
     ...card,
-    actions: card.actions.filter((action) => actionVisible(action, can, isSuperAdmin)),
+    actions: card.actions
+      .filter((action) => actionVisible(action, can, isSuperAdmin))
+      .map((action) =>
+        action.to.includes('section=no-shows')
+          ? { ...action, badgeCount: pendingNoShows }
+          : action,
+      ),
   })).filter((card) => card.actions.length > 0)
 
   return (
@@ -247,7 +316,7 @@ export function HomePage() {
         </section>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
         {visibleCards.map((card) => (
           <section
             key={card.title}
@@ -258,9 +327,18 @@ export function HomePage() {
             <header className="mb-4 border-b border-slate-100/80 pb-3">
               <h2
                 id={`dash-card-${card.title}`}
-                className="dash-card-title text-base font-semibold tracking-tight text-slate-900"
+                className={`dash-card-title text-base font-semibold tracking-tight whitespace-nowrap ${
+                  card.titleClassName || 'text-slate-900'
+                }`}
               >
-                {card.title}
+                {card.accent === 'whatsapp' ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <MessageSquare className="h-4 w-4 shrink-0" aria-hidden />
+                    {card.title}
+                  </span>
+                ) : (
+                  card.title
+                )}
               </h2>
               <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{card.description}</p>
             </header>

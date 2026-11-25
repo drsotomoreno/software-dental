@@ -11,6 +11,10 @@ const allowedHosts = [
 
 export default defineConfig({
   plugins: [react()],
+  // Cada `npm run build` genera una versión nueva → recepción purga caché/Dexie al abrir.
+  define: {
+    __APP_BUILD_VERSION__: JSON.stringify(new Date().toISOString()),
+  },
   server: {
     host: true,
     // La tableta entra por la IP LAN (192.168.x.x); el chequeo de host de Vite la bloqueaba.

@@ -21,7 +21,10 @@ import googleDriveRoutes from './server/routes/googleDrive.routes.js'
 import kioskRoutes from './server/routes/kiosk.routes.js'
 import superadminRoutes from './server/routes/superadmin.routes.js'
 import colaboradoresRouter from './server/routes/colaboradores.js'
+import whatsappRoutes from './server/routes/whatsapp.routes.js'
+import whatsappWebhookRoutes from './server/routes/whatsappWebhook.routes.js'
 import { attachKioskSocket } from './server/socket/kioskSocket.js'
+import { startWhatsappRemindersCron } from './server/jobs/whatsappRemindersJob.js'
 import { ensureEmrV2Schema } from './server/services/emrV2Store.js'
 import { getLocalLanIPv4, isPrivateLanOrigin } from './server/utils/localLanAddress.js'
 import { mailTransportLabel } from './server/services/mailer.js'
@@ -120,6 +123,8 @@ app.use('/api/integrations/google-drive', googleDriveRoutes)
 app.use('/api/drive', googleDriveRoutes)
 app.use('/api/v1/kiosk', kioskRoutes)
 app.use('/api/superadmin', superadminRoutes)
+app.use('/api/whatsapp', whatsappRoutes)
+app.use('/api/webhooks/whatsapp', whatsappWebhookRoutes)
 app.use('/api', authRoutes)
 app.use('/api', colaboradoresRouter)
 
@@ -232,6 +237,12 @@ async function bootAfterListen() {
   void startRecurringBillingCron().catch((error) => {
     console.error(
       '[RecurringBilling] No se pudo armar el cron diario:',
+      error instanceof Error ? error.message : error,
+    )
+  })
+  void startWhatsappRemindersCron().catch((error) => {
+    console.error(
+      '[WhatsAppReminders] No se pudo armar el cron:',
       error instanceof Error ? error.message : error,
     )
   })

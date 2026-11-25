@@ -6,10 +6,12 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import { PatientListSearch } from '@/components/patients/PatientListSearch'
 import { ClinicalSyncHealthBanner } from '@/components/patients/ClinicalSyncHealthBanner'
+import { ClinicHydrationBanner } from '@/components/patients/ClinicHydrationBanner'
 import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import { resolveActiveClinicSyncId } from '@/services/clinicalSyncState'
 import { isCompletedPatient } from '@/types/patient'
 import { patientMatchesQuery } from '@/utils/patientListSearch'
+import { useClinicHydration } from '@/hooks/useClinicHydration'
 
 export function CompletedPatientsPage() {
   const { can, user } = useAuth()
@@ -17,18 +19,30 @@ export function CompletedPatientsPage() {
   const loggedRef = useRef(false)
   const [query, setQuery] = useState('')
   const clinicId = resolveActiveClinicSyncId(user)
+  const { isHydrating } = useClinicHydration()
 
   const patients = useLiveQuery(async () => {
     if (!clinicId) return []
-    const all = await db.patients.orderBy('lastName').reverse().toArray()
-    return all.filter(
-      (patient) => belongsToCurrentClinic(patient, clinicId) && isCompletedPatient(patient),
-    )
+    try {
+      const all = await db.patients.orderBy('lastName').reverse().toArray()
+      return (all ?? []).filter(
+        (patient) =>
+          patient && belongsToCurrentClinic(patient, clinicId) && isCompletedPatient(patient),
+      )
+    } catch (error) {
+      console.warn('[CompletedPatientsPage] Dexie aún no listo:', error)
+      return []
+    }
   }, [clinicId])
 
+  const safePatients = patients ?? []
+  const dexieReady = patients !== undefined
+  const showHydration =
+    Boolean(clinicId) && isHydrating && (!dexieReady || safePatients.length === 0)
+
   const filteredPatients = useMemo(
-    () => (patients ?? []).filter((patient) => patientMatchesQuery(patient, query)),
-    [patients, query],
+    () => safePatients.filter((patient) => patient && patientMatchesQuery(patient, query)),
+    [safePatients, query],
   )
 
   useEffect(() => {
@@ -58,11 +72,15 @@ export function CompletedPatientsPage() {
         )}
       </div>
 
-      <ClinicalSyncHealthBanner listEmpty={Boolean(patients && patients.length === 0)} />
+      <ClinicHydrationBanner visible={showHydration} />
 
-      {!patients ? (
-        <p className="text-slate-500">Cargando...</p>
-      ) : patients.length === 0 ? (
+      <ClinicalSyncHealthBanner
+        listEmpty={dexieReady && safePatients.length === 0 && !isHydrating}
+      />
+
+      {showHydration || !dexieReady ? (
+        <p className="text-slate-500">Sincronizando datos de la clínica…</p>
+      ) : safePatients.length === 0 ? (
         <div className="card text-center">
           <p className="text-slate-500">No hay pacientes con tratamiento terminado.</p>
           <Link to="/pacientes" className="btn-secondary mt-4 inline-flex">
@@ -77,7 +95,7 @@ export function CompletedPatientsPage() {
             query={query}
             onQueryChange={setQuery}
             shown={filteredPatients.length}
-            total={patients.length}
+            total={safePatients.length}
           />
 
           {filteredPatients.length === 0 ? (
@@ -103,15 +121,19 @@ export function CompletedPatientsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredPatients.map((patient) => (
-                <tr key={patient.id} className="hover:bg-teal-50/40">
+              {filteredPatients.map((patient) => {
+                if (!patient) return null
+                const rowKey = String(patient.syncId || patient.id || '')
+                if (!rowKey) return null
+                return (
+                <tr key={rowKey} className="hover:bg-teal-50/40">
                   <td className="px-4 py-2.5 font-mono text-xs">
-                    {patient.documentType} {patient.documentNumber}
+                    {patient.documentType ?? ''} {patient.documentNumber ?? ''}
                   </td>
                   <td className="px-4 py-2.5 font-medium">
-                    {patient.firstName} {patient.lastName}
+                    {patient.firstName ?? ''} {patient.lastName ?? ''}
                   </td>
-                  <td className="px-4 py-2.5">{patient.phone}</td>
+                  <td className="px-4 py-2.5">{patient.phone ?? '—'}</td>
                   <td className="px-4 py-2.5">{patient.insurer ?? '—'}</td>
                   <td className="px-4 py-2.5">
                     <span className="rounded-full bg-teal-100 px-2.5 py-0.5 text-xs font-medium text-teal-900">
@@ -120,7 +142,7 @@ export function CompletedPatientsPage() {
                   </td>
                   <td className="px-4 py-2.5">
                     <Link
-                      to={`/pacientes/${encodeURIComponent(String(patient.syncId || patient.id))}`}
+                      to={`/pacientes/${encodeURIComponent(rowKey)}`}
                       state={{ resetHistoryView: true }}
                       className="text-dental-600 hover:underline"
                     >
@@ -128,7 +150,8 @@ export function CompletedPatientsPage() {
                     </Link>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
             </div>

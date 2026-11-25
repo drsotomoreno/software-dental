@@ -307,6 +307,14 @@
   --dash-accent-icon-bg: rgba(3, 105, 161, 0.1);
 }
 
+.dash-card[data-accent='whatsapp'] {
+  --dash-accent: #10b981;
+  --dash-accent-strong: #059669;
+  --dash-accent-soft: rgba(16, 185, 129, 0.12);
+  --dash-accent-icon-bg: rgba(16, 185, 129, 0.12);
+  border-top-width: 4px;
+}
+
 .dash-card-title {
   color: var(--dash-accent-strong);
 }

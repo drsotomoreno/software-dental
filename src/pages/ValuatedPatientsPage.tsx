@@ -6,10 +6,12 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useAudit } from '@/hooks/useAudit'
 import { PatientListSearch } from '@/components/patients/PatientListSearch'
 import { ClinicalSyncHealthBanner } from '@/components/patients/ClinicalSyncHealthBanner'
+import { ClinicHydrationBanner } from '@/components/patients/ClinicHydrationBanner'
 import { belongsToCurrentClinic } from '@/services/clinicLocalIsolation'
 import { resolveActiveClinicSyncId } from '@/services/clinicalSyncState'
 import { isValuatedOnlyPatient } from '@/types/patient'
 import { patientMatchesQuery } from '@/utils/patientListSearch'
+import { useClinicHydration } from '@/hooks/useClinicHydration'
 import {
   etiquetaAperturaPaciente,
   ordenarPorAperturaDesc,
@@ -23,21 +25,33 @@ export function ValuatedPatientsPage() {
   const loggedRef = useRef(false)
   const [query, setQuery] = useState('')
   const clinicId = resolveActiveClinicSyncId(user)
+  const { isHydrating } = useClinicHydration()
 
   const patients = useLiveQuery(async () => {
     if (!clinicId) return []
-    const all = await db.patients.orderBy('lastName').reverse().toArray()
-    return all.filter(
-      (patient) => belongsToCurrentClinic(patient, clinicId) && isValuatedOnlyPatient(patient),
-    )
+    try {
+      const all = await db.patients.orderBy('lastName').reverse().toArray()
+      return (all ?? []).filter(
+        (patient) =>
+          patient && belongsToCurrentClinic(patient, clinicId) && isValuatedOnlyPatient(patient),
+      )
+    } catch (error) {
+      console.warn('[ValuatedPatientsPage] Dexie aún no listo:', error)
+      return []
+    }
   }, [clinicId])
+
+  const safePatients = patients ?? []
+  const dexieReady = patients !== undefined
+  const showHydration =
+    Boolean(clinicId) && isHydrating && (!dexieReady || safePatients.length === 0)
 
   const filteredPatients = useMemo(
     () =>
       ordenarPorAperturaDesc(
-        (patients ?? []).filter((patient) => patientMatchesQuery(patient, query)),
+        safePatients.filter((patient) => patient && patientMatchesQuery(patient, query)),
       ),
-    [patients, query],
+    [safePatients, query],
   )
 
   useEffect(() => {
@@ -81,11 +95,15 @@ export function ValuatedPatientsPage() {
         )}
       </div>
 
-      <ClinicalSyncHealthBanner listEmpty={Boolean(patients && patients.length === 0)} />
+      <ClinicHydrationBanner visible={showHydration} />
 
-      {!patients ? (
-        <p className="text-slate-500">Cargando...</p>
-      ) : patients.length === 0 ? (
+      <ClinicalSyncHealthBanner
+        listEmpty={dexieReady && safePatients.length === 0 && !isHydrating}
+      />
+
+      {showHydration || !dexieReady ? (
+        <p className="text-slate-500">Sincronizando datos de la clínica…</p>
+      ) : safePatients.length === 0 ? (
         <div className="card text-center">
           <p className="text-slate-500">No hay pacientes en valoración registrados.</p>
           {can('patients.write') && (
@@ -102,7 +120,7 @@ export function ValuatedPatientsPage() {
             query={query}
             onQueryChange={setQuery}
             shown={filteredPatients.length}
-            total={patients.length}
+            total={safePatients.length}
           />
 
           {filteredPatients.length === 0 ? (
@@ -117,15 +135,18 @@ export function ValuatedPatientsPage() {
           ) : (
             <ul className="space-y-3">
               {filteredPatients.map((patient) => {
+                if (!patient) return null
+                const rowKey = String(patient.syncId || patient.id || '')
+                if (!rowKey) return null
                 const whatsappUrl = buildWhatsAppUrl(
                   patient.phone,
                   buildValuationFollowUpMessage(resolveAccountHolderTitle(user)),
                 )
-                const valuationPath = `/pacientes/${encodeURIComponent(String(patient.syncId || patient.id))}`
-                const fullName = `${patient.firstName} ${patient.lastName}`.trim()
+                const valuationPath = `/pacientes/${encodeURIComponent(rowKey)}`
+                const fullName = `${patient.firstName ?? ''} ${patient.lastName ?? ''}`.trim()
                 return (
                   <li
-                    key={patient.id}
+                    key={rowKey}
                     className="rounded-xl border border-amber-200 bg-white p-4 shadow-sm"
                   >
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

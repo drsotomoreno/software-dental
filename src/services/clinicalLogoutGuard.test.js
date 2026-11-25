@@ -17,20 +17,22 @@ describe('clinical logout guard', () => {
     assert.match(src, /timedOut/)
   })
 
-  it('AuthContext usa la guardia con finally que limpia sesión', () => {
+  it('AuthContext limpia sesión, Dexie y fuerza location.replace', () => {
     const auth = readFileSync(join(dir, '../contexts/AuthContext.tsx'), 'utf8')
     assert.match(auth, /guardClinicalLogout/)
-    assert.match(auth, /finally/)
     assert.match(auth, /clearStoredApiAuth/)
     assert.match(auth, /setUser\(null\)/)
     assert.match(auth, /Promise\.race/)
+    assert.match(auth, /purgeClientStateOnLogout/)
+    assert.match(auth, /\/api\/logout/)
+    assert.match(auth, /location\.replace\(['"]\/login['"]\)/)
   })
 
-  it('TopNavbar cierra sesión con preventDefault y redirect replace', () => {
+  it('TopNavbar cierra sesión con preventDefault y hard redirect', () => {
     const nav = readFileSync(join(dir, '../components/layout/TopNavbar.tsx'), 'utf8')
     assert.match(nav, /preventDefault/)
     assert.match(nav, /stopPropagation/)
-    assert.match(nav, /replace:\s*true/)
+    assert.match(nav, /location\.replace\(['"]\/login['"]\)/)
     assert.match(nav, /type="button"/)
   })
 

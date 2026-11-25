@@ -14,6 +14,7 @@ import {
   resolveSubscriptionSession,
   sessionHintFromRequest,
 } from '../services/subscriptionAuthStore.js'
+import { creditWhatsappPurchase } from '../services/whatsappClinicStore.js'
 import { readDurableJson, writeDurableJson } from '../services/durableStore.js'
 
 const ORDERS_FILE = join(config.dataDir, 'bold-orders.json')
@@ -320,6 +321,53 @@ export async function boldPaymentsWebhook(req, res) {
     }
 
     const data = body?.data && typeof body.data === 'object' ? body.data : {}
+
+    // Recargas WhatsApp / Chatbot (mismo webhook Bold, kind distinto).
+    if (order.kind === 'whatsapp_package') {
+      const credit = await creditWhatsappPurchase({
+        clinicId: order.clinicId,
+        packageId: order.packageId,
+        paymentReference: paymentId || order.orderId,
+        amountCop: Number(order.amount) || undefined,
+      })
+      if (!credit.ok) {
+        console.error('[Bold] Falló acreditación WhatsApp tras APPROVED:', credit.error)
+        return res.status(credit.status || 500).json({
+          success: false,
+          ok: false,
+          error: credit.error || 'No se pudieron acreditar los créditos WhatsApp.',
+        })
+      }
+
+      order.status = 'activated'
+      order.paymentId = paymentId || order.paymentId
+      order.updatedAt = now
+      order.webhookStatus = status
+      order.activatedAt = now
+      order.whatsappPurchaseId = credit.purchase_id
+      order.creditsAdded = credit.credits_added
+      if (paymentId && !store.processedPaymentIds.includes(paymentId)) {
+        store.processedPaymentIds.push(paymentId)
+      }
+      await saveOrders(store)
+
+      return res.json({
+        success: true,
+        ok: true,
+        message: credit.duplicate
+          ? 'Pago WhatsApp ya acreditado (idempotente).'
+          : 'Pago aprobado. Créditos WhatsApp acreditados.',
+        kind: 'whatsapp_package',
+        packageId: order.packageId,
+        clinicId: order.clinicId,
+        purchaseId: credit.purchase_id,
+        creditsAdded: credit.credits_added,
+        reminders_balance: credit.reminders_balance,
+        chatbot_sessions_balance: credit.chatbot_sessions_balance,
+        duplicate: credit.duplicate === true,
+      })
+    }
+
     const boldCustomerToken = String(
       data.customer_token ?? data.customerToken ?? body.customer_token ?? '',
     ).trim() || null

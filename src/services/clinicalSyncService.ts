@@ -788,6 +788,11 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
     return await withTimeout(
       (async () => {
         const clinicId = getCurrentClinicId()
+        const { markInitialClinicPullStarted, recordPullSuccess, recordPullFailure } = await import(
+          '@/services/clinicalSyncHealth'
+        )
+        markInitialClinicPullStarted(clinicId || undefined)
+
         const { ensureDentalDatabaseForAuth } = await import('@/db/database')
         // Misma resolución canónica que AuthContext / purge (nunca UUID crudo del maestro).
         await ensureDentalDatabaseForAuth(auth.user?.id, clinicId)
@@ -818,6 +823,10 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
                 await applyFullClinicPull(cached)
               }
               commitSyncSchemaEpoch()
+              if (clinicId) {
+                const cachedCount = Array.isArray(cached?.patients) ? cached.patients.length : 0
+                recordPullSuccess(clinicId, cachedCount)
+              }
               return true
             }
           }
@@ -826,11 +835,10 @@ export async function pullCompleteClinicOnLogin(): Promise<boolean> {
             await applyFullClinicPull(cached)
           }
         }
-        if (!clinicId) return false
-
-        const { recordPullSuccess, recordPullFailure } = await import(
-          '@/services/clinicalSyncHealth'
-        )
+        if (!clinicId) {
+          recordPullFailure('', 'Sin clinicId de sesión')
+          return false
+        }
 
         // Primero metadata (rápido); luego blobs si hay red.
         let merged = await pullAndMerge(false, {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Info, Sparkles } from 'lucide-react'
 import { DEMO_STEPS, getDemoStep } from '@/constants/demoSteps'
 import { useAuth } from '@/contexts/AuthContext'
@@ -19,7 +19,6 @@ import { DemoStepTreatmentPlan } from './DemoStepTreatmentPlan'
 import { EMPTY_DEMO_FORM, type DemoFormData } from './demoTypes'
 
 export function DemoShell() {
-  const navigate = useNavigate()
   const { logout } = useAuth()
   const [currentStep, setCurrentStep] = useState(1)
   const [formData, setFormData] = useState<DemoFormData>(EMPTY_DEMO_FORM)
@@ -30,14 +29,14 @@ export function DemoShell() {
   const needsPlan = userNeedsWelcome(getStoredApiAuth()?.user)
 
   const handleLogout = async () => {
+    if (loggingOut) return
     setLoggingOut(true)
     try {
       await logout()
+      // logout() ya hace window.location.replace('/login')
     } catch (error) {
       console.error('[DemoShell] logout falló (se redirige de todos modos):', error)
-    } finally {
-      setLoggingOut(false)
-      navigate('/login', { replace: true })
+      window.location.replace('/login')
     }
   }
 

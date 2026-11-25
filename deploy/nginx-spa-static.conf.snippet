@@ -25,8 +25,45 @@ location /socket.io/ {
     proxy_read_timeout 120s;
 }
 
+# Assets con hash: cache largo (immutable).
+location /assets/ {
+    root __DIST_ROOT__;
+    access_log off;
+    expires 30d;
+    add_header Cache-Control "public, max-age=2592000, immutable" always;
+    add_header X-MHD-Static "nginx-dist-assets" always;
+    try_files $uri =404;
+}
+
+# HTML de entrada: NUNCA cachear (si no, el navegador queda en UI vieja / root vacío).
+location = /index.html {
+    root __DIST_ROOT__;
+    add_header Cache-Control "no-store, no-cache, must-revalidate, max-age=0" always;
+    add_header Pragma "no-cache" always;
+    add_header X-MHD-Static "nginx-dist-html" always;
+}
+
+# Service Worker: NUNCA cachear (debe revalidar en cada visita).
+location = /sw.js {
+    root __DIST_ROOT__;
+    add_header Cache-Control "no-store, no-cache, must-revalidate, max-age=0" always;
+    add_header Pragma "no-cache" always;
+    add_header X-MHD-Static "nginx-dist-sw" always;
+    try_files $uri =404;
+}
+
+# Rutas SPA: servir index sin caché.
 location / {
     root __DIST_ROOT__;
-    try_files $uri $uri/ /index.html;
+    try_files $uri $uri/ @mhd_spa;
+    add_header X-MHD-Static "nginx-dist" always;
+}
+
+location @mhd_spa {
+    root __DIST_ROOT__;
+    add_header Cache-Control "no-store, no-cache, must-revalidate, max-age=0" always;
+    add_header Pragma "no-cache" always;
+    add_header X-MHD-Static "nginx-dist-spa" always;
+    try_files /index.html =404;
 }
 # --- END MHD_SPA_STATIC ---

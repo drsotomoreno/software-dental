@@ -126,6 +126,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(authUser)
           setIsLoading(false)
           if (accessTier(validation.user) !== 'none') {
+            // Marcar hidratación antes del await interno para que los listados
+            // no flashéen "sin pacientes" con Dexie vacío tras un deploy.
+            void import('@/services/clinicalSyncHealth')
+              .then(({ markInitialClinicPullStarted }) => {
+                markInitialClinicPullStarted()
+              })
+              .catch(() => undefined)
             // No await: un pull lento no debe re-bloquear /perfil tras OAuth Drive.
             void pullCompleteClinicOnLogin().catch((error) => {
               console.error('[auth] Pull clínico tras sesión:', error)
@@ -216,6 +223,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn('[auth] Unificación IndexedDB legacy diferida:', error)
       }
       if (accessTier(sessionUser) !== 'none') {
+        void import('@/services/clinicalSyncHealth')
+          .then(({ markInitialClinicPullStarted }) => {
+            markInitialClinicPullStarted()
+          })
+          .catch(() => undefined)
         // Offline-first: no bloquear login ni la ficha clínica esperando sync.
         void pullCompleteClinicOnLogin().catch((error) => {
           console.error('[auth] Pull clínico tras login:', error)
@@ -367,7 +379,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         : null
 
     try {
-      // Sync previo best-effort: tope 2s dentro de guardClinicalLogout; nunca bloquea.
+      // Sync previo best-effort: tope 2s; nunca bloquea el cierre.
       const { guardClinicalLogout } = await import('@/services/clinicalLogoutGuard')
       await Promise.race([
         guardClinicalLogout().catch((error) => {
@@ -388,42 +400,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (error) {
       console.error('[auth] logout pre-clean falló (se continúa el cierre):', error)
-    } finally {
-      // Endpoint de logout del backend (si existe): no bloquear el cierre.
-      try {
-        void fetch('/api/logout', {
+    }
+
+    // Endpoint de logout del backend (si existe): no bloquear la salida.
+    try {
+      await Promise.race([
+        fetch('/api/logout', {
           method: 'POST',
           headers: {
             Accept: 'application/json',
             ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
           },
-        }).catch(() => undefined)
-      } catch {
-        /* sin red / endpoint ausente */
-      }
+        }).catch(() => undefined),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 1500)),
+      ])
+    } catch {
+      /* sin red / endpoint ausente */
+    }
 
-      // Siempre limpiar sesión activa, aunque sync/API fallen.
+    try {
+      const { lockLocalEncryption } = await import('@/db/localEncryptionKey')
+      lockLocalEncryption()
+    } catch (error) {
+      console.error('[auth] No se pudo cerrar el vault de cifrado local:', error)
+    }
+
+    void logoutSession(sessionId).catch((error) => {
+      console.error('[auth] logoutSession falló:', error)
+    })
+
+    clearExpressRegisterFlag()
+    clearStoredApiAuth()
+    setUser(null)
+
+    // PC de recepción: vaciar Dexie/IndexedDB + storage para no mezclar clínicas/usuarios.
+    try {
+      const { purgeClientStateOnLogout } = await import('@/bootstrap/clientRecovery')
+      await Promise.race([
+        purgeClientStateOnLogout(),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 3000)),
+      ])
+    } catch (error) {
+      console.error('[auth] purgeClientStateOnLogout falló (se continúa):', error)
       clearStoredApiAuth()
-      clearExpressRegisterFlag()
-      try {
-        const { lockLocalEncryption } = await import('@/db/localEncryptionKey')
-        lockLocalEncryption()
-      } catch (error) {
-        console.error('[auth] No se pudo cerrar el vault de cifrado local:', error)
-      }
+    }
 
-      void logoutSession(sessionId).catch((error) => {
-        console.error('[auth] logoutSession falló:', error)
-      })
-
-      try {
-        const { invalidateClinicPullCacheOnLogout } = await import('@/services/clinicalLogoutGuard')
-        void invalidateClinicPullCacheOnLogout()
-      } catch {
-        /* no bloquear */
-      }
-
-      setUser(null)
+    // Hard reset de React en memoria (evita estado zombie en el mismo PC).
+    if (typeof window !== 'undefined') {
+      window.location.replace('/login')
     }
 
     return { ok: true }

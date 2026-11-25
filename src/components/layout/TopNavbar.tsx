@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent } from 'react'
-import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import { Home } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { RipsStatusWidget } from '@/components/RipsStatusWidget'
@@ -16,8 +16,8 @@ function accountInitials(firstName?: string, lastName?: string): string {
 
 export function TopNavbar() {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const navigate = useNavigate()
   const location = useLocation()
   const { user, logout } = useAuth()
   const onDashboard = location.pathname === DASHBOARD_PATH
@@ -39,13 +39,15 @@ export function TopNavbar() {
   const handleLogout = async (e: ReactMouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
     e.stopPropagation()
+    if (loggingOut) return
     setMenuOpen(false)
+    setLoggingOut(true)
     try {
       await logout()
+      // logout() ya hace window.location.replace('/login'); esto es fallback.
     } catch (error) {
       console.error('[TopNavbar] logout falló (se redirige de todos modos):', error)
-    } finally {
-      navigate('/login', { replace: true })
+      window.location.replace('/login')
     }
   }
 
@@ -82,6 +84,7 @@ export function TopNavbar() {
               aria-expanded={menuOpen}
               aria-haspopup="true"
               aria-label="Menú de cuenta"
+              disabled={loggingOut}
             >
               <span className="max-w-[22rem] truncate text-sm font-medium text-gray-700">
                 {displayName}
@@ -133,12 +136,13 @@ export function TopNavbar() {
 
                 <button
                   type="button"
+                  disabled={loggingOut}
                   onClick={(e) => {
                     void handleLogout(e)
                   }}
-                  className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                  className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-60"
                 >
-                  Cerrar Sesión
+                  {loggingOut ? 'Cerrando sesión…' : 'Cerrar Sesión'}
                 </button>
               </div>
             )}

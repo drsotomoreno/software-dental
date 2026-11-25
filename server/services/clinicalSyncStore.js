@@ -1525,6 +1525,21 @@ export async function pushClinicSnapshot(clinicId, body = {}, aliasIds = []) {
           accepted.appointmentSyncIds.push(record.syncId)
         }
       }
+      // Espejo WhatsApp (recordatorios / inasistencias). No afecta wa.me manual.
+      try {
+        const { syncAppointmentsFromClinicalPush } = await import('./whatsappAppointmentSync.js')
+        void syncAppointmentsFromClinicalPush(canonical, body.appointments).catch((error) => {
+          console.warn(
+            '[Sync] Espejo WhatsApp de citas no actualizado:',
+            error instanceof Error ? error.message : error,
+          )
+        })
+      } catch (error) {
+        console.warn(
+          '[Sync] Módulo WhatsApp sync no disponible:',
+          error instanceof Error ? error.message : error,
+        )
+      }
     }
     const rejectedDraftSyncIds = []
     body.clinicalRecords = prepareIncomingClinicalRows(
