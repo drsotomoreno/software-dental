@@ -44,7 +44,7 @@ export function InvoiceLedgerPanel({
   liveClinicalData = null,
   showPatientColumn = true,
   title = 'Mis Cuentas y Facturas',
-  description = 'Facturas registradas en control de pagos y ortodoncia, en orden consecutivo por fecha y número.',
+  description = 'Facturas de venta (FV) y recibos de caja internos (RC) de control de pagos y ortodoncia, en orden por fecha y número.',
 }: InvoiceLedgerPanelProps) {
   const { user } = useAuth()
   const [preset, setPreset] = useState<InvoiceReportPreset>('all')
@@ -190,21 +190,37 @@ export function InvoiceLedgerPanel({
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-500">Periodo</p>
             <p className="mt-1 text-sm font-semibold text-slate-800">
-              {preset === 'all' ? 'Todas las facturas' : dateRange?.label ?? 'Seleccione un rango válido'}
+              {preset === 'all' ? 'Todos los comprobantes' : dateRange?.label ?? 'Seleccione un rango válido'}
+            </p>
+            <p className="mt-2 text-xs text-slate-500">
+              {summary.invoiceCount} documento{summary.invoiceCount === 1 ? '' : 's'}
+              {summary.voidedCount > 0 ? ` · ${summary.voidedCount} anulada(s)` : ''}
             </p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Facturas</p>
-            <p className="mt-1 text-2xl font-bold text-slate-900">{summary.invoiceCount}</p>
+            <p className="text-xs uppercase tracking-wide text-slate-500">Facturas (FV)</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900">{summary.fevCount}</p>
+            <p className="mt-1 text-xs text-slate-500">{formatCurrency(summary.fevTotal)}</p>
+          </div>
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
+            <p className="text-xs uppercase tracking-wide text-sky-700">Recibos internos (RC)</p>
+            <p className="mt-1 text-2xl font-bold text-sky-900">{summary.receiptCount}</p>
+            <p className="mt-1 text-xs text-sky-700">{formatCurrency(summary.receiptTotal)}</p>
           </div>
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
             <p className="text-xs uppercase tracking-wide text-emerald-700">Total facturado</p>
             <p className="mt-1 text-2xl font-bold text-emerald-800">
-              {formatCurrency(summary.totalAmount)}
+              {formatCurrency(summary.activeTotal)}
+            </p>
+            <p className="mt-1 text-xs text-emerald-700">
+              FV + RC activos
+              {summary.voidedCount > 0
+                ? ` (excluye ${formatCurrency(summary.voidedTotal)} en notas crédito)`
+                : ''}
             </p>
           </div>
         </div>
@@ -223,7 +239,8 @@ export function InvoiceLedgerPanel({
               <thead className="border-b border-slate-200 bg-slate-50">
                 <tr>
                   <th className="px-3 py-2 font-medium text-slate-600">#</th>
-                  <th className="px-3 py-2 font-medium text-slate-600">Nº factura</th>
+                  <th className="px-3 py-2 font-medium text-slate-600">Nº comprobante</th>
+                  <th className="px-3 py-2 font-medium text-slate-600">Tipo</th>
                   <th className="px-3 py-2 font-medium text-slate-600">Fecha</th>
                   {showPatientColumn && (
                     <th className="px-3 py-2 font-medium text-slate-600">Paciente</th>
@@ -247,6 +264,21 @@ export function InvoiceLedgerPanel({
                   <tr key={entry.key}>
                     <td className="px-3 py-2 text-slate-500">{index + 1}</td>
                     <td className="px-3 py-2 font-medium text-slate-800">{entry.invoiceNumber}</td>
+                    <td className="px-3 py-2">
+                      {entry.documentKind === 'factura' ? (
+                        <span className="inline-flex rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+                          Factura de venta
+                        </span>
+                      ) : entry.documentKind === 'recibo_interno' ? (
+                        <span className="inline-flex rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">
+                          Recibo de caja interno
+                        </span>
+                      ) : (
+                        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                          Comprobante
+                        </span>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap px-3 py-2 text-slate-600">
                       {entry.invoiceDate
                         ? new Date(entry.invoiceDate).toLocaleDateString('es-CO')
@@ -299,7 +331,7 @@ export function InvoiceLedgerPanel({
                           className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
                         >
                           <Eye className="h-3.5 w-3.5" />
-                          Ver factura
+                          {entry.documentKind === 'recibo_interno' ? 'Ver recibo' : 'Ver factura'}
                         </button>
                         {canCreditNotePayment && user && (
                           <button

@@ -108,9 +108,18 @@ export function ConsultationCheckout({
         buyer: payload.buyer,
         cart: payload.cart,
       })
+      const requestedKind =
+        payload.documentKind === 'electronic_invoice' ? 'factura' : 'recibo_interno'
+      const documentKind =
+        result.invoice.emissionMode === 'provider'
+          ? 'factura'
+          : result.invoice.emissionMode === 'manual'
+            ? 'recibo_interno'
+            : requestedKind
       const nextPayment: PaymentRecord = {
         ...draftPayment,
-        invoices: [result.invoice],
+        documentKind,
+        invoices: [{ ...result.invoice, documentKind }],
       }
       onPaymentRegistered([...paymentControl, nextPayment])
       const thermal = buildThermalDataFromPayment({

@@ -233,6 +233,11 @@ export interface PaymentInvoice {
   creditNoteId?: string
   creditNoteNumber?: string
   voidReason?: string
+  /**
+   * Tipo de comprobante persistido en el propio documento.
+   * `recibo_interno` → consecutivo RC; `factura` → consecutivo FV (FEV real).
+   */
+  documentKind?: PaymentDocumentKind
   /** Factura automática con proveedor vs recibo interno */
   emissionMode?: 'provider' | 'manual'
   cufe?: string | null
@@ -297,6 +302,8 @@ export interface OrthodonticsPaymentRecord {
   /** Especificación del pago adicional */
   additionalPaymentDescription?: string
   paymentReason: string
+  /** Tipo de comprobante generado para este abono (RC vs FEV) */
+  documentKind?: PaymentDocumentKind
   invoices: PaymentInvoice[]
   notes?: string
 }

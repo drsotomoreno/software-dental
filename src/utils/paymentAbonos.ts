@@ -27,11 +27,17 @@ export function latestPaymentInvoice(payment: PaymentReceiptSource): PaymentInvo
 
 export function resolvePaymentDocumentKind(payment: PaymentReceiptSource): PaymentDocumentKind | null {
   const invoice = latestPaymentInvoice(payment)
-  if (invoice?.emissionMode === 'provider') return 'factura'
+  if (invoice?.emissionMode === 'provider' || invoice?.cufe) return 'factura'
   if (invoice?.emissionMode === 'manual') return 'recibo_interno'
+  if (invoice?.documentKind === 'factura' || invoice?.documentKind === 'recibo_interno') {
+    return invoice.documentKind
+  }
   if (payment.documentKind === 'factura' || payment.documentKind === 'recibo_interno') {
     return payment.documentKind
   }
+  const number = invoice?.invoiceNumber?.trim() ?? ''
+  if (/^RC\d+/i.test(number)) return 'recibo_interno'
+  if (/recibo de caja interno/i.test(invoice?.notes ?? '')) return 'recibo_interno'
   return null
 }
 

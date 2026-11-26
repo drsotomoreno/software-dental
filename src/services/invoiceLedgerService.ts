@@ -2,6 +2,7 @@ import { db } from '@/db/database'
 import type {
   ClinicalRecord,
   OrthodonticsPaymentRecord,
+  PaymentDocumentKind,
   PaymentRecord,
 } from '@/types/clinicalRecord'
 import type { Patient } from '@/types/patient'
@@ -9,7 +10,6 @@ import type {
   InvoiceDateRange,
   InvoiceLedgerEntry,
   InvoiceLedgerSource,
-  InvoiceLedgerSummary,
   InvoiceReportPreset,
 } from '@/types/invoiceLedger'
 import type { ClinicalRecordFormData } from '@/types/clinicalRecord'
@@ -17,6 +17,10 @@ import {
   clinicalPaymentsNeedAutoInvoices,
   normalizeClinicalRecordPayments,
 } from '@/services/paymentInvoiceService'
+import { dedupeInvoiceLedgerEntries } from '@/services/invoiceLedgerMath'
+import { resolvePaymentDocumentKind } from '@/utils/paymentAbonos'
+
+export { dedupeInvoiceLedgerEntries, summarizeInvoiceLedger } from '@/services/invoiceLedgerMath'
 
 export interface LoadInvoiceLedgerOptions {
   patientId?: string
@@ -56,6 +60,20 @@ function matchesPatientFilter(patientKey: string, filter?: string): boolean {
   return patientKey === filter || patientKey === String(Number(filter))
 }
 
+function resolveEntryDocumentKind(
+  payment: { documentKind?: PaymentDocumentKind; invoices?: PaymentRecord['invoices'] },
+  invoice: PaymentRecord['invoices'][number],
+): PaymentDocumentKind | null {
+  return (
+    resolvePaymentDocumentKind({
+      documentKind: payment.documentKind,
+      invoices: [invoice],
+    }) ??
+    invoice.documentKind ??
+    null
+  )
+}
+
 function pushPaymentInvoices(
   target: InvoiceLedgerEntry[],
   payments: PaymentRecord[],
@@ -84,13 +102,15 @@ function pushPaymentInvoices(
         patientRouteId: id,
         patientName: name,
         patientDocument: document,
-      paymentReason: payment.paymentReason,
-      paymentMethod: payment.paymentMethod,
-      paymentDate: payment.paymentDate,
-      treatingDentistName: payment.treatingDentistName,
-      source: options.source,
+        paymentReason: payment.paymentReason,
+        paymentMethod: payment.paymentMethod,
+        paymentDate: payment.paymentDate,
+        treatingDentistName: payment.treatingDentistName,
+        source: options.source,
         recordId: options.recordId,
         isDraft: options.isDraft,
+        documentKind: resolveEntryDocumentKind(payment, invoice),
+        isVoided: invoice.status === 'voided_by_credit_note',
       })
     }
   }
@@ -129,6 +149,8 @@ function pushOrthodonticsInvoices(
         source: 'ortodoncia',
         recordId: options.recordId,
         isDraft: options.isDraft,
+        documentKind: resolveEntryDocumentKind(payment, invoice),
+        isVoided: invoice.status === 'voided_by_credit_note',
       })
     }
   }
@@ -153,12 +175,24 @@ function collectFromRecord(
   })
 }
 
+function paymentsChanged(
+  before: PaymentRecord[] | OrthodonticsPaymentRecord[] | undefined,
+  after: PaymentRecord[] | OrthodonticsPaymentRecord[] | undefined,
+): boolean {
+  return JSON.stringify(before ?? []) !== JSON.stringify(after ?? [])
+}
+
 async function backfillClinicalRecordPayments(record: ClinicalRecord): Promise<ClinicalRecord> {
-  if (!clinicalPaymentsNeedAutoInvoices(record)) {
+  const normalized = normalizeClinicalRecordPayments(record)
+  const changed =
+    clinicalPaymentsNeedAutoInvoices(record) ||
+    paymentsChanged(record.paymentControl, normalized.paymentControl) ||
+    paymentsChanged(record.orthodonticsPaymentControl, normalized.orthodonticsPaymentControl)
+
+  if (!changed) {
     return record
   }
 
-  const normalized = normalizeClinicalRecordPayments(record)
   if (record.id != null) {
     await db.clinicalRecords.update(record.id, {
       paymentControl: normalized.paymentControl,
@@ -173,28 +207,25 @@ async function backfillDraftPayments(draft: {
   patientId: string
   clinicalDraft?: ClinicalRecordFormData
 }): Promise<ClinicalRecordFormData | undefined> {
-  if (!draft.clinicalDraft || !clinicalPaymentsNeedAutoInvoices(draft.clinicalDraft)) {
+  if (!draft.clinicalDraft) return draft.clinicalDraft
+
+  const normalized = normalizeClinicalRecordPayments(draft.clinicalDraft)
+  const changed =
+    clinicalPaymentsNeedAutoInvoices(draft.clinicalDraft) ||
+    paymentsChanged(draft.clinicalDraft.paymentControl, normalized.paymentControl) ||
+    paymentsChanged(
+      draft.clinicalDraft.orthodonticsPaymentControl,
+      normalized.orthodonticsPaymentControl,
+    )
+
+  if (!changed) {
     return draft.clinicalDraft
   }
 
-  const normalized = normalizeClinicalRecordPayments(draft.clinicalDraft)
   await db.patientClinicalDrafts.update(draft.patientId, {
     clinicalDraft: normalized,
   })
   return normalized
-}
-
-function sortLedgerEntries(entries: InvoiceLedgerEntry[]): InvoiceLedgerEntry[] {
-  return [...entries].sort((left, right) => {
-    const dateCompare = left.invoiceDate.localeCompare(right.invoiceDate)
-    if (dateCompare !== 0) return dateCompare
-
-    const leftNumber = Number.parseInt(left.invoiceNumber.replace(/\D/g, ''), 10) || 0
-    const rightNumber = Number.parseInt(right.invoiceNumber.replace(/\D/g, ''), 10) || 0
-    if (leftNumber !== rightNumber) return leftNumber - rightNumber
-
-    return left.invoiceNumber.localeCompare(right.invoiceNumber, 'es-CO')
-  })
 }
 
 export async function loadInvoiceLedger(
@@ -209,10 +240,12 @@ export async function loadInvoiceLedger(
   }
 
   const entries: InvoiceLedgerEntry[] = []
+  const patientsWithSavedRecords = new Set<string>()
   const records = await db.clinicalRecords.toArray()
 
   for (const record of records) {
     if (!matchesPatientFilter(String(record.patientId), patientId)) continue
+    patientsWithSavedRecords.add(String(record.patientId))
     const normalizedRecord = await backfillClinicalRecordPayments(record)
     collectFromRecord(entries, normalizedRecord, patientMap)
   }
@@ -224,6 +257,8 @@ export async function loadInvoiceLedger(
   for (const draft of drafts) {
     if (!matchesPatientFilter(draft.patientId, patientId)) continue
     if (livePatientKey && draft.patientId === livePatientKey) continue
+    // Si ya hay historia firmada, el borrador no debe duplicar los mismos comprobantes.
+    if (patientsWithSavedRecords.has(String(draft.patientId))) continue
     const patient = patientMap.get(draft.patientId)
     const clinicalDraft = (await backfillDraftPayments(draft)) ?? draft.clinicalDraft
     if (!clinicalDraft) continue
@@ -253,7 +288,7 @@ export async function loadInvoiceLedger(
     )
   }
 
-  return sortLedgerEntries(entries)
+  return dedupeInvoiceLedgerEntries(entries)
 }
 
 export function getDateRangeForPreset(
@@ -324,13 +359,6 @@ export function filterLedgerByDateRange(
     if (Number.isNaN(invoiceDate.getTime())) return false
     return invoiceDate >= range.start && invoiceDate <= range.end
   })
-}
-
-export function summarizeInvoiceLedger(entries: InvoiceLedgerEntry[]): InvoiceLedgerSummary {
-  return {
-    invoiceCount: entries.length,
-    totalAmount: entries.reduce((sum, entry) => sum + (entry.amount || 0), 0),
-  }
 }
 
 export const INVOICE_SOURCE_LABELS: Record<InvoiceLedgerSource, string> = {
