@@ -6,13 +6,24 @@ import {
   checkRepsLimit,
   checkRethusLimit,
   checkUserLimits,
+  getPaidPlanById,
   hasRethusCode,
+  isBoldCheckoutPlan,
+  normalizePaidPlanId,
   rethusLimitReachedMessage,
   snapshotLimitError,
   userLimitMessage,
 } from './subscriptionPlans.js'
 
 const corporativo = { plan: 'corporativo', estado_pago: 'activo', rol: 'admin' }
+
+test('normaliza alias truncados del Plan Pioneros (noma → nomad)', () => {
+  assert.equal(normalizePaidPlanId('noma'), 'nomad')
+  assert.equal(normalizePaidPlanId('Pioneros'), 'nomad')
+  assert.equal(normalizePaidPlanId('nomad'), 'nomad')
+  assert.equal(getPaidPlanById('noma')?.amountCOP, 50000)
+  assert.equal(isBoldCheckoutPlan('noma'), true)
+})
 
 test('el catálogo deja ReTHUS en 1, 4 y 6, y una sede REPS en todos los planes', () => {
   assert.deepEqual(PLAN_LIMITS.nomad, { name: 'Plan Pioneros', maxRethus: 1, maxReps: 1 })

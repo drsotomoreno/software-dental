@@ -137,8 +137,15 @@ export async function createBoldIntegrity(req, res) {
       })
     }
 
-    const secretKey = String(config.bold?.secretKey || process.env.BOLD_SECRET_KEY || '').trim()
-    const apiKey = String(process.env.VITE_BOLD_API_KEY || '').trim()
+    const secretKey = String(
+      config.bold?.secretKey || process.env.BOLD_SECRET_KEY || '',
+    ).trim()
+    const apiKey = String(
+      config.bold?.apiKey ||
+        process.env.BOLD_API_KEY ||
+        process.env.VITE_BOLD_API_KEY ||
+        '',
+    ).trim()
     if (!secretKey || !apiKey) {
       return res.status(503).json({
         success: false,

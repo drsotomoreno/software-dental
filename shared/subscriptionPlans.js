@@ -119,11 +119,25 @@ export const SUBSCRIPTION_PURCHASES_ENABLED = true
 export const SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE =
   'La compra de planes estará disponible cuando se active el medio de pago. Por ahora puede revisar tarifas; la adquisición permanece inactiva.'
 
-/** Planes con monto fijo en COP para checkout Bold (IVA excluido). */
-export function getPaidPlanById(planId) {
-  const id = String(planId ?? '')
+/** Alias históricos / truncados → id canónico (p. ej. plan=noma → nomad). */
+const PLAN_ID_ALIASES = Object.freeze({
+  noma: 'nomad',
+  pioneros: 'nomad',
+  'plan-pioneros': 'nomad',
+  'plan_pioneros': 'nomad',
+})
+
+export function normalizePaidPlanId(planId) {
+  const raw = String(planId ?? '')
     .trim()
     .toLowerCase()
+  if (!raw) return ''
+  return PLAN_ID_ALIASES[raw] || raw
+}
+
+/** Planes con monto fijo en COP para checkout Bold (IVA excluido). */
+export function getPaidPlanById(planId) {
+  const id = normalizePaidPlanId(planId)
   return PAID_PLANS.find((plan) => plan.id === id) || null
 }
 

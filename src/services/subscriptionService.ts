@@ -10,6 +10,7 @@ import {
 import {
   getPaidPlanById,
   isBoldCheckoutPlan,
+  normalizePaidPlanId,
   PAID_PLANS,
   TRIAL_DAYS,
   TTC_MESSAGE_PACKAGES,
@@ -18,6 +19,7 @@ import {
 export {
   getPaidPlanById,
   isBoldCheckoutPlan,
+  normalizePaidPlanId,
   PAID_PLANS,
   TRIAL_DAYS,
   TTC_MESSAGE_PACKAGES,

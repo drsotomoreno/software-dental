@@ -17,8 +17,15 @@ import { validateInternationalMobile } from '@/utils/phoneValidation'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PhoneCountryInput } from '@/components/ui/PhoneCountryInput'
 import { PublicLegalFooter } from '@/components/legal/PublicLegalFooter'
+import { isBoldCheckoutPlan, normalizePaidPlanId } from '@/services/subscriptionService'
 
 type AuthMode = 'login' | 'register' | 'verify'
+
+function boldCheckoutReturnPath(searchParams: URLSearchParams): string | null {
+  const planId = normalizePaidPlanId(searchParams.get('plan'))
+  if (!planId || !isBoldCheckoutPlan(planId)) return null
+  return `/subscription-plans?plan=${encodeURIComponent(planId)}&checkout=1`
+}
 
 function initialAuthMode(pathname: string, searchParams: URLSearchParams): AuthMode {
   const modeParam = (searchParams.get('mode') || searchParams.get('modo') || '').toLowerCase()
@@ -48,7 +55,11 @@ export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams] = useSearchParams()
-  const from = (location.state as { from?: string } | null)?.from ?? '/app'
+  const boldReturn = boldCheckoutReturnPath(searchParams)
+  const from =
+    boldReturn ||
+    (location.state as { from?: string } | null)?.from ||
+    '/app'
   const apiAuth = getStoredApiAuth()
   const isSuperAdmin = isApiSuperAdmin(apiAuth?.user)
 
@@ -68,20 +79,22 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false)
   const [switchingAccount, setSwitchingAccount] = useState(false)
 
-  const afterLogin =
-    !from ||
-    from === '/' ||
-    from === '/login' ||
-    from === '/registro' ||
-    from === '/welcome-trial' ||
-    from === '/demo'
+  const afterLogin = boldReturn
+    ? boldReturn
+    : !from ||
+        from === '/' ||
+        from === '/login' ||
+        from === '/registro' ||
+        from === '/welcome-trial' ||
+        from === '/demo'
       ? '/app'
       : from
   const storedUser = apiAuth?.user
   const onRegisterPath = location.pathname === '/registro'
   const demoIntent =
-    searchParams.get('destino') === 'demo' ||
-    (location.state as { intent?: string } | null)?.intent === 'demo'
+    !boldReturn &&
+    (searchParams.get('destino') === 'demo' ||
+      (location.state as { intent?: string } | null)?.intent === 'demo')
 
   useEffect(() => {
     if (mode !== 'verify') return undefined
@@ -113,7 +126,11 @@ export function LoginPage() {
       return
     }
     const sessionUser = getStoredApiAuth()?.user
-    navigate(postAuthDestination(sessionUser, afterLogin), { replace: true })
+    // Checkout Bold: priorizar retorno al plan (no mandar a /demo).
+    navigate(
+      boldReturn || postAuthDestination(sessionUser, afterLogin),
+      { replace: true },
+    )
   }
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -237,15 +254,17 @@ export function LoginPage() {
   }
 
   const hasActiveSession = !isLoading && Boolean(user || (apiAuth?.token && apiAuth.user))
-  const dest = demoIntent
-    ? '/demo'
-    : storedUser && !isSuperAdmin
-      ? postAuthDestination(storedUser, afterLogin)
-      : afterLogin
-  const offerAccountSwitch = hasActiveSession && !onRegisterPath && !demoIntent
+  const dest = boldReturn
+    ? boldReturn
+    : demoIntent
+      ? '/demo'
+      : storedUser && !isSuperAdmin
+        ? postAuthDestination(storedUser, afterLogin)
+        : afterLogin
+  const offerAccountSwitch = hasActiveSession && !onRegisterPath && !demoIntent && !boldReturn
   const activeEmail = String(storedUser?.email || user?.email || '').trim()
 
-  if (hasActiveSession && !offerAccountSwitch && (!onRegisterPath || demoIntent)) {
+  if (hasActiveSession && !offerAccountSwitch && (!onRegisterPath || demoIntent || boldReturn)) {
     return <Navigate to={dest} replace />
   }
 

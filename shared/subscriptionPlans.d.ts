@@ -26,6 +26,7 @@ export const PAID_PLANS: PaidPlan[]
 export const PAID_PLAN_IDS: string[]
 export const SUBSCRIPTION_PURCHASES_ENABLED: boolean
 export const SUBSCRIPTION_PURCHASES_DISABLED_MESSAGE: string
+export function normalizePaidPlanId(planId?: string | null): string
 export function getPaidPlanById(planId?: string | null): PaidPlan | null
 export function isBoldCheckoutPlan(planId?: string | null): boolean
 export const TRIAL_DAYS: number

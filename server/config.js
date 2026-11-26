@@ -204,10 +204,13 @@ export const config = {
   /**
    * Bold Pagos en Línea.
    * secretKey = Llave Secreta (hash de integridad / webhooks). Nunca exponer al frontend.
-   * La Llave de Identidad va solo como VITE_BOLD_API_KEY (bundle Vite); no se lee aquí.
+   * apiKey = Llave de Identidad (BOLD_API_KEY o VITE_BOLD_API_KEY). Se recorta whitespace.
    */
   bold: {
-    secretKey: process.env.BOLD_SECRET_KEY || '',
+    apiKey: String(
+      process.env.BOLD_API_KEY || process.env.VITE_BOLD_API_KEY || '',
+    ).trim(),
+    secretKey: String(process.env.BOLD_SECRET_KEY || '').trim(),
   },
 }
 

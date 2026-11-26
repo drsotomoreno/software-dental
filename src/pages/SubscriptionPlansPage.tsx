@@ -1,7 +1,12 @@
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { APP_INITIALS, APP_NAME } from '@/constants/branding'
 import { BoldCheckoutButton } from '@/components/BoldCheckoutButton'
-import { isBoldCheckoutPlan, PAID_PLANS } from '@/services/subscriptionService'
+import {
+  isBoldCheckoutPlan,
+  normalizePaidPlanId,
+  PAID_PLANS,
+} from '@/services/subscriptionService'
 import { SUBSCRIPTION_PURCHASES_ENABLED } from '../../shared/subscriptionPlans.js'
 
 /**
@@ -9,6 +14,23 @@ import { SUBSCRIPTION_PURCHASES_ENABLED } from '../../shared/subscriptionPlans.j
  * Corporativo permanece como contacto manual.
  */
 export function SubscriptionPlansPage() {
+  const [searchParams] = useSearchParams()
+  const focusPlanId = useMemo(
+    () => normalizePaidPlanId(searchParams.get('plan')),
+    [searchParams],
+  )
+  const autoCheckout =
+    searchParams.get('checkout') === '1' && isBoldCheckoutPlan(focusPlanId)
+  const paymentPending = searchParams.get('pago') === 'procesando'
+
+  useEffect(() => {
+    if (!focusPlanId) return
+    const node = document.querySelector(`[data-plan-card="${focusPlanId}"]`)
+    if (node instanceof HTMLElement) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [focusPlanId])
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-dental-50 px-4 py-10">
       <div className="mx-auto max-w-6xl">
@@ -38,21 +60,33 @@ export function SubscriptionPlansPage() {
             Planes Pioneros, Smart y BioniC: facturación mensual con compromiso mínimo de 12 meses y
             débito automático a tarjeta. Tarifas{' '}
             <strong>Excluidas de IVA (0 % - Art. 476 ET)</strong>. Si aún no tiene cuenta, el botón
-            lo llevará al registro o inicio de sesión.
+            lo llevará al registro o inicio de sesión y, al volver, abrirá la pasarela Bold.
           </p>
         </div>
+
+        {paymentPending ? (
+          <div className="mb-6 rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4 text-sky-950 shadow-sm">
+            <p className="font-semibold">Pago en proceso</p>
+            <p className="mt-1 text-sm leading-relaxed">
+              Bold está confirmando su pago. En unos segundos su plan quedará activo; si no ve el
+              cambio, actualice esta página o revise «Mi Suscripción».
+            </p>
+          </div>
+        ) : null}
 
         <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
           {PAID_PLANS.map((plan) => {
             const boldReady = SUBSCRIPTION_PURCHASES_ENABLED && isBoldCheckoutPlan(plan.id)
+            const isFocused = focusPlanId === plan.id
             return (
               <article
                 key={plan.id}
+                data-plan-card={plan.id}
                 className={`relative flex flex-col rounded-2xl border p-6 shadow-sm ${
                   plan.featured
                     ? 'border-dental-800 bg-dental-800 text-white shadow-dental-900/20 xl:-translate-y-1'
                     : 'border-slate-200 bg-white text-slate-800'
-                }`}
+                } ${isFocused ? 'ring-2 ring-amber-400 ring-offset-2' : ''}`}
               >
                 {plan.featured ? (
                   <p className="mb-4 inline-flex self-start rounded-full bg-amber-400 px-3 py-1 text-xs font-semibold text-dental-950">
@@ -113,6 +147,7 @@ export function SubscriptionPlansPage() {
                       planId={plan.id}
                       planName={plan.name}
                       label={plan.cta}
+                      autoCheckout={autoCheckout && isFocused}
                       mutedClassName={plan.featured ? 'text-dental-100' : 'text-slate-500'}
                       className={`inline-flex w-full items-center justify-center rounded-lg px-4 py-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
                         plan.featured

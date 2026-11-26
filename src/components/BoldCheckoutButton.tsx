@@ -1,9 +1,14 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getStoredApiAuth } from '@/services/apiAuthService'
-import { getPaidPlanById, isBoldCheckoutPlan } from '@/services/subscriptionService'
+import {
+  getPaidPlanById,
+  isBoldCheckoutPlan,
+  normalizePaidPlanId,
+} from '@/services/subscriptionService'
 
 const BOLD_SCRIPT_SRC = 'https://checkout.bold.co/library/boldPaymentButton.js'
+const CHECKOUT_INTENT_KEY = 'mhd.bold.checkoutIntent'
 
 type BoldIntegrityResponse = {
   success?: boolean
@@ -19,6 +24,12 @@ type BoldIntegrityResponse = {
 }
 
 type BoldCheckoutCtor = new (config: Record<string, string>) => { open: () => void }
+
+type CheckoutIntent = {
+  planId: string
+  acceptedTerms: boolean
+  createdAt: number
+}
 
 declare global {
   interface Window {
@@ -69,6 +80,39 @@ function loadBoldScript(): Promise<void> {
   return boldScriptPromise
 }
 
+function readCheckoutIntent(): CheckoutIntent | null {
+  try {
+    const raw = sessionStorage.getItem(CHECKOUT_INTENT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as CheckoutIntent
+    const planId = normalizePaidPlanId(parsed?.planId)
+    if (!planId || !isBoldCheckoutPlan(planId)) return null
+    return {
+      planId,
+      acceptedTerms: parsed.acceptedTerms === true,
+      createdAt: Number(parsed.createdAt) || Date.now(),
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeCheckoutIntent(intent: CheckoutIntent) {
+  try {
+    sessionStorage.setItem(CHECKOUT_INTENT_KEY, JSON.stringify(intent))
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function clearCheckoutIntent() {
+  try {
+    sessionStorage.removeItem(CHECKOUT_INTENT_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
 async function requestIntegrity(planId: string): Promise<BoldIntegrityResponse> {
   const auth = getStoredApiAuth()
   const response = await fetch('/api/payments/bold/integrity', {
@@ -102,25 +146,36 @@ export interface BoldCheckoutButtonProps {
    * El botón muestra "Pagar Cuota (N+1)/12" cuando 1 ≤ N < 12.
    */
   paidInstallmentNumber?: number | null
+  /**
+   * Tras login: abrir Bold automáticamente si hay consentimiento guardado
+   * (`?checkout=1` + sessionStorage).
+   */
+  autoCheckout?: boolean
 }
 
 /**
  * Botón de Pagos Bold: suscripción anual, cuota mensual con autorización del suscriptor, IVA excluido.
  * No envía `tax` al SDK (Bold trata el cobro sin IVA / 0 % al omitirlo).
+ *
+ * Payload hacia BoldCheckout (obligatorio si hay amount):
+ * orderId + amount (entero COP) + currency=COP + apiKey + integritySignature (SHA-256).
  */
 export function BoldCheckoutButton({
-  planId,
+  planId: planIdProp,
   planName,
   disabled = false,
   className = '',
   label,
   mutedClassName = 'text-slate-500',
   paidInstallmentNumber = null,
+  autoCheckout = false,
 }: BoldCheckoutButtonProps) {
   const navigate = useNavigate()
+  const planId = normalizePaidPlanId(planIdProp)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [acceptedTerms, setAcceptedTerms] = useState(false)
+  const autoStartedRef = useRef(false)
 
   const plan = useMemo(() => getPaidPlanById(planId), [planId])
   const amountCOP = typeof plan?.amountCOP === 'number' ? plan.amountCOP : 0
@@ -133,6 +188,74 @@ export function BoldCheckoutButton({
         ? 1
         : 1
   const inAnnualCommitment = paidInstallments >= 1 && paidInstallments < 12
+
+  const openBoldCheckout = useCallback(async () => {
+    if (!isBoldCheckoutPlan(planId)) {
+      throw new Error('Este plan no tiene checkout en línea.')
+    }
+
+    await loadBoldScript()
+    if (!window.BoldCheckout) {
+      throw new Error('La librería BoldCheckout no está disponible.')
+    }
+
+    const integrity = await requestIntegrity(planId)
+    // Exactamente el mismo string firmado en el backend (sin recalcular).
+    const amount = String(integrity.amount ?? '')
+      .trim()
+      .replace(/\D/g, '')
+    if (!amount || amount === '0') {
+      throw new Error('Monto Bold inválido.')
+    }
+    const currency = String(integrity.currency || 'COP')
+      .trim()
+      .toUpperCase()
+    if (currency !== 'COP') {
+      throw new Error('La moneda del pago debe ser COP.')
+    }
+    const orderId = String(integrity.orderId || '')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+    if (!orderId) {
+      throw new Error('Identificador de orden Bold inválido.')
+    }
+    const apiKey = String(integrity.apiKey || '').trim()
+    const integritySignature = String(integrity.integritySignature || '')
+      .trim()
+      .toLowerCase()
+    if (!apiKey || !integritySignature || integritySignature.length !== 64) {
+      throw new Error('Firma de integridad Bold inválida.')
+    }
+
+    const redirectionUrl = `${window.location.origin}/subscription-plans?pago=procesando&plan=${encodeURIComponent(planId)}`
+
+    const boldConfig = {
+      orderId,
+      currency: 'COP',
+      amount,
+      apiKey,
+      integritySignature,
+      description: String(integrity.description || '').trim(),
+      redirectionUrl,
+    }
+
+    if (import.meta.env.DEV) {
+      console.log('[BoldCheckout] params', {
+        orderId: boldConfig.orderId,
+        currency: boldConfig.currency,
+        amount: boldConfig.amount,
+        apiKeyPrefix: boldConfig.apiKey.slice(0, 6) + '…',
+        description: boldConfig.description,
+        redirectionUrl: boldConfig.redirectionUrl,
+        integritySignatureLen: boldConfig.integritySignature.length,
+      })
+    }
+
+    // Sin `tax`: Bold procesa sin IVA (equivalente a Excluido / 0 % Art. 476 ET).
+    const checkout = new window.BoldCheckout(boldConfig)
+    clearCheckoutIntent()
+    checkout.open()
+  }, [planId])
 
   const handleClick = useCallback(async () => {
     setError('')
@@ -147,62 +270,52 @@ export function BoldCheckoutButton({
 
     const auth = getStoredApiAuth()
     if (!auth?.token) {
-      const q = new URLSearchParams({ plan: planId })
+      writeCheckoutIntent({
+        planId,
+        acceptedTerms: true,
+        createdAt: Date.now(),
+      })
+      const q = new URLSearchParams({
+        plan: planId,
+        checkout: '1',
+      })
       navigate(`/login?${q.toString()}`, {
-        state: { from: `/suscripcion?plan=${encodeURIComponent(planId)}` },
+        state: {
+          from: `/subscription-plans?plan=${encodeURIComponent(planId)}&checkout=1`,
+          boldCheckout: true,
+        },
       })
       return
     }
 
     setBusy(true)
     try {
-      await loadBoldScript()
-      if (!window.BoldCheckout) {
-        throw new Error('La librería BoldCheckout no está disponible.')
-      }
-
-      const integrity = await requestIntegrity(planId)
-      // Exactamente el mismo string firmado en el backend (sin recalcular).
-      const amount = String(integrity.amount ?? '')
-        .trim()
-        .replace(/\D/g, '')
-      if (!amount) {
-        throw new Error('Monto Bold inválido.')
-      }
-      const currency = 'COP'
-      const redirectionUrl = `${window.location.origin}/suscripcion?pago=procesando`
-
-      const boldConfig = {
-        orderId: String(integrity.orderId),
-        currency,
-        amount,
-        apiKey: String(integrity.apiKey),
-        integritySignature: String(integrity.integritySignature),
-        description: String(integrity.description || ''),
-        redirectionUrl,
-      }
-
-      if (import.meta.env.DEV) {
-        console.log('[BoldCheckout] params', {
-          orderId: boldConfig.orderId,
-          currency: boldConfig.currency,
-          amount: boldConfig.amount,
-          apiKeyPrefix: boldConfig.apiKey.slice(0, 6) + '…',
-          description: boldConfig.description,
-          redirectionUrl: boldConfig.redirectionUrl,
-          integritySignatureLen: boldConfig.integritySignature.length,
-        })
-      }
-
-      // Sin `tax`: Bold procesa sin IVA (equivalente a Excluido / 0 % Art. 476 ET).
-      const checkout = new window.BoldCheckout(boldConfig)
-      checkout.open()
+      await openBoldCheckout()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo abrir el pago Bold.')
     } finally {
       setBusy(false)
     }
-  }, [acceptedTerms, navigate, planId])
+  }, [acceptedTerms, navigate, openBoldCheckout, planId])
+
+  useEffect(() => {
+    if (!autoCheckout || autoStartedRef.current || disabled) return
+    const intent = readCheckoutIntent()
+    if (!intent || intent.planId !== planId || !intent.acceptedTerms) return
+    if (!getStoredApiAuth()?.token) return
+
+    autoStartedRef.current = true
+    setAcceptedTerms(true)
+    setBusy(true)
+    setError('')
+    void openBoldCheckout()
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'No se pudo abrir el pago Bold.')
+      })
+      .finally(() => {
+        setBusy(false)
+      })
+  }, [autoCheckout, disabled, openBoldCheckout, planId])
 
   const defaultLabel = inAnnualCommitment
     ? `Pagar Cuota ${nextInstallment}/12 con Bold (${amountLabel} COP)`
@@ -214,7 +327,7 @@ export function BoldCheckoutButton({
   const consentId = `bold-consent-${planId}`
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-bold-plan={planId}>
       {amountCOP > 0 ? (
         <div className={`space-y-1 text-center text-xs leading-relaxed ${mutedClassName}`}>
           <p className="font-semibold">
