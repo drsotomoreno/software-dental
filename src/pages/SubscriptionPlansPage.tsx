@@ -60,7 +60,7 @@ export function SubscriptionPlansPage() {
             Planes Pioneros, Smart y BioniC: facturación mensual con compromiso mínimo de 12 meses y
             débito automático a tarjeta. Tarifas{' '}
             <strong>Excluidas de IVA (0 % - Art. 476 ET)</strong>. Si aún no tiene cuenta, el botón
-            lo llevará al registro o inicio de sesión y, al volver, abrirá la pasarela Bold.
+            le pedirá crear cuenta o iniciar sesión y, al volver, abrirá la pasarela Bold.
           </p>
         </div>
 

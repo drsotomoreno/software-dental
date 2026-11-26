@@ -7,6 +7,14 @@ import {
   normalizePaidPlanId,
 } from '@/services/subscriptionService'
 
+function checkoutReturnPath(planId: string) {
+  return `/subscription-plans?plan=${encodeURIComponent(planId)}&checkout=1`
+}
+
+function authQueryForPlan(planId: string) {
+  return new URLSearchParams({ plan: planId, checkout: '1' }).toString()
+}
+
 const BOLD_SCRIPT_SRC = 'https://checkout.bold.co/library/boldPaymentButton.js'
 const CHECKOUT_INTENT_KEY = 'mhd.bold.checkoutIntent'
 
@@ -175,6 +183,7 @@ export function BoldCheckoutButton({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [acceptedTerms, setAcceptedTerms] = useState(false)
+  const [authGateOpen, setAuthGateOpen] = useState(false)
   const autoStartedRef = useRef(false)
 
   const plan = useMemo(() => getPaidPlanById(planId), [planId])
@@ -275,16 +284,7 @@ export function BoldCheckoutButton({
         acceptedTerms: true,
         createdAt: Date.now(),
       })
-      const q = new URLSearchParams({
-        plan: planId,
-        checkout: '1',
-      })
-      navigate(`/login?${q.toString()}`, {
-        state: {
-          from: `/subscription-plans?plan=${encodeURIComponent(planId)}&checkout=1`,
-          boldCheckout: true,
-        },
-      })
+      setAuthGateOpen(true)
       return
     }
 
@@ -296,7 +296,28 @@ export function BoldCheckoutButton({
     } finally {
       setBusy(false)
     }
-  }, [acceptedTerms, navigate, openBoldCheckout, planId])
+  }, [acceptedTerms, openBoldCheckout, planId])
+
+  const goToAuth = useCallback(
+    (mode: 'register' | 'login') => {
+      writeCheckoutIntent({
+        planId,
+        acceptedTerms: true,
+        createdAt: Date.now(),
+      })
+      const q = authQueryForPlan(planId)
+      const returnPath = checkoutReturnPath(planId)
+      const path = mode === 'register' ? `/registro?${q}` : `/login?${q}`
+      setAuthGateOpen(false)
+      navigate(path, {
+        state: {
+          from: returnPath,
+          boldCheckout: true,
+        },
+      })
+    },
+    [navigate, planId],
+  )
 
   useEffect(() => {
     if (!autoCheckout || autoStartedRef.current || disabled) return
@@ -394,6 +415,60 @@ export function BoldCheckoutButton({
         {plan?.taxLabel || 'Excluido de IVA (0 % - Art. 476 ET)'}
       </p>
       {error ? <p className="text-center text-xs text-red-600">{error}</p> : null}
+
+      {authGateOpen ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 p-4"
+          role="presentation"
+          onClick={() => setAuthGateOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`bold-auth-title-${planId}`}
+            aria-describedby={`bold-auth-desc-${planId}`}
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3
+              id={`bold-auth-title-${planId}`}
+              className="text-xl font-bold tracking-tight text-slate-900"
+            >
+              Antes de continuar al pago, crea tu cuenta gratis
+            </h3>
+            <p
+              id={`bold-auth-desc-${planId}`}
+              className="mt-3 text-sm leading-relaxed text-slate-600"
+            >
+              Para activar tu suscripción al instante necesitamos asociarla a tu cuenta. ¡Es muy fácil
+              y te tomará menos de 1 minuto!
+            </p>
+            <div className="mt-6 flex flex-col gap-2.5">
+              <button
+                type="button"
+                className="inline-flex w-full items-center justify-center rounded-lg bg-dental-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-dental-700"
+                onClick={() => goToAuth('register')}
+              >
+                Crear mi cuenta (Registrarme)
+              </button>
+              <button
+                type="button"
+                className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                onClick={() => goToAuth('login')}
+              >
+                Ya tengo cuenta, iniciar sesión
+              </button>
+              <button
+                type="button"
+                className="mt-1 text-sm font-medium text-slate-500 hover:text-slate-700"
+                onClick={() => setAuthGateOpen(false)}
+              >
+                Volver
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

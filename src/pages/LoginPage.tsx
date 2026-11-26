@@ -245,7 +245,8 @@ export function LoginPage() {
       }
       setPassword('')
       setConfirmPassword('')
-      navigate('/demo', { replace: true })
+      // Checkout Bold: tras registro volver a planes y abrir pasarela.
+      navigate(boldReturn || '/demo', { replace: true })
     } catch {
       setError('No se pudo conectar con el servidor. Intente de nuevo.')
     } finally {
