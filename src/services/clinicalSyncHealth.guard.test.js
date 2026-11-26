@@ -15,7 +15,11 @@ test('listados cablean ClinicalSyncHealthBanner cuando vacíos', async () => {
   ]) {
     const src = await readFile(join(root, rel), 'utf8')
     assert.match(src, /ClinicalSyncHealthBanner/, rel)
-    assert.match(src, /listEmpty=\{Boolean\(patients && patients\.length === 0\)\}/, rel)
+    assert.match(
+      src,
+      /listEmpty=\{dexieReady && safePatients\.length === 0 && !isHydrating\}/,
+      rel,
+    )
   }
 })
 
