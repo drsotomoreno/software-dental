@@ -1,5 +1,6 @@
 /**
- * Evolution API — envío asíncrono de plantilla de bienvenida (registro express).
+ * Evolution API — envío asíncrono de plantilla de bienvenida (registro express)
+ * y consulta silenciosa de existencia de número (sin OTP ni mensajes).
  * Contrato tipado en src/services/whatsapp.service.ts
  */
 import { config } from '../config.js'
@@ -7,6 +8,9 @@ import { withPgClient } from './durableStore.js'
 import {
   updateUserWhatsAppFields,
 } from './subscriptionAuthStore.js'
+
+/** Timeout corto para no bloquear altas si Evolution no responde. */
+export const WHATSAPP_EXISTS_TIMEOUT_MS = 3_000
 
 export function toEvolutionWhatsAppNumber(phone) {
   const digits = String(phone ?? '').replace(/\D/g, '')
@@ -19,6 +23,118 @@ export function toEvolutionWhatsAppNumber(phone) {
 export function isEvolutionConfigured() {
   const wa = config.evolutionWhatsapp || {}
   return Boolean(wa.baseUrl && wa.apiKey && wa.instance && wa.templateName)
+}
+
+/** Credenciales mínimas de instancia (sin plantilla) para check de existencia. */
+export function isEvolutionInstanceConfigured() {
+  const wa = config.evolutionWhatsapp || {}
+  return Boolean(wa.baseUrl && wa.apiKey && wa.instance)
+}
+
+/**
+ * Interpreta la respuesta de POST /chat/whatsappNumbers/{instance}.
+ * @param {unknown} raw
+ * @param {string} number
+ * @returns {boolean|null} true/false si hay señal clara; null si es ambiguo.
+ */
+export function parseWhatsAppExistsResponse(raw, number) {
+  const expected = String(number || '').replace(/\D/g, '')
+  const list = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw?.data)
+      ? raw.data
+      : Array.isArray(raw?.response)
+        ? raw.response
+        : raw && typeof raw === 'object'
+          ? [raw]
+          : []
+
+  if (!list.length) return null
+
+  const match =
+    list.find((item) => {
+      if (!item || typeof item !== 'object') return false
+      const candidate = String(item.number || item.jid || '')
+        .split('@')[0]
+        .replace(/\D/g, '')
+      if (!expected || !candidate) return false
+      return candidate === expected || candidate.endsWith(expected) || expected.endsWith(candidate)
+    }) || list[0]
+
+  if (!match || typeof match !== 'object') return null
+
+  if (typeof match.exists === 'boolean') return match.exists
+  if (typeof match.onWhatsApp === 'boolean') return match.onWhatsApp
+  if (typeof match.isOnWhatsApp === 'boolean') return match.isOnWhatsApp
+  if (typeof match.numberExists === 'boolean') return match.numberExists
+  return null
+}
+
+/**
+ * Consulta silenciosa: ¿el número existe en WhatsApp?
+ * No envía mensajes ni códigos. Ante timeout, instancia caída o error de red
+ * devuelve `{ ok: false, exists: null }` para que el registro pueda continuar.
+ *
+ * @param {string} phoneNumber
+ * @param {{ timeoutMs?: number, fetchImpl?: typeof fetch, waConfig?: { baseUrl?: string, apiKey?: string, instance?: string } }} [options]
+ * @returns {Promise<{ ok: boolean, exists: boolean|null, skipped?: boolean, error?: string, raw?: unknown }>}
+ */
+export async function checkWhatsAppNumberExists(phoneNumber, options = {}) {
+  const timeoutMs =
+    Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+      ? Math.round(options.timeoutMs)
+      : WHATSAPP_EXISTS_TIMEOUT_MS
+  const fetchImpl = options.fetchImpl || fetch
+  const wa = options.waConfig || config.evolutionWhatsapp || {}
+  const configured = Boolean(wa.baseUrl && wa.apiKey && wa.instance)
+
+  if (!configured) {
+    return {
+      ok: false,
+      exists: null,
+      skipped: true,
+      error: 'Evolution API no configurada (EVOLUTION_API_URL / API_KEY / INSTANCE).',
+    }
+  }
+
+  const number = toEvolutionWhatsAppNumber(phoneNumber)
+  if (!number || number.length < 8) {
+    return { ok: false, exists: null, error: 'Número inválido para consulta WhatsApp.' }
+  }
+
+  const base = String(wa.baseUrl).replace(/\/$/, '')
+  const url = `${base}/chat/whatsappNumbers/${encodeURIComponent(wa.instance)}`
+
+  try {
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: String(wa.apiKey),
+      },
+      body: JSON.stringify({ numbers: [number] }),
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    const raw = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      return {
+        ok: false,
+        exists: null,
+        raw,
+        error:
+          (raw && typeof raw === 'object' && raw.message && String(raw.message)) ||
+          `Evolution HTTP ${response.status}`,
+      }
+    }
+    const exists = parseWhatsAppExistsResponse(raw, number)
+    if (exists === null) {
+      return { ok: false, exists: null, raw, error: 'Respuesta ambigua de Evolution.' }
+    }
+    return { ok: true, exists, raw }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Error de red con Evolution API'
+    return { ok: false, exists: null, error: message }
+  }
 }
 
 /**

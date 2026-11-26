@@ -1,7 +1,8 @@
 /**
- * Cliente Evolution API — plantilla de bienvenida WhatsApp (registro express).
- * Las credenciales viven en el servidor (`server/services/whatsapp.service.js`);
- * este módulo tipa el contrato y puede reutilizarse en tests o workers Node.
+ * Cliente Evolution API — plantilla de bienvenida WhatsApp (registro express)
+ * y contrato tipado de la consulta silenciosa de existencia
+ * (`checkWhatsAppNumberExists` en `server/services/whatsapp.service.js`).
+ * Las credenciales viven en el servidor; este módulo tipa el contrato.
  */
 
 export type WhatsAppDeliveryStatus =

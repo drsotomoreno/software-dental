@@ -30,7 +30,11 @@ import {
   inboundMessageText,
   senderDigitCandidates,
 } from '../services/evolutionInbound.service.js'
-import { voidSendWelcomeWhatsAppInBackground } from '../services/whatsapp.service.js'
+import {
+  checkWhatsAppNumberExists,
+  voidSendWelcomeWhatsAppInBackground,
+} from '../services/whatsapp.service.js'
+import { FAKE_OR_INVALID_MOBILE_ERROR } from '../../shared/mobilePhone.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -132,7 +136,7 @@ export async function requestRegisterCode(req, res) {
       return res.status(400).json({
         success: false,
         ok: false,
-        error: 'Indique un celular válido. Ejemplo: 3001234567.',
+        error: FAKE_OR_INVALID_MOBILE_ERROR,
       })
     }
     if (password.length < 6) {
@@ -148,6 +152,23 @@ export async function requestRegisterCode(req, res) {
         ok: false,
         error: 'Falta configurar WHATSAPP_BUSINESS_NUMBER (WhatsApp corporativo) en el servidor.',
       })
+    }
+
+    // Consulta silenciosa a Evolution: sin OTP ni SMS. Si la instancia falla, no bloquea.
+    const waExists = await checkWhatsAppNumberExists(phone)
+    if (waExists.ok && waExists.exists === false) {
+      return res.status(400).json({
+        success: false,
+        ok: false,
+        error:
+          'Este número no parece tener WhatsApp activo. Por favor ingresa un número celular real.',
+      })
+    }
+    if (!waExists.ok) {
+      console.warn(
+        '[Auth] Check WhatsApp omitido (fallback):',
+        waExists.skipped ? 'no configurado' : waExists.error || 'desconocido',
+      )
     }
 
     const conflicts = await findRegistrationConflicts({ email, phoneNumber: phone })

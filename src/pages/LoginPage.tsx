@@ -50,6 +50,11 @@ async function postJson(url: string, body: Record<string, string>) {
   return { response, payload }
 }
 
+/** Errores de formato / WhatsApp inactivo para anclarlos al campo celular. */
+function isRegisterPhoneError(message: string) {
+  return /celular|whatsapp|n[uú]mero/i.test(String(message || ''))
+}
+
 export function LoginPage() {
   const { user, login, logout, isLoading, adoptApiSession } = useAuth()
   const navigate = useNavigate()
@@ -91,6 +96,7 @@ export function LoginPage() {
       : from
   const storedUser = apiAuth?.user
   const onRegisterPath = location.pathname === '/registro'
+  const registerPhoneError = mode === 'register' && error && isRegisterPhoneError(error) ? error : ''
   const demoIntent =
     !boldReturn &&
     (searchParams.get('destino') === 'demo' ||
@@ -291,7 +297,7 @@ export function LoginPage() {
       ? 'Registro de prueba gratuita'
       : mode === 'verify'
         ? 'Confirme el código enviado a su correo'
-        : 'Acceso seguro — cédula y contraseña de su clínica'
+        : 'Acceso seguro — correo o cédula y contraseña de su clínica'
 
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-br from-slate-50 to-dental-50">
@@ -334,7 +340,7 @@ export function LoginPage() {
         {mode === 'login' && (
           <form onSubmit={handleLogin} className="card space-y-4">
             <div>
-              <label className="label-field">Número de documento (cédula)</label>
+              <label className="label-field">Correo electrónico o cédula</label>
               <input
                 type="text"
                 inputMode="text"
@@ -343,11 +349,11 @@ export function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="input-field"
-                placeholder="Cédula o correo del titular"
+                placeholder="correo@ejemplo.com o cédula"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Los colaboradores ingresan con su cédula y la clave asignada por el administrador de
-                la clínica. El titular también puede usar su correo.
+                Ingrese su correo electrónico o número de cédula y su contraseña. Los colaboradores
+                también pueden ingresar con su cédula y la clave asignada por la clínica.
               </p>
             </div>
             <div>
@@ -463,16 +469,32 @@ export function LoginPage() {
                 id="register-phone"
                 required
                 value={phoneNumber}
-                onChange={setPhoneNumber}
-                placeholder="300 123 4567"
+                onChange={(next) => {
+                  setPhoneNumber(next)
+                  if (registerPhoneError) setError('')
+                }}
+                placeholder="315 847 2936"
+                className={registerPhoneError ? 'ring-2 ring-red-300' : ''}
               />
               <p className="mt-1 text-xs text-slate-500">
-                Colombia (+57) viene seleccionada. También puede elegir otro país: solo se aceptan
-                celulares, en formato internacional.
+                Validamos automáticamente que tu número tenga WhatsApp activo. No enviamos códigos
+                SMS ni OTP a tu celular (el código de activación llega solo a tu correo).
               </p>
+              {registerPhoneError ? (
+                <p className="mt-1.5 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+                  {registerPhoneError}
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-slate-500">
+                  Colombia (+57) viene seleccionada. También puede elegir otro país: solo se aceptan
+                  celulares, en formato internacional.
+                </p>
+              )}
             </div>
-            {error && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+            {error && !registerPhoneError && (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+                {error}
+              </p>
             )}
             <button type="submit" disabled={submitting} className="btn-primary w-full">
               {submitting ? 'Enviando código...' : 'Continuar a la verificación'}

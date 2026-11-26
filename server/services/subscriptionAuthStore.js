@@ -640,7 +640,7 @@ export async function registerSubscriptionUser({
     return {
       ok: false,
       status: 400,
-      error: 'Indique un celular válido. Ejemplo: 3001234567.',
+      error: 'Ingresa un número de celular real y válido.',
     }
   }
   if (!reuseHash && (!password || String(password).length < 6)) {
@@ -827,7 +827,7 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
     return {
       ok: false,
       status: 400,
-      error: 'Indique su número de documento (cédula) o el correo del titular, y su contraseña.',
+      error: 'Indique su correo electrónico o número de cédula, y su contraseña.',
     }
   }
 
@@ -871,7 +871,7 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
   }
 
   if (userIndex === -1) {
-    return { ok: false, status: 401, error: 'Documento o contraseña incorrectos.' }
+    return { ok: false, status: 401, error: 'Correo/cédula o contraseña incorrectos.' }
   }
 
   let currentUser = refreshPaymentStatus(store.users[userIndex])
@@ -888,7 +888,7 @@ export async function loginSubscriptionUser({ email, documentNumber, password })
   const matchedHash = resolvedPasswordHash(currentUser.passwordHash, password)
   if (!masterLogin && (!currentUser.passwordHash || !matchedHash)) {
     await saveStore(store)
-    return { ok: false, status: 401, error: 'Documento o contraseña incorrectos.' }
+    return { ok: false, status: 401, error: 'Correo/cédula o contraseña incorrectos.' }
   }
 
   if (!masterLogin && matchedHash && matchedHash !== currentUser.passwordHash) {
@@ -1697,7 +1697,7 @@ export async function createEmailVerification({ nombre, email, password, phone_n
     return {
       ok: false,
       status: 400,
-      error: 'Indique un celular colombiano válido (+57), por ejemplo 3001234567.',
+      error: 'Ingresa un número de celular real y válido.',
     }
   }
   const passwordValue = String(password ?? '').trim()

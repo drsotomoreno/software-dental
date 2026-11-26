@@ -1,7 +1,7 @@
 /**
  * Celular internacional en dígitos E.164.
  * Sin indicativo, se interpreta como Colombia (+57).
- * Los fijos y los números mal formados se rechazan.
+ * Los fijos, mal formados y patrones falsos evidentes se rechazan.
  */
 import libphonenumber from 'google-libphonenumber'
 
@@ -9,6 +9,9 @@ const { PhoneNumberUtil, PhoneNumberFormat, PhoneNumberType } = libphonenumber
 const phoneUtil = PhoneNumberUtil.getInstance()
 
 const DEFAULT_REGION = 'CO'
+
+/** Mensaje único para longitud inválida o patrones inventados evidentes. */
+export const FAKE_OR_INVALID_MOBILE_ERROR = 'Ingresa un número de celular real y válido.'
 
 function fail(error) {
   return { ok: false, e164: '', national: '', digits: '', error }
@@ -32,6 +35,66 @@ function asMobile(parsed) {
   }
 }
 
+function hasLongSequentialRun(digits, minLen = 6) {
+  const s = String(digits || '')
+  if (s.length < minLen) return false
+  let ascending = 1
+  let descending = 1
+  for (let i = 1; i < s.length; i += 1) {
+    const delta = Number(s[i]) - Number(s[i - 1])
+    if (delta === 1) {
+      ascending += 1
+      descending = 1
+    } else if (delta === -1) {
+      descending += 1
+      ascending = 1
+    } else {
+      ascending = 1
+      descending = 1
+    }
+    if (ascending >= minLen || descending >= minLen) return true
+  }
+  return false
+}
+
+/**
+ * Patrones inventados evidentes (repetidos, secuencias tipo 3123456789 / 3001234567,
+ * longitud fuera de E.164). No envía nada a WhatsApp: solo heurística local.
+ *
+ * @param {string} raw
+ * @returns {boolean}
+ */
+function hasHeavyDigitRepetition(digits) {
+  const value = String(digits || '')
+  if (!value) return true
+  if (/^(\d)\1+$/.test(value)) return true
+  const counts = new Map()
+  for (const ch of value) {
+    counts.set(ch, (counts.get(ch) || 0) + 1)
+  }
+  for (const count of counts.values()) {
+    if (count >= 7) return true
+  }
+  // Pocos dígitos distintos en un celular de 10 (ej. 3000000000, 3111111111).
+  if (value.length >= 10 && counts.size <= 2) return true
+  return false
+}
+
+export function looksLikeFakeMobileDigits(raw) {
+  const value = String(raw ?? '').replace(/\D/g, '')
+  if (!value) return true
+  if (value.length < 8 || value.length > 15) return true
+  if (hasHeavyDigitRepetition(value)) return true
+
+  const coLocal = colombiaLocal(value)
+  if (coLocal) {
+    if (hasHeavyDigitRepetition(coLocal)) return true
+    if (hasLongSequentialRun(coLocal, 6)) return true
+  }
+
+  return false
+}
+
 /**
  * @param {string} raw Número con o sin + / 00. Nacional suelto = Colombia.
  * @returns {{ ok: boolean, e164: string, national: string, digits: string, error?: string }}
@@ -41,6 +104,10 @@ export function inspectMobile(raw) {
   if (!input) return fail('El celular es obligatorio.')
 
   const digitsOnly = input.replace(/\D/g, '')
+  if (digitsOnly && looksLikeFakeMobileDigits(digitsOnly)) {
+    return fail(FAKE_OR_INVALID_MOBILE_ERROR)
+  }
+
   const candidates = []
   if (input.startsWith('+')) candidates.push(input)
   else if (input.startsWith('00') && digitsOnly.length > 4) {
@@ -64,13 +131,18 @@ export function inspectMobile(raw) {
       sawFixed = true
       continue
     }
-    if (mobile?.ok) return mobile
+    if (mobile?.ok) {
+      if (looksLikeFakeMobileDigits(mobile.digits)) {
+        return fail(FAKE_OR_INVALID_MOBILE_ERROR)
+      }
+      return mobile
+    }
   }
 
   return fail(
     sawFixed
       ? 'Use un número celular, no un teléfono fijo.'
-      : 'Ingrese un celular válido. Ejemplo: 300 123 4567.',
+      : FAKE_OR_INVALID_MOBILE_ERROR,
   )
 }
 
